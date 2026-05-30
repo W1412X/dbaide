@@ -53,6 +53,11 @@ class SqlTab(QWidget):
         self.tabs.addTab(self.validation_view, "Validation")
         layout.addWidget(self.tabs, 1)
 
+    def set_running(self, running: bool) -> None:
+        self.run_btn.setEnabled(not running)
+        self.more.setEnabled(not running)
+        self.editor.setEnabled(not running)
+
     def set_sql(self, sql: str) -> None:
         self.editor.setPlainText(sql)
 

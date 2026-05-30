@@ -383,8 +383,12 @@ class MainWindow(QMainWindow):
         self.run_action("load_history", {"connection_name": conn, "workflow_id": workflow_id})
 
     def run_action(self, action: str, payload: dict[str, Any]) -> None:
+        if self.running:
+            self.toast("A task is already running")
+            return
         self.running = True
         self.composer.set_running(True)
+        self.sql_tab.set_running(True)
         self.topbar.set_global_status("Running", "running")
         worker = ServiceWorker(self.service, action, payload)
         worker.signals.progress.connect(self.on_progress)
@@ -396,6 +400,7 @@ class MainWindow(QMainWindow):
         self.toast("Cancelling is not yet supported for in-flight workflows")
         self.running = False
         self.composer.set_running(False)
+        self.sql_tab.set_running(False)
         self._restore_status_badge()
 
     def on_progress(self, message: str) -> None:
@@ -407,6 +412,7 @@ class MainWindow(QMainWindow):
     def handle_result(self, action: str, result: Any) -> None:
         self.running = False
         self.composer.set_running(False)
+        self.sql_tab.set_running(False)
         self._restore_status_badge()
         if action == "build_assets":
             self.ask_tab.append_note(
@@ -451,6 +457,7 @@ class MainWindow(QMainWindow):
     def handle_failure(self, exc: object) -> None:
         self.running = False
         self.composer.set_running(False)
+        self.sql_tab.set_running(False)
         self.right.trace.end_live()
         self.fail(exc)
         self._restore_status_badge()
