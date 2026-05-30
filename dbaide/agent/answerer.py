@@ -30,12 +30,26 @@ class AnswerFormatter:
                 lines.append(f"  Top: {top}")
         return "\n".join(lines)
 
-    def query_result(self, result: QueryResult, *, sql: str = "", rationale: str = "") -> str:
+    def query_result(
+        self,
+        result: QueryResult,
+        *,
+        sql: str = "",
+        rationale: str = "",
+        interpretation: dict | None = None,
+    ) -> str:
         """Natural-language answer — no separate result table."""
         parts: list[str] = []
         if rationale:
             parts.append(rationale.strip())
         parts.append(_summarize_rows(result))
+        if interpretation:
+            summary = str(interpretation.get("summary") or "").strip()
+            if summary:
+                parts.append(summary)
+            actions = interpretation.get("next_actions") or []
+            if actions:
+                parts.append("建议：" + "；".join(str(a) for a in actions[:3]))
         timing = f"共 {result.row_count:,} 条记录" if result.row_count != 1 else "共 1 条记录"
         timing += f"，耗时 {result.elapsed_ms:.0f}ms"
         if result.truncated:

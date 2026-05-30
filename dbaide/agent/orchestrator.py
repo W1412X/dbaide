@@ -131,7 +131,9 @@ class AskOrchestrator:
             logger.warning("agent_loop_failed: %s", exc, exc_info=True)
 
         logger.info("agent_loop_fallback_to_staged question=%s", question[:80])
-        return self._run_staged(question, database=database, execute=execute, disclosures=disclosures)
+        staged = self._run_staged(question, database=database, execute=execute, disclosures=disclosures)
+        staged.warnings.append("Agent used staged pipeline (tool loop unavailable).")
+        return staged
 
     def _run_staged(self, question: str, *, database: str = "", execute: bool, disclosures: list[str]) -> AssistantResponse:
 
@@ -202,6 +204,24 @@ class AskOrchestrator:
         try:
             discovery = self._discover(question)
             agent = ProgressiveSchemaAgent(self.llm, self.asset_store, self.instance)
+            table_hits = [h for h in discovery.hits if h.kind == "table" and h.table]
+            if len(table_hits) == 1:
+                hit = table_hits[0]
+                return hit.table, hit.database or active_database
+            if len(table_hits) > 1:
+                items = [
+                    {"index": i, "name": h.table, "summary": _brief(h.summary or h.path)}
+                    for i, h in enumerate(table_hits[:12])
+                ]
+                kept = agent._filter_indices(  # noqa: SLF001
+                    question,
+                    level="table",
+                    items=items,
+                    context=f"discovered tables in {active_database or 'default'}",
+                )
+                if kept:
+                    hit = table_hits[kept[0]]
+                    return hit.table, hit.database or active_database
             table, table_database = agent.top_table(discovery)
             if table:
                 return table, table_database or active_database
@@ -418,13 +438,29 @@ class AskOrchestrator:
 
         elapsed = (time.perf_counter() - start) * 1000 if start else result.elapsed_ms
         self._step(ctx, "done", f"Query returned {result.row_count} rows in {elapsed:.0f}ms")
-        answer = self.formatter.query_result(result, rationale=draft.rationale)
+        warnings = list(validation_report.warnings)
+        if risk.action == "confirm":
+            warnings.append(risk.reason)
+        interpretation = self.interpreter.interpret(
+            question=ctx.question,
+            sql=normalized_sql,
+            row_count=result.row_count,
+            columns=result.columns,
+            elapsed_ms=result.elapsed_ms,
+            truncated=result.truncated,
+            warnings=warnings,
+        )
+        answer = self.formatter.query_result(
+            result,
+            rationale=draft.rationale,
+            interpretation=interpretation,
+        )
         return AssistantResponse(
             answer=answer,
             sql=normalized_sql,
             result=result,
             disclosures=self._new_disclosures(disclosures),
-            warnings=self._collect_warnings(ctx),
+            warnings=self._collect_warnings(ctx) + warnings,
         )
 
     def _attempt_self_correction(self, ctx: AgentContext, columns: list[ColumnInfo], database: str):

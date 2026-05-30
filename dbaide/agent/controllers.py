@@ -195,48 +195,63 @@ class ResultInterpreter:
         warnings: list[str],
     ) -> dict[str, Any]:
         """Interpret query result."""
+        zh = _prefers_chinese(question)
         parts = []
 
-        # Basic result summary
         if row_count == 0:
-            parts.append("The query returned no rows. This could mean:")
-            parts.append("- The filter conditions are too restrictive")
-            parts.append("- The data doesn't match the expected criteria")
-            parts.append("- The table is empty")
+            if zh:
+                parts.append("查询未返回任何行，可能原因：")
+                parts.append("- 筛选条件过严或字段值不匹配")
+                parts.append("- 目标表当前没有符合条件的数据")
+                parts.append("- 关联的表或时间范围不正确")
+            else:
+                parts.append("The query returned no rows. This could mean:")
+                parts.append("- The filter conditions are too restrictive")
+                parts.append("- The data doesn't match the expected criteria")
+                parts.append("- The table is empty")
         elif row_count == 1:
-            parts.append("The query returned 1 row.")
+            parts.append("查询返回 1 条记录。" if zh else "The query returned 1 row.")
         else:
-            parts.append(f"The query returned {row_count:,} rows.")
+            parts.append(
+                f"查询共返回 {row_count:,} 条记录。"
+                if zh
+                else f"The query returned {row_count:,} rows."
+            )
 
         if truncated:
-            parts.append(f"Note: Results were truncated. Only showing a subset of {row_count:,} total rows.")
+            parts.append(
+                f"注意：结果已截断，界面仅展示部分数据（总计 {row_count:,} 条）。"
+                if zh
+                else f"Note: Results were truncated. Only showing a subset of {row_count:,} total rows."
+            )
 
-        # Timing
         if elapsed_ms > 5000:
-            parts.append(f"Query took {elapsed_ms/1000:.1f}s - consider adding indexes or reducing scope.")
+            parts.append(
+                f"查询耗时 {elapsed_ms / 1000:.1f}s，可考虑加索引或缩小范围。"
+                if zh
+                else f"Query took {elapsed_ms/1000:.1f}s - consider adding indexes or reducing scope."
+            )
 
-        # Warnings
         if warnings:
-            parts.append("Warnings:")
+            label = "提示：" if zh else "Warnings:"
+            parts.append(label)
             for w in warnings:
                 parts.append(f"  - {w}")
 
-        # Assumptions
         assumptions = []
         if "date" in sql.lower() or "time" in sql.lower():
-            assumptions.append("Query involves date/time filtering")
+            assumptions.append("查询包含时间筛选" if zh else "Query involves date/time filtering")
         if "join" in sql.lower():
-            assumptions.append("Query joins multiple tables")
+            assumptions.append("查询涉及多表关联" if zh else "Query joins multiple tables")
 
-        # Next actions
         next_actions = []
         if row_count == 0:
-            next_actions.append("Try relaxing filter conditions")
-            next_actions.append("Check if the table has data")
+            next_actions.append("放宽 WHERE 条件或检查样例数据" if zh else "Try relaxing filter conditions")
+            next_actions.append("确认表名、字段名和时间范围" if zh else "Check if the table has data")
         elif truncated:
-            next_actions.append("Add more specific filters to reduce result set")
+            next_actions.append("增加更具体的筛选以减少结果集" if zh else "Add more specific filters to reduce result set")
         if elapsed_ms > 10000:
-            next_actions.append("Consider running EXPLAIN to check query plan")
+            next_actions.append("运行 EXPLAIN 查看执行计划" if zh else "Consider running EXPLAIN to check query plan")
 
         return {
             "summary": "\n".join(parts),
@@ -245,6 +260,10 @@ class ResultInterpreter:
             "row_count": row_count,
             "elapsed_ms": elapsed_ms,
         }
+
+
+def _prefers_chinese(text: str) -> bool:
+    return any("\u4e00" <= ch <= "\u9fff" for ch in text)
 
 
 # ─────────────────────────────────────────────────────────────────────────────

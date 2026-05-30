@@ -54,6 +54,23 @@ class TestAnswerFormatter:
         assert "active" in result
         assert "80" in result
 
+    def test_query_result_with_interpretation(self):
+        result = QueryResult(
+            columns=["id"],
+            rows=[],
+            sql="SELECT id FROM users WHERE id = 0",
+            row_count=0,
+            elapsed_ms=12.0,
+        )
+        interpretation = {
+            "summary": "查询未返回任何行，可能原因：\n- 筛选条件过严",
+            "next_actions": ["放宽 WHERE 条件"],
+        }
+        formatted = self.formatter.query_result(result, interpretation=interpretation)
+        assert "查询未返回任何行" in formatted
+        assert "建议：" in formatted
+        assert "放宽 WHERE 条件" in formatted
+
     def test_query_result_empty(self):
         result = QueryResult(columns=[], rows=[], sql="SELECT 1", row_count=0, elapsed_ms=1.0)
         formatted = self.formatter.query_result(result, sql="SELECT 1")
