@@ -4,6 +4,7 @@ from PyQt6.QtCore import Qt
 from PyQt6.QtWidgets import QLabel, QVBoxLayout, QWidget
 
 from dbaide.desktop.components.inputs import configure_wrapped_label
+from dbaide.desktop.theme import Theme
 
 
 class EmptyState(QWidget):
@@ -24,7 +25,7 @@ class EmptyState(QWidget):
         title_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         body_label = QLabel(body)
         configure_wrapped_label(body_label, max_width=520)
-        body_label.setStyleSheet("color:#737b89;")
+        body_label.setStyleSheet(f"color: {Theme.MUTED};")
         body_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         layout.addWidget(title_label)
         layout.addWidget(body_label)
