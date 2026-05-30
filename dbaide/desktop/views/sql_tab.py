@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import json
+
 from PyQt6.QtCore import pyqtSignal
 from PyQt6.QtGui import QFont
 from PyQt6.QtWidgets import QHBoxLayout, QPlainTextEdit, QTabWidget, QTextBrowser, QVBoxLayout, QWidget
@@ -86,7 +88,7 @@ class SqlTab(QWidget):
         self.tabs.setCurrentWidget(self.result_table)
 
     def show_explain(self, payload: dict) -> None:
-        self.explain_view.setPlainText(str(payload))
+        self.explain_view.setPlainText(json.dumps(payload, ensure_ascii=False, indent=2))
         self.tabs.setCurrentWidget(self.explain_view)
 
     def show_error(self, message: str) -> None:
