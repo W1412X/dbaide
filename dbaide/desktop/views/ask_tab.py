@@ -117,6 +117,10 @@ class AskTab(QWidget):
         self.conversation.begin_turn("")
         self.conversation.complete_turn(answer=f"**{title}**\n\n{body}", ok=True)
 
+    def clear_conversation(self) -> None:
+        self.conversation.clear()
+        self._turn_open = False
+
     def append_search_hits(self, query: str, hits: list[dict[str, Any]]) -> None:
         if not hits:
             body = f"No matches for `{query}`. Try building assets or asking in natural language."

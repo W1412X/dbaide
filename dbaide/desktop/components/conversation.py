@@ -413,3 +413,11 @@ class ConversationView(QScrollArea):
 
     def _scroll_bottom(self) -> None:
         self.verticalScrollBar().setValue(self.verticalScrollBar().maximum())
+
+    def clear(self) -> None:
+        while self._stream_layout.count() > 1:
+            item = self._stream_layout.takeAt(0)
+            widget = item.widget()
+            if widget is not None:
+                widget.deleteLater()
+        self._current_turn = None
