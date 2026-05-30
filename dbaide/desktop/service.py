@@ -120,6 +120,7 @@ class DesktopService:
             "list_history": self.list_history,
             "load_history": self.load_history,
             "asset_markdown": self.asset_markdown,
+            "preview_asset": self.asset_markdown,
             "test_model": self.test_model,
         }
         if action not in handlers:
