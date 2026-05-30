@@ -41,6 +41,7 @@ class MainWindow(QMainWindow):
         self.schema_rows: list[dict[str, Any]] = []
         self.running = False
         self._last_question = ""
+        self._last_action = ""
         self._tab_names = ("Ask", "SQL", "Assets", "History")
         self.setWindowTitle("DBAide")
         self.resize(1440, 900)
@@ -57,6 +58,7 @@ class MainWindow(QMainWindow):
         layout.setSpacing(0)
         self.topbar = TopBar()
         self.topbar.connection_changed.connect(self._connection_changed)
+        self.topbar.database_changed.connect(self._database_changed)
         self.topbar.refresh.connect(self.refresh_all)
         self.topbar.build_assets.connect(self.build_assets)
         self.topbar.settings.connect(lambda: self.open_settings("connections"))
@@ -66,7 +68,8 @@ class MainWindow(QMainWindow):
         body.setChildrenCollapsible(False)
         body.setHandleWidth(1)
         self.sidebar = Sidebar()
-        self.sidebar.schema_selected.connect(self.inspect_schema)
+        self.sidebar.schema_preview.connect(self.preview_schema)
+        self.sidebar.schema_selected.connect(self.open_schema_asset)
         self.sidebar.settings_requested.connect(lambda: self.open_settings("connections"))
 
         center = QWidget()
@@ -97,7 +100,9 @@ class MainWindow(QMainWindow):
         self.sql_tab.explain_requested.connect(self.explain_sql)
         self.sql_tab.run_requested.connect(lambda sql, _action: self.execute_sql(sql))
         self.assets_tab.asset_selected.connect(self.load_asset)
+        self.assets_tab.search_requested.connect(self.search_assets)
         self.history_tab.history_selected.connect(self.load_history)
+        self.history_tab.history_preview.connect(self.preview_history)
         self.stack.addWidget(self.ask_tab)
         self.stack.addWidget(self.sql_tab)
         self.stack.addWidget(self.assets_tab)
@@ -113,6 +118,7 @@ class MainWindow(QMainWindow):
         self.right = RightPanel()
         self.right.copy_trace_requested.connect(self.copy_trace)
         self.right.clear_trace_requested.connect(self.right.clear_all)
+        self.right.clear_conversation_requested.connect(self.ask_tab.clear_conversation)
 
         body.addWidget(self.sidebar)
         body.addWidget(center)
@@ -145,22 +151,7 @@ class MainWindow(QMainWindow):
             self.ask_tab.set_has_connection(has_conn)
             self.composer.set_disabled_no_connection(not has_conn)
             if has_conn:
-                self._load_schema(conn_name)
-                self._load_history(conn_name)
-                asset_status = "missing"
-                for c in conns:
-                    if c["name"] == conn_name:
-                        asset_status = c.get("asset_status") or "missing"
-                self.topbar.set_asset_status(asset_status)
-                hint = "  Enter 换行 · ⌘Enter 发送"
-                self.composer.set_placeholder(
-                    (
-                        "Ask about your data, e.g. \"最近 7 天每天订单数\""
-                        if asset_status == "ready"
-                        else "Ask a question, or build assets for better accuracy"
-                    )
-                    + hint
-                )
+                self._refresh_connection_context(conn_name)
             else:
                 self.composer.set_placeholder("Add or select a connection to start")
             self.statusbar.showMessage("Ready")
@@ -182,16 +173,45 @@ class MainWindow(QMainWindow):
             self.tabbar.setCurrentIndex(self._tab_names.index(name))
 
     def _connection_changed(self, _text: str) -> None:
-        name = self.current_connection()
-        if name:
-            self._load_schema(name)
-            self._load_history(name)
+        conn = self.current_connection()
+        if conn:
+            self._refresh_connection_context(conn)
+
+    def _database_changed(self, _text: str) -> None:
+        database = self.current_database()
+        self.toast(f"Database scope: {database or 'auto'}")
+
+    def _refresh_connection_context(self, conn_name: str) -> None:
+        conns = self.bootstrap.get("connections") or []
+        self._load_schema(conn_name)
+        self._load_history(conn_name)
+        asset_status = "missing"
+        for c in conns:
+            if c["name"] == conn_name:
+                asset_status = c.get("asset_status") or "missing"
+                break
+        self.topbar.set_asset_status(asset_status)
+        hint = "  Enter 换行 · ⌘Enter 发送"
+        self.composer.set_placeholder(
+            (
+                "Ask about your data, e.g. \"最近 7 天每天订单数\""
+                if asset_status == "ready"
+                else "Ask a question, or build assets for better accuracy"
+            )
+            + hint
+        )
 
     def _load_schema(self, name: str) -> None:
         try:
             self.schema_rows = self.service.dispatch("schema_tree", {"name": name})
-        except Exception:
+            self.sidebar.load_schema(self.schema_rows)
+        except Exception as exc:
             self.schema_rows = []
+            self.sidebar.load_schema([], error=str(exc))
+            self.toast(f"Schema load failed: {exc}")
+            self.topbar.set_databases([])
+            self.assets_tab.load_schema([])
+            return
         dbs = [row["name"] for row in self.schema_rows]
         self.topbar.set_databases(dbs)
         self.sidebar.load_schema(self.schema_rows)
@@ -357,35 +377,60 @@ class MainWindow(QMainWindow):
         })
 
     def inspect_schema(self, data: dict[str, Any]) -> None:
+        self.open_schema_asset(data)
+
+    def preview_schema(self, data: dict[str, Any]) -> None:
         path = str(data.get("path") or "")
         if path:
-            self.load_asset(path)
+            self.run_action("preview_asset", {"path": path})
+
+    def open_schema_asset(self, data: dict[str, Any]) -> None:
+        path = str(data.get("path") or "")
+        if path:
+            self.run_action("asset_markdown", {"path": path})
 
     def load_asset(self, path: str) -> None:
-        if path.startswith("search:"):
-            query = path.split(":", 1)[1]
-            self._last_question = query
-            self.ask_tab.append_user(query, connection=self.current_connection(), database=self.current_database())
-            self.run_action("ask", {
-                "connection_name": self.current_connection(),
-                "question": query,
-                "database": self.current_database(),
-                "execution_policy": self.composer.policy(),
-                "show_trace": True,
-            })
-            self.switch_tab("Ask")
+        if not path:
             return
         self.run_action("asset_markdown", {"path": path})
         self.switch_tab("Assets")
 
+    def search_assets(self, query: str) -> None:
+        conn = self.current_connection()
+        if not conn:
+            self.toast("Select a connection first")
+            return
+        self._last_question = query
+        self.run_action("search_assets", {
+            "connection_name": conn,
+            "query": query,
+        })
+
     def load_history(self, workflow_id: str) -> None:
         conn = self.current_connection()
         self.run_action("load_history", {"connection_name": conn, "workflow_id": workflow_id})
+        self.switch_tab("Ask")
+
+    def preview_history(self, workflow_id: str) -> None:
+        conn = self.current_connection()
+        if not conn or not workflow_id:
+            return
+        try:
+            entry = self.service.dispatch("load_history", {
+                "connection_name": conn,
+                "workflow_id": workflow_id,
+            })
+            self.right.show_trace(entry.get("trace") or [])
+            self.right.show_plan(entry)
+            self.toast(f"Preview: {workflow_id}")
+        except Exception as exc:
+            self.toast(str(exc))
 
     def run_action(self, action: str, payload: dict[str, Any]) -> None:
         if self.running:
             self.toast("A task is already running")
             return
+        self._last_action = action
         self.running = True
         self.composer.set_running(True)
         self.sql_tab.set_running(True)
@@ -430,7 +475,15 @@ class MainWindow(QMainWindow):
             self._load_history(self.current_connection())
             return
         if action == "search_assets":
-            self.ask_tab.append_search_hits(self._last_question, result)
+            self.assets_tab.show_search_hits(self._last_question, result)
+            self.switch_tab("Assets")
+            return
+        if action == "preview_asset":
+            self.right.show_inspector(
+                markdown=result.get("markdown") or "",
+                doc=result.get("doc"),
+                focus=True,
+            )
             return
         if action == "validate_sql":
             self.sql_tab.show_validation(result)
@@ -443,7 +496,11 @@ class MainWindow(QMainWindow):
             return
         if action == "asset_markdown":
             self.assets_tab.show_markdown(result.get("markdown") or "", title=result.get("path") or "Asset")
-            self.right.show_inspector(markdown=result.get("markdown") or "", doc=result.get("doc"))
+            self.right.show_inspector(
+                markdown=result.get("markdown") or "",
+                doc=result.get("doc"),
+                focus=False,
+            )
             return
         if action == "load_history":
             self.ask_tab.append_result(result)
@@ -459,7 +516,7 @@ class MainWindow(QMainWindow):
         self.composer.set_running(False)
         self.sql_tab.set_running(False)
         self.right.trace.end_live()
-        self.fail(exc)
+        self.fail(exc, modal=self._last_action not in ("ask", "preview_asset", "search_assets"))
         self._restore_status_badge()
 
     def _restore_status_badge(self) -> None:
@@ -490,14 +547,20 @@ class MainWindow(QMainWindow):
     def toast(self, message: str) -> None:
         self.statusbar.showMessage(message, 4000)
 
-    def fail(self, exc: object) -> None:
+    def fail(self, exc: object, *, modal: bool = True) -> None:
         msg = f"**{type(exc).__name__}**: {exc}"
         if getattr(self.ask_tab, "_turn_open", False):
             self.ask_tab.finish_turn_error(msg)
+        elif self._last_action in ("ask", "preview_asset", "search_assets"):
+            self.ask_tab.append_note("Error", msg)
         else:
             self.ask_tab.append_note("Error", msg)
-        self.sql_tab.show_error(str(exc))
-        QMessageBox.warning(self, "DBAide", str(exc))
+        if self._last_action in ("validate_sql", "execute_sql", "explain_sql"):
+            self.sql_tab.show_error(str(exc))
+        if modal:
+            QMessageBox.warning(self, "DBAide", str(exc))
+        else:
+            self.toast(str(exc))
 
 
 class DBAideDesktop:
