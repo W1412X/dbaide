@@ -1,0 +1,317 @@
+"""Plan validator, risk controller, result interpreter, error router for DBAide."""
+from __future__ import annotations
+
+import logging
+from typing import Any
+
+from dbaide.core.errors import DBAideError, ErrorCode, RepairAction
+from dbaide.core.result import ExecutionPolicy, QueryPlan, ValidationReport
+
+logger = logging.getLogger("dbaide.agent.controllers")
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# PlanValidator
+# ─────────────────────────────────────────────────────────────────────────────
+
+class PlanValidator:
+    """Validates QueryPlan against known schema.
+
+    Deterministic validation - no LLM dependency.
+    """
+
+    def validate(
+        self,
+        plan: QueryPlan,
+        known_tables: set[str],
+        known_columns: dict[str, set[str]],
+    ) -> tuple[bool, list[str], list[str]]:
+        """Validate a query plan.
+
+        Returns:
+            (ok, issues, warnings)
+        """
+        issues = []
+        warnings = []
+
+        # Check tables exist
+        for table in plan.target_entities:
+            if table not in known_tables:
+                issues.append(f"Unknown table: {table}")
+
+        # Check columns exist
+        for col_ref in plan.selected_columns:
+            if "." in col_ref:
+                table, col = col_ref.split(".", 1)
+                if table in known_columns and col not in known_columns[table]:
+                    issues.append(f"Unknown column: {col_ref}")
+
+        # Check joins reference valid tables
+        for join in plan.joins:
+            from_table = join.get("from_table", "")
+            to_table = join.get("to_table", "")
+            if from_table and from_table not in known_tables:
+                issues.append(f"Join references unknown table: {from_table}")
+            if to_table and to_table not in known_tables:
+                issues.append(f"Join references unknown table: {to_table}")
+
+        # Warnings
+        if not plan.target_entities:
+            warnings.append("No target entities specified")
+        if plan.confidence < 0.65:
+            warnings.append(f"Low confidence: {plan.confidence:.2f}")
+        if len(plan.target_entities) > 3:
+            warnings.append(f"Query involves {len(plan.target_entities)} tables - may be complex")
+
+        return len(issues) == 0, issues, warnings
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# RiskController
+# ─────────────────────────────────────────────────────────────────────────────
+
+class RiskDecision:
+    """Decision from risk controller."""
+
+    __slots__ = ("action", "reason", "risk_level", "requires_confirmation")
+
+    def __init__(self, action: str, reason: str, risk_level: str = "low",
+                 requires_confirmation: bool = False) -> None:
+        self.action = action
+        self.reason = reason
+        self.risk_level = risk_level
+        self.requires_confirmation = requires_confirmation
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "action": self.action,
+            "reason": self.reason,
+            "risk_level": self.risk_level,
+            "requires_confirmation": self.requires_confirmation,
+        }
+
+
+class RiskController:
+    """Controls whether SQL can be auto-executed.
+
+    Inspired by Codex's approval workflow.
+    """
+
+    def decide(
+        self,
+        *,
+        policy: ExecutionPolicy,
+        validation: ValidationReport,
+        plan_confidence: float = 0.0,
+        table_count: int = 1,
+        has_joins: bool = False,
+        join_confidence: float = 1.0,
+    ) -> RiskDecision:
+        """Decide whether to execute, confirm, or reject."""
+
+        # Policy: inspect only - never execute
+        if policy == ExecutionPolicy.INSPECT_ONLY:
+            return RiskDecision("reject", "Inspect-only policy", "low")
+
+        # Policy: SQL only - generate but don't execute
+        if policy == ExecutionPolicy.SQL_ONLY:
+            return RiskDecision("generate_only", "SQL-only policy", "low")
+
+        # Validation failed - reject
+        if not validation.ok:
+            return RiskDecision("reject", "SQL validation failed", "rejected")
+
+        # High risk from validation
+        if validation.risk_level == "high":
+            return RiskDecision(
+                "confirm",
+                f"High risk: {'; '.join(validation.warnings[:3])}",
+                "high",
+                requires_confirmation=True,
+            )
+
+        # Low confidence plan
+        if plan_confidence < 0.65:
+            return RiskDecision(
+                "confirm",
+                f"Low plan confidence ({plan_confidence:.2f})",
+                "medium",
+                requires_confirmation=True,
+            )
+
+        # Low confidence joins
+        if has_joins and join_confidence < 0.8:
+            return RiskDecision(
+                "confirm",
+                f"Low join confidence ({join_confidence:.2f})",
+                "medium",
+                requires_confirmation=True,
+            )
+
+        # Complex query
+        if table_count > 2:
+            return RiskDecision(
+                "confirm",
+                f"Query involves {table_count} tables",
+                "medium",
+                requires_confirmation=True,
+            )
+
+        # Policy: expert - allow more
+        if policy == ExecutionPolicy.EXPERT:
+            return RiskDecision("auto_execute", "Expert policy, low risk", "low")
+
+        # Default: safe auto
+        if validation.requires_confirmation:
+            return RiskDecision(
+                "confirm",
+                "Validation requires confirmation",
+                validation.risk_level,
+                requires_confirmation=True,
+            )
+
+        return RiskDecision("auto_execute", "Low risk, safe to execute", "low")
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# ResultInterpreter
+# ─────────────────────────────────────────────────────────────────────────────
+
+class ResultInterpreter:
+    """Interprets query results and generates natural language explanations.
+
+    Only explains actual results - never fabricates.
+    """
+
+    def interpret(
+        self,
+        *,
+        question: str,
+        sql: str,
+        row_count: int,
+        columns: list[str],
+        elapsed_ms: float,
+        truncated: bool,
+        warnings: list[str],
+    ) -> dict[str, Any]:
+        """Interpret query result."""
+        parts = []
+
+        # Basic result summary
+        if row_count == 0:
+            parts.append("The query returned no rows. This could mean:")
+            parts.append("- The filter conditions are too restrictive")
+            parts.append("- The data doesn't match the expected criteria")
+            parts.append("- The table is empty")
+        elif row_count == 1:
+            parts.append("The query returned 1 row.")
+        else:
+            parts.append(f"The query returned {row_count:,} rows.")
+
+        if truncated:
+            parts.append(f"Note: Results were truncated. Only showing a subset of {row_count:,} total rows.")
+
+        # Timing
+        if elapsed_ms > 5000:
+            parts.append(f"Query took {elapsed_ms/1000:.1f}s - consider adding indexes or reducing scope.")
+
+        # Warnings
+        if warnings:
+            parts.append("Warnings:")
+            for w in warnings:
+                parts.append(f"  - {w}")
+
+        # Assumptions
+        assumptions = []
+        if "date" in sql.lower() or "time" in sql.lower():
+            assumptions.append("Query involves date/time filtering")
+        if "join" in sql.lower():
+            assumptions.append("Query joins multiple tables")
+
+        # Next actions
+        next_actions = []
+        if row_count == 0:
+            next_actions.append("Try relaxing filter conditions")
+            next_actions.append("Check if the table has data")
+        elif truncated:
+            next_actions.append("Add more specific filters to reduce result set")
+        if elapsed_ms > 10000:
+            next_actions.append("Consider running EXPLAIN to check query plan")
+
+        return {
+            "summary": "\n".join(parts),
+            "assumptions": assumptions,
+            "next_actions": next_actions,
+            "row_count": row_count,
+            "elapsed_ms": elapsed_ms,
+        }
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# ErrorRouter
+# ─────────────────────────────────────────────────────────────────────────────
+
+class ErrorRouter:
+    """Routes errors to repair actions.
+
+    Inspired by Claude Code's self-correction pattern.
+    """
+
+    # Error code -> repair action mapping
+    REPAIR_MAP = {
+        ErrorCode.UNKNOWN_TABLE: RepairAction.REFRESH_SCHEMA,
+        ErrorCode.UNKNOWN_COLUMN: RepairAction.REFRESH_SCHEMA,
+        ErrorCode.SCHEMA_LINK_LOW_CONFIDENCE: RepairAction.REPLAN,
+        ErrorCode.UNSAFE_SQL: RepairAction.STOP,
+        ErrorCode.SQL_EXPLAIN_FAILED: RepairAction.RERENDER_SQL,
+        ErrorCode.SQL_EXECUTION_FAILED: RepairAction.RERENDER_SQL,
+        ErrorCode.QUERY_TIMEOUT: RepairAction.REPLAN,
+        ErrorCode.EMPTY_RESULT: RepairAction.ASK_USER,
+        ErrorCode.ASSET_MISSING: RepairAction.REBUILD_ASSET,
+        ErrorCode.ASSET_STALE: RepairAction.REBUILD_ASSET,
+        ErrorCode.MODEL_UNAVAILABLE: RepairAction.STOP,
+        ErrorCode.LLM_ERROR: RepairAction.REPLAN,
+        ErrorCode.CONNECTION_FAILED: RepairAction.STOP,
+        ErrorCode.PERMISSION_DENIED: RepairAction.STOP,
+        ErrorCode.USER_CANCELLED: RepairAction.STOP,
+    }
+
+    def __init__(self) -> None:
+        self._repair_counts: dict[str, int] = {}
+        self._max_repairs_per_stage = 2
+        self._max_repairs_total = 5
+
+    def route(self, error: DBAideError, stage: str) -> RepairAction:
+        """Determine repair action for an error."""
+        action = self.REPAIR_MAP.get(error.code, RepairAction.STOP)
+
+        # Check repair budget
+        stage_key = f"{stage}:{action.value}"
+        stage_count = self._repair_counts.get(stage_key, 0)
+        total_count = sum(self._repair_counts.values())
+
+        if stage_count >= self._max_repairs_per_stage:
+            logger.warning("repair budget exhausted for stage %s", stage)
+            return RepairAction.STOP
+
+        if total_count >= self._max_repairs_total:
+            logger.warning("total repair budget exhausted")
+            return RepairAction.STOP
+
+        # Record repair attempt
+        self._repair_counts[stage_key] = stage_count + 1
+
+        return action
+
+    def reset(self) -> None:
+        """Reset repair counters for a new workflow."""
+        self._repair_counts.clear()
+
+    def should_retry(self, error: DBAideError) -> bool:
+        """Check if error is retryable."""
+        return error.retryable and error.code in {
+            ErrorCode.SQL_EXECUTION_FAILED,
+            ErrorCode.QUERY_TIMEOUT,
+            ErrorCode.LLM_ERROR,
+            ErrorCode.CONNECTION_FAILED,
+        }

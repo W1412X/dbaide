@@ -1,0 +1,29 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "dbaide"
+version = "0.1.0"
+description = "A lightweight CLI data assistant with progressive schema disclosure."
+readme = "README.md"
+requires-python = ">=3.11"
+license = {text = "MIT"}
+authors = [{name = "DBAide"}]
+dependencies = [
+    "pymysql>=1.1.0",
+    "psycopg[binary]>=3.1.0",
+]
+
+[project.optional-dependencies]
+mysql = []
+postgres = []
+gui = ["PyQt6>=6.5.0"]
+dev = ["pytest>=8.0.0", "pyinstaller>=6.0.0"]
+
+[project.scripts]
+dbaide = "dbaide.cli:main"
+dbaide-gui = "dbaide.gui:main"
+
+[tool.setuptools.packages.find]
+include = ["dbaide*"]

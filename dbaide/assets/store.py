@@ -1,0 +1,123 @@
+from __future__ import annotations
+
+import json
+import logging
+import os
+import re
+import tempfile
+from pathlib import Path
+from typing import Any
+
+from dbaide.models import ColumnInfo, TableInfo
+
+logger = logging.getLogger("dbaide.assets")
+
+DEFAULT_ASSET_DIR = Path.home() / ".dbaide" / "assets"
+
+
+class AssetStore:
+    def __init__(self, base_dir: Path | None = None) -> None:
+        self.base_dir = Path(os.environ.get("DBAIDE_ASSETS", base_dir or DEFAULT_ASSET_DIR)).expanduser()
+
+    def instance_dir(self, instance: str) -> Path:
+        return self.base_dir / "instances" / safe_name(instance)
+
+    def database_dir(self, instance: str, database: str) -> Path:
+        return self.instance_dir(instance) / "databases" / safe_name(database)
+
+    def table_dir(self, instance: str, database: str, table: str) -> Path:
+        return self.database_dir(instance, database) / "tables" / safe_name(table)
+
+    def column_dir(self, instance: str, database: str, table: str) -> Path:
+        return self.table_dir(instance, database, table) / "columns"
+
+    def write_json(self, path: Path, data: dict[str, Any] | list[Any]) -> None:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        content = json.dumps(data, ensure_ascii=False, indent=2, default=str)
+        fd, tmp = tempfile.mkstemp(dir=str(path.parent), suffix=".tmp")
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8") as fh:
+                fh.write(content)
+            os.replace(tmp, str(path))
+        except Exception:
+            try:
+                os.unlink(tmp)
+            except OSError:
+                pass
+            raise
+
+    def read_json(self, path: Path) -> Any:
+        with path.open("r", encoding="utf-8") as fh:
+            return json.load(fh)
+
+    def has_instance(self, instance: str) -> bool:
+        return (self.instance_dir(instance) / "instance.json").exists()
+
+    def instance_doc(self, instance: str) -> dict[str, Any] | None:
+        return self._read_optional(self.instance_dir(instance) / "instance.json")
+
+    def database_docs(self, instance: str) -> list[dict[str, Any]]:
+        path = self.instance_dir(instance) / "databases.json"
+        data = self._read_optional(path)
+        if isinstance(data, dict):
+            return list(data.get("databases") or [])
+        return []
+
+    def table_docs(self, instance: str, database: str) -> list[dict[str, Any]]:
+        path = self.database_dir(instance, database) / "tables.json"
+        data = self._read_optional(path)
+        if isinstance(data, dict):
+            return list(data.get("tables") or [])
+        return []
+
+    def column_docs(self, instance: str, database: str, table: str) -> list[dict[str, Any]]:
+        col_dir = self.column_dir(instance, database, table)
+        if not col_dir.exists():
+            return []
+        docs = []
+        for path in sorted(col_dir.glob("*.json")):
+            data = self._read_optional(path)
+            if isinstance(data, dict):
+                docs.append(data)
+        return docs
+
+    def table_doc(self, instance: str, database: str, table: str) -> dict[str, Any] | None:
+        return self._read_optional(self.table_dir(instance, database, table) / "table.json")
+
+    def to_table_info(self, doc: dict[str, Any]) -> TableInfo:
+        return TableInfo(
+            name=str(doc.get("name") or doc.get("table") or ""),
+            schema=str(doc.get("database") or doc.get("schema") or ""),
+            comment=str(doc.get("description") or doc.get("comment") or ""),
+            estimated_rows=doc.get("estimated_rows"),
+            table_type=str(doc.get("table_type") or "table"),
+        )
+
+    def to_column_info(self, doc: dict[str, Any]) -> ColumnInfo:
+        return ColumnInfo(
+            name=str(doc.get("name") or doc.get("column") or ""),
+            data_type=str(doc.get("data_type") or doc.get("type") or ""),
+            nullable=doc.get("nullable"),
+            default=doc.get("default"),
+            comment=str(doc.get("semantic_summary") or doc.get("comment") or ""),
+            primary_key=bool(doc.get("primary_key")),
+            indexed=bool(doc.get("indexed")),
+        )
+
+    def _read_optional(self, path: Path) -> Any:
+        if not path.exists():
+            return None
+        try:
+            return self.read_json(path)
+        except (json.JSONDecodeError, OSError, UnicodeDecodeError):
+            return None
+
+
+def safe_name(value: str) -> str:
+    text = str(value or "default").strip()
+    text = re.sub(r"[^A-Za-z0-9_-]+", "_", text)
+    text = text.strip("_.-")
+    if not text or text == "." or text == "..":
+        return "default"
+    return text
+

@@ -1,0 +1,243 @@
+"""Tool specifications for DBAide tool registry."""
+from __future__ import annotations
+
+from typing import Any
+
+
+class ToolSpec:
+    """Tool specification with schema, permissions, and timeout."""
+
+    __slots__ = (
+        "name", "description", "input_schema", "output_schema",
+        "permission_level", "timeout_seconds", "max_rows",
+        "cache_policy", "safe_for_auto_call",
+    )
+
+    def __init__(
+        self,
+        *,
+        name: str,
+        description: str,
+        input_schema: dict[str, Any] | None = None,
+        output_schema: dict[str, Any] | None = None,
+        permission_level: str = "safe_metadata",
+        timeout_seconds: int = 30,
+        max_rows: int | None = None,
+        cache_policy: str = "none",
+        safe_for_auto_call: bool = True,
+    ) -> None:
+        self.name = name
+        self.description = description
+        self.input_schema = input_schema or {}
+        self.output_schema = output_schema or {}
+        self.permission_level = permission_level
+        self.timeout_seconds = timeout_seconds
+        self.max_rows = max_rows
+        self.cache_policy = cache_policy
+        self.safe_for_auto_call = safe_for_auto_call
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "name": self.name,
+            "description": self.description,
+            "input_schema": self.input_schema,
+            "output_schema": self.output_schema,
+            "permission_level": self.permission_level,
+            "timeout_seconds": self.timeout_seconds,
+            "max_rows": self.max_rows,
+            "cache_policy": self.cache_policy,
+            "safe_for_auto_call": self.safe_for_auto_call,
+        }
+
+
+# Permission levels
+SAFE_METADATA = "safe_metadata"
+SAFE_PROFILE = "safe_profile"
+COSTLY_SCAN = "costly_scan"
+SQL_VALIDATE = "sql_validate"
+SQL_EXECUTE = "sql_execute"
+CONFIG_WRITE = "config_write"
+
+
+# Pre-defined tool specs
+SEARCH_ASSETS = ToolSpec(
+    name="search_assets",
+    description="Search offline schema assets by keyword",
+    input_schema={"query": "string", "instances": "list[string]", "limit": "integer"},
+    output_schema={"hits": "list[SearchHit]"},
+    permission_level=SAFE_METADATA,
+    timeout_seconds=5,
+    safe_for_auto_call=True,
+)
+
+LIST_DATABASES = ToolSpec(
+    name="list_databases",
+    description="List all databases in a connection",
+    input_schema={},
+    output_schema={"databases": "list[string]"},
+    permission_level=SAFE_METADATA,
+    timeout_seconds=10,
+    safe_for_auto_call=True,
+)
+
+LIST_TABLES = ToolSpec(
+    name="list_tables",
+    description="List all tables in a database",
+    input_schema={"database": "string"},
+    output_schema={"tables": "list[TableInfo]"},
+    permission_level=SAFE_METADATA,
+    timeout_seconds=10,
+    safe_for_auto_call=True,
+)
+
+DESCRIBE_TABLE = ToolSpec(
+    name="describe_table",
+    description="Get column metadata for a table",
+    input_schema={"table": "string", "database": "string"},
+    output_schema={"columns": "list[ColumnInfo]"},
+    permission_level=SAFE_METADATA,
+    timeout_seconds=10,
+    safe_for_auto_call=True,
+)
+
+SHOW_TABLE_DOC = ToolSpec(
+    name="show_table_doc",
+    description="Show offline asset documentation for a table",
+    input_schema={"instance": "string", "database": "string", "table": "string"},
+    output_schema={"doc": "dict"},
+    permission_level=SAFE_METADATA,
+    timeout_seconds=5,
+    safe_for_auto_call=True,
+)
+
+SHOW_COLUMN_DOC = ToolSpec(
+    name="show_column_doc",
+    description="Show offline asset documentation for a column",
+    input_schema={"instance": "string", "database": "string", "table": "string", "column": "string"},
+    output_schema={"doc": "dict"},
+    permission_level=SAFE_METADATA,
+    timeout_seconds=5,
+    safe_for_auto_call=True,
+)
+
+VALIDATE_SQL = ToolSpec(
+    name="validate_sql",
+    description="Validate SQL for safety and correctness",
+    input_schema={"sql": "string"},
+    output_schema={"ok": "boolean", "issues": "list[string]", "normalized_sql": "string"},
+    permission_level=SQL_VALIDATE,
+    timeout_seconds=5,
+    safe_for_auto_call=True,
+)
+
+EXPLAIN_SQL = ToolSpec(
+    name="explain_sql",
+    description="Run EXPLAIN on a SQL query",
+    input_schema={"sql": "string", "database": "string"},
+    output_schema={"plan": "list[dict]"},
+    permission_level=SQL_VALIDATE,
+    timeout_seconds=15,
+    safe_for_auto_call=True,
+)
+
+EXECUTE_READONLY_SQL = ToolSpec(
+    name="execute_readonly_sql",
+    description="Execute a validated read-only SQL query",
+    input_schema={"sql": "string", "database": "string", "limit": "integer", "timeout_seconds": "integer"},
+    output_schema={"rows": "list[dict]", "columns": "list[string]", "row_count": "integer"},
+    permission_level=SQL_EXECUTE,
+    timeout_seconds=30,
+    max_rows=10000,
+    safe_for_auto_call=False,
+)
+
+EXECUTE_SQL = ToolSpec(
+    name="execute_sql",
+    description="Alias for execute_readonly_sql — run validated read-only SQL",
+    input_schema={"sql": "string", "database": "string"},
+    output_schema={"rows": "list[dict]", "columns": "list[string]", "row_count": "integer"},
+    permission_level=SQL_EXECUTE,
+    timeout_seconds=30,
+    max_rows=10000,
+    safe_for_auto_call=False,
+)
+
+PROFILE_TABLE = ToolSpec(
+    name="profile_table",
+    description="Profile columns of a table",
+    input_schema={"table": "string", "columns": "list[string]", "database": "string"},
+    output_schema={"profiles": "list[ColumnProfile]"},
+    permission_level=SAFE_PROFILE,
+    timeout_seconds=60,
+    safe_for_auto_call=True,
+)
+
+PROFILE_COLUMN = ToolSpec(
+    name="profile_column",
+    description="Profile a single column",
+    input_schema={"table": "string", "column": "string", "database": "string", "top_k": "integer"},
+    output_schema={"profile": "ColumnProfile"},
+    permission_level=SAFE_PROFILE,
+    timeout_seconds=30,
+    safe_for_auto_call=True,
+)
+
+BUILD_ASSETS = ToolSpec(
+    name="build_assets",
+    description="Build offline schema assets",
+    input_schema={"connection": "string", "databases": "list[string]", "profile_mode": "string"},
+    output_schema={"stats": "BuildStats"},
+    permission_level=COSTLY_SCAN,
+    timeout_seconds=600,
+    safe_for_auto_call=False,
+)
+
+ASK_USER = ToolSpec(
+    name="ask_user",
+    description="Ask the user a clarification question",
+    input_schema={"question": "string", "options": "list[string]"},
+    output_schema={"answer": "string"},
+    permission_level=SAFE_METADATA,
+    timeout_seconds=300,
+    safe_for_auto_call=True,
+)
+
+DISCOVER_SCHEMA = ToolSpec(
+    name="discover_schema",
+    description="Progressive LLM schema discovery (instance → database → table → column)",
+    input_schema={"question": "string"},
+    output_schema={"hits": "list[dict]", "trace": "list[string]"},
+    permission_level=SAFE_METADATA,
+    timeout_seconds=60,
+    safe_for_auto_call=True,
+)
+
+GENERATE_SQL = ToolSpec(
+    name="generate_sql",
+    description="Generate read-only SQL for a question using table column metadata",
+    input_schema={"question": "string", "table": "string", "database": "string"},
+    output_schema={"sql": "string", "rationale": "string", "confidence": "float"},
+    permission_level=SAFE_METADATA,
+    timeout_seconds=30,
+    safe_for_auto_call=True,
+)
+
+SYNTHESIZE_SCHEMA_ANSWER = ToolSpec(
+    name="synthesize_schema_answer",
+    description="Write a markdown answer from progressive schema discovery",
+    input_schema={"question": "string"},
+    output_schema={"answer": "string"},
+    permission_level=SAFE_METADATA,
+    timeout_seconds=30,
+    safe_for_auto_call=True,
+)
+
+REQUEST_CONFIRMATION = ToolSpec(
+    name="request_confirmation",
+    description="Request user confirmation before executing",
+    input_schema={"reason": "string", "sql": "string", "risk_level": "string"},
+    output_schema={"confirmed": "boolean"},
+    permission_level=SAFE_METADATA,
+    timeout_seconds=300,
+    safe_for_auto_call=True,
+)
