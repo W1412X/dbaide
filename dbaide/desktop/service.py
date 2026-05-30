@@ -307,7 +307,12 @@ class DesktopService:
         )
         engine = WorkflowEngine(conn, self._safe_llm(), self.store)
         progress_cb = payload.get("progress")
-        result = engine.run(request, progress=progress_cb if callable(progress_cb) else None)
+        cancel_check = payload.get("cancel_check")
+        result = engine.run(
+            request,
+            progress=progress_cb if callable(progress_cb) else None,
+            cancel_check=cancel_check if callable(cancel_check) else None,
+        )
         try:
             self.history.save(result)
         except Exception:
