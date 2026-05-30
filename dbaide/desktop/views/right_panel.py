@@ -15,6 +15,7 @@ from dbaide.desktop.components.trace import TracePanel
 class RightPanel(QWidget):
     copy_trace_requested = pyqtSignal()
     clear_trace_requested = pyqtSignal()
+    clear_conversation_requested = pyqtSignal()
 
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
@@ -46,12 +47,12 @@ class RightPanel(QWidget):
         self._menu.setFixedWidth(32)
         self._menu.add_action("Copy Trace", self.copy_trace_requested.emit)
         self._menu.add_action("Clear Trace", self.clear_trace_requested.emit)
+        self._menu.add_action("Clear Conversation", self.clear_conversation_requested.emit)
         self.tabs.setCornerWidget(self._menu, Qt.Corner.TopRightCorner)
         layout.addWidget(self.tabs, 1)
 
     def show_trace(self, events: list[dict[str, Any]]) -> None:
         self.trace.load_events(events)
-        self.tabs.setCurrentWidget(self.trace)
 
     def show_plan(self, result: dict[str, Any]) -> None:
         plan = result.get("query_plan") or {}
@@ -74,15 +75,21 @@ class RightPanel(QWidget):
         if validation:
             lines.extend(["", "Validation:", json.dumps(validation, ensure_ascii=False, indent=2)])
         self.plan_view.setPlainText("\n".join(lines))
-        self.tabs.setCurrentIndex(1)
 
-    def show_inspector(self, *, markdown: str = "", doc: dict[str, Any] | None = None) -> None:
+    def show_inspector(
+        self,
+        *,
+        markdown: str = "",
+        doc: dict[str, Any] | None = None,
+        focus: bool = True,
+    ) -> None:
         self.inspect_preview.clear_view()
         if markdown:
             self.inspect_preview.append_card("Asset Preview", markdown)
         if doc:
             self.inspect_json.setPlainText(json.dumps(doc, ensure_ascii=False, indent=2))
-        self.tabs.setCurrentIndex(2)
+        if focus:
+            self.tabs.setCurrentIndex(2)
 
     def clear_all(self) -> None:
         self.trace.clear_trace()
