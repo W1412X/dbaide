@@ -463,6 +463,20 @@ class SettingsDialog(QDialog):
         self._selected_model = ""
         self._reload_model_list()
 
+    def set_save_busy(self, busy: bool, *, target: str = "connection") -> None:
+        if target == "connection":
+            self.save_conn_btn.setEnabled(not busy)
+            self.test_conn_btn.setEnabled(not busy)
+            if busy:
+                self.conn_test_status.setText("Saving connection…")
+                self.conn_test_status.setStyleSheet(f"color:{Theme.MUTED}; font-size:12px;")
+        else:
+            self.save_model_btn.setEnabled(not busy)
+            self.test_model_btn.setEnabled(not busy)
+            if busy:
+                self.model_test_status.setText("Saving model…")
+                self.model_test_status.setStyleSheet(f"color:{Theme.MUTED}; font-size:12px;")
+
     def set_test_busy(self, busy: bool, *, target: str = "connection") -> None:
         if target == "connection":
             self.test_conn_btn.setEnabled(not busy)

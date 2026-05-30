@@ -92,9 +92,19 @@ LIST_TABLES = ToolSpec(
 
 DESCRIBE_TABLE = ToolSpec(
     name="describe_table",
-    description="Get column metadata for a table",
+    description="Get column metadata for a table (accumulates in loop context for multi-table SQL)",
     input_schema={"table": "string", "database": "string"},
-    output_schema={"columns": "list[ColumnInfo]"},
+    output_schema={"columns": "list[ColumnInfo]", "disclosed_tables": "list[string]"},
+    permission_level=SAFE_METADATA,
+    timeout_seconds=10,
+    safe_for_auto_call=True,
+)
+
+GET_RELATIONS = ToolSpec(
+    name="get_relations",
+    description="Load declared foreign keys for disclosed tables (from assets or live catalog)",
+    input_schema={"tables": "list[string]", "table": "string", "database": "string"},
+    output_schema={"relations": "list[dict]", "count": "integer"},
     permission_level=SAFE_METADATA,
     timeout_seconds=10,
     safe_for_auto_call=True,
@@ -214,9 +224,9 @@ DISCOVER_SCHEMA = ToolSpec(
 
 GENERATE_SQL = ToolSpec(
     name="generate_sql",
-    description="Generate read-only SQL for a question using table column metadata",
-    input_schema={"question": "string", "table": "string", "database": "string"},
-    output_schema={"sql": "string", "rationale": "string", "confidence": "float"},
+    description="Generate read-only SQL using disclosed table column metadata (all describe_table results, or tables arg)",
+    input_schema={"question": "string", "table": "string", "tables": "list[string]", "database": "string"},
+    output_schema={"sql": "string", "rationale": "string", "confidence": "float", "tables": "list[string]"},
     permission_level=SAFE_METADATA,
     timeout_seconds=30,
     safe_for_auto_call=True,

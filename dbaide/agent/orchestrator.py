@@ -11,6 +11,12 @@ from typing import Any, Callable
 from dbaide.adapters.base import DatabaseAdapter
 from dbaide.agent.answerer import AnswerFormatter
 from dbaide.agent.controllers import ErrorRouter, ResultInterpreter, RiskController
+from dbaide.agent.schema_context import (
+    collect_relations,
+    merge_sql_context,
+    table_targets_from_discovery,
+    validation_feedback,
+)
 from dbaide.agent.progressive_schema import ModelRequiredError, ProgressiveSchemaAgent
 from dbaide.agent.router import TaskRouter
 from dbaide.agent.sql_writer import SQLWriter
@@ -96,11 +102,15 @@ class AskOrchestrator:
         self._loop_table = ""
         self._loop_table_database = database
         self._loop_columns: list[ColumnInfo] = []
+        self._loop_schemas: dict[str, list[ColumnInfo]] = {}
+        self._loop_schema_db: dict[str, str] = {}
+        self._loop_relations: list[dict[str, Any]] = []
         self._loop_sql = ""
         self._loop_sql_rationale = ""
         self._loop_sql_confidence = 0.0
         self._loop_query_result = None
         self._loop_answer = ""
+        self._loop_sql_feedback = ""
 
     def run(self, question: str, *, database: str = "", execute: bool = True) -> AssistantResponse:
         if isinstance(self.llm, NullLLMClient):
@@ -302,9 +312,14 @@ class AskOrchestrator:
         self, ctx: AgentContext, disclosures: list[str], active_database: str,
         execute: bool, start: float,
     ) -> AssistantResponse:
-        self._step(ctx, "discover", "Finding relevant tables (LLM)…")
-        table, table_database = self._pick_table(ctx.question, active_database)
-        if not table:
+        self._step(ctx, "discover", "Progressive schema discovery…")
+        discovery = self._discover(ctx.question)
+        targets = table_targets_from_discovery(discovery, active_database)
+        if not targets:
+            table, table_database = self._pick_table(ctx.question, active_database)
+            if table:
+                targets = [(table_database, table)]
+        if not targets:
             return AssistantResponse(
                 answer=(
                     "No suitable table found.\n\n"
@@ -314,32 +329,48 @@ class AskOrchestrator:
                 warnings=self._collect_warnings(ctx),
             )
 
-        ctx.table = table
-        self._step(ctx, "describe", f"Describing table {table_database}.{table}…")
-        columns = self.schema.describe_table(table, database=table_database)
-        ctx.columns = [c.name for c in columns]
+        disclosed: list[tuple[str, str, list[ColumnInfo]]] = []
+        for database, table in targets:
+            self._step(ctx, "describe", f"Describing table {database}.{table}…")
+            columns = self.schema.describe_table(table, database=database)
+            disclosed.append((database, table, columns))
+        ctx.table = disclosed[0][1]
+        ctx.columns = [c.name for c in disclosed[0][2]]
+        table_database = disclosed[0][0]
+
+        relations = collect_relations(self, targets)
+        sql_context = merge_sql_context(self.session.disclosure.summary(), relations)
 
         draft = None
         validation = None
         feedback = ""
         for attempt in range(self.MAX_SQL_RETRIES + 1):
             self._step(ctx, "generate", f"Generating SQL (attempt {attempt + 1})…")
-            draft = self.sql_writer.write(
-                ctx.question,
-                table,
-                columns,
-                context=self.session.disclosure.summary(),
-                feedback=feedback,
-            )
+            if len(disclosed) == 1:
+                database, table, columns = disclosed[0]
+                draft = self.sql_writer.write(
+                    ctx.question,
+                    table,
+                    columns,
+                    context=sql_context,
+                    feedback=feedback,
+                )
+            else:
+                draft = self.sql_writer.write(
+                    ctx.question,
+                    disclosed_schemas=disclosed,
+                    context=sql_context,
+                    feedback=feedback,
+                )
             ctx.sql = draft.sql
             validation = self.query.validate_sql(draft.sql, add_limit=True)
             if validation.ok:
                 break
-            issues = "; ".join(issue.message for issue in validation.issues)
-            ctx.error = issues
-            feedback = issues
+            issues = [issue.message for issue in validation.issues]
+            ctx.error = "; ".join(issues)
+            feedback = validation_feedback(issues)
             if attempt < self.MAX_SQL_RETRIES:
-                self._step(ctx, "retry", f"Validation failed: {issues}. Retrying…")
+                self._step(ctx, "retry", f"Validation failed: {feedback}. Retrying…")
                 continue
             return AssistantResponse(
                 answer="Generated SQL failed validation:\n" + "\n".join(f"- {i.message}" for i in validation.issues),

@@ -9,7 +9,7 @@ from typing import Callable
 from dbaide.adapters.base import DatabaseAdapter
 from dbaide.assets.profiler import ColumnProfiler
 from dbaide.assets.store import AssetStore
-from dbaide.assets.summarizer import AssetSummarizer
+from dbaide.assets.summarizer import ASSET_SCHEMA_VERSION, AssetSummarizer
 from dbaide.llm import LLMClient
 from dbaide.models import ConnectionConfig
 
@@ -125,7 +125,7 @@ class AssetBuilder:
         self.store.write_json(
             self.store.instance_dir(instance) / "manifest.json",
             {
-                "asset_schema_version": 2,
+                "asset_schema_version": ASSET_SCHEMA_VERSION,
                 "instance": instance,
                 "built_at": started,
                 "completed_at": instance_doc["completed_at"],
@@ -374,20 +374,11 @@ def should_profile_column(column, *, mode: str) -> bool:
         return False
     if mode == "all":
         return True
-    name = str(column.name or "").lower()
-    typ = str(column.data_type or "").lower()
     if column.primary_key or column.indexed:
         return True
-    if name == "id" or name.endswith("_id"):
+    typ = str(column.data_type or "").lower()
+    if any(k in typ for k in ["date", "time", "timestamp", "bool", "bit"]):
         return True
-    if any(k in name for k in ["status", "state", "type", "category", "kind", "level"]):
-        return True
-    if any(k in name for k in ["created", "updated"]) or name.endswith(("_at", "_time", "_date")):
-        return True
-    if any(k in name for k in ["amount", "price", "total", "fee", "cost", "money", "count", "qty", "quantity"]):
-        return True
-    if any(k in typ for k in ["date", "time", "bool"]):
-        return True
-    if any(k in typ for k in ["int", "real", "numeric", "decimal", "float", "double"]):
+    if any(k in typ for k in ["int", "real", "numeric", "decimal", "float", "double", "number"]):
         return True
     return False

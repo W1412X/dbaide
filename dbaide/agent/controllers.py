@@ -280,7 +280,6 @@ class ErrorRouter:
     REPAIR_MAP = {
         ErrorCode.UNKNOWN_TABLE: RepairAction.REFRESH_SCHEMA,
         ErrorCode.UNKNOWN_COLUMN: RepairAction.REFRESH_SCHEMA,
-        ErrorCode.SCHEMA_LINK_LOW_CONFIDENCE: RepairAction.REPLAN,
         ErrorCode.UNSAFE_SQL: RepairAction.STOP,
         ErrorCode.SQL_EXPLAIN_FAILED: RepairAction.RERENDER_SQL,
         ErrorCode.SQL_EXECUTION_FAILED: RepairAction.RERENDER_SQL,

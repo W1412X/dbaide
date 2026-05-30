@@ -97,29 +97,28 @@ class ColumnProfiler:
 
 
 def infer_data_kind(column: ColumnInfo, profile: ColumnProfile | None = None) -> str:
-    name = column.name.lower()
     typ = (column.data_type or "").lower()
-    if any(k in typ for k in ["bool", "bit"]) or name.startswith("is_") or name.startswith("has_"):
+    if any(k in typ for k in ["bool", "bit"]):
         return "boolean"
-    time_name = (
-        name in {"date", "day", "time", "timestamp"}
-        or name.endswith("_at")
-        or name.endswith("_time")
-        or name.endswith("_date")
-        or "created" in name
-        or "updated" in name
-    )
-    if time_name or any(k in typ for k in ["date", "time", "timestamp"]):
+    if any(k in typ for k in ["date", "time", "timestamp"]):
         return "temporal"
-    if any(k in name for k in ["status", "state", "type", "category", "kind", "level"]):
-        return "categorical"
     if any(k in typ for k in ["int", "real", "numeric", "decimal", "float", "double", "number"]):
-        if profile and profile.distinct_count is not None and profile.row_count and profile.distinct_count <= min(50, max(3, profile.row_count // 20)):
+        if (
+            profile
+            and profile.distinct_count is not None
+            and profile.row_count
+            and profile.distinct_count <= min(50, max(3, profile.row_count // 20))
+        ):
             return "categorical"
         return "numeric"
-    if profile and profile.distinct_count is not None and profile.row_count and profile.distinct_count <= min(50, max(3, profile.row_count // 20)):
+    if (
+        profile
+        and profile.distinct_count is not None
+        and profile.row_count
+        and profile.distinct_count <= min(50, max(3, profile.row_count // 20))
+    ):
         return "categorical"
-    if any(k in typ for k in ["char", "text", "json", "uuid"]):
+    if any(k in typ for k in ["char", "text", "json", "uuid", "blob", "clob"]):
         return "text"
     return "unknown"
 

@@ -380,9 +380,7 @@ def _filter_system(level: str) -> str:
         f"You filter {level} objects for relevance to the user's question.\n"
         "Return JSON only: {\"relevant_indices\": [<index values from the batch>], \"reason\": \"...\"}\n"
         "Rules:\n"
-        "- Include ONLY objects clearly related to the question (semantic match, not just keyword overlap).\n"
-        "- For Chinese questions, consider English table/column names and industrial synonyms "
-        "(e.g. 产线 → production line, line_id, production_lines).\n"
+        "- Include ONLY objects clearly related to the question.\n"
         "- Prefer precision over recall; empty array is OK.\n"
         "- Use the 'index' field from each object; do not invent indices."
     )

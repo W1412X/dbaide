@@ -36,10 +36,15 @@ class DeveloperTools:
                     if idx >= max_columns:
                         lines.append(f"      ... {len(columns) - max_columns} more column(s)")
                         break
-                    role = col.get("likely_role") or "unknown"
                     typ = col.get("data_type") or ""
                     prof = col.get("profile_status") or ""
-                    lines.append(f"      - {col.get('name')} : {typ} [{role}, {prof}]")
+                    flags = []
+                    if col.get("primary_key"):
+                        flags.append("pk")
+                    if col.get("indexed"):
+                        flags.append("idx")
+                    flag_text = f" [{', '.join(flags)}]" if flags else ""
+                    lines.append(f"      - {col.get('name')} : {typ}{flag_text} ({prof})")
         return "\n".join(lines)
 
     def markdown(self, instance: str, *, database: str = "") -> str:
@@ -56,14 +61,15 @@ class DeveloperTools:
             for table_doc in self.store.table_docs(instance, db_name):
                 table = str(table_doc.get("name") or table_doc.get("table") or "")
                 lines.extend([f"### `{table}`", "", str(table_doc.get("description") or ""), ""])
-                lines.append("| Column | Type | Role | Profile | Summary |")
-                lines.append("| --- | --- | --- | --- | --- |")
+                lines.append("| Column | Type | PK | Indexed | Profile | Summary |")
+                lines.append("| --- | --- | --- | --- | --- | --- |")
                 for col in self.store.column_docs(instance, db_name, table):
                     lines.append(
-                        "| {name} | {typ} | {role} | {profile} | {summary} |".format(
+                        "| {name} | {typ} | {pk} | {indexed} | {profile} | {summary} |".format(
                             name=col.get("name") or "",
                             typ=col.get("data_type") or "",
-                            role=col.get("likely_role") or "",
+                            pk="✓" if col.get("primary_key") else "",
+                            indexed="✓" if col.get("indexed") else "",
                             profile=col.get("profile_status") or "",
                             summary=str(col.get("semantic_summary") or "").replace("|", "\\|")[:240],
                         )
@@ -79,15 +85,15 @@ class DeveloperTools:
                 continue
             for table_doc in self.store.table_docs(instance, db_name):
                 table = str(table_doc.get("name") or table_doc.get("table") or "")
-                for hint in table_doc.get("join_hints") or []:
+                for fk in table_doc.get("foreign_keys") or []:
                     out.append(
                         {
                             "database": db_name,
                             "table": table,
-                            "column": hint.get("column"),
-                            "ref_table": hint.get("ref_table"),
-                            "ref_column": hint.get("ref_column"),
-                            "source": hint.get("source") or "foreign_key",
+                            "column": fk.get("column"),
+                            "ref_table": fk.get("ref_table"),
+                            "ref_column": fk.get("ref_column"),
+                            "source": "foreign_key",
                         }
                     )
         return out

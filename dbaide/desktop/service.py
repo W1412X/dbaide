@@ -248,7 +248,8 @@ class DesktopService:
                         "name": col,
                         "path": f"{name}.{db_name}.{table}.{col}",
                         "data_type": col_doc.get("data_type") or col_doc.get("type") or "",
-                        "role": col_doc.get("likely_role") or "",
+                        "primary_key": bool(col_doc.get("primary_key")),
+                        "indexed": bool(col_doc.get("indexed")),
                     })
                 db_row["children"].append(table_row)
             rows.append(db_row)

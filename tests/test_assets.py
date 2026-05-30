@@ -1,8 +1,9 @@
 import sqlite3
 
-from dbaide.adapters.base import DatabaseAdapter, rows_to_result
 from dbaide.adapters import build_adapter
+from dbaide.adapters.base import DatabaseAdapter, rows_to_result
 from dbaide.assets import AssetBuilder, AssetStore
+from dbaide.assets.summarizer import ASSET_SCHEMA_VERSION
 from dbaide.models import ColumnInfo, ColumnProfile, ConnectionConfig, TableInfo
 
 
@@ -39,18 +40,102 @@ def test_asset_builder_creates_hierarchy(tmp_path):
     assert (store.instance_dir("local") / "instance.json").exists()
     assert (store.database_dir("local", "main") / "database.json").exists()
     assert (store.table_dir("local", "main", "orders") / "table.json").exists()
+
+    id_doc = store.read_json(store.column_dir("local", "main", "orders") / "id.json")
+    total_doc = store.read_json(store.column_dir("local", "main", "orders") / "total_amount.json")
     status_doc = store.read_json(store.column_dir("local", "main", "orders") / "status.json")
     note_doc = store.read_json(store.column_dir("local", "main", "orders") / "note.json")
     table_doc = store.read_json(store.table_dir("local", "main", "orders") / "table.json")
     instance_doc = store.read_json(store.instance_dir("local") / "instance.json")
-    assert status_doc["likely_role"] == "categorical_status"
-    assert status_doc["profile"]["distinct_count"] == 2
-    assert status_doc["statistics"]["data_kind"] == "categorical"
-    assert status_doc["statistics"]["distribution"]["top_values_coverage"] == 1.0
+
+    assert id_doc["asset_schema_version"] == ASSET_SCHEMA_VERSION
+    assert id_doc["profile_status"] == "profiled"
+    assert id_doc["primary_key"] is True
+    assert "likely_role" not in id_doc
+    assert "semantic_tags" not in id_doc
+
+    assert total_doc["profile_status"] == "profiled"
+    assert total_doc["statistics"]["data_kind"] == "categorical"
+    assert total_doc["statistics"]["distinct_count"] == 2
+
+    assert status_doc["profile_status"] == "not_profiled"
     assert note_doc["profile_status"] == "not_profiled"
-    assert note_doc["likely_role"] == "text"
-    assert "categorical_status" in table_doc["role_index"]
-    assert instance_doc["asset_schema_version"] == 2
+    assert "likely_role" not in note_doc
+
+    assert "role_index" not in table_doc
+    assert "join_hints" not in table_doc
+    assert "id" in table_doc["column_index"]["primary_key"]
+    assert instance_doc["asset_schema_version"] == ASSET_SCHEMA_VERSION
+
+
+def test_table_doc_stores_only_declared_foreign_keys():
+    from dbaide.assets.summarizer import AssetSummarizer
+    from dbaide.models import ForeignKeyInfo
+
+    summarizer = AssetSummarizer()
+    table = TableInfo(name="orders")
+    columns = [
+        {
+            "name": "user_id",
+            "table": "orders",
+            "data_type": "INTEGER",
+            "primary_key": False,
+            "indexed": False,
+            "source_comment": "",
+            "semantic_summary": "user_id: INTEGER",
+        }
+    ]
+    doc = summarizer.table_doc(
+        instance="local",
+        database="main",
+        table=table,
+        columns=columns,
+        foreign_keys=[],
+    )
+    assert doc["foreign_keys"] == []
+    assert "join_hints" not in doc
+
+    doc_with_fk = summarizer.table_doc(
+        instance="local",
+        database="main",
+        table=table,
+        columns=columns,
+        foreign_keys=[ForeignKeyInfo("orders", "user_id", "users", "id")],
+    )
+    assert len(doc_with_fk["foreign_keys"]) == 1
+    assert doc_with_fk["foreign_keys"][0]["ref_table"] == "users"
+    assert doc_with_fk["foreign_keys"][0]["source"] == "foreign_key"
+
+
+def test_asset_builder_foreign_keys_from_adapter(tmp_path):
+    db = tmp_path / "fk.db"
+    conn = sqlite3.connect(db)
+    conn.executescript(
+        """
+        CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT);
+        CREATE TABLE orders (
+            id INTEGER PRIMARY KEY,
+            user_id INTEGER REFERENCES users(id),
+            total_amount REAL
+        );
+        """
+    )
+    conn.commit()
+    conn.close()
+
+    cfg = ConnectionConfig(name="local", type="sqlite", path=str(db))
+    adapter = build_adapter(cfg)
+    store = AssetStore(tmp_path / "assets")
+    AssetBuilder(connection=cfg, adapter=adapter, store=store).build(profile_mode="none", sample=False)
+
+    table_doc = store.read_json(store.table_dir("local", "main", "orders") / "table.json")
+    assert "join_hints" not in table_doc
+    assert len(table_doc["foreign_keys"]) == 1
+    assert table_doc["foreign_keys"][0]["column"] == "user_id"
+    assert table_doc["foreign_keys"][0]["ref_table"] == "users"
+
+    user_id_doc = store.read_json(store.column_dir("local", "main", "orders") / "user_id.json")
+    assert "semantic_tags" not in user_id_doc
 
 
 def test_asset_builder_discovers_all_databases(tmp_path):
@@ -60,7 +145,6 @@ def test_asset_builder_discovers_all_databases(tmp_path):
 
     stats = AssetBuilder(connection=conn, adapter=adapter, store=store).build(profile_mode="none", sample=False)
 
-    # Now always discovers all databases, not just the configured one
     assert adapter.list_databases_called is True
     assert stats.databases >= 1
 

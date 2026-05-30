@@ -163,9 +163,12 @@ class AskAgentLoop:
             '  {"action":"finish","answer":"markdown answer for the user"}\n\n'
             "Guidelines:\n"
             "- Schema / where-is questions: discover_schema → synthesize_schema_answer → finish\n"
-            "- Data queries: discover_schema → describe_table → generate_sql → validate_sql"
+            "- Data queries: discover_schema → describe_table (each relevant table)"
+            " → get_relations (when multiple tables) → generate_sql → validate_sql"
             + (" → execute_sql → finish" if state.execute_allowed and policy not in ("sql_only", "inspect_only") else " → finish")
             + "\n"
+            "- Multi-table: describe every needed table; get_relations loads declared FKs; generate_sql uses all disclosed tables.\n"
+            "- If validate_sql reports unknown tables/columns, describe_table then retry generate_sql.\n"
             "- Profile questions: discover_schema → profile_table → finish\n"
             "- SQL explain: validate_sql or explain_sql as needed → finish\n"
             "- Do not invent tables or columns. Prefer precision over listing everything.\n"

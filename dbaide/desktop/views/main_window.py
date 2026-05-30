@@ -331,7 +331,7 @@ class MainWindow(QMainWindow):
         dialog.connection_saved.connect(lambda payload: self._settings_save_connection(dialog, payload))
         dialog.connection_deleted.connect(self._settings_delete_connection)
         dialog.connection_test.connect(lambda payload: self._settings_test_connection(dialog, payload))
-        dialog.model_saved.connect(self._settings_save_model)
+        dialog.model_saved.connect(lambda payload: self._settings_save_model(dialog, payload))
         dialog.model_deleted.connect(self._settings_delete_model)
         dialog.model_test.connect(lambda payload: self._settings_test_model(dialog, payload))
         dialog.exec()
@@ -349,15 +349,22 @@ class MainWindow(QMainWindow):
             self.fail(exc)
 
     def _settings_save_connection(self, dialog: SettingsDialog, payload: dict[str, Any]) -> None:
-        try:
-            self.service.dispatch("save_connection", payload)
-            self.refresh_all()
-            dialog._connections = {c["name"]: dict(c) for c in self.bootstrap.get("connections") or []}
-            dialog._default_connection = str(self.bootstrap.get("default_connection") or "")
+        dialog.set_save_busy(True, target="connection")
+
+        def on_done(_result: object) -> None:
+            dialog.set_save_busy(False, target="connection")
+            dialog._connections[payload["name"]] = dict(payload)
+            if payload.get("make_default"):
+                dialog._default_connection = payload["name"]
             dialog._reload_connection_list()
             self.toast("Connection saved")
-        except Exception as exc:
-            self.fail(exc)
+            self.refresh_all()
+
+        def on_fail(exc: object) -> None:
+            dialog.set_save_busy(False, target="connection")
+            dialog.show_test_result(False, str(exc), target="connection")
+
+        self._run_background("save_connection", payload, on_done, on_error=on_fail)
 
     def _settings_delete_connection(self, name: str) -> None:
         try:
@@ -380,13 +387,23 @@ class MainWindow(QMainWindow):
 
         self._run_background("test_connection", payload, on_done, on_error=on_fail)
 
-    def _settings_save_model(self, payload: dict[str, Any]) -> None:
-        try:
-            self.service.dispatch("save_model", payload)
-            self.refresh_all()
+    def _settings_save_model(self, dialog: SettingsDialog, payload: dict[str, Any]) -> None:
+        dialog.set_save_busy(True, target="model")
+
+        def on_done(_result: object) -> None:
+            dialog.set_save_busy(False, target="model")
+            dialog._models[payload["name"]] = dict(payload)
+            if payload.get("make_default"):
+                dialog._default_model = payload["name"]
+            dialog._reload_model_list()
             self.toast("Model saved")
-        except Exception as exc:
-            self.fail(exc)
+            self.refresh_all()
+
+        def on_fail(exc: object) -> None:
+            dialog.set_save_busy(False, target="model")
+            dialog.show_test_result(False, str(exc), target="model")
+
+        self._run_background("save_model", payload, on_done, on_error=on_fail)
 
     def _settings_delete_model(self, name: str) -> None:
         try:
@@ -530,6 +547,7 @@ class MainWindow(QMainWindow):
                 f"```json\n{json.dumps(result.get('stats', {}), ensure_ascii=False, indent=2)}\n```",
             )
             self.refresh_all()
+            self.switch_tab("Ask")
             self.toast("Assets built")
             return
         if action == "ask":

@@ -50,18 +50,30 @@ class QueryTools:
         self.context.record_execution(result.sql, instance=self.instance, database=database)
         return result
 
-    def execute_sql(self, sql: str, *, database: str = "", limit: int = 100) -> QueryResult:
+    def execute_sql(
+        self,
+        sql: str,
+        *,
+        database: str = "",
+        limit: int = 100,
+        preflight_explain: bool = False,
+    ) -> QueryResult:
         validation = self.validate_sql(sql, add_limit=True)
         if not validation.ok:
             raise ValueError("; ".join(issue.message for issue in validation.issues))
         normalized = validation.normalized_sql
-        explain_target = _strip_leading_explain(normalized)
-        try:
-            explain_result = self.adapter.explain(explain_target, database=database, timeout_seconds=self.timeout_seconds)
-            self.context.record_execution(explain_result.sql, instance=self.instance, database=database)
-        except (ValueError, RuntimeError, OSError):
-            pass
-        result = self.adapter.execute_readonly(normalized, database=database, limit=limit, timeout_seconds=self.timeout_seconds)
+        if preflight_explain:
+            explain_target = _strip_leading_explain(normalized)
+            try:
+                explain_result = self.adapter.explain(
+                    explain_target, database=database, timeout_seconds=self.timeout_seconds,
+                )
+                self.context.record_execution(explain_result.sql, instance=self.instance, database=database)
+            except (ValueError, RuntimeError, OSError):
+                pass
+        result = self.adapter.execute_readonly(
+            normalized, database=database, limit=limit, timeout_seconds=self.timeout_seconds,
+        )
         self.context.record_execution(result.sql, instance=self.instance, database=database)
         return result
 

@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from dbaide.adapters.base import DatabaseAdapter
 from dbaide.assets import AssetStore
-from dbaide.context.catalog import CatalogMatcher, ScoredTable
 from dbaide.context.disclosure import DisclosureContext
 from dbaide.models import ColumnInfo, ForeignKeyInfo, TableInfo
 
@@ -12,7 +11,6 @@ class SchemaTools:
         self.adapter = adapter
         self.context = context
         self.instance = instance or adapter.config.name
-        self.matcher = CatalogMatcher()
         self.assets = assets or AssetStore()
 
     def disclose_instance(self) -> None:
@@ -48,10 +46,6 @@ class SchemaTools:
         tables = self.adapter.list_tables(database=database)
         self.context.record_tables(tables, instance=self.instance, database=database)
         return tables
-
-    def candidate_tables(self, query: str, *, database: str = "", limit: int = 8) -> list[ScoredTable]:
-        tables = self.list_tables(database=database)
-        return self.matcher.score_tables(query, tables, limit=limit)
 
     def describe_table(self, table: str, database: str = "") -> list[ColumnInfo]:
         database = database or self._asset_database_for_table(table) or self._default_asset_database()
