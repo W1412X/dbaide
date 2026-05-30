@@ -6,6 +6,7 @@ import time
 from typing import Any, Callable, Iterator
 
 from dbaide.adapters import build_adapter
+from dbaide.agent.progress_events import progress_label
 from dbaide.agent import DataAssistant
 from dbaide.core.errors import DBAideError, ErrorCode, RepairAction
 from dbaide.core.events import TraceEvent, TraceKind, TraceLevel
@@ -95,10 +96,20 @@ class WorkflowEngine:
         assistant = self._build_assistant(request)
         self._trace(result, "agent_request", "Running assistant", "agent")
 
-        def on_progress(msg: str) -> None:
+        def on_progress(msg: str | dict[str, Any]) -> None:
             if cancel_check:
                 cancel_check()
-            self._trace(result, "agent_progress", msg, "agent", summary=msg[:120])
+            label = progress_label(msg)
+            if isinstance(msg, dict):
+                self._trace(
+                    result,
+                    str(msg.get("stage") or "agent_progress"),
+                    label,
+                    str(msg.get("kind") or "agent"),
+                    summary=str(msg.get("detail") or label)[:120],
+                )
+            else:
+                self._trace(result, "agent_progress", msg, "agent", summary=label[:120])
             if progress:
                 progress(msg)
 

@@ -8,6 +8,7 @@ from dataclasses import dataclass, field
 from typing import Any, Callable
 
 from dbaide.agent.loop_state import dump_loop_state, restore_loop_state
+from dbaide.agent.progress_events import brief_tool_summary, from_trace_event, progress_event, progress_label
 from dbaide.agent.runtime import AgentRuntime
 from dbaide.agent.toolkit import build_tool_registry
 from dbaide.core.events import TraceEvent, TraceKind, TraceLevel
@@ -72,18 +73,24 @@ class AskAgentLoop:
             reply = str(user_reply or question or "").strip()
             if reply:
                 transcript.append(f"User reply: {reply}")
-                self.progress(f"User replied: {reply[:80]}")
+                self.progress(
+                    progress_event(stage="user", title=f"Reply: {reply[:120]}", status="completed", kind="user"),
+                )
             state = LoopState(
                 question=str(resume_state.get("question") or question),
                 database=str(resume_state.get("database") or database),
                 execute_allowed=execute,
             )
-            self.progress("Resuming agent loop…")
+            self.progress(
+                progress_event(stage="loop", title="Resuming agent loop", status="running", kind="agent"),
+            )
         else:
             orch._reset_loop_state(question, database, execute)
             orch.schema.disclose_instance()
             state = LoopState(question=question, database=database, execute_allowed=execute)
-            self.progress("Agent loop started…")
+            self.progress(
+                progress_event(stage="loop", title="Agent loop started", status="running", kind="agent"),
+            )
         tool_ctx = ToolContext(
             execution_policy=orch.execution_policy.value,
             trace_sink=self._trace_sink,
@@ -109,7 +116,9 @@ class AskAgentLoop:
                     answer = self._answer_from_state(orch)
                 if not answer:
                     return None
-                self.progress("Agent loop finished")
+                self.progress(
+                    progress_event(stage="loop", title="Agent loop finished", status="completed", kind="agent"),
+                )
                 return self._build_response(orch, answer, disclosures_before or [])
 
             if action != "call_tool":
@@ -124,13 +133,34 @@ class AskAgentLoop:
             args = decision.get("args") if isinstance(decision.get("args"), dict) else {}
             thought = str(decision.get("thought") or "").strip()
             if thought:
-                self.progress(thought[:120])
+                self.progress(
+                    progress_event(stage="decision", title=thought[:200], status="completed", kind="decision"),
+                )
 
-            runtime.trace_step(stage=tool_name, title=f"Calling {tool_name}")
+            self.progress(
+                progress_event(
+                    stage=tool_name,
+                    title=f"Calling {tool_name}",
+                    status="running",
+                    kind="tool",
+                    detail=str(args)[:200] if args else "",
+                )
+            )
             result = runtime.call_tool(tool_name, args, tool_ctx)
             summary = _summarize_tool_result(tool_name, result)
+            brief = brief_tool_summary(tool_name, result)
             state.calls.append(ToolCallRecord(tool=tool_name, args=args, ok=result.ok, summary=summary))
             transcript.append(f"Tool `{tool_name}` → {summary}")
+            self.progress(
+                progress_event(
+                    stage=tool_name,
+                    title=f"{tool_name} done",
+                    status="completed" if result.ok else "failed",
+                    kind="tool",
+                    detail=brief,
+                    duration_ms=float(getattr(result, "duration_ms", 0) or 0),
+                )
+            )
 
             if tool_name == "ask_user" and result.ok and isinstance(result.data, dict) and result.data.get("pending"):
                 return self._build_wait_response(orch, state, transcript, disclosures_before or [])
@@ -260,7 +290,15 @@ class AskAgentLoop:
             lines.extend(f"- {item}" for item in options)
         answer = "\n".join(lines)
         snapshot = dump_loop_state(orch, transcript=transcript, execute_allowed=state.execute_allowed)
-        self.progress("Waiting for user clarification…")
+        self.progress(
+            progress_event(
+                stage="ask_user",
+                title="Waiting for user clarification",
+                status="waiting",
+                kind="user",
+                detail=question,
+            ),
+        )
         return AssistantResponse(
             answer=answer,
             sql=orch._loop_sql or "",
@@ -285,8 +323,10 @@ class AskAgentLoop:
         )
 
     def _trace_sink(self, event: TraceEvent) -> None:
-        if event.title:
-            self.progress(event.title[:120])
+        # Tool loop emits structured progress for tool calls; registry/runtime traces duplicate it.
+        if event.actor in {"tool", "runtime"}:
+            return
+        self.progress(from_trace_event(event))
 
 
 def _summarize_tool_result(tool: str, result: ToolResult) -> str:

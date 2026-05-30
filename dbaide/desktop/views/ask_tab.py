@@ -3,10 +3,10 @@ from __future__ import annotations
 from typing import Any
 
 from PyQt6.QtCore import pyqtSignal
-from PyQt6.QtWidgets import QApplication, QHBoxLayout, QStackedWidget, QVBoxLayout, QWidget
+from PyQt6.QtWidgets import QApplication, QHBoxLayout, QSizePolicy, QStackedWidget, QVBoxLayout, QWidget
 
 from dbaide.desktop.components.base import compact_button
-from dbaide.desktop.components.conversation import ConversationView, classify_trace_message
+from dbaide.desktop.components.conversation import ConversationView
 from dbaide.desktop.components.composer_options import POLICY_LABELS
 from dbaide.desktop.components.empty_state import EmptyState
 from dbaide.desktop.components.menu import MenuButton
@@ -43,6 +43,7 @@ class AskTab(QWidget):
         empty_layout.addStretch(1)
 
         self.conversation = ConversationView()
+        self.conversation.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
         self.stack.addWidget(empty_page)
         self.stack.addWidget(self.conversation)
         layout.addWidget(self.stack, 1)
@@ -64,7 +65,12 @@ class AskTab(QWidget):
     def append_activity(self, message: str) -> None:
         if not self._turn_open:
             return
-        self.conversation.append_trace(message, kind=classify_trace_message(message))
+        self.conversation.append_trace(message)
+
+    def append_activity_event(self, event: dict) -> None:
+        if not self._turn_open:
+            return
+        self.conversation.append_trace_event(event)
 
     def finish_turn_error(self, message: str) -> None:
         self.conversation.finish_turn_error(message)

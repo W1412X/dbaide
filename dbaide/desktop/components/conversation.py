@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
-from PyQt6.QtCore import Qt
+from PyQt6.QtCore import Qt, QTimer
 from PyQt6.QtGui import QFont
 from PyQt6.QtWidgets import (
     QFrame,
@@ -19,6 +19,7 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 
+from dbaide.agent.progress_events import conversation_trace_step, trace_dedupe_keys
 from dbaide.desktop.components.base import compact_button
 from dbaide.desktop.components.inputs import configure_readonly_text_view, configure_wrapped_label
 from dbaide.desktop.theme import Theme
@@ -90,6 +91,7 @@ class CollapsibleTracePanel(QFrame):
 
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
+        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
         self.setObjectName("tracePanel")
         self.setStyleSheet(
             f"""
@@ -109,12 +111,14 @@ class CollapsibleTracePanel(QFrame):
         self._toggle.setChecked(True)
         self._toggle.setCursor(Qt.CursorShape.PointingHandCursor)
         self._toggle.setFlat(True)
+        self._toggle.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         self._toggle.setFont(QFont("Inter", 11, QFont.Weight.DemiBold))
         self._toggle.toggled.connect(self._on_toggle)
         outer.addWidget(self._toggle)
 
         self._body = QWidget()
         self._body.setStyleSheet("background: transparent;")
+        self._body.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
         body_layout = QVBoxLayout(self._body)
         body_layout.setContentsMargins(12, 0, 12, 12)
         body_layout.setSpacing(6)
@@ -138,37 +142,29 @@ class CollapsibleTracePanel(QFrame):
         self._render_step(self._steps[-1])
         self._refresh_header()
 
+    def append_from_event(self, event: dict[str, Any]) -> None:
+        step = conversation_trace_step(event)
+        if step is None:
+            return
+        message, kind, detail = step
+        self.append(message, kind=kind, detail=detail)
+
     def extend_from_events(self, events: list[dict[str, Any]]) -> None:
-        seen = {s.message for s in self._steps}
+        seen: set[str] = set()
+        for existing in self._steps:
+            seen |= set(trace_dedupe_keys({"title": existing.message, "detail": existing.detail}))
         for event in events:
-            stage = str(event.get("stage") or "")
-            title = str(event.get("title") or "")
-            summary = str(event.get("summary") or "")
-            output = str(event.get("output_preview") or "")
-            if stage in {"agent_progress"} and summary:
-                if summary in seen:
-                    continue
-                self.append(summary, kind=classify_trace_message(summary))
-                seen.add(summary)
+            step = conversation_trace_step(event)
+            if step is None:
                 continue
-            if stage in {"workflow_started", "planning"}:
+            message, kind, detail = step
+            keys = set(trace_dedupe_keys(event)) | set(
+                trace_dedupe_keys({"title": message, "detail": detail})
+            )
+            if keys & seen:
                 continue
-            if stage.startswith("execute") or stage == "execution_completed":
-                kind = "result"
-            elif stage in {"sql_generated", "sql_validation"}:
-                kind = "result" if stage == "sql_validation" else "decision"
-            elif str(event.get("actor") or "") == "tool":
-                kind = "tool"
-            else:
-                kind = classify_trace_message(title or summary)
-            msg = title or summary or stage
-            if not msg or msg in seen:
-                continue
-            detail = output if output and output not in msg else ""
-            if summary and summary != msg and not detail:
-                detail = summary
-            self.append(msg, kind=kind, detail=detail)
-            seen.add(msg)
+            seen |= keys
+            self.append(message, kind=kind, detail=detail)
 
     def finish(self, *, ok: bool = True) -> None:
         self._running = False
@@ -207,6 +203,7 @@ class CollapsibleTracePanel(QFrame):
 
     def _render_step(self, step: TraceStep) -> None:
         row = QWidget()
+        row.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
         row.setStyleSheet("background: transparent;")
         layout = QVBoxLayout(row)
         layout.setContentsMargins(0, 0, 0, 0)
@@ -237,45 +234,64 @@ class CollapsibleTracePanel(QFrame):
         self._steps_layout.addWidget(row)
 
 
-class _MarkdownBlock(QWidget):
+class _MarkdownBlock(QFrame):
     def __init__(self, markdown: str, *, title: str = "", parent=None) -> None:
         super().__init__(parent)
+        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
+        self.setObjectName("answerBlock")
+        self.setStyleSheet(
+            f"""
+            QFrame#answerBlock {{
+                background: {Theme.PANEL};
+                border: 1px solid {Theme.BORDER_SOFT};
+                border-radius: 12px;
+            }}
+            """
+        )
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(6)
+        layout.setContentsMargins(16, 14, 16, 14)
+        layout.setSpacing(8)
         if title:
             t = QLabel(title)
             t.setFont(QFont("Inter", 10, QFont.Weight.DemiBold))
-            t.setStyleSheet(f"color: {Theme.MUTED};")
+            t.setStyleSheet(f"color: {Theme.MUTED}; background: transparent;")
             layout.addWidget(t)
-        body = QTextBrowser()
-        body.setOpenExternalLinks(True)
-        body.setFrameShape(QFrame.Shape.NoFrame)
-        body.setFont(QFont("Inter", 13))
-        configure_readonly_text_view(body)
-        body.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
-        body.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
-        body.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
-        body.setStyleSheet(
+        self._body = QTextBrowser()
+        self._body.setOpenExternalLinks(True)
+        self._body.setFrameShape(QFrame.Shape.NoFrame)
+        self._body.setFont(QFont("Inter", 13))
+        configure_readonly_text_view(self._body)
+        self._body.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self._body.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self._body.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        self._body.setStyleSheet(
             f"QTextBrowser {{ background: transparent; border: none; color: {Theme.TEXT}; padding: 0; }}"
         )
         html = render_markdown_safe(markdown or "")
-        body.setHtml(
+        self._body.setHtml(
             f"<style>body{{margin:0;color:{Theme.TEXT};font-family:Inter,sans-serif;font-size:13px;}}"
             f"p{{margin:4px 0;}} pre,code{{background:{Theme.CODE_BG};"
             f"border-radius:8px;padding:8px;font-family:Menlo,monospace;font-size:11px;white-space:pre-wrap;}}"
+            f"table.md-table{{border-collapse:collapse;width:100%;margin:8px 0;}}"
+            f"table.md-table th,table.md-table td{{border:1px solid {Theme.BORDER_SOFT};padding:6px 10px;text-align:left;}}"
+            f"table.md-table th{{background:{Theme.PANEL_2};font-weight:600;}}"
+            f"table.md-table tr:nth-child(even) td{{background:{Theme.PANEL};}}"
             f"a{{color:{Theme.BLUE};}}</style>{html}"
         )
-        self._sync_body_height(body)
-        layout.addWidget(body)
+        layout.addWidget(self._body)
+        self._body.document().documentLayout().documentSizeChanged.connect(self._sync_body_height)
+        self._sync_body_height()
 
-    @staticmethod
-    def _sync_body_height(body: QTextBrowser) -> None:
-        doc = body.document()
-        width = max(body.viewport().width(), body.parentWidget().width() if body.parentWidget() else 0, 640)
+    def resizeEvent(self, event) -> None:  # noqa: N802
+        super().resizeEvent(event)
+        self._sync_body_height()
+
+    def _sync_body_height(self, *_args) -> None:
+        doc = self._body.document()
+        width = max(self._body.viewport().width(), self.width() - 32, 320)
         doc.setTextWidth(width)
         height = int(doc.documentLayout().documentSize().height()) + 8
-        body.setFixedHeight(max(height, 24))
+        self._body.setFixedHeight(max(height, 24))
 
 
 class _ClarificationBar(QFrame):
@@ -319,67 +335,97 @@ class TurnBlock(QFrame):
 
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
+        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
         self.setObjectName("turnBlock")
         self.setStyleSheet("QFrame#turnBlock { background: transparent; border: none; }")
         self._layout = QVBoxLayout(self)
-        self._layout.setContentsMargins(0, 12, 0, 20)
-        self._layout.setSpacing(10)
+        self._layout.setContentsMargins(0, 0, 0, 4)
+        self._layout.setSpacing(12)
+
+        self._header = QWidget()
+        self._header.setStyleSheet("background: transparent;")
+        self._header.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
+        self._header_layout = QVBoxLayout(self._header)
+        self._header_layout.setContentsMargins(0, 0, 0, 0)
+        self._header_layout.setSpacing(6)
+        self._header.hide()
+        self._layout.addWidget(self._header)
+
         self.trace = CollapsibleTracePanel()
         self._layout.addWidget(self.trace)
-        self._content = QVBoxLayout()
+
+        self._content_host = QWidget()
+        self._content_host.setStyleSheet("background: transparent;")
+        self._content_host.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
+        self._content = QVBoxLayout(self._content_host)
+        self._content.setContentsMargins(0, 0, 0, 0)
         self._content.setSpacing(10)
-        self._layout.addLayout(self._content)
+        self._content_host.hide()
+        self._layout.addWidget(self._content_host)
 
     def set_user(self, text: str, *, meta: str = "") -> None:
-        insert_at = 0
+        self._header.show()
         if meta:
             meta_label = QLabel(meta)
             meta_label.setAlignment(Qt.AlignmentFlag.AlignRight)
             meta_label.setFont(QFont("Inter", 10))
-            meta_label.setStyleSheet(f"color: {Theme.MUTED};")
-            self._layout.insertWidget(insert_at, meta_label)
-            insert_at += 1
+            meta_label.setStyleSheet(f"color: {Theme.MUTED}; background: transparent;")
+            self._header_layout.addWidget(meta_label)
         bubble_row = QWidget()
         bubble_row.setStyleSheet("background: transparent;")
         row = QHBoxLayout(bubble_row)
         row.setContentsMargins(0, 0, 0, 0)
         row.addStretch(1)
         row.addWidget(_Bubble(text, align_right=True))
-        self._layout.insertWidget(insert_at, bubble_row)
+        self._header_layout.addWidget(bubble_row)
 
     def append_content(self, widget: QWidget) -> None:
+        self._content_host.show()
         self._content.addWidget(widget)
 
 
 class ConversationView(QScrollArea):
+    _H_MARGIN = 20
+
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
         self.setWidgetResizable(True)
         self.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
         self.setStyleSheet(f"QScrollArea {{ border: none; background: {Theme.BG}; }}")
 
         self._root = QWidget()
         self._root.setStyleSheet(f"background: {Theme.BG};")
-        self._column = QVBoxLayout(self._root)
-        self._column.setContentsMargins(0, 0, 0, 0)
-
-        self._stream = QWidget()
-        self._stream.setMaximumWidth(1180)
-        self._stream.setMinimumWidth(640)
-        self._stream.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
-        self._stream_layout = QVBoxLayout(self._stream)
-        self._stream_layout.setContentsMargins(16, 8, 16, 32)
-        self._stream_layout.setSpacing(0)
-        self._stream_layout.addStretch(1)
-
-        center = QHBoxLayout()
-        center.setContentsMargins(12, 0, 12, 0)
-        center.addWidget(self._stream, 1)
-        wrap = QWidget()
-        wrap.setLayout(center)
-        self._column.addWidget(wrap)
+        self._root.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+        self._layout = QVBoxLayout(self._root)
+        self._layout.setContentsMargins(self._H_MARGIN, 16, self._H_MARGIN, 24)
+        self._layout.setSpacing(16)
+        # Top stretch anchors conversation turns to the bottom (chat-style).
+        self._layout.addStretch(1)
         self.setWidget(self._root)
         self._current_turn: TurnBlock | None = None
+        self._hint_label: QLabel | None = None
+
+    def showEvent(self, event) -> None:  # noqa: N802
+        super().showEvent(event)
+        self._sync_viewport_width()
+
+    def resizeEvent(self, event) -> None:  # noqa: N802
+        super().resizeEvent(event)
+        self._sync_viewport_width()
+
+    def _sync_viewport_width(self) -> None:
+        """QScrollArea keeps content width when height overflows; force full viewport width."""
+        viewport_w = self.viewport().width()
+        if viewport_w <= 0:
+            return
+        self._root.setMinimumWidth(viewport_w)
+        content_w = max(200, viewport_w - self._H_MARGIN * 2)
+        for index in range(self._layout.count()):
+            item = self._layout.itemAt(index)
+            widget = item.widget() if item is not None else None
+            if widget is not None:
+                widget.setMinimumWidth(content_w)
 
     def begin_turn(self, user_text: str, *, meta: str = "") -> None:
         turn = TurnBlock()
@@ -395,6 +441,13 @@ class ConversationView(QScrollArea):
             self.begin_turn("")
         assert self._current_turn is not None
         self._current_turn.trace.append(message, kind=kind, detail=detail)
+        self._scroll_bottom()
+
+    def append_trace_event(self, event: dict[str, Any]) -> None:
+        if self._current_turn is None:
+            self.begin_turn("")
+        assert self._current_turn is not None
+        self._current_turn.trace.append_from_event(event)
         self._scroll_bottom()
 
     def append_clarification(self, *, question: str, options: list[str]) -> _ClarificationBar | None:
@@ -424,7 +477,8 @@ class ConversationView(QScrollArea):
         row.setContentsMargins(0, 0, 0, 0)
         row.addStretch(1)
         row.addWidget(_Bubble(text, align_right=True))
-        self._current_turn._layout.addWidget(bubble_row)
+        self._current_turn._header.show()
+        self._current_turn._header_layout.addWidget(bubble_row)
         self._scroll_bottom()
 
     def complete_turn(
@@ -481,24 +535,38 @@ class ConversationView(QScrollArea):
             self.complete_turn(answer=message, ok=False)
 
     def append_hint(self, text: str) -> None:
+        if self._hint_label is not None:
+            self._hint_label.setText(text)
+            return
         label = QLabel(text)
         configure_wrapped_label(label)
         label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         label.setFont(QFont("Inter", 12))
-        label.setStyleSheet(f"color: {Theme.MUTED}; padding: 64px 24px;")
-        self._stream_layout.insertWidget(0, label)
+        label.setStyleSheet(f"color: {Theme.MUTED}; background: transparent; padding: 32px 24px;")
+        self._hint_label = label
+        self._layout.insertWidget(1, label)
+        self._sync_viewport_width()
 
     def _insert_turn(self, turn: TurnBlock) -> None:
-        idx = max(0, self._stream_layout.count() - 1)
-        self._stream_layout.insertWidget(idx, turn)
+        if self._hint_label is not None:
+            self._hint_label.hide()
+        self._layout.addWidget(turn)
+        self._sync_viewport_width()
 
     def _scroll_bottom(self) -> None:
-        self.verticalScrollBar().setValue(self.verticalScrollBar().maximum())
+        def _do_scroll() -> None:
+            self._sync_viewport_width()
+            bar = self.verticalScrollBar()
+            bar.setValue(bar.maximum())
+
+        QTimer.singleShot(0, _do_scroll)
 
     def clear(self) -> None:
-        while self._stream_layout.count() > 1:
-            item = self._stream_layout.takeAt(0)
+        while self._layout.count() > 1:
+            item = self._layout.takeAt(1)
             widget = item.widget()
             if widget is not None:
                 widget.deleteLater()
+        self._hint_label = None
         self._current_turn = None
+        self._sync_viewport_width()

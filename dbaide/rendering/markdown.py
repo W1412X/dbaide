@@ -24,6 +24,9 @@ def render_markdown_safe(text: str) -> str:
     # Process code blocks first (fenced with ```)
     safe = _process_code_blocks(safe)
 
+    # GitHub-style pipe tables (before inline/block so rows are not wrapped in <p>)
+    safe = _process_tables(safe)
+
     # Process inline elements
     safe = _process_inline(safe)
 
@@ -43,7 +46,7 @@ _BLOCK_TOKEN = re.compile(r"@@HTMLBLOCK(\d+)@@")
 
 def _isolate_html_blocks(text: str) -> tuple[str, list[str]]:
     blocks: list[str] = []
-    pattern = re.compile(r"<pre[^>]*>.*?</pre>", re.S | re.I)
+    pattern = re.compile(r"<(?:pre|table)\b[^>]*>.*?</(?:pre|table)>", re.S | re.I)
 
     def repl(match: re.Match[str]) -> str:
         blocks.append(match.group(0))
@@ -69,6 +72,71 @@ def _process_code_blocks(text: str) -> str:
         return f'<pre{lang_attr}><code>{code}</code></pre>'
 
     return re.sub(r'```(\w*)\n(.*?)```', replace_block, text, flags=re.S)
+
+
+def _looks_like_table_row(line: str) -> bool:
+    stripped = line.strip()
+    if not stripped:
+        return False
+    if stripped.startswith("|") and stripped.count("|") >= 2:
+        return True
+    return stripped.count("|") >= 1 and not stripped.startswith("#")
+
+
+def _is_table_separator(line: str) -> bool:
+    stripped = line.strip().strip("|")
+    if not stripped:
+        return False
+    parts = [part.strip() for part in stripped.split("|")]
+    if not parts:
+        return False
+    return all(re.fullmatch(r":?-{3,}:?", part) for part in parts if part)
+
+
+def _parse_table_row(line: str) -> list[str]:
+    stripped = line.strip()
+    if stripped.startswith("|"):
+        stripped = stripped[1:]
+    if stripped.endswith("|"):
+        stripped = stripped[:-1]
+    return [cell.strip() for cell in stripped.split("|")]
+
+
+def _render_table_html(header: list[str], rows: list[list[str]]) -> str:
+    def _cells(values: list[str], tag: str) -> str:
+        parts = []
+        for value in values:
+            parts.append(f"<{tag}>{_process_inline(value)}</{tag}>")
+        return "".join(parts)
+
+    thead = f"<thead><tr>{_cells(header, 'th')}</tr></thead>"
+    body_rows = "".join(f"<tr>{_cells(row, 'td')}</tr>" for row in rows)
+    tbody = f"<tbody>{body_rows}</tbody>" if body_rows else ""
+    return f'<table class="md-table">{thead}{tbody}</table>'
+
+
+def _process_tables(text: str) -> str:
+    lines = text.split("\n")
+    result: list[str] = []
+    index = 0
+    while index < len(lines):
+        line = lines[index]
+        if (
+            _looks_like_table_row(line)
+            and index + 1 < len(lines)
+            and _is_table_separator(lines[index + 1])
+        ):
+            header = _parse_table_row(line)
+            index += 2
+            rows: list[list[str]] = []
+            while index < len(lines) and _looks_like_table_row(lines[index]):
+                rows.append(_parse_table_row(lines[index]))
+                index += 1
+            result.append(_render_table_html(header, rows))
+            continue
+        result.append(line)
+        index += 1
+    return "\n".join(result)
 
 
 def _process_inline(text: str) -> str:

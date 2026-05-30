@@ -20,7 +20,7 @@ from PyQt6.QtWidgets import (
 
 from dbaide.desktop.components.composer import ComposerWidget
 from dbaide.desktop.dialogs.settings import SettingsDialog
-from dbaide.desktop.service import DesktopService
+from dbaide.agent.progress_events import progress_label
 from dbaide.desktop.theme import APP_STYLE
 from dbaide.desktop.views.ask_tab import AskTab
 from dbaide.desktop.views.assets_tab import AssetsTab
@@ -376,6 +376,8 @@ class MainWindow(QMainWindow):
             return
         self.topbar.set_asset_status("building")
         self.topbar.set_global_status("Building assets", "building")
+        self.right.trace.begin_live()
+        self.right.tabs.setCurrentWidget(self.right.trace)
         self.run_action("build_assets", {"name": conn})
 
     def add_connection(self, conn_type: str = "sqlite") -> None:
@@ -599,11 +601,21 @@ class MainWindow(QMainWindow):
         self.sql_tab.set_running(False)
         self._restore_status_badge()
 
-    def on_progress(self, message: str) -> None:
-        self.statusbar.showMessage(message)
-        if self.running:
-            self.ask_tab.append_activity(message)
-            self.right.trace.append_live(message)
+    def on_progress(self, message: object) -> None:
+        label = progress_label(message if isinstance(message, dict) else str(message or ""))
+        self.statusbar.showMessage(label)
+        if not self.running:
+            return
+        if isinstance(message, dict):
+            if self._last_action == "ask":
+                self.ask_tab.append_activity_event(message)
+            self.right.trace.append_live_event(message)
+        else:
+            text = str(message or "").strip()
+            if text:
+                if self._last_action == "ask":
+                    self.ask_tab.append_activity(text)
+                self.right.trace.append_live(text)
 
     def handle_result(self, action: str, result: Any) -> None:
         self._current_worker = None
@@ -612,6 +624,7 @@ class MainWindow(QMainWindow):
         self.sql_tab.set_running(False)
         self._restore_status_badge()
         if action == "build_assets":
+            self.right.trace.end_live()
             self.ask_tab.append_note(
                 "Assets built",
                 f"```json\n{json.dumps(result.get('stats', {}), ensure_ascii=False, indent=2)}\n```",

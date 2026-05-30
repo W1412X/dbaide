@@ -10,6 +10,7 @@ from dbaide.core.result import ExecutionPolicy
 from dbaide.models import ColumnInfo
 from dbaide.tools.registry import ToolContext, ToolRegistry, ToolResult
 from dbaide.agent.schema_context import collect_relations, merge_sql_context, validation_feedback
+from dbaide.agent.progress_events import progress_event
 from dbaide.tools.specs import (
     ASK_USER,
     DESCRIBE_TABLE,
@@ -43,6 +44,15 @@ def build_tool_registry(orchestrator: AskOrchestrator) -> ToolRegistry:
         try:
             discovery = orchestrator._discover(question)
             orchestrator._loop_discovery = discovery
+            for note in discovery.trace:
+                orchestrator.progress(
+                    progress_event(
+                        stage="discover_schema",
+                        title=note,
+                        status="info",
+                        kind="substep",
+                    )
+                )
             hits = [
                 {"kind": h.kind, "path": h.path, "name": h.name, "database": h.database, "summary": h.summary[:240]}
                 for h in discovery.hits

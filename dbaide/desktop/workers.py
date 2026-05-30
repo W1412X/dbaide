@@ -12,7 +12,7 @@ class CancelledError(Exception):
 
 
 class WorkerSignals(QObject):
-    progress = pyqtSignal(str)
+    progress = pyqtSignal(object)
     done = pyqtSignal(str, object)
     failed = pyqtSignal(object)
 
@@ -37,7 +37,7 @@ class ServiceWorker(QRunnable):
         if self._cancelled:
             raise CancelledError("Task cancelled by user")
 
-    def _emit_progress(self, message: str) -> None:
+    def _emit_progress(self, message: str | dict) -> None:
         self._check_cancelled()
         self.signals.progress.emit(message)
 

@@ -1,0 +1,189 @@
+"""Structured progress payloads for GUI trace and status bar."""
+
+from __future__ import annotations
+
+from typing import Any
+
+from dbaide.core.events import TraceEvent
+
+TOOL_TRACE_STAGES = frozenset({
+    "discover_schema",
+    "describe_table",
+    "generate_sql",
+    "validate_sql",
+    "execute_sql",
+    "get_relations",
+    "ask_user",
+    "profile_table",
+    "synthesize_schema_answer",
+    "explain_sql",
+    "list_databases",
+    "list_tables",
+})
+
+
+def progress_event(
+    *,
+    stage: str,
+    title: str,
+    status: str = "running",
+    kind: str = "agent",
+    detail: str = "",
+    duration_ms: float = 0.0,
+) -> dict[str, Any]:
+    payload: dict[str, Any] = {
+        "stage": stage,
+        "title": title,
+        "status": status,
+        "kind": kind,
+    }
+    if detail:
+        payload["detail"] = detail
+    if duration_ms > 0:
+        payload["duration_ms"] = duration_ms
+    return payload
+
+
+def from_trace_event(event: TraceEvent) -> dict[str, Any]:
+    detail_parts = [event.summary, event.input_preview, event.output_preview]
+    detail = " · ".join(part.strip() for part in detail_parts if part and part.strip())
+    return progress_event(
+        stage=event.stage or event.actor or "agent",
+        title=event.title or event.stage or "step",
+        status=event.status or "running",
+        kind=str(event.kind.value if hasattr(event.kind, "value") else event.kind),
+        detail=detail[:500],
+        duration_ms=float(event.duration_ms or 0.0),
+    )
+
+
+def progress_label(payload: str | dict[str, Any]) -> str:
+    if isinstance(payload, str):
+        return payload.strip()
+    title = str(payload.get("title") or "").strip()
+    stage = str(payload.get("stage") or "").strip()
+    detail = str(payload.get("detail") or "").strip()
+    if title and stage and title != stage:
+        text = f"{stage}: {title}"
+    else:
+        text = title or stage or detail or "Working…"
+    if detail and detail not in text:
+        text = f"{text} — {detail[:80]}"
+    return text[:240]
+
+
+def brief_tool_summary(tool: str, result: Any) -> str:
+    """Human-readable one-liner for live trace (not full JSON dump)."""
+    if not getattr(result, "ok", False):
+        err = getattr(result, "error", None)
+        return f"Failed: {getattr(err, 'message', err) or 'unknown error'}"
+    data = getattr(result, "data", None) or {}
+    if not isinstance(data, dict):
+        return "ok"
+    if tool == "discover_schema":
+        count = data.get("count", len(data.get("hits") or []))
+        return f"{count} schema hit(s)"
+    if tool == "describe_table":
+        tables = data.get("disclosed_tables") or []
+        cols = data.get("columns") or []
+        if tables:
+            return f"disclosed {', '.join(str(t) for t in tables)}"
+        return f"{len(cols)} column(s)"
+    if tool == "get_relations":
+        return f"{data.get('count', len(data.get('relations') or []))} FK(s)"
+    if tool == "generate_sql":
+        sql = str(data.get("sql") or "").strip()
+        tables = data.get("tables") or []
+        prefix = f"tables={', '.join(str(t) for t in tables)} · " if tables else ""
+        return prefix + (sql[:120] + "…" if len(sql) > 120 else sql or "SQL drafted")
+    if tool == "validate_sql":
+        return "valid" if data.get("ok") else "; ".join(
+            issue.get("message", str(issue)) if isinstance(issue, dict) else str(issue)
+            for issue in (data.get("issues") or [])[:3]
+        ) or "invalid"
+    if tool == "execute_sql":
+        return f"{data.get('row_count', '?')} rows"
+    if tool == "ask_user":
+        return str(data.get("question") or "waiting for user")[:160]
+    if tool == "synthesize_schema_answer":
+        return "schema answer ready"
+    if tool == "profile_table":
+        return f"{data.get('column_count', '?')} column profile(s)"
+    raw = str(data)
+    return raw[:200] + ("…" if len(raw) > 200 else "")
+
+
+def normalize_trace_key(text: str) -> str:
+    text = " ".join(str(text or "").strip().split())
+    if " — " in text:
+        text = text.split(" — ", 1)[0].strip()
+    return text.lower()
+
+
+def trace_dedupe_keys(event: dict[str, Any]) -> frozenset[str]:
+    """Fingerprints for skipping duplicate in-turn / persisted trace lines."""
+    stage = str(event.get("stage") or "").strip()
+    title = str(event.get("title") or "").strip()
+    summary = str(event.get("summary") or "").strip()
+    detail = str(event.get("detail") or "").strip()
+    keys: set[str] = set()
+    for raw in (
+        title,
+        summary,
+        detail,
+        progress_label(event) if (title or stage or detail) else "",
+        f"{stage}: {title}" if stage and title else "",
+    ):
+        if raw:
+            keys.add(normalize_trace_key(raw))
+    if stage:
+        keys.add(normalize_trace_key(stage))
+    return frozenset(keys)
+
+
+def conversation_trace_step(event: dict[str, Any]) -> tuple[str, str, str] | None:
+    """Map a progress or persisted trace dict to (message, kind, detail)."""
+    stage = str(event.get("stage") or "").strip()
+    title = str(event.get("title") or "").strip()
+    summary = str(event.get("summary") or "").strip()
+    output = str(event.get("output_preview") or "").strip()
+    detail = str(event.get("detail") or "").strip()
+    status = str(event.get("status") or "").strip()
+    kind = str(event.get("kind") or "").strip()
+    actor = str(event.get("actor") or "").strip()
+
+    if stage in {"workflow_started", "planning"}:
+        return None
+
+    if status == "info" or kind == "substep":
+        line = title or summary or detail
+        return (line, "info", "") if line else None
+
+    if stage in TOOL_TRACE_STAGES or actor == "tool":
+        message = f"{stage}: {title}" if stage and title else (title or summary or stage)
+        step_detail = output or detail
+        if summary and summary not in message and summary != title:
+            step_detail = summary if not step_detail else step_detail
+        return message, "tool", step_detail
+
+    if stage == "sql_generated":
+        return title or "SQL generated", "decision", output or detail
+    if stage == "sql_validation":
+        return title or "Validating SQL", "result", output or detail
+    if stage in {"execution_completed", "execute_sql"} or stage.startswith("execute"):
+        return title or summary or stage, "result", output or summary or detail
+    if stage in {"workflow_completed", "result_interpreted", "waiting_for_user"}:
+        return title or summary or stage, "info", detail or summary
+
+    if stage == "agent_progress":
+        line = summary or title
+        return (line, kind or "info", detail) if line else None
+
+    if title or summary:
+        message = f"{stage}: {title}" if stage and title else (title or summary or stage)
+        step_kind = kind or ("tool" if stage in TOOL_TRACE_STAGES else "info")
+        step_detail = output or detail or (summary if summary != message else "")
+        return message, step_kind, step_detail
+
+    return None
+

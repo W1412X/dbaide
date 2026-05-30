@@ -17,6 +17,7 @@ from dbaide.agent.schema_context import (
     table_targets_from_discovery,
     validation_feedback,
 )
+from dbaide.agent.progress_events import progress_event
 from dbaide.agent.progressive_schema import ModelRequiredError, ProgressiveSchemaAgent
 from dbaide.agent.router import TaskRouter
 from dbaide.agent.sql_writer import SQLWriter
@@ -65,7 +66,7 @@ class AskOrchestrator:
         *,
         asset_store: AssetStore | None = None,
         execution_policy: ExecutionPolicy = ExecutionPolicy.SAFE_AUTO,
-        progress: Callable[[str], None] | None = None,
+        progress: Callable[[Any], None] | None = None,
     ) -> None:
         self.adapter = adapter
         self.session = session
@@ -524,7 +525,9 @@ class AskOrchestrator:
 
     def _step(self, ctx: AgentContext, name: str, detail: str) -> None:
         ctx.steps.append(AgentStep(name=name, status="done", detail=detail))
-        self.progress(detail)
+        self.progress(
+            progress_event(stage=name, title=detail, status="completed", kind="decision"),
+        )
 
     def _collect_warnings(self, ctx: AgentContext) -> list[str]:
         return [f"Error: {ctx.error}"] if ctx.error else []
