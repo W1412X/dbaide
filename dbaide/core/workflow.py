@@ -11,6 +11,7 @@ from dbaide.core.errors import DBAideError, ErrorCode, RepairAction
 from dbaide.core.events import TraceEvent, TraceKind, TraceLevel
 from dbaide.core.result import (
     ExecutionPolicy,
+    NextAction,
     QueryPlan,
     SQLCandidate,
     ValidationReport,
@@ -103,7 +104,13 @@ class WorkflowEngine:
 
         assistant._orchestrator.progress = on_progress  # noqa: SLF001
         try:
-            response = assistant.ask(request.question, database=database, execute=execute)
+            response = assistant.ask(
+                request.question,
+                database=database,
+                execute=execute,
+                resume_state=request.resume_state,
+                user_reply=request.user_reply,
+            )
         except Exception as exc:
             if type(exc).__name__ == "CancelledError" or "cancelled" in str(exc).lower():
                 result.status = WorkflowStatus.CANCELLED
@@ -111,6 +118,28 @@ class WorkflowEngine:
                 self._trace(result, "workflow_cancelled", "Workflow cancelled", "system")
                 return result
             raise
+
+        if getattr(response, "status", "completed") == "wait_user":
+            result.status = WorkflowStatus.WAIT_USER
+            result.answer_markdown = response.answer
+            result.answer_plaintext = response.answer
+            result.warnings = response.warnings or []
+            result.pending_question = response.pending_question
+            result.pending_options = list(response.pending_options or [])
+            result.resume_state = response.resume_state
+            result.next_actions = [
+                NextAction(
+                    label="Reply to continue",
+                    action_type="reply",
+                    payload={
+                        "pending_question": response.pending_question,
+                        "options": list(response.pending_options or []),
+                    },
+                ),
+            ]
+            self._trace(result, "waiting_for_user", "Waiting for user clarification", "agent")
+            result.completed_at = time.time()
+            return result
 
         result.status = WorkflowStatus.COMPLETED
         result.answer_markdown = response.answer

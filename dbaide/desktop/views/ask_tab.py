@@ -3,7 +3,7 @@ from __future__ import annotations
 from typing import Any
 
 from PyQt6.QtCore import pyqtSignal
-from PyQt6.QtWidgets import QApplication, QHBoxLayout, QVBoxLayout, QWidget
+from PyQt6.QtWidgets import QApplication, QHBoxLayout, QStackedWidget, QVBoxLayout, QWidget
 
 from dbaide.desktop.components.base import compact_button
 from dbaide.desktop.components.conversation import ConversationView, classify_trace_message
@@ -15,13 +15,16 @@ from dbaide.desktop.components.menu import MenuButton
 class AskTab(QWidget):
     open_sql = pyqtSignal(str)
     empty_action = pyqtSignal(str)
+    clarification_choice = pyqtSignal(str)
 
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
-        self.stack = QWidget()
-        self.stack_layout = QVBoxLayout(self.stack)
+        self.stack = QStackedWidget()
+        empty_page = QWidget()
+        empty_layout = QVBoxLayout(empty_page)
+        empty_layout.setContentsMargins(0, 0, 0, 0)
         self.empty = EmptyState(
             "Connect your first database",
             "Open Settings to add a connection and configure the model.",
@@ -29,27 +32,25 @@ class AskTab(QWidget):
         )
         self._empty_btn = compact_button("Open Settings", primary=True, width=128)
         self._empty_btn.clicked.connect(lambda: self.empty_action.emit("settings"))
-        self.stack_layout.addWidget(self.empty)
+        empty_layout.addWidget(self.empty)
         empty_actions = QWidget()
         empty_row = QHBoxLayout(empty_actions)
         empty_row.setContentsMargins(0, 0, 0, 0)
         empty_row.addStretch(1)
         empty_row.addWidget(self._empty_btn)
         empty_row.addStretch(1)
-        self.stack_layout.addWidget(empty_actions)
+        empty_layout.addWidget(empty_actions)
+        empty_layout.addStretch(1)
 
         self.conversation = ConversationView()
-        self.stack_layout.addWidget(self.conversation, 1)
-        self.conversation.hide()
-
+        self.stack.addWidget(empty_page)
+        self.stack.addWidget(self.conversation)
         layout.addWidget(self.stack, 1)
         self._turn_open = False
         self._hint_shown = False
 
     def set_has_connection(self, has_connection: bool) -> None:
-        self.empty.setVisible(not has_connection)
-        self._empty_btn.parentWidget().setVisible(not has_connection)
-        self.conversation.setVisible(has_connection)
+        self.stack.setCurrentIndex(1 if has_connection else 0)
         if has_connection and not self._hint_shown:
             self.conversation.append_hint("Ask about your schema or data in natural language.")
             self._hint_shown = True
@@ -72,7 +73,22 @@ class AskTab(QWidget):
     def append_user(self, question: str, *, connection: str, database: str, policy: str) -> None:
         self.begin_turn(question, connection=connection, database=database, policy=policy)
 
+    def append_clarification_reply(self, text: str) -> None:
+        self.conversation.append_clarification_reply(text)
+
+    def show_clarification(self, result: dict[str, Any]) -> None:
+        """Pause the current turn and show ask_user prompt with optional chips."""
+        question = str(result.get("pending_question") or result.get("answer_markdown") or "")
+        options = [str(item) for item in (result.get("pending_options") or []) if str(item).strip()]
+        self._turn_open = True
+        bar = self.conversation.append_clarification(question=question, options=options)
+        if bar is not None:
+            bar.connect_option(self.clarification_choice.emit)
+
     def append_result(self, result: dict[str, Any]) -> None:
+        if str(result.get("status") or "") == "wait_user":
+            self.show_clarification(result)
+            return
         status = str(result.get("status") or "completed")
         workflow_id = str(result.get("workflow_id") or "")
         ok = status not in ("failed", "cancelled")

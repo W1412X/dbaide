@@ -14,11 +14,13 @@ from PyQt6.QtWidgets import (
     QPushButton,
     QScrollArea,
     QSizePolicy,
+    QTextBrowser,
     QVBoxLayout,
     QWidget,
 )
 
-from dbaide.desktop.components.inputs import configure_wrapped_label
+from dbaide.desktop.components.base import compact_button
+from dbaide.desktop.components.inputs import configure_readonly_text_view, configure_wrapped_label
 from dbaide.desktop.theme import Theme
 from dbaide.rendering.markdown import render_markdown_safe
 from dbaide.rendering.sanitize import escape_user_text
@@ -246,21 +248,70 @@ class _MarkdownBlock(QWidget):
             t.setFont(QFont("Inter", 10, QFont.Weight.DemiBold))
             t.setStyleSheet(f"color: {Theme.MUTED};")
             layout.addWidget(t)
-        body = QLabel()
-        configure_wrapped_label(body)
-        body.setTextFormat(Qt.TextFormat.RichText)
+        body = QTextBrowser()
         body.setOpenExternalLinks(True)
-        body.setTextInteractionFlags(
-            Qt.TextInteractionFlag.TextSelectableByMouse | Qt.TextInteractionFlag.LinksAccessibleByMouse
-        )
+        body.setFrameShape(QFrame.Shape.NoFrame)
         body.setFont(QFont("Inter", 13))
+        configure_readonly_text_view(body)
+        body.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        body.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        body.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
+        body.setStyleSheet(
+            f"QTextBrowser {{ background: transparent; border: none; color: {Theme.TEXT}; padding: 0; }}"
+        )
         html = render_markdown_safe(markdown or "")
-        body.setText(
-            f"<style>p{{margin:4px 0;}} pre,code{{background:{Theme.CODE_BG};"
-            f"border-radius:8px;padding:8px;font-family:Menlo,monospace;font-size:11px;}}"
+        body.setHtml(
+            f"<style>body{{margin:0;color:{Theme.TEXT};font-family:Inter,sans-serif;font-size:13px;}}"
+            f"p{{margin:4px 0;}} pre,code{{background:{Theme.CODE_BG};"
+            f"border-radius:8px;padding:8px;font-family:Menlo,monospace;font-size:11px;white-space:pre-wrap;}}"
             f"a{{color:{Theme.BLUE};}}</style>{html}"
         )
+        self._sync_body_height(body)
         layout.addWidget(body)
+
+    @staticmethod
+    def _sync_body_height(body: QTextBrowser) -> None:
+        doc = body.document()
+        width = max(body.viewport().width(), body.parentWidget().width() if body.parentWidget() else 0, 640)
+        doc.setTextWidth(width)
+        height = int(doc.documentLayout().documentSize().height()) + 8
+        body.setFixedHeight(max(height, 24))
+
+
+class _ClarificationBar(QFrame):
+    """Option chips for ask_user clarification."""
+
+    def __init__(self, options: list[str], parent=None) -> None:
+        super().__init__(parent)
+        self.setObjectName("clarificationBar")
+        self.setStyleSheet(
+            f"""
+            QFrame#clarificationBar {{
+                background: {Theme.PANEL};
+                border: 1px solid {Theme.BORDER_SOFT};
+                border-radius: 10px;
+            }}
+            """
+        )
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(10, 8, 10, 8)
+        layout.setSpacing(8)
+        hint = QLabel("Choose an option or type a reply below:")
+        hint.setFont(QFont("Inter", 11))
+        hint.setStyleSheet(f"color: {Theme.MUTED}; background: transparent;")
+        layout.addWidget(hint)
+        layout.addStretch(1)
+        self._buttons: list[QPushButton] = []
+        for option in options:
+            btn = compact_button(option, width=min(160, max(72, len(option) * 9)))
+            btn.setCursor(Qt.CursorShape.PointingHandCursor)
+            layout.addWidget(btn)
+            self._buttons.append(btn)
+
+    def connect_option(self, callback) -> None:
+        for btn in self._buttons:
+            label = btn.text()
+            btn.clicked.connect(lambda _checked=False, value=label: callback(value))
 
 
 class TurnBlock(QFrame):
@@ -344,6 +395,36 @@ class ConversationView(QScrollArea):
             self.begin_turn("")
         assert self._current_turn is not None
         self._current_turn.trace.append(message, kind=kind, detail=detail)
+        self._scroll_bottom()
+
+    def append_clarification(self, *, question: str, options: list[str]) -> _ClarificationBar | None:
+        if self._current_turn is None:
+            self.begin_turn("")
+        turn = self._current_turn
+        assert turn is not None
+        turn.trace.append("Waiting for your reply…", kind="info")
+        turn.trace.finish(ok=True)
+        turn.trace.set_collapsed(True)
+        body = f"**Clarification needed**\n\n{question}"
+        if options:
+            body += "\n\n" + "\n".join(f"- {item}" for item in options)
+        turn.append_content(_MarkdownBlock(body, title="DBAide"))
+        bar = _ClarificationBar(options) if options else None
+        if bar is not None:
+            turn.append_content(bar)
+        self._scroll_bottom()
+        return bar
+
+    def append_clarification_reply(self, text: str) -> None:
+        if self._current_turn is None:
+            return
+        bubble_row = QWidget()
+        bubble_row.setStyleSheet("background: transparent;")
+        row = QHBoxLayout(bubble_row)
+        row.setContentsMargins(0, 0, 0, 0)
+        row.addStretch(1)
+        row.addWidget(_Bubble(text, align_right=True))
+        self._current_turn._layout.addWidget(bubble_row)
         self._scroll_bottom()
 
     def complete_turn(

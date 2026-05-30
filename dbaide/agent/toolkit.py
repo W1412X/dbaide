@@ -11,6 +11,7 @@ from dbaide.models import ColumnInfo
 from dbaide.tools.registry import ToolContext, ToolRegistry, ToolResult
 from dbaide.agent.schema_context import collect_relations, merge_sql_context, validation_feedback
 from dbaide.tools.specs import (
+    ASK_USER,
     DESCRIBE_TABLE,
     DISCOVER_SCHEMA,
     EXECUTE_READONLY_SQL,
@@ -281,6 +282,21 @@ def build_tool_registry(orchestrator: AskOrchestrator) -> ToolRegistry:
         orchestrator._loop_answer = answer
         return ToolResult(ok=True, data={"answer": answer, "column_count": len(profiles)})
 
+    def _ask_user(args: dict[str, Any], _ctx: ToolContext) -> ToolResult:
+        question = str(args.get("question") or "").strip()
+        if not question:
+            return ToolResult(ok=False, error=_err("ask_user", "question is required"))
+        options_raw = args.get("options")
+        options: list[str] = []
+        if isinstance(options_raw, list):
+            options = [str(item).strip() for item in options_raw if str(item).strip()]
+        orchestrator._loop_pending_question = question
+        orchestrator._loop_pending_options = options
+        return ToolResult(
+            ok=True,
+            data={"pending": True, "question": question, "options": options},
+        )
+
     registry.register(DISCOVER_SCHEMA, _discover_schema)
     registry.register(SYNTHESIZE_SCHEMA_ANSWER, _synthesize_schema_answer)
     registry.register(LIST_DATABASES, _list_databases)
@@ -293,6 +309,7 @@ def build_tool_registry(orchestrator: AskOrchestrator) -> ToolRegistry:
     registry.register(EXECUTE_SQL, _execute_sql)
     registry.register(EXPLAIN_SQL, _explain_sql)
     registry.register(PROFILE_TABLE, _profile_table)
+    registry.register(ASK_USER, _ask_user)
     return registry
 
 

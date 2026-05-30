@@ -306,6 +306,8 @@ class DesktopService:
             limit=int(payload.get("limit") or 100),
             timeout_seconds=int(payload.get("timeout_seconds") or 10),
             show_trace=bool(payload.get("show_trace", True)),
+            resume_state=payload.get("resume_state"),
+            user_reply=str(payload.get("user_reply") or ""),
         )
         engine = WorkflowEngine(conn, self._safe_llm(), self.store)
         progress_cb = payload.get("progress")

@@ -111,8 +111,18 @@ class AskOrchestrator:
         self._loop_query_result = None
         self._loop_answer = ""
         self._loop_sql_feedback = ""
+        self._loop_pending_question = ""
+        self._loop_pending_options = []
 
-    def run(self, question: str, *, database: str = "", execute: bool = True) -> AssistantResponse:
+    def run(
+        self,
+        question: str,
+        *,
+        database: str = "",
+        execute: bool = True,
+        resume_state: dict[str, Any] | None = None,
+        user_reply: str = "",
+    ) -> AssistantResponse:
         if isinstance(self.llm, NullLLMClient):
             return AssistantResponse(
                 answer=(
@@ -134,6 +144,8 @@ class AskOrchestrator:
                 database=database,
                 execute=execute,
                 disclosures_before=disclosures,
+                resume_state=resume_state,
+                user_reply=user_reply,
             )
             if loop_response is not None:
                 return loop_response

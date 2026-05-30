@@ -39,6 +39,7 @@ class WorkflowResult:
         "validation_report", "execution_result",
         "assumptions", "warnings", "errors", "next_actions",
         "trace", "created_at", "completed_at",
+        "pending_question", "pending_options", "resume_state",
     )
 
     def __init__(
@@ -64,6 +65,9 @@ class WorkflowResult:
         trace: list[TraceEvent] | None = None,
         created_at: float = 0.0,
         completed_at: float = 0.0,
+        pending_question: str = "",
+        pending_options: list[str] | None = None,
+        resume_state: dict[str, Any] | None = None,
     ) -> None:
         self.schema_version = 1
         self.workflow_id = workflow_id or str(uuid.uuid4())[:8]
@@ -86,6 +90,9 @@ class WorkflowResult:
         self.trace = trace or []
         self.created_at = created_at
         self.completed_at = completed_at
+        self.pending_question = pending_question
+        self.pending_options = pending_options or []
+        self.resume_state = resume_state
 
     def to_dict(self) -> dict[str, Any]:
         """Serialize to JSON-compatible dict."""
@@ -112,6 +119,9 @@ class WorkflowResult:
             "trace_summary": f"{len(self.trace)} events",
             "created_at": self.created_at,
             "completed_at": self.completed_at,
+            "pending_question": self.pending_question,
+            "pending_options": self.pending_options,
+            "resume_state": self.resume_state,
         }
 
 
@@ -121,7 +131,7 @@ class WorkflowRequest:
     __slots__ = (
         "question", "connection_name", "database_scope", "mode",
         "execution_policy", "limit", "timeout_seconds", "model_name",
-        "show_trace",
+        "show_trace", "resume_state", "user_reply",
     )
 
     def __init__(
@@ -136,6 +146,8 @@ class WorkflowRequest:
         timeout_seconds: int = 10,
         model_name: str = "",
         show_trace: bool = False,
+        resume_state: dict[str, Any] | None = None,
+        user_reply: str = "",
     ) -> None:
         self.question = question
         self.connection_name = connection_name
@@ -146,6 +158,8 @@ class WorkflowRequest:
         self.timeout_seconds = timeout_seconds
         self.model_name = model_name
         self.show_trace = show_trace
+        self.resume_state = resume_state
+        self.user_reply = user_reply
 
 
 class QueryPlan:

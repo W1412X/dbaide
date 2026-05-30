@@ -42,6 +42,7 @@ class MainWindow(QMainWindow):
         self.running = False
         self._last_question = ""
         self._last_action = ""
+        self._pending_resume: dict[str, Any] | None = None
         self._current_worker: ServiceWorker | None = None
         self._settings = QSettings("DBAide", "DBAide")
         self._tab_names = ("Ask", "SQL", "Assets", "History")
@@ -100,6 +101,7 @@ class MainWindow(QMainWindow):
         self.history_tab = HistoryTab()
         self.ask_tab.empty_action.connect(self._empty_action)
         self.ask_tab.open_sql.connect(self.open_sql)
+        self.ask_tab.clarification_choice.connect(self._submit_clarification)
         self.sql_tab.validate_requested.connect(self.validate_sql)
         self.sql_tab.explain_requested.connect(self.explain_sql)
         self.sql_tab.run_requested.connect(lambda sql, _action: self.execute_sql(sql))
@@ -133,14 +135,7 @@ class MainWindow(QMainWindow):
         body.setStretchFactor(0, 0)
         body.setStretchFactor(1, 1)
         body.setStretchFactor(2, 0)
-        saved_sizes = self._settings.value("splitter_sizes")
-        if saved_sizes:
-            try:
-                body.setSizes([int(x) for x in saved_sizes])
-            except (TypeError, ValueError):
-                body.setSizes([280, 780, 360])
-        else:
-            body.setSizes([280, 780, 360])
+        self._apply_splitter_sizes(body)
         body.splitterMoved.connect(self._save_splitter_sizes)
         layout.addWidget(body, 1)
 
@@ -196,8 +191,26 @@ class MainWindow(QMainWindow):
     def _background_failed(self, exc: object) -> None:
         self.toast(str(exc))
 
+    def _default_splitter_sizes(self) -> list[int]:
+        return [280, 780, 360]
+
+    def _apply_splitter_sizes(self, splitter: QSplitter) -> None:
+        defaults = self._default_splitter_sizes()
+        saved_sizes = self._settings.value("splitter_sizes")
+        sizes = defaults
+        if saved_sizes:
+            try:
+                parsed = [int(x) for x in saved_sizes]
+                if len(parsed) == 3 and parsed[0] >= 180 and parsed[1] >= 420:
+                    sizes = parsed
+            except (TypeError, ValueError):
+                pass
+        splitter.setSizes(sizes)
+
     def _save_splitter_sizes(self, *_args) -> None:
-        self._settings.setValue("splitter_sizes", self.body_splitter.sizes())
+        sizes = self.body_splitter.sizes()
+        if len(sizes) == 3 and sizes[0] >= 180 and sizes[1] >= 420:
+            self._settings.setValue("splitter_sizes", sizes)
 
     def current_connection(self) -> str:
         return self.topbar.connection.current_value()
@@ -278,6 +291,9 @@ class MainWindow(QMainWindow):
         self.switch_tab("SQL")
 
     def submit_composer(self, question: str, policy: str) -> None:
+        if self._pending_resume:
+            self._submit_clarification(question)
+            return
         if not question:
             self.toast("Enter a question first")
             return
@@ -298,6 +314,60 @@ class MainWindow(QMainWindow):
             "execution_policy": policy,
             "show_trace": True,
         })
+
+    def _submit_clarification(self, reply: str) -> None:
+        reply = str(reply or "").strip()
+        if not reply:
+            self.toast("Enter a reply first")
+            return
+        if not self._pending_resume:
+            self.submit_composer(reply, self.composer.policy())
+            return
+        conn = self.current_connection()
+        if not conn:
+            self.toast("Select a connection first")
+            return
+        database = self.current_database()
+        policy = self.composer.policy()
+        original_question = str(self._pending_resume.get("question") or self._last_question)
+        resume_state = self._pending_resume
+        self._pending_resume = None
+        self.composer.clear_input()
+        self.ask_tab.append_clarification_reply(reply)
+        self.ask_tab.append_activity(f"User replied: {reply[:80]}")
+        self.right.trace.begin_live()
+        self.right.tabs.setCurrentWidget(self.right.trace)
+        self.run_action("ask", {
+            "connection_name": conn,
+            "question": original_question,
+            "user_reply": reply,
+            "resume_state": resume_state,
+            "database": database,
+            "execution_policy": policy,
+            "show_trace": True,
+        })
+        self._restore_composer_placeholder()
+
+    def _restore_composer_placeholder(self) -> None:
+        conn = self.current_connection()
+        if not conn:
+            self.composer.set_placeholder("Add or select a connection to start")
+            return
+        conns = self.bootstrap.get("connections") or []
+        asset_status = "missing"
+        for c in conns:
+            if c["name"] == conn:
+                asset_status = c.get("asset_status") or "missing"
+                break
+        hint = "  Enter 换行 · ⌘Enter 发送"
+        self.composer.set_placeholder(
+            (
+                "Ask about your data, e.g. \"最近 7 天每天订单数\""
+                if asset_status == "ready"
+                else "Ask a question, or build assets for better accuracy"
+            )
+            + hint
+        )
 
     def build_assets(self) -> None:
         conn = self.current_connection()
@@ -552,6 +622,15 @@ class MainWindow(QMainWindow):
             return
         if action == "ask":
             self.right.trace.end_live()
+            if str(result.get("status") or "") == "wait_user":
+                self._pending_resume = result.get("resume_state")
+                self._last_question = str(result.get("question") or self._last_question)
+                self.ask_tab.append_result(result)
+                self.right.show_trace(result.get("trace") or [])
+                self.composer.set_placeholder("Reply to continue…  Enter 换行 · ⌘Enter 发送")
+                self.toast("Waiting for your reply")
+                return
+            self._pending_resume = None
             if str(result.get("status") or "") == "cancelled":
                 if getattr(self.ask_tab, "_turn_open", False):
                     self.ask_tab.finish_turn_error("**Cancelled**: Task stopped by user.")
@@ -561,6 +640,7 @@ class MainWindow(QMainWindow):
             self.right.show_trace(result.get("trace") or [])
             self.right.show_plan(result)
             self._load_history(self.current_connection())
+            self._restore_composer_placeholder()
             return
         if action == "search_assets":
             self.assets_tab.show_search_hits(self._last_question, result)

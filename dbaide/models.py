@@ -227,9 +227,18 @@ class AssistantResponse:
         result: QueryResult | None = None,
         disclosures: list[str] | None = None,
         warnings: list[str] | None = None,
+        *,
+        status: str = "completed",
+        pending_question: str = "",
+        pending_options: list[str] | None = None,
+        resume_state: dict[str, Any] | None = None,
     ) -> None:
         self.answer = answer
         self.sql = sql
         self.result = result
         self.disclosures = disclosures or []
         self.warnings = warnings or []
+        self.status = status
+        self.pending_question = pending_question
+        self.pending_options = pending_options or []
+        self.resume_state = resume_state

@@ -7,6 +7,7 @@ import logging
 from dataclasses import dataclass, field
 from typing import Any, Callable
 
+from dbaide.agent.loop_state import dump_loop_state, restore_loop_state
 from dbaide.agent.runtime import AgentRuntime
 from dbaide.agent.toolkit import build_tool_registry
 from dbaide.core.events import TraceEvent, TraceKind, TraceLevel
@@ -59,13 +60,30 @@ class AskAgentLoop:
         database: str = "",
         execute: bool = True,
         disclosures_before: list[str] | None = None,
+        resume_state: dict[str, Any] | None = None,
+        user_reply: str = "",
     ) -> AssistantResponse | None:
         """Run the tool loop. Returns None to signal fallback to staged pipeline."""
         orch = self.orchestrator
-        orch._reset_loop_state(question, database, execute)
-        orch.schema.disclose_instance()
+        transcript: list[str] = []
 
-        state = LoopState(question=question, database=database, execute_allowed=execute)
+        if resume_state:
+            transcript, execute = restore_loop_state(orch, resume_state)
+            reply = str(user_reply or question or "").strip()
+            if reply:
+                transcript.append(f"User reply: {reply}")
+                self.progress(f"User replied: {reply[:80]}")
+            state = LoopState(
+                question=str(resume_state.get("question") or question),
+                database=str(resume_state.get("database") or database),
+                execute_allowed=execute,
+            )
+            self.progress("Resuming agent loop…")
+        else:
+            orch._reset_loop_state(question, database, execute)
+            orch.schema.disclose_instance()
+            state = LoopState(question=question, database=database, execute_allowed=execute)
+            self.progress("Agent loop started…")
         tool_ctx = ToolContext(
             execution_policy=orch.execution_policy.value,
             trace_sink=self._trace_sink,
@@ -76,9 +94,6 @@ class AskAgentLoop:
             execution_policy=orch.execution_policy,
             trace_sink=self._trace_sink,
         )
-
-        self.progress("Agent loop started…")
-        transcript: list[str] = []
 
         while runtime.steps_remaining > 0:
             try:
@@ -116,6 +131,9 @@ class AskAgentLoop:
             summary = _summarize_tool_result(tool_name, result)
             state.calls.append(ToolCallRecord(tool=tool_name, args=args, ok=result.ok, summary=summary))
             transcript.append(f"Tool `{tool_name}` → {summary}")
+
+            if tool_name == "ask_user" and result.ok and isinstance(result.data, dict) and result.data.get("pending"):
+                return self._build_wait_response(orch, state, transcript, disclosures_before or [])
 
             if tool_name == "execute_sql" and result.ok:
                 break
@@ -168,6 +186,8 @@ class AskAgentLoop:
             + (" → execute_sql → finish" if state.execute_allowed and policy not in ("sql_only", "inspect_only") else " → finish")
             + "\n"
             "- Multi-table: describe every needed table; get_relations loads declared FKs; generate_sql uses all disclosed tables.\n"
+            "- If schema is ambiguous or multiple valid interpretations exist, call ask_user with optional options before guessing.\n"
+            "- ask_user pauses the run until the user replies; the next user message resumes the same workflow.\n"
             "- If validate_sql reports unknown tables/columns, describe_table then retry generate_sql.\n"
             "- Profile questions: discover_schema → profile_table → finish\n"
             "- SQL explain: validate_sql or explain_sql as needed → finish\n"
@@ -223,6 +243,35 @@ class AskAgentLoop:
             note = "SQL generated (not executed)."
             return f"SQL:\n```sql\n{orch._loop_sql}\n```\n\n_{note}_"
         return orch._loop_answer or ""
+
+    def _build_wait_response(
+        self,
+        orch: AskOrchestrator,
+        state: LoopState,
+        transcript: list[str],
+        disclosures_before: list[str],
+    ) -> AssistantResponse:
+        question = orch._loop_pending_question
+        options = list(orch._loop_pending_options)
+        lines = [question]
+        if options:
+            lines.append("")
+            lines.append("Options:")
+            lines.extend(f"- {item}" for item in options)
+        answer = "\n".join(lines)
+        snapshot = dump_loop_state(orch, transcript=transcript, execute_allowed=state.execute_allowed)
+        self.progress("Waiting for user clarification…")
+        return AssistantResponse(
+            answer=answer,
+            sql=orch._loop_sql or "",
+            result=None,
+            disclosures=orch.session.disclosure.events[len(disclosures_before):],
+            warnings=[],
+            status="wait_user",
+            pending_question=question,
+            pending_options=options,
+            resume_state=snapshot,
+        )
 
     def _build_response(
         self, orch: AskOrchestrator, answer: str, disclosures_before: list[str],

@@ -1,6 +1,7 @@
 """Tool registry for DBAide agent tools."""
 from __future__ import annotations
 
+import json
 import logging
 import time
 from typing import Any, Callable
@@ -116,7 +117,7 @@ class ToolRegistry:
         handler = self._handlers[name]
 
         # Check cache
-        cache_key = f"{name}:{hash(frozenset(arguments.items()))}"
+        cache_key = f"{name}:{hash(json.dumps(arguments, sort_keys=True, default=str))}"
         if spec.cache_policy == "session" and cache_key in self._cache:
             ts, cached = self._cache[cache_key]
             logger.debug("cache hit: %s", name)

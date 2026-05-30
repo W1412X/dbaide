@@ -47,5 +47,19 @@ class DataAssistant:
         self.instance = session.connection.name
         self.asset_store = asset_store or AssetStore()
 
-    def ask(self, question: str, *, database: str = "", execute: bool = True) -> AssistantResponse:
-        return self._orchestrator.run(question, database=database, execute=execute)
+    def ask(
+        self,
+        question: str,
+        *,
+        database: str = "",
+        execute: bool = True,
+        resume_state: dict | None = None,
+        user_reply: str = "",
+    ) -> AssistantResponse:
+        return self._orchestrator.run(
+            question,
+            database=database,
+            execute=execute,
+            resume_state=resume_state,
+            user_reply=user_reply,
+        )

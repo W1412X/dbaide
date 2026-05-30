@@ -27,13 +27,37 @@ def render_markdown_safe(text: str) -> str:
     # Process inline elements
     safe = _process_inline(safe)
 
-    # Process block elements
+    # Protect fenced code blocks (already <pre>) from paragraph wrapping
+    safe, html_blocks = _isolate_html_blocks(safe)
     safe = _process_blocks(safe)
+    safe = _restore_html_blocks(safe, html_blocks)
 
     # Final sanitization
     safe = sanitize_markdown_html(safe)
 
     return safe
+
+
+_BLOCK_TOKEN = re.compile(r"@@HTMLBLOCK(\d+)@@")
+
+
+def _isolate_html_blocks(text: str) -> tuple[str, list[str]]:
+    blocks: list[str] = []
+    pattern = re.compile(r"<pre[^>]*>.*?</pre>", re.S | re.I)
+
+    def repl(match: re.Match[str]) -> str:
+        blocks.append(match.group(0))
+        return f"@@HTMLBLOCK{len(blocks) - 1}@@"
+
+    return pattern.sub(repl, text), blocks
+
+
+def _restore_html_blocks(text: str, blocks: list[str]) -> str:
+    for index, block in enumerate(blocks):
+        token = f"@@HTMLBLOCK{index}@@"
+        text = text.replace(f"<p>{token}</p>", block)
+        text = text.replace(token, block)
+    return text
 
 
 def _process_code_blocks(text: str) -> str:
@@ -117,6 +141,13 @@ def _process_blocks(text: str) -> str:
                 result.append('</ul>' if result[-1].startswith('<li>') else '</ol>')
                 in_list = False
             result.append('')
+
+        # Preserved HTML blocks (fenced code converted to <pre>)
+        elif _BLOCK_TOKEN.fullmatch(stripped):
+            if in_list:
+                result.append('</ul>')
+                in_list = False
+            result.append(stripped)
 
         # Regular paragraph
         else:
