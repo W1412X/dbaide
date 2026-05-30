@@ -152,10 +152,14 @@ class MainWindow(QMainWindow):
                     if c["name"] == conn_name:
                         asset_status = c.get("asset_status") or "missing"
                 self.topbar.set_asset_status(asset_status)
+                hint = "  Enter 换行 · ⌘Enter 发送"
                 self.composer.set_placeholder(
-                    "Ask about your data, e.g. \"最近 7 天每天订单数\""
-                    if asset_status == "ready"
-                    else "Ask a question, or build assets for better accuracy"
+                    (
+                        "Ask about your data, e.g. \"最近 7 天每天订单数\""
+                        if asset_status == "ready"
+                        else "Ask a question, or build assets for better accuracy"
+                    )
+                    + hint
                 )
             else:
                 self.composer.set_placeholder("Add or select a connection to start")

@@ -36,7 +36,7 @@ class ComposerWidget(Panel):
         outer.setSpacing(10)
 
         self.input = QTextEdit()
-        self.input.setPlaceholderText("Ask about your data…")
+        self.input.setPlaceholderText("Ask about your data…  Enter 换行 · ⌘Enter 发送")
         configure_multiline_text_edit(
             self.input,
             min_height=_INPUT_MIN,
