@@ -25,17 +25,35 @@ class SQLWriter:
         self.llm = llm or NullLLMClient()
         self.dialect = dialect
 
-    def write(self, question: str, table: str, columns: list[ColumnInfo], *, context: dict | None = None) -> SQLDraft:
+    def write(
+        self,
+        question: str,
+        table: str,
+        columns: list[ColumnInfo],
+        *,
+        context: dict | None = None,
+        feedback: str = "",
+    ) -> SQLDraft:
         if isinstance(self.llm, NullLLMClient):
             raise ModelRequiredError("LLM is required for SQL generation.")
-        return self._llm_write(question, table, columns, context or {})
+        return self._llm_write(question, table, columns, context or {}, feedback)
 
-    def _llm_write(self, question: str, table: str, columns: list[ColumnInfo], context: dict) -> SQLDraft:
+    def _llm_write(
+        self,
+        question: str,
+        table: str,
+        columns: list[ColumnInfo],
+        context: dict,
+        feedback: str,
+    ) -> SQLDraft:
         """LLM-based SQL generation with robust output parsing."""
+        user_prompt = self._user_prompt(question, table, columns, context)
+        if feedback.strip():
+            user_prompt += f"\n\nPrevious SQL failed validation or execution. Fix it:\n{feedback.strip()}"
         payload = self.llm.complete_json(
             [
                 LLMMessage("system", self._system_prompt()),
-                LLMMessage("user", self._user_prompt(question, table, columns, context)),
+                LLMMessage("user", user_prompt),
             ],
             schema_hint='Return JSON only: {"sql": "...", "rationale": "...", "confidence": 0.0}.',
         )
