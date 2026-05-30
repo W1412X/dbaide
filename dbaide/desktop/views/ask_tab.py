@@ -7,6 +7,7 @@ from PyQt6.QtWidgets import QApplication, QHBoxLayout, QVBoxLayout, QWidget
 
 from dbaide.desktop.components.base import compact_button
 from dbaide.desktop.components.conversation import ConversationView, classify_trace_message
+from dbaide.desktop.components.composer_options import POLICY_LABELS
 from dbaide.desktop.components.empty_state import EmptyState
 from dbaide.desktop.components.menu import MenuButton
 
@@ -54,7 +55,8 @@ class AskTab(QWidget):
             self._hint_shown = True
 
     def begin_turn(self, question: str, *, connection: str, database: str, policy: str) -> None:
-        meta = " · ".join(x for x in (connection, database or "auto", policy) if x)
+        policy_label = POLICY_LABELS.get(policy, policy)
+        meta = " · ".join(x for x in (connection, database or "auto", policy_label) if x)
         self.conversation.begin_turn(question, meta=meta)
         self._turn_open = True
 
