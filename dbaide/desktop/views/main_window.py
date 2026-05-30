@@ -368,11 +368,17 @@ class MainWindow(QMainWindow):
             self.fail(exc)
 
     def _settings_test_connection(self, dialog: SettingsDialog, payload: dict[str, Any]) -> None:
-        try:
-            result = self.service.dispatch("test_connection", payload)
-            dialog.show_test_result(True, str(result.get("message") or "Connection OK"))
-        except Exception as exc:
-            dialog.show_test_result(False, str(exc))
+        dialog.set_test_busy(True, target="connection")
+
+        def on_done(result: dict[str, Any]) -> None:
+            dialog.set_test_busy(False, target="connection")
+            dialog.show_test_result(True, str(result.get("message") or "Connection OK"), target="connection")
+
+        def on_fail(exc: object) -> None:
+            dialog.set_test_busy(False, target="connection")
+            dialog.show_test_result(False, str(exc), target="connection")
+
+        self._run_background("test_connection", payload, on_done, on_error=on_fail)
 
     def _settings_save_model(self, payload: dict[str, Any]) -> None:
         try:
@@ -391,12 +397,17 @@ class MainWindow(QMainWindow):
             self.fail(exc)
 
     def _settings_test_model(self, dialog: SettingsDialog, payload: dict[str, Any]) -> None:
-        try:
-            self.service.dispatch("save_model", payload)
-            result = self.service.dispatch("test_model", {"name": payload.get("name")})
-            dialog.show_test_result(bool(result.get("ok")), str(result.get("message") or "OK"))
-        except Exception as exc:
-            dialog.show_test_result(False, str(exc))
+        dialog.set_test_busy(True, target="model")
+
+        def on_done(result: dict[str, Any]) -> None:
+            dialog.set_test_busy(False, target="model")
+            dialog.show_test_result(bool(result.get("ok")), str(result.get("message") or "OK"), target="model")
+
+        def on_fail(exc: object) -> None:
+            dialog.set_test_busy(False, target="model")
+            dialog.show_test_result(False, str(exc), target="model")
+
+        self._run_background("test_model_profile", payload, on_done, on_error=on_fail)
 
     def validate_sql(self, sql: str) -> None:
         if not sql.strip():

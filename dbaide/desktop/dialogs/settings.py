@@ -203,6 +203,10 @@ class SettingsDialog(QDialog):
         form_col = QVBoxLayout()
         self.conn_form = ConnectionForm()
         form_col.addWidget(self.conn_form, 1)
+        self.conn_test_status = QLabel("")
+        self.conn_test_status.setWordWrap(True)
+        self.conn_test_status.setStyleSheet(f"color:{Theme.MUTED}; font-size:12px;")
+        form_col.addWidget(self.conn_test_status)
         form_col.addLayout(self._conn_actions())
         row.addLayout(form_col, 1)
         card_layout.addLayout(row)
@@ -226,6 +230,10 @@ class SettingsDialog(QDialog):
         form_col = QVBoxLayout()
         self.model_form = ModelForm()
         form_col.addWidget(self.model_form, 1)
+        self.model_test_status = QLabel("")
+        self.model_test_status.setWordWrap(True)
+        self.model_test_status.setStyleSheet(f"color:{Theme.MUTED}; font-size:12px;")
+        form_col.addWidget(self.model_test_status)
         form_col.addLayout(self._model_actions())
         row.addLayout(form_col, 1)
         card_layout.addLayout(row)
@@ -455,8 +463,25 @@ class SettingsDialog(QDialog):
         self._selected_model = ""
         self._reload_model_list()
 
-    def show_test_result(self, ok: bool, message: str) -> None:
-        if ok:
-            QMessageBox.information(self, "Settings", message)
+    def set_test_busy(self, busy: bool, *, target: str = "connection") -> None:
+        if target == "connection":
+            self.test_conn_btn.setEnabled(not busy)
+            self.save_conn_btn.setEnabled(not busy)
+            if busy:
+                self.conn_test_status.setText("Testing connection…")
+                self.conn_test_status.setStyleSheet(f"color:{Theme.MUTED}; font-size:12px;")
         else:
+            self.test_model_btn.setEnabled(not busy)
+            self.save_model_btn.setEnabled(not busy)
+            if busy:
+                self.model_test_status.setText("Testing model…")
+                self.model_test_status.setStyleSheet(f"color:{Theme.MUTED}; font-size:12px;")
+
+    def show_test_result(self, ok: bool, message: str, *, target: str = "connection") -> None:
+        label = self.conn_test_status if target == "connection" else self.model_test_status
+        color = Theme.GREEN if ok else Theme.RED
+        prefix = "OK" if ok else "Failed"
+        label.setStyleSheet(f"color:{color}; font-size:12px;")
+        label.setText(f"{prefix}: {message}")
+        if not ok:
             QMessageBox.warning(self, "Settings", message)

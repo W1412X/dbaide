@@ -122,6 +122,7 @@ class DesktopService:
             "asset_markdown": self.asset_markdown,
             "preview_asset": self.asset_markdown,
             "test_model": self.test_model,
+            "test_model_profile": self.test_model_profile,
         }
         if action not in handlers:
             raise ValueError(f"Unknown desktop action: {action}")
@@ -405,6 +406,10 @@ class DesktopService:
             return {"ok": False, "message": "No model configured"}
         text = llm.complete_text([LLMMessage("user", "Reply with OK only.")])
         return {"ok": True, "message": text.strip()[:120]}
+
+    def test_model_profile(self, payload: dict[str, Any]) -> dict[str, Any]:
+        self.save_model(payload)
+        return self.test_model({"name": payload.get("name")})
 
     def cli_command(
         self,
