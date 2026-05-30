@@ -11,6 +11,7 @@ from dbaide.desktop.theme import Theme
 
 class AssetsTab(QWidget):
     asset_selected = pyqtSignal(str)
+    search_requested = pyqtSignal(str)
 
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
@@ -18,7 +19,7 @@ class AssetsTab(QWidget):
         layout.setContentsMargins(0, 0, 0, 0)
         search_row = QHBoxLayout()
         self.search = QLineEdit()
-        self.search.setPlaceholderText("Ask about schema…")
+        self.search.setPlaceholderText("Search offline assets…")
         self.search.returnPressed.connect(self._search)
         search_row.addWidget(self.search)
         layout.addLayout(search_row)
@@ -63,7 +64,22 @@ class AssetsTab(QWidget):
         if path:
             self.asset_selected.emit(str(path))
 
+    def show_search_hits(self, query: str, hits: list[dict[str, Any]]) -> None:
+        self.preview.clear_view()
+        if not hits:
+            self.preview.append_card(
+                "Asset search",
+                f"No matches for `{query}`. Build assets or ask in natural language on the Ask tab.",
+            )
+            return
+        lines = [f"Found **{len(hits)}** matches for `{query}`:", ""]
+        for hit in hits:
+            lines.append(f"- **{hit.get('path')}** ({hit.get('kind')}, score {hit.get('score', 0):.1f})")
+            if hit.get("summary"):
+                lines.append(f"  {str(hit['summary'])[:160]}")
+        self.preview.append_card("Asset search", "\n".join(lines))
+
     def _search(self) -> None:
         query = self.search.text().strip()
         if query:
-            self.asset_selected.emit(f"search:{query}")
+            self.search_requested.emit(query)
