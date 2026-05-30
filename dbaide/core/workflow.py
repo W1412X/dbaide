@@ -45,7 +45,13 @@ class WorkflowEngine:
         self._adapter = None
         self._session = None
 
-    def run(self, request: WorkflowRequest, *, progress: Callable[[str], None] | None = None) -> WorkflowResult:
+    def run(
+        self,
+        request: WorkflowRequest,
+        *,
+        progress: Callable[[str], None] | None = None,
+        cancel_check: Callable[[], None] | None = None,
+    ) -> WorkflowResult:
         """Execute a workflow synchronously."""
         result = WorkflowResult(
             question=request.question,
@@ -89,12 +95,22 @@ class WorkflowEngine:
         self._trace(result, "agent_request", "Running assistant", "agent")
 
         def on_progress(msg: str) -> None:
+            if cancel_check:
+                cancel_check()
             self._trace(result, "agent_progress", msg, "agent", summary=msg[:120])
             if progress:
                 progress(msg)
 
         assistant._orchestrator.progress = on_progress  # noqa: SLF001
-        response = assistant.ask(request.question, database=database, execute=execute)
+        try:
+            response = assistant.ask(request.question, database=database, execute=execute)
+        except Exception as exc:
+            if type(exc).__name__ == "CancelledError" or "cancelled" in str(exc).lower():
+                result.status = WorkflowStatus.CANCELLED
+                result.completed_at = time.time()
+                self._trace(result, "workflow_cancelled", "Workflow cancelled", "system")
+                return result
+            raise
 
         result.status = WorkflowStatus.COMPLETED
         result.answer_markdown = response.answer
@@ -157,15 +173,8 @@ class WorkflowEngine:
     def _validate_sql(self, sql: str, *, database: str = "") -> ValidationReport:
         try:
             tools = QueryTools(self._get_adapter(), self._get_session().disclosure)
-            validation = tools.validate_sql(sql, add_limit=True)
-            return ValidationReport(
-                ok=validation.ok,
-                normalized_sql=validation.normalized_sql,
-                issues=[issue.message for issue in validation.issues],
-                warnings=[],
-                risk_level="low" if validation.ok else "rejected",
-                requires_confirmation=not validation.ok,
-            )
+            _ = database
+            return tools.validate_sql_report(sql, add_limit=True)
         except Exception as exc:
             return ValidationReport(
                 ok=False,

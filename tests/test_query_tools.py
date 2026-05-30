@@ -4,6 +4,15 @@ from dbaide.models import ColumnInfo, ColumnProfile, ConnectionConfig, TableInfo
 from dbaide.tools import QueryTools
 
 
+def test_validate_sql_report_flags_select_star_without_where():
+    adapter = ExplainSpyAdapter(ConnectionConfig(name="local", type="sqlite", path="/tmp/test.db"))
+    query = QueryTools(adapter, DisclosureContext())
+    report = query.validate_sql_report("SELECT * FROM users")
+    assert report.ok is True
+    assert report.risk_level in {"low", "medium"}
+    assert any("SELECT *" in warning or "large result" in warning.lower() for warning in report.warnings)
+
+
 def test_explain_sql_does_not_double_prefix_explicit_explain():
     adapter = ExplainSpyAdapter(ConnectionConfig(name="local", type="sqlite", path="/tmp/test.db"))
     query = QueryTools(adapter, DisclosureContext())

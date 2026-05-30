@@ -6,7 +6,7 @@ import logging
 from typing import TYPE_CHECKING, Any
 
 from dbaide.core.errors import DBAideError, ErrorCode
-from dbaide.core.result import ExecutionPolicy, ValidationReport
+from dbaide.core.result import ExecutionPolicy
 from dbaide.tools.registry import ToolContext, ToolRegistry, ToolResult
 from dbaide.tools.specs import (
     DESCRIBE_TABLE,
@@ -125,12 +125,16 @@ def build_tool_registry(orchestrator: AskOrchestrator) -> ToolRegistry:
         if validation.ok:
             orchestrator._loop_sql = validation.normalized_sql
         issues = [{"message": i.message, "severity": i.severity} for i in validation.issues]
+        report = orchestrator.query.validate_sql_report(sql, add_limit=True)
         return ToolResult(
             ok=validation.ok,
             data={
                 "ok": validation.ok,
                 "normalized_sql": validation.normalized_sql,
                 "issues": issues,
+                "risk_level": report.risk_level,
+                "warnings": report.warnings,
+                "requires_confirmation": report.requires_confirmation,
             },
         )
 
@@ -154,12 +158,7 @@ def build_tool_registry(orchestrator: AskOrchestrator) -> ToolRegistry:
             issues = "; ".join(i.message for i in validation.issues)
             return ToolResult(ok=False, error=_err("execute_sql", f"SQL invalid: {issues}"))
 
-        validation_report = ValidationReport(
-            ok=True,
-            normalized_sql=validation.normalized_sql,
-            issues=[],
-            risk_level="low",
-        )
+        validation_report = orchestrator.query.validate_sql_report(validation.normalized_sql, add_limit=False)
         confidence = float(orchestrator._loop_sql_confidence or 0.7)
         risk = orchestrator.risk.decide(
             policy=policy,
@@ -175,7 +174,9 @@ def build_tool_registry(orchestrator: AskOrchestrator) -> ToolRegistry:
                     "blocked": True,
                     "reason": risk.reason,
                     "risk_action": risk.action,
+                    "risk_level": risk.risk_level,
                     "sql": validation.normalized_sql,
+                    "warnings": validation_report.warnings,
                 },
             )
 

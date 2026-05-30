@@ -301,10 +301,15 @@ class AskOrchestrator:
 
         draft = None
         validation = None
+        feedback = ""
         for attempt in range(self.MAX_SQL_RETRIES + 1):
             self._step(ctx, "generate", f"Generating SQL (attempt {attempt + 1})…")
             draft = self.sql_writer.write(
-                ctx.question, table, columns, context=self.session.disclosure.summary(),
+                ctx.question,
+                table,
+                columns,
+                context=self.session.disclosure.summary(),
+                feedback=feedback,
             )
             ctx.sql = draft.sql
             validation = self.query.validate_sql(draft.sql, add_limit=True)
@@ -312,6 +317,7 @@ class AskOrchestrator:
                 break
             issues = "; ".join(issue.message for issue in validation.issues)
             ctx.error = issues
+            feedback = issues
             if attempt < self.MAX_SQL_RETRIES:
                 self._step(ctx, "retry", f"Validation failed: {issues}. Retrying…")
                 continue
@@ -338,14 +344,16 @@ class AskOrchestrator:
         normalized_sql = validation.normalized_sql
         ctx.sql = normalized_sql
         tables_in_sql = _extract_tables(normalized_sql)
-        validation_report = ValidationReport(
-            ok=validation.ok,
-            normalized_sql=normalized_sql,
-            issues=[i.message for i in validation.issues],
-            warnings=[],
-            risk_level="low" if validation.ok else "rejected",
-            requires_confirmation=False,
-        )
+        validation_report = self.query.validate_sql_report(normalized_sql, add_limit=False)
+        if not validation_report.ok:
+            validation_report = ValidationReport(
+                ok=validation.ok,
+                normalized_sql=normalized_sql,
+                issues=[i.message for i in validation.issues],
+                warnings=[],
+                risk_level="rejected",
+                requires_confirmation=False,
+            )
         risk = self.risk.decide(
             policy=self.execution_policy,
             validation=validation_report,

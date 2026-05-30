@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dbaide.adapters.base import DatabaseAdapter
 from dbaide.context.disclosure import DisclosureContext
+from dbaide.core.result import ValidationReport
 from dbaide.models import QueryResult, ValidationResult
 from dbaide.validation import SchemaGuard, SQLGuard
 
@@ -23,6 +24,22 @@ class QueryTools:
         if not second.ok:
             return second
         return first
+
+    def validate_sql_report(self, sql: str, *, add_limit: bool = True) -> ValidationReport:
+        report = self.sql_guard.validate_with_report(sql, add_limit=add_limit)
+        if not report.ok:
+            return report
+        schema_result = self.schema_guard.validate(report.normalized_sql, self.context)
+        if not schema_result.ok:
+            return ValidationReport(
+                ok=False,
+                normalized_sql=report.normalized_sql,
+                issues=[issue.message for issue in schema_result.issues],
+                warnings=report.warnings,
+                risk_level="rejected",
+                requires_confirmation=False,
+            )
+        return report
 
     def explain_sql(self, sql: str, *, database: str = "") -> QueryResult:
         validation = self.sql_guard.validate(sql, add_limit=False)
