@@ -447,9 +447,9 @@ class MainWindow(QMainWindow):
     def handle_failure(self, exc: object) -> None:
         self.running = False
         self.composer.set_running(False)
-        self.topbar.set_global_status("Failed", "failed")
         self.right.trace.end_live()
         self.fail(exc)
+        self._restore_status_badge()
 
     def _restore_status_badge(self) -> None:
         conn = self.current_connection()
