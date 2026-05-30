@@ -117,6 +117,7 @@ class PillSelect(QToolButton):
         self._placeholder = placeholder
         self._max_width = max_width
         self._options: list[tuple[str, str]] = []
+        self._tooltips: dict[str, str] = {}
         self._value = ""
         self.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
         self._menu = QMenu(self)
@@ -150,6 +151,11 @@ class PillSelect(QToolButton):
         )
         self._sync_label()
 
+    def set_option_tooltips(self, tooltips: dict[str, str]) -> None:
+        self._tooltips = dict(tooltips)
+        self._rebuild_menu()
+        self._sync_label()
+
     def set_options(self, options: list[tuple[str, str]]) -> None:
         self._options = list(options)
         self._rebuild_menu()
@@ -170,6 +176,8 @@ class PillSelect(QToolButton):
             action = self._menu.addAction(label)
             action.setCheckable(True)
             action.setChecked(value == self._value)
+            if tip := self._tooltips.get(value):
+                action.setToolTip(tip)
             action.triggered.connect(lambda _checked=False, v=value: self._pick(v))
 
     def _pick(self, value: str) -> None:
@@ -187,3 +195,4 @@ class PillSelect(QToolButton):
         text = f"{label}  ▾"
         width = max(self._max_width - 16, 48)
         self.setText(QFontMetrics(self.font()).elidedText(text, Qt.TextElideMode.ElideRight, width))
+        self.setToolTip(self._tooltips.get(self._value, ""))

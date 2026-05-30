@@ -4,7 +4,7 @@ from PyQt6.QtCore import QEvent, Qt, pyqtSignal
 from PyQt6.QtWidgets import QHBoxLayout, QTextEdit, QVBoxLayout
 
 from dbaide.desktop.components.base import compact_button, Panel
-from dbaide.desktop.components.composer_options import POLICIES
+from dbaide.desktop.components.composer_options import POLICIES, POLICY_TOOLTIPS
 from dbaide.desktop.components.inputs import configure_multiline_text_edit, sync_multiline_height
 from dbaide.desktop.components.menu import PillSelect
 from dbaide.desktop.theme import Theme
@@ -62,6 +62,7 @@ class ComposerWidget(Panel):
         footer.setSpacing(8)
         self.policy_select = PillSelect("Safe", max_width=108)
         self.policy_select.set_options(POLICIES)
+        self.policy_select.set_option_tooltips(POLICY_TOOLTIPS)
         self.policy_select.set_value("safe_auto")
         footer.addWidget(self.policy_select)
         footer.addStretch(1)
