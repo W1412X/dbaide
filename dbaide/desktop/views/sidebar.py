@@ -9,6 +9,7 @@ from dbaide.desktop.components.base import SectionLabel, compact_button
 
 
 class Sidebar(QWidget):
+    schema_preview = pyqtSignal(dict)
     schema_selected = pyqtSignal(dict)
     settings_requested = pyqtSignal()
 
@@ -35,8 +36,12 @@ class Sidebar(QWidget):
         layout.addWidget(self.settings_btn, alignment=Qt.AlignmentFlag.AlignHCenter)
         self._rows: list[dict[str, Any]] = []
 
-    def load_schema(self, rows: list[dict[str, Any]]) -> None:
+    def load_schema(self, rows: list[dict[str, Any]], *, error: str = "") -> None:
         self._rows = rows
+        if error:
+            self.tree.clear()
+            self.tree.addTopLevelItem(QTreeWidgetItem([f"Schema load failed: {error}"]))
+            return
         self._render(rows)
 
     def _render(self, rows: list[dict[str, Any]]) -> None:
@@ -89,8 +94,8 @@ class Sidebar(QWidget):
         if not items:
             return
         data = items[0].data(0, Qt.ItemDataRole.UserRole)
-        if isinstance(data, dict):
-            self.schema_selected.emit(data)
+        if isinstance(data, dict) and data.get("path"):
+            self.schema_preview.emit(data)
 
     def _double_clicked(self, item: QTreeWidgetItem, _column: int) -> None:
         data = item.data(0, Qt.ItemDataRole.UserRole)
