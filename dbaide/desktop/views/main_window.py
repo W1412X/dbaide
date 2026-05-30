@@ -2,9 +2,9 @@ from __future__ import annotations
 
 import json
 import sys
-from typing import Any
+from typing import Any, Callable
 
-from PyQt6.QtCore import Qt, QThreadPool
+from PyQt6.QtCore import Qt, QSettings, QThreadPool
 from PyQt6.QtWidgets import (
     QApplication,
     QHBoxLayout,
@@ -29,7 +29,7 @@ from dbaide.desktop.views.right_panel import RightPanel
 from dbaide.desktop.views.sidebar import Sidebar
 from dbaide.desktop.views.sql_tab import SqlTab
 from dbaide.desktop.views.topbar import TopBar
-from dbaide.desktop.workers import ServiceWorker
+from dbaide.desktop.workers import CancelledError, ServiceWorker
 
 
 class MainWindow(QMainWindow):
@@ -42,6 +42,8 @@ class MainWindow(QMainWindow):
         self.running = False
         self._last_question = ""
         self._last_action = ""
+        self._current_worker: ServiceWorker | None = None
+        self._settings = QSettings("DBAide", "DBAide")
         self._tab_names = ("Ask", "SQL", "Assets", "History")
         self.setWindowTitle("DBAide")
         self.resize(1440, 900)
@@ -65,6 +67,8 @@ class MainWindow(QMainWindow):
         layout.addWidget(self.topbar)
 
         body = QSplitter(Qt.Orientation.Horizontal)
+        body.setObjectName("mainSplitter")
+        self.body_splitter = body
         body.setChildrenCollapsible(False)
         body.setHandleWidth(1)
         self.sidebar = Sidebar()
@@ -125,11 +129,19 @@ class MainWindow(QMainWindow):
         body.addWidget(self.right)
         body.setCollapsible(0, False)
         body.setCollapsible(1, False)
-        body.setCollapsible(2, False)
+        body.setCollapsible(2, True)
         body.setStretchFactor(0, 0)
         body.setStretchFactor(1, 1)
         body.setStretchFactor(2, 0)
-        body.setSizes([280, 780, 360])
+        saved_sizes = self._settings.value("splitter_sizes")
+        if saved_sizes:
+            try:
+                body.setSizes([int(x) for x in saved_sizes])
+            except (TypeError, ValueError):
+                body.setSizes([280, 780, 360])
+        else:
+            body.setSizes([280, 780, 360])
+        body.splitterMoved.connect(self._save_splitter_sizes)
         layout.addWidget(body, 1)
 
         self.setCentralWidget(root)
@@ -138,25 +150,54 @@ class MainWindow(QMainWindow):
         self.statusbar.showMessage("Ready")
 
     def refresh_all(self) -> None:
+        self.statusbar.showMessage("Loading…")
+        self._run_background("bootstrap", {}, self._on_bootstrap_loaded)
+
+    def _on_bootstrap_loaded(self, bootstrap: dict[str, Any]) -> None:
         try:
-            self.bootstrap = self.service.dispatch("bootstrap", {})
-            conns = self.bootstrap.get("connections") or []
-            default = self.bootstrap.get("default_connection") or ""
-            self.topbar.set_connections(conns, default)
-            models = self.bootstrap.get("models") or []
-            default_model = str(self.bootstrap.get("default_model") or "default")
-            self.composer.set_models(models, default_model)
-            conn_name = self.current_connection()
-            has_conn = bool(conn_name)
-            self.ask_tab.set_has_connection(has_conn)
-            self.composer.set_disabled_no_connection(not has_conn)
-            if has_conn:
-                self._refresh_connection_context(conn_name)
-            else:
-                self.composer.set_placeholder("Add or select a connection to start")
+            self.bootstrap = bootstrap
+            self._apply_bootstrap_ui()
             self.statusbar.showMessage("Ready")
         except Exception as exc:
             self.fail(exc)
+
+    def _apply_bootstrap_ui(self) -> None:
+        conns = self.bootstrap.get("connections") or []
+        default = self.bootstrap.get("default_connection") or ""
+        self.topbar.set_connections(conns, default)
+        models = self.bootstrap.get("models") or []
+        default_model = str(self.bootstrap.get("default_model") or "default")
+        self.composer.set_models(models, default_model)
+        conn_name = self.current_connection()
+        has_conn = bool(conn_name)
+        self.ask_tab.set_has_connection(has_conn)
+        self.composer.set_disabled_no_connection(not has_conn)
+        if has_conn:
+            self._refresh_connection_context(conn_name)
+        else:
+            self.composer.set_placeholder("Add or select a connection to start")
+
+    def _run_background(
+        self,
+        action: str,
+        payload: dict[str, Any],
+        on_success: Callable[[Any], None],
+        *,
+        on_error: Callable[[object], None] | None = None,
+    ) -> None:
+        worker = ServiceWorker(self.service, action, payload)
+        worker.signals.done.connect(lambda act, result: on_success(result) if act == action else None)
+        if on_error:
+            worker.signals.failed.connect(on_error)
+        else:
+            worker.signals.failed.connect(self._background_failed)
+        self.pool.start(worker)
+
+    def _background_failed(self, exc: object) -> None:
+        self.toast(str(exc))
+
+    def _save_splitter_sizes(self, *_args) -> None:
+        self._settings.setValue("splitter_sizes", self.body_splitter.sizes())
 
     def current_connection(self) -> str:
         return self.topbar.connection.current_value()
@@ -202,27 +243,35 @@ class MainWindow(QMainWindow):
         )
 
     def _load_schema(self, name: str) -> None:
-        try:
-            self.schema_rows = self.service.dispatch("schema_tree", {"name": name})
-            self.sidebar.load_schema(self.schema_rows)
-        except Exception as exc:
-            self.schema_rows = []
-            self.sidebar.load_schema([], error=str(exc))
-            self.toast(f"Schema load failed: {exc}")
-            self.topbar.set_databases([])
-            self.assets_tab.load_schema([])
+        self._run_background(
+            "schema_tree",
+            {"name": name},
+            lambda rows: self._apply_schema_loaded(name, rows),
+            on_error=lambda exc: self._apply_schema_error(str(exc)),
+        )
+
+    def _apply_schema_loaded(self, name: str, rows: list[dict[str, Any]]) -> None:
+        if name != self.current_connection():
             return
+        self.schema_rows = rows
         dbs = [row["name"] for row in self.schema_rows]
         self.topbar.set_databases(dbs)
         self.sidebar.load_schema(self.schema_rows)
         self.assets_tab.load_schema(self.schema_rows)
 
+    def _apply_schema_error(self, message: str) -> None:
+        self.schema_rows = []
+        self.sidebar.load_schema([], error=message)
+        self.topbar.set_databases([])
+        self.assets_tab.load_schema([])
+        self.toast(f"Schema load failed: {message}")
+
     def _load_history(self, name: str) -> None:
-        try:
-            entries = self.service.dispatch("list_history", {"connection_name": name})
-        except Exception:
-            entries = []
-        self.history_tab.load(entries)
+        self._run_background(
+            "list_history",
+            {"connection_name": name},
+            lambda entries: self.history_tab.load(entries if name == self.current_connection() else entries),
+        )
 
     def open_sql(self, sql: str) -> None:
         self.sql_tab.set_sql(sql)
@@ -439,10 +488,14 @@ class MainWindow(QMainWindow):
         worker.signals.progress.connect(self.on_progress)
         worker.signals.done.connect(self.handle_result)
         worker.signals.failed.connect(self.handle_failure)
+        self._current_worker = worker
         self.pool.start(worker)
 
     def stop_task(self) -> None:
-        self.toast("Cancelling is not yet supported for in-flight workflows")
+        if self._current_worker and not self._current_worker.is_cancelled:
+            self._current_worker.cancel()
+            self.toast("Cancelling…")
+            return
         self.running = False
         self.composer.set_running(False)
         self.sql_tab.set_running(False)
@@ -455,6 +508,7 @@ class MainWindow(QMainWindow):
             self.right.trace.append_live(message)
 
     def handle_result(self, action: str, result: Any) -> None:
+        self._current_worker = None
         self.running = False
         self.composer.set_running(False)
         self.sql_tab.set_running(False)
@@ -469,6 +523,11 @@ class MainWindow(QMainWindow):
             return
         if action == "ask":
             self.right.trace.end_live()
+            if str(result.get("status") or "") == "cancelled":
+                if getattr(self.ask_tab, "_turn_open", False):
+                    self.ask_tab.finish_turn_error("**Cancelled**: Task stopped by user.")
+                self.toast("Cancelled")
+                return
             self.ask_tab.append_result(result)
             self.right.show_trace(result.get("trace") or [])
             self.right.show_plan(result)
@@ -512,10 +571,17 @@ class MainWindow(QMainWindow):
             self.toast(str(result.get("message") or "Connection OK"))
 
     def handle_failure(self, exc: object) -> None:
+        self._current_worker = None
         self.running = False
         self.composer.set_running(False)
         self.sql_tab.set_running(False)
         self.right.trace.end_live()
+        if isinstance(exc, CancelledError):
+            if getattr(self.ask_tab, "_turn_open", False):
+                self.ask_tab.finish_turn_error("**Cancelled**: Task stopped by user.")
+            self.toast("Cancelled")
+            self._restore_status_badge()
+            return
         self.fail(exc, modal=self._last_action not in ("ask", "preview_asset", "search_assets"))
         self._restore_status_badge()
 
