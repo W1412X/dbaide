@@ -22,9 +22,8 @@ from dbaide.desktop.components.composer import ComposerWidget
 from dbaide.desktop.dialogs.settings import SettingsDialog
 from dbaide.agent.progress_events import progress_label
 from dbaide.desktop.theme import APP_STYLE
+from dbaide.desktop.service import DesktopService
 from dbaide.desktop.views.ask_tab import AskTab
-from dbaide.desktop.views.assets_tab import AssetsTab
-from dbaide.desktop.views.history_tab import HistoryTab
 from dbaide.desktop.views.right_panel import RightPanel
 from dbaide.desktop.views.sidebar import Sidebar
 from dbaide.desktop.views.sql_tab import SqlTab
@@ -45,7 +44,7 @@ class MainWindow(QMainWindow):
         self._pending_resume: dict[str, Any] | None = None
         self._current_worker: ServiceWorker | None = None
         self._settings = QSettings("DBAide", "DBAide")
-        self._tab_names = ("Ask", "SQL", "Assets", "History")
+        self._tab_names = ("Ask", "SQL")
         self.setWindowTitle("DBAide")
         self.resize(1440, 900)
         self.setMinimumSize(1000, 720)
@@ -75,6 +74,7 @@ class MainWindow(QMainWindow):
         self.sidebar = Sidebar()
         self.sidebar.schema_preview.connect(self.preview_schema)
         self.sidebar.schema_selected.connect(self.open_schema_asset)
+        self.sidebar.semantic_search_requested.connect(self.search_assets)
         self.sidebar.settings_requested.connect(lambda: self.open_settings("connections"))
 
         center = QWidget()
@@ -97,22 +97,14 @@ class MainWindow(QMainWindow):
         self.stack = QStackedWidget()
         self.ask_tab = AskTab()
         self.sql_tab = SqlTab()
-        self.assets_tab = AssetsTab()
-        self.history_tab = HistoryTab()
         self.ask_tab.empty_action.connect(self._empty_action)
         self.ask_tab.open_sql.connect(self.open_sql)
         self.ask_tab.clarification_choice.connect(self._submit_clarification)
         self.sql_tab.validate_requested.connect(self.validate_sql)
         self.sql_tab.explain_requested.connect(self.explain_sql)
         self.sql_tab.run_requested.connect(lambda sql, _action: self.execute_sql(sql))
-        self.assets_tab.asset_selected.connect(self.load_asset)
-        self.assets_tab.search_requested.connect(self.search_assets)
-        self.history_tab.history_selected.connect(self.load_history)
-        self.history_tab.history_preview.connect(self.preview_history)
         self.stack.addWidget(self.ask_tab)
         self.stack.addWidget(self.sql_tab)
-        self.stack.addWidget(self.assets_tab)
-        self.stack.addWidget(self.history_tab)
         center_layout.addWidget(self.stack, 1)
 
         self.composer = ComposerWidget()
@@ -125,6 +117,12 @@ class MainWindow(QMainWindow):
         self.right.copy_trace_requested.connect(self.copy_trace)
         self.right.clear_trace_requested.connect(self.right.clear_all)
         self.right.clear_conversation_requested.connect(self.ask_tab.clear_conversation)
+        self.right.history_selected.connect(self.load_history)
+        self.right.history_preview.connect(self.preview_history)
+        self.right.joins_refresh_requested.connect(self.refresh_joins)
+        self.right.joins_add_requested.connect(self._add_join)
+        self.right.joins_update_requested.connect(self._update_join)
+        self.right.joins_delete_requested.connect(self._delete_join)
 
         body.addWidget(self.sidebar)
         body.addWidget(center)
@@ -239,6 +237,7 @@ class MainWindow(QMainWindow):
         conns = self.bootstrap.get("connections") or []
         self._load_schema(conn_name)
         self._load_history(conn_name)
+        self.refresh_joins()
         asset_status = "missing"
         for c in conns:
             if c["name"] == conn_name:
@@ -270,21 +269,64 @@ class MainWindow(QMainWindow):
         dbs = [row["name"] for row in self.schema_rows]
         self.topbar.set_databases(dbs)
         self.sidebar.load_schema(self.schema_rows)
-        self.assets_tab.load_schema(self.schema_rows)
 
     def _apply_schema_error(self, message: str) -> None:
         self.schema_rows = []
         self.sidebar.load_schema([], error=message)
         self.topbar.set_databases([])
-        self.assets_tab.load_schema([])
         self.toast(f"Schema load failed: {message}")
 
     def _load_history(self, name: str) -> None:
         self._run_background(
             "list_history",
             {"connection_name": name},
-            lambda entries: self.history_tab.load(entries if name == self.current_connection() else entries),
+            lambda entries: self.right.load_history(entries if name == self.current_connection() else entries),
         )
+
+    def refresh_joins(self) -> None:
+        conn = self.current_connection()
+        if not conn:
+            self.right.show_joins([])
+            return
+        try:
+            result = self.service.dispatch("list_joins", {"connection_name": conn})
+            self.right.show_joins(result.get("joins") or [])
+        except Exception as exc:
+            self.toast(str(exc))
+
+    def _add_join(self, payload: dict[str, Any]) -> None:
+        conn = self.current_connection()
+        if not conn:
+            return
+        try:
+            payload = {**payload, "connection_name": conn, "source": "user"}
+            self.service.dispatch("add_join", payload)
+            self.refresh_joins()
+            self.toast("Join saved")
+        except Exception as exc:
+            self.toast(str(exc))
+
+    def _update_join(self, payload: dict[str, Any]) -> None:
+        conn = self.current_connection()
+        if not conn:
+            return
+        try:
+            self.service.dispatch("update_join", {**payload, "connection_name": conn})
+            self.refresh_joins()
+            self.toast("Join updated")
+        except Exception as exc:
+            self.toast(str(exc))
+
+    def _delete_join(self, join_id: str) -> None:
+        conn = self.current_connection()
+        if not conn:
+            return
+        try:
+            self.service.dispatch("delete_join", {"connection_name": conn, "id": join_id})
+            self.refresh_joins()
+            self.toast("Join deleted")
+        except Exception as exc:
+            self.toast(str(exc))
 
     def open_sql(self, sql: str) -> None:
         self.sql_tab.set_sql(sql)
@@ -306,7 +348,7 @@ class MainWindow(QMainWindow):
         self.composer.clear_input()
         self.ask_tab.append_user(question, connection=conn, database=database, policy=policy)
         self.right.trace.begin_live()
-        self.right.tabs.setCurrentWidget(self.right.trace)
+        self.right.focus_trace()
         self.run_action("ask", {
             "connection_name": conn,
             "question": question,
@@ -336,7 +378,7 @@ class MainWindow(QMainWindow):
         self.ask_tab.append_clarification_reply(reply)
         self.ask_tab.append_activity(f"User replied: {reply[:80]}")
         self.right.trace.begin_live()
-        self.right.tabs.setCurrentWidget(self.right.trace)
+        self.right.focus_trace()
         self.run_action("ask", {
             "connection_name": conn,
             "question": original_question,
@@ -377,7 +419,7 @@ class MainWindow(QMainWindow):
         self.topbar.set_asset_status("building")
         self.topbar.set_global_status("Building assets", "building")
         self.right.trace.begin_live()
-        self.right.tabs.setCurrentWidget(self.right.trace)
+        self.right.focus_trace()
         self.run_action("build_assets", {"name": conn})
 
     def add_connection(self, conn_type: str = "sqlite") -> None:
@@ -539,10 +581,8 @@ class MainWindow(QMainWindow):
             self.run_action("asset_markdown", {"path": path})
 
     def load_asset(self, path: str) -> None:
-        if not path:
-            return
-        self.run_action("asset_markdown", {"path": path})
-        self.switch_tab("Assets")
+        if path:
+            self.run_action("asset_markdown", {"path": path})
 
     def search_assets(self, query: str) -> None:
         conn = self.current_connection()
@@ -571,6 +611,7 @@ class MainWindow(QMainWindow):
             })
             self.right.show_trace(entry.get("trace") or [])
             self.right.show_plan(entry)
+            self.right.focus_trace()
             self.toast(f"Preview: {workflow_id}")
         except Exception as exc:
             self.toast(str(exc))
@@ -656,8 +697,7 @@ class MainWindow(QMainWindow):
             self._restore_composer_placeholder()
             return
         if action == "search_assets":
-            self.assets_tab.show_search_hits(self._last_question, result)
-            self.switch_tab("Assets")
+            self.right.show_search_hits(self._last_question, result)
             return
         if action == "preview_asset":
             self.right.show_inspector(
@@ -676,11 +716,10 @@ class MainWindow(QMainWindow):
             self.sql_tab.show_explain(result)
             return
         if action == "asset_markdown":
-            self.assets_tab.show_markdown(result.get("markdown") or "", title=result.get("path") or "Asset")
             self.right.show_inspector(
                 markdown=result.get("markdown") or "",
                 doc=result.get("doc"),
-                focus=False,
+                focus=True,
             )
             return
         if action == "load_history":
@@ -758,6 +797,8 @@ class DBAideDesktop:
     def run(self) -> None:
         app = QApplication.instance() or QApplication(sys.argv)
         app.setApplicationName("DBAide")
+        # Fusion makes global QSS apply consistently on macOS (native style ignores many label rules).
+        app.setStyle("Fusion")
         window = MainWindow(self.service)
         window.show()
         app.exec()

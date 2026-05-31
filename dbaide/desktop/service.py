@@ -5,6 +5,7 @@ from typing import Any, Callable
 
 from dbaide.adapters import build_adapter
 from dbaide.assets import AssetBuilder, AssetSearch, AssetStore
+from dbaide.joins import JoinCatalogStore
 from dbaide.assets.summarizer import (
     render_column_markdown,
     render_database_markdown,
@@ -97,6 +98,7 @@ class DesktopService:
     def __init__(self, cfg: ConfigManager | None = None, store: AssetStore | None = None) -> None:
         self.cfg = cfg or ConfigManager()
         self.store = store or AssetStore()
+        self.join_catalog = JoinCatalogStore()
         self.history = WorkflowHistoryStore()
 
     def dispatch(self, action: str, payload: dict[str, Any] | None = None) -> Any:
@@ -123,6 +125,10 @@ class DesktopService:
             "preview_asset": self.asset_markdown,
             "test_model": self.test_model,
             "test_model_profile": self.test_model_profile,
+            "list_joins": self.list_joins,
+            "add_join": self.add_join,
+            "update_join": self.update_join,
+            "delete_join": self.delete_join,
         }
         if action not in handlers:
             raise ValueError(f"Unknown desktop action: {action}")
@@ -309,7 +315,7 @@ class DesktopService:
             resume_state=payload.get("resume_state"),
             user_reply=str(payload.get("user_reply") or ""),
         )
-        engine = WorkflowEngine(conn, self._safe_llm(), self.store)
+        engine = WorkflowEngine(conn, self._safe_llm(), self.store, self.join_catalog)
         progress_cb = payload.get("progress")
         cancel_check = payload.get("cancel_check")
         result = engine.run(
@@ -452,6 +458,54 @@ class DesktopService:
             password=str(payload.get("password") or ""),
             path=str(payload.get("path") or "").strip(),
         )
+
+    def list_joins(self, payload: dict[str, Any]) -> dict[str, Any]:
+        conn = self.cfg.get_connection(str(payload.get("connection_name") or payload.get("name") or None))
+        tables = payload.get("tables")
+        table_list = [str(t) for t in tables] if isinstance(tables, list) else None
+        joins = self.join_catalog.list_records(
+            conn.name,
+            database=str(payload.get("database") or ""),
+            tables=table_list,
+            min_confidence=float(payload.get("min_confidence") or 0.0),
+            endpoint=payload if payload.get("table") and payload.get("column") else None,
+        )
+        return {"joins": joins, "count": len(joins)}
+
+    def add_join(self, payload: dict[str, Any]) -> dict[str, Any]:
+        conn = self.cfg.get_connection(str(payload.get("connection_name") or payload.get("name") or None))
+        source = str(payload.get("source") or "user")
+        record = self.join_catalog.add(
+            conn.name,
+            payload,
+            source=source,
+            database=str(payload.get("database") or conn.database or ""),
+        )
+        return {"join": record}
+
+    def update_join(self, payload: dict[str, Any]) -> dict[str, Any]:
+        conn = self.cfg.get_connection(str(payload.get("connection_name") or payload.get("name") or None))
+        join_id = str(payload.get("id") or payload.get("join_id") or "")
+        updated = self.join_catalog.update(conn.name, join_id, payload)
+        if updated is None:
+            raise ValueError(f"Join not found: {join_id}")
+        return {"join": updated}
+
+    def delete_join(self, payload: dict[str, Any]) -> dict[str, Any]:
+        conn = self.cfg.get_connection(str(payload.get("connection_name") or payload.get("name") or None))
+        join_id = str(payload.get("id") or payload.get("join_id") or "")
+        endpoint = None
+        if payload.get("table") and payload.get("column") and payload.get("ref_table") and payload.get("ref_column"):
+            endpoint = {
+                "table": payload["table"],
+                "column": payload["column"],
+                "ref_table": payload["ref_table"],
+                "ref_column": payload["ref_column"],
+            }
+        ok = self.join_catalog.delete(conn.name, join_id=join_id, endpoint=endpoint)
+        if not ok:
+            raise ValueError("Join not found")
+        return {"deleted": True}
 
     def _safe_llm(self):
         return build_llm_client(self.cfg.model())

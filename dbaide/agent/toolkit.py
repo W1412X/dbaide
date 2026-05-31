@@ -9,8 +9,16 @@ from dbaide.core.errors import DBAideError, ErrorCode
 from dbaide.core.result import ExecutionPolicy
 from dbaide.models import ColumnInfo
 from dbaide.tools.registry import ToolContext, ToolRegistry, ToolResult
-from dbaide.agent.schema_context import collect_relations, merge_sql_context, validation_feedback
-from dbaide.agent.progress_events import progress_event
+from dbaide.agent.schema_context import (
+    collect_relations,
+    disclosed_schemas_for_tables,
+    join_confidence_for_sql,
+    merge_sql_context,
+    validation_feedback,
+)
+from dbaide.agent.join_validation import validate_join_relations
+from dbaide.joins import JoinCatalogStore, USER_JOIN_CONFIDENCE, catalog_record_to_relation
+from dbaide.agent.progress_events import progress_event, subagent_event
 from dbaide.tools.specs import (
     ASK_USER,
     DESCRIBE_TABLE,
@@ -24,13 +32,39 @@ from dbaide.tools.specs import (
     LIST_TABLES,
     PROFILE_TABLE,
     SYNTHESIZE_SCHEMA_ANSWER,
+    VALIDATE_JOINS,
     VALIDATE_SQL,
+    LIST_JOINS,
+    ADD_JOIN,
+    UPDATE_JOIN,
+    DELETE_JOIN,
 )
 
 if TYPE_CHECKING:
     from dbaide.agent.orchestrator import AskOrchestrator
 
 logger = logging.getLogger("dbaide.agent.toolkit")
+
+# Tools exposed to the Ask loop LLM (catalog CRUD stays on GUI/service only).
+LOOP_DECISION_TOOL_NAMES = frozenset({
+    "discover_schema",
+    "synthesize_schema_answer",
+    "list_databases",
+    "list_tables",
+    "describe_table",
+    "get_relations",
+    "generate_sql",
+    "validate_sql",
+    "execute_sql",
+    "execute_readonly_sql",
+    "explain_sql",
+    "profile_table",
+    "ask_user",
+})
+
+
+def loop_tool_specs(registry: ToolRegistry) -> list:
+    return [s for s in registry.list_specs() if s.name in LOOP_DECISION_TOOL_NAMES]
 
 
 def build_tool_registry(orchestrator: AskOrchestrator) -> ToolRegistry:
@@ -42,17 +76,8 @@ def build_tool_registry(orchestrator: AskOrchestrator) -> ToolRegistry:
         if not question:
             return ToolResult(ok=False, error=_err("discover_schema", "question is required"))
         try:
-            discovery = orchestrator._discover(question)
+            discovery = orchestrator._discover(question, parent="discover_schema")
             orchestrator._loop_discovery = discovery
-            for note in discovery.trace:
-                orchestrator.progress(
-                    progress_event(
-                        stage="discover_schema",
-                        title=note,
-                        status="info",
-                        kind="substep",
-                    )
-                )
             hits = [
                 {"kind": h.kind, "path": h.path, "name": h.name, "database": h.database, "summary": h.summary[:240]}
                 for h in discovery.hits
@@ -69,9 +94,14 @@ def build_tool_registry(orchestrator: AskOrchestrator) -> ToolRegistry:
         if not question:
             return ToolResult(ok=False, error=_err("synthesize_schema_answer", "question is required"))
         try:
-            discovery = orchestrator._loop_discovery or orchestrator._discover(question)
+            discovery = orchestrator._loop_discovery or orchestrator._discover(question, parent="synthesize_schema_answer")
             agent = ProgressiveSchemaAgent(orchestrator.llm, orchestrator.asset_store, orchestrator.instance)
-            answer = agent.synthesize_answer(question, discovery)
+            answer = agent.synthesize_answer(
+                question,
+                discovery,
+                progress=orchestrator.progress,
+                parent="synthesize_schema_answer",
+            )
             orchestrator._loop_answer = answer
             return ToolResult(ok=True, data={"answer": answer})
         except Exception as exc:
@@ -133,9 +163,108 @@ def build_tool_registry(orchestrator: AskOrchestrator) -> ToolRegistry:
                 targets.append((database_default, table))
         if not targets:
             return ToolResult(ok=False, error=_err("get_relations", "tables required (describe_table first)"))
-        relations = collect_relations(orchestrator, targets)
+        schemas = disclosed_schemas_for_tables(orchestrator, targets)
+        sample_size = int(args.get("sample_size") or 150)
+        relations = collect_relations(
+            orchestrator,
+            targets,
+            question=orchestrator._loop_question,
+            disclosed_schemas=schemas,
+            sample_size=sample_size,
+            parent="get_relations",
+        )
         orchestrator._loop_relations = relations
-        return ToolResult(ok=True, data={"relations": relations, "count": len(relations)})
+        _persist_agent_joins(orchestrator, relations, database=targets[0][0] if targets else "")
+        return ToolResult(ok=True, data=_relations_payload(relations))
+
+    def _validate_joins(args: dict[str, Any], _ctx: ToolContext) -> ToolResult:
+        relations = list(orchestrator._loop_relations or [])
+        if not relations:
+            return ToolResult(ok=False, error=_err("validate_joins", "no relations; call get_relations first"))
+        targets = _targets_from_relations(orchestrator, relations)
+        if len({t for _, t in targets}) < 2:
+            return ToolResult(ok=False, error=_err("validate_joins", "need at least two tables"))
+        schemas = disclosed_schemas_for_tables(orchestrator, targets)
+        sample_size = int(args.get("sample_size") or 150)
+        validated = validate_join_relations(
+            orchestrator,
+            relations,
+            schemas,
+            sample_size=sample_size,
+            parent="validate_joins",
+        )
+        orchestrator._loop_relations = validated
+        _persist_agent_joins(orchestrator, validated, database=targets[0][0] if targets else "")
+        return ToolResult(ok=True, data=_relations_payload(validated))
+
+    def _list_joins(args: dict[str, Any], _ctx: ToolContext) -> ToolResult:
+        database = str(args.get("database") or orchestrator._loop_database or "")
+        tables_arg = args.get("tables")
+        tables: list[str] | None = None
+        if isinstance(tables_arg, list):
+            tables = [str(t).strip() for t in tables_arg if str(t).strip()]
+        min_conf = float(args.get("min_confidence") or 0.0)
+        endpoint = args if args.get("table") and args.get("column") else None
+        records = orchestrator.join_catalog.list_records(
+            orchestrator.instance,
+            database=database,
+            tables=tables,
+            min_confidence=min_conf,
+            endpoint=endpoint,
+        )
+        return ToolResult(ok=True, data={"joins": records, "count": len(records)})
+
+    def _add_join(args: dict[str, Any], _ctx: ToolContext) -> ToolResult:
+        required = ("table", "column", "ref_table", "ref_column")
+        missing = [k for k in required if not str(args.get(k) or "").strip()]
+        if missing:
+            return ToolResult(ok=False, error=_err("add_join", f"missing: {', '.join(missing)}"))
+        database = str(args.get("database") or orchestrator._loop_database or "")
+        source = str(args.get("source") or "user").strip().lower()
+        if source not in {"user", "agent"}:
+            source = "user"
+        rel = {
+            "table": str(args["table"]).strip(),
+            "column": str(args["column"]).strip(),
+            "ref_table": str(args["ref_table"]).strip(),
+            "ref_column": str(args["ref_column"]).strip(),
+            "join_type": str(args.get("join_type") or ""),
+            "reason": str(args.get("reason") or ""),
+            "confidence": USER_JOIN_CONFIDENCE if source == "user" else float(args.get("confidence") or 0.7),
+        }
+        record = orchestrator.join_catalog.add(
+            orchestrator.instance,
+            rel,
+            source=source,
+            database=database,
+        )
+        return ToolResult(ok=True, data={"join": record, "relation": catalog_record_to_relation(record)})
+
+    def _update_join(args: dict[str, Any], _ctx: ToolContext) -> ToolResult:
+        join_id = str(args.get("id") or args.get("join_id") or "").strip()
+        if not join_id:
+            return ToolResult(ok=False, error=_err("update_join", "id is required"))
+        updated = orchestrator.join_catalog.update(orchestrator.instance, join_id, args)
+        if updated is None:
+            return ToolResult(ok=False, error=_err("update_join", f"join not found: {join_id}"))
+        return ToolResult(ok=True, data={"join": updated, "relation": catalog_record_to_relation(updated)})
+
+    def _delete_join(args: dict[str, Any], _ctx: ToolContext) -> ToolResult:
+        join_id = str(args.get("id") or args.get("join_id") or "").strip()
+        endpoint = None
+        if args.get("table") and args.get("column") and args.get("ref_table") and args.get("ref_column"):
+            endpoint = {
+                "table": args["table"],
+                "column": args["column"],
+                "ref_table": args["ref_table"],
+                "ref_column": args["ref_column"],
+            }
+        if not join_id and not endpoint:
+            return ToolResult(ok=False, error=_err("delete_join", "id or full endpoint required"))
+        ok = orchestrator.join_catalog.delete(orchestrator.instance, join_id=join_id, endpoint=endpoint)
+        if not ok:
+            return ToolResult(ok=False, error=_err("delete_join", "join not found"))
+        return ToolResult(ok=True, data={"deleted": True, "id": join_id or "endpoint"})
 
     def _generate_sql(args: dict[str, Any], _ctx: ToolContext) -> ToolResult:
         question = str(args.get("question") or orchestrator._loop_question or "").strip()
@@ -144,9 +273,27 @@ def build_tool_registry(orchestrator: AskOrchestrator) -> ToolRegistry:
             return ToolResult(ok=False, error=_err("generate_sql", "table is required (describe_table first)"))
         try:
             targets = [(db, table) for db, table, _ in disclosed]
-            relations = orchestrator._loop_relations or collect_relations(orchestrator, targets)
+            relations = list(orchestrator._loop_relations or [])
+            if not relations and len(targets) >= 2:
+                relations = collect_relations(
+                    orchestrator,
+                    targets,
+                    question=question,
+                    disclosed_schemas=disclosed,
+                    parent="generate_sql",
+                )
+                orchestrator._loop_relations = relations
             ctx = merge_sql_context(orchestrator.session.disclosure.summary(), relations)
             feedback = orchestrator._loop_sql_feedback
+            table_names = ", ".join(t for _, t, _ in disclosed)
+            orchestrator.progress(
+                subagent_event(
+                    agent="sql_writer",
+                    title="Generating SQL",
+                    parent="generate_sql",
+                    detail=table_names,
+                ),
+            )
             if len(disclosed) == 1:
                 database, table, columns = disclosed[0]
                 draft = orchestrator.sql_writer.write(
@@ -167,6 +314,15 @@ def build_tool_registry(orchestrator: AskOrchestrator) -> ToolRegistry:
             orchestrator._loop_sql = draft.sql
             orchestrator._loop_sql_rationale = draft.rationale
             orchestrator._loop_sql_confidence = draft.confidence
+            orchestrator.progress(
+                subagent_event(
+                    agent="sql_writer",
+                    title="SQL draft ready",
+                    parent="generate_sql",
+                    detail=draft.rationale[:160] if draft.rationale else "",
+                    status="completed",
+                ),
+            )
             tables_used = [t for _, t, _ in disclosed]
             if tables_used:
                 orchestrator._loop_table = tables_used[0]
@@ -226,12 +382,28 @@ def build_tool_registry(orchestrator: AskOrchestrator) -> ToolRegistry:
 
         validation_report = orchestrator.query.validate_sql_report(validation.normalized_sql, add_limit=False)
         confidence = float(orchestrator._loop_sql_confidence or 0.7)
+        has_joins = " join " in validation.normalized_sql.lower()
+        join_conf = (
+            join_confidence_for_sql(orchestrator._loop_relations, validation.normalized_sql)
+            if has_joins
+            else 1.0
+        )
         risk = orchestrator.risk.decide(
             policy=policy,
             validation=validation_report,
             plan_confidence=confidence,
             table_count=max(1, len(_tables_in_sql(validation.normalized_sql))),
-            has_joins=" join " in validation.normalized_sql.lower(),
+            has_joins=has_joins,
+            join_confidence=join_conf,
+        )
+        orchestrator.progress(
+            subagent_event(
+                agent="risk",
+                title=f"Risk: {risk.action}",
+                parent="execute_sql",
+                detail=risk.reason,
+                status="completed" if risk.action == "auto_execute" else "info",
+            ),
         )
         if risk.action != "auto_execute":
             return ToolResult(
@@ -313,6 +485,11 @@ def build_tool_registry(orchestrator: AskOrchestrator) -> ToolRegistry:
     registry.register(LIST_TABLES, _list_tables)
     registry.register(DESCRIBE_TABLE, _describe_table)
     registry.register(GET_RELATIONS, _get_relations)
+    registry.register(VALIDATE_JOINS, _validate_joins)
+    registry.register(LIST_JOINS, _list_joins)
+    registry.register(ADD_JOIN, _add_join)
+    registry.register(UPDATE_JOIN, _update_join)
+    registry.register(DELETE_JOIN, _delete_join)
     registry.register(GENERATE_SQL, _generate_sql)
     registry.register(VALIDATE_SQL, _validate_sql)
     registry.register(EXECUTE_READONLY_SQL, _execute_sql)
@@ -321,6 +498,68 @@ def build_tool_registry(orchestrator: AskOrchestrator) -> ToolRegistry:
     registry.register(PROFILE_TABLE, _profile_table)
     registry.register(ASK_USER, _ask_user)
     return registry
+
+
+def _persist_agent_joins(
+    orchestrator: AskOrchestrator,
+    relations: list[dict[str, Any]],
+    *,
+    database: str = "",
+) -> None:
+    catalog = getattr(orchestrator, "join_catalog", None)
+    if catalog is None:
+        return
+    try:
+        saved = catalog.persist_agent_candidates(
+            orchestrator.instance,
+            relations,
+            database=database or orchestrator._loop_database or "",
+        )
+        if saved:
+            orchestrator.progress(
+                subagent_event(
+                    agent="join_catalog",
+                    title=f"Saved {len(saved)} join candidate(s)",
+                    parent="get_relations",
+                ),
+            )
+    except Exception as exc:
+        logger.warning("persist_agent_joins_failed: %s", exc)
+
+
+def _relations_payload(relations: list[dict[str, Any]]) -> dict[str, Any]:
+    declared = sum(1 for r in relations if str(r.get("source") or "") in {"foreign_key", "agent", "user"})
+    semantic = sum(1 for r in relations if r.get("source") == "semantic")
+    catalog = sum(1 for r in relations if r.get("catalog") or str(r.get("source") or "") in {"user", "agent"})
+    validated = sum(1 for r in relations if float(r.get("confidence") or 0) >= 0.35)
+    return {
+        "relations": relations,
+        "count": len(relations),
+        "declared_count": declared,
+        "semantic_count": semantic,
+        "catalog_count": catalog,
+        "validated_count": validated,
+    }
+
+
+def _targets_from_relations(orchestrator: AskOrchestrator, relations: list[dict[str, Any]]) -> list[tuple[str, str]]:
+    db_default = orchestrator._loop_table_database or orchestrator._loop_database or ""
+    names: set[str] = set()
+    for rel in relations:
+        for key in ("table", "ref_table"):
+            name = str(rel.get(key) or "").strip()
+            if name:
+                names.add(name)
+    targets: list[tuple[str, str]] = []
+    for name in sorted(names):
+        db = db_default
+        for schema_key, schema_db in orchestrator._loop_schema_db.items():
+            table_part = schema_key.split(".", 1)[1] if "." in schema_key else schema_key
+            if table_part == name or schema_key == name:
+                db = schema_db
+                break
+        targets.append((db, name))
+    return targets
 
 
 def _schema_key(database: str, table: str) -> str:

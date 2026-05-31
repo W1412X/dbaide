@@ -9,8 +9,9 @@ from typing import Any, Callable
 
 from dbaide.agent.loop_state import dump_loop_state, restore_loop_state
 from dbaide.agent.progress_events import brief_tool_summary, from_trace_event, progress_event, progress_label
+from dbaide.agent.schema_context import disclosed_table_keys
 from dbaide.agent.runtime import AgentRuntime
-from dbaide.agent.toolkit import build_tool_registry
+from dbaide.agent.toolkit import build_tool_registry, loop_tool_specs
 from dbaide.core.events import TraceEvent, TraceKind, TraceLevel
 from dbaide.core.result import ExecutionPolicy
 from dbaide.llm import LLMMessage
@@ -22,7 +23,7 @@ if True:  # TYPE_CHECKING without circular import at runtime
 
 logger = logging.getLogger("dbaide.agent.loop")
 
-DECISION_RETRIES = 2
+DECISION_RETRIES = 3
 RESULT_PREVIEW_LIMIT = 3500
 
 
@@ -107,6 +108,7 @@ class AskAgentLoop:
                 decision = self._decide(state, transcript)
             except LoopDecisionError as exc:
                 logger.warning("loop_decision_failed: %s", exc)
+                self._fail(f"decision_invalid: {exc}")
                 return None
 
             action = str(decision.get("action") or "").strip().lower()
@@ -115,6 +117,7 @@ class AskAgentLoop:
                 if not answer or answer == "Query complete.":
                     answer = self._answer_from_state(orch)
                 if not answer:
+                    self._fail("finish_empty_answer")
                     return None
                 self.progress(
                     progress_event(stage="loop", title="Agent loop finished", status="completed", kind="agent"),
@@ -123,6 +126,7 @@ class AskAgentLoop:
 
             if action != "call_tool":
                 logger.warning("loop_unknown_action: %s", action)
+                self._fail(f"unknown_action: {action}")
                 return None
 
             tool_name = str(decision.get("tool") or "").strip()
@@ -165,6 +169,16 @@ class AskAgentLoop:
             if tool_name == "ask_user" and result.ok and isinstance(result.data, dict) and result.data.get("pending"):
                 return self._build_wait_response(orch, state, transcript, disclosures_before or [])
 
+            if tool_name == "describe_table" and result.ok:
+                auto = self._auto_get_relations_if_needed(state, runtime, tool_ctx)
+                if auto is not None:
+                    summary = _summarize_tool_result("get_relations", auto)
+                    brief = brief_tool_summary("get_relations", auto)
+                    state.calls.append(
+                        ToolCallRecord(tool="get_relations", args={}, ok=auto.ok, summary=summary),
+                    )
+                    transcript.append(f"Tool `get_relations` (auto) → {summary}")
+
             if tool_name == "execute_sql" and result.ok:
                 break
             if tool_name == "execute_sql" and isinstance(result.data, dict) and result.data.get("blocked"):
@@ -192,10 +206,51 @@ class AskAgentLoop:
                 return self._build_response(orch, answer, disclosures_before or [])
 
         logger.warning("loop_budget_exhausted steps=%d", len(state.calls))
+        self._fail("step_budget_exhausted")
         return None
 
+    def _fail(self, reason: str) -> None:
+        self.orchestrator._loop_fail_reason = reason
+
+    def _auto_get_relations_if_needed(
+        self,
+        state: LoopState,
+        runtime: AgentRuntime,
+        tool_ctx: ToolContext,
+    ) -> ToolResult | None:
+        """Codex-style deterministic step: load FKs once multiple tables are disclosed."""
+        orch = self.orchestrator
+        tables = disclosed_table_keys(orch)
+        if len(tables) < 2:
+            return None
+        for call in state.calls:
+            if call.tool == "get_relations" and call.ok:
+                return None
+        self.progress(
+            progress_event(
+                stage="get_relations",
+                title="Auto: loading foreign-key relations",
+                status="running",
+                kind="decision",
+                detail=", ".join(f"{db}.{t}" for db, t in tables),
+            ),
+        )
+        result = runtime.call_tool("get_relations", {}, tool_ctx)
+        brief = brief_tool_summary("get_relations", result)
+        self.progress(
+            progress_event(
+                stage="get_relations",
+                title="get_relations done (auto)",
+                status="completed" if result.ok else "failed",
+                kind="tool",
+                detail=brief,
+                duration_ms=float(getattr(result, "duration_ms", 0) or 0),
+            ),
+        )
+        return result
+
     def _decide(self, state: LoopState, transcript: list[str]) -> dict[str, Any]:
-        tools = self.registry.list_specs()
+        tools = loop_tool_specs(self.registry)
         tool_lines = "\n".join(f"- {s.name}: {s.description}" for s in tools)
         policy = self.orchestrator.execution_policy.value
         execute_note = "allowed" if state.execute_allowed else "disabled"
@@ -215,7 +270,9 @@ class AskAgentLoop:
             " → get_relations (when multiple tables) → generate_sql → validate_sql"
             + (" → execute_sql → finish" if state.execute_allowed and policy not in ("sql_only", "inspect_only") else " → finish")
             + "\n"
-            "- Multi-table: describe every needed table; get_relations loads declared FKs; generate_sql uses all disclosed tables.\n"
+            "- Multi-table: describe tables → get_relations (auto after 2+ tables; catalog + FK + LLM hints) → generate_sql.\n"
+            "- get_relations already includes sample evidence; do not call validate_joins unless user explicitly asks to re-check joins.\n"
+            "- Saved joins (user catalog) are loaded automatically inside get_relations — no join CRUD during queries.\n"
             "- If schema is ambiguous or multiple valid interpretations exist, call ask_user with optional options before guessing.\n"
             "- ask_user pauses the run until the user replies; the next user message resumes the same workflow.\n"
             "- If validate_sql reports unknown tables/columns, describe_table then retry generate_sql.\n"

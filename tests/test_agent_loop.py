@@ -1,10 +1,12 @@
 import sqlite3
 
 from dbaide.adapters import build_adapter
-from dbaide.agent.loop import AskAgentLoop
+from dbaide.agent.loop import AskAgentLoop, LoopState, ToolCallRecord
 from dbaide.agent.orchestrator import AskOrchestrator
+from dbaide.agent.runtime import AgentRuntime
 from dbaide.agent.toolkit import build_tool_registry
-from dbaide.models import ConnectionConfig
+from dbaide.core.result import ExecutionPolicy
+from dbaide.models import ColumnInfo, ConnectionConfig
 from dbaide.session import Session
 from dbaide.tools.registry import ToolContext
 from tests.llm_mock import AgentMockLLM
@@ -80,3 +82,40 @@ def test_orchestrator_uses_loop_before_staged(tmp_path):
     orch = AskOrchestrator(adapter, session, AgentMockLLM())
     response = orch.run("和产线相关的表")
     assert response.answer
+
+
+def test_auto_get_relations_after_multi_describe(tmp_path):
+    db = tmp_path / "multi.db"
+    conn = sqlite3.connect(db)
+    conn.executescript(
+        """
+        CREATE TABLE assets (id INTEGER PRIMARY KEY, name TEXT);
+        CREATE TABLE asset_sensors (id INTEGER PRIMARY KEY, asset_id INTEGER);
+        """
+    )
+    conn.commit()
+    conn.close()
+    cfg = ConnectionConfig(name="local", type="sqlite", path=str(db))
+    adapter = build_adapter(cfg)
+    session = Session(connection=cfg)
+    orch = AskOrchestrator(adapter, session, AgentMockLLM())
+    orch._reset_loop_state("sensor query", "", True)
+    orch._loop_schemas = {
+        "assets": [ColumnInfo(name="id", data_type="INTEGER", primary_key=True)],
+        "asset_sensors": [ColumnInfo(name="asset_id", data_type="INTEGER")],
+    }
+    orch._loop_schema_db = {"assets": "", "asset_sensors": ""}
+    loop = AskAgentLoop(orch)
+    state = LoopState(question="sensor query", database="", execute_allowed=True)
+    registry = build_tool_registry(orch)
+    runtime = AgentRuntime(
+        llm=orch.llm,
+        tool_registry=registry,
+        execution_policy=ExecutionPolicy.SAFE_AUTO,
+    )
+    ctx = ToolContext()
+    first = loop._auto_get_relations_if_needed(state, runtime, ctx)
+    assert first is not None
+    assert first.ok
+    state.calls.append(ToolCallRecord(tool="get_relations", args={}, ok=True, summary="ok"))
+    assert loop._auto_get_relations_if_needed(state, runtime, ctx) is None

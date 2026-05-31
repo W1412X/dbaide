@@ -15,7 +15,7 @@ from PyQt6.QtWidgets import (
 )
 
 from dbaide.desktop.components.base import compact_button
-from dbaide.desktop.components.inputs import configure_form
+from dbaide.desktop.components.inputs import FORM_INNER_LABEL_RULES, configure_form, form_label
 from dbaide.desktop.theme import Theme
 
 
@@ -33,7 +33,9 @@ class ConnectionForm(QWidget):
         scroll.setFrameShape(QFrame.Shape.NoFrame)
         inner = QWidget()
         inner.setObjectName("connFormInner")
-        inner.setStyleSheet(f"QWidget#connFormInner {{ background: {Theme.BG}; }}")
+        inner.setStyleSheet(
+            f"QWidget#connFormInner {{ background: {Theme.BG}; }}{FORM_INNER_LABEL_RULES}"
+        )
         form = QFormLayout(inner)
         configure_form(form)
 
@@ -69,14 +71,14 @@ class ConnectionForm(QWidget):
         path_layout.addWidget(self.path, 1)
         path_layout.addWidget(browse)
 
-        form.addRow("Name", self.name)
-        form.addRow("Type", self.type_select)
-        form.addRow("SQLite path", path_row)
-        form.addRow("Host", self.host)
-        form.addRow("Port", self.port)
-        form.addRow("Database", self.database)
-        form.addRow("User", self.user)
-        form.addRow("Password", self.password)
+        form.addRow(form_label("Name"), self.name)
+        form.addRow(form_label("Type"), self.type_select)
+        form.addRow(form_label("SQLite path"), path_row)
+        form.addRow(form_label("Host"), self.host)
+        form.addRow(form_label("Port"), self.port)
+        form.addRow(form_label("Database"), self.database)
+        form.addRow(form_label("User"), self.user)
+        form.addRow(form_label("Password"), self.password)
         scroll.setWidget(inner)
         outer.addWidget(scroll)
 

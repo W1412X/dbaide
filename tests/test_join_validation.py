@@ -1,0 +1,145 @@
+"""Tests for join type classification and sample validation."""
+
+from __future__ import annotations
+
+import sqlite3
+
+from dbaide.adapters import build_adapter
+from dbaide.agent.join_validation import (
+    JoinSampleValidator,
+    classify_join_type,
+    type_alignment_score,
+)
+from dbaide.agent.orchestrator import AskOrchestrator
+from dbaide.agent.toolkit import build_tool_registry
+from dbaide.llm import LLMClient, LLMMessage
+from dbaide.models import ColumnInfo, ConnectionConfig
+from dbaide.session import Session
+from dbaide.tools.registry import ToolContext
+
+
+class JoinInferMockLLM(LLMClient):
+    def complete_json(self, messages: list[LLMMessage], *, schema_hint: str = "") -> dict:
+        system = messages[0].content if messages else ""
+        if "infer JOIN relationships" in system:
+            return {
+                "joins": [
+                    {
+                        "left_table": "asset_sensors",
+                        "left_column": "asset_id",
+                        "right_table": "assets",
+                        "right_column": "id",
+                        "confidence": 0.9,
+                        "reason": "sensor belongs to asset",
+                    }
+                ]
+            }
+        return {}
+
+    def complete_text(self, messages: list[LLMMessage]) -> str:
+        return "ok"
+
+
+def seed_asset_sensor_db(path):
+    conn = sqlite3.connect(path)
+    conn.executescript(
+        """
+        CREATE TABLE assets (
+            id INTEGER PRIMARY KEY,
+            name TEXT
+        );
+        CREATE TABLE asset_sensors (
+            id INTEGER PRIMARY KEY,
+            asset_id INTEGER,
+            reading REAL
+        );
+        INSERT INTO assets VALUES (1, 'pump'), (2, 'valve');
+        INSERT INTO asset_sensors VALUES (10, 1, 1.1), (11, 1, 1.2), (12, 2, 2.1);
+        """
+    )
+    conn.commit()
+    conn.close()
+
+
+def test_type_alignment_score():
+    assert type_alignment_score("INTEGER", "BIGINT") >= 0.85
+    assert type_alignment_score("VARCHAR(50)", "TEXT") >= 0.85
+    assert type_alignment_score("BLOB", "INTEGER") < 0.5
+    assert type_alignment_score("BLOB", "INTEGER") > 0.0
+
+
+def test_classify_join_type():
+    assert classify_join_type(max_right_per_left=1, max_left_per_right=1) == "one_to_one"
+    assert classify_join_type(max_right_per_left=3, max_left_per_right=1) == "one_to_many"
+    assert classify_join_type(max_right_per_left=1, max_left_per_right=4) == "many_to_one"
+    assert classify_join_type(max_right_per_left=2, max_left_per_right=3) == "many_to_many"
+
+
+def test_sample_validation_many_to_one(tmp_path):
+    db = tmp_path / "linked.db"
+    seed_asset_sensor_db(db)
+    conn = ConnectionConfig(name="local", type="sqlite", path=str(db))
+    adapter = build_adapter(conn)
+    orch = AskOrchestrator(adapter, Session(connection=conn), JoinInferMockLLM())
+    disclosed = [
+        ("", "assets", [ColumnInfo(name="id", data_type="INTEGER", primary_key=True)]),
+        ("", "asset_sensors", [ColumnInfo(name="asset_id", data_type="INTEGER")]),
+    ]
+    rel = {
+        "table": "asset_sensors",
+        "column": "asset_id",
+        "ref_table": "assets",
+        "ref_column": "id",
+        "source": "semantic",
+    }
+    validator = JoinSampleValidator(orch, sample_size=50)
+    out = validator.validate_one(rel, col_types={
+        ("assets", "id"): "INTEGER",
+        ("asset_sensors", "asset_id"): "INTEGER",
+    }, table_db={"assets": "", "asset_sensors": ""})
+    assert out["validated"] is True
+    assert out["join_type"] == "many_to_one"
+    assert out["validation"]["match_rate"] >= 0.45
+
+
+def test_validate_joins_tool(tmp_path):
+    db = tmp_path / "linked.db"
+    seed_asset_sensor_db(db)
+    conn = ConnectionConfig(name="local", type="sqlite", path=str(db))
+    adapter = build_adapter(conn)
+    orch = AskOrchestrator(adapter, Session(connection=conn), JoinInferMockLLM())
+    registry = build_tool_registry(orch)
+    ctx = ToolContext()
+    orch._reset_loop_state("sensor stats", "", True)
+    registry.invoke("describe_table", {"table": "assets"}, ctx)
+    registry.invoke("describe_table", {"table": "asset_sensors"}, ctx)
+    rel_result = registry.invoke("get_relations", {}, ctx)
+    assert rel_result.ok
+    assert rel_result.data["validated_count"] >= 1
+    rels = rel_result.data["relations"]
+    assert rels[0].get("join_type") in {"many_to_one", "one_to_many", "one_to_one"}
+    revalidate = registry.invoke("validate_joins", {"sample_size": 80}, ctx)
+    assert revalidate.ok
+    assert revalidate.data["validated_count"] >= 1
+
+
+def test_incompatible_types_keep_low_confidence(tmp_path):
+    db = tmp_path / "badtypes.db"
+    sqlite3.connect(db).close()
+    cfg = ConnectionConfig(name="local", type="sqlite", path=str(db))
+    orch = AskOrchestrator(build_adapter(cfg), Session(connection=cfg), JoinInferMockLLM())
+    rel = {
+        "table": "a",
+        "column": "blob_col",
+        "ref_table": "b",
+        "ref_column": "id",
+        "source": "semantic",
+        "confidence": 0.7,
+    }
+    validator = JoinSampleValidator(orch)
+    out = validator.validate_one(
+        rel,
+        col_types={("a", "blob_col"): "BLOB", ("b", "id"): "INTEGER"},
+    )
+    assert float(out.get("confidence") or 0) < float(rel["confidence"])
+    assert out["validation"]["type_alignment"] < 0.5

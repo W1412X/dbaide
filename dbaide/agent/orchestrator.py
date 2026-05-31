@@ -13,6 +13,8 @@ from dbaide.agent.answerer import AnswerFormatter
 from dbaide.agent.controllers import ErrorRouter, ResultInterpreter, RiskController
 from dbaide.agent.schema_context import (
     collect_relations,
+    disclosed_table_keys,
+    join_confidence_for_sql,
     merge_sql_context,
     table_targets_from_discovery,
     validation_feedback,
@@ -21,6 +23,7 @@ from dbaide.agent.progress_events import progress_event
 from dbaide.agent.progressive_schema import ModelRequiredError, ProgressiveSchemaAgent
 from dbaide.agent.router import TaskRouter
 from dbaide.agent.sql_writer import SQLWriter
+from dbaide.joins import JoinCatalogStore
 from dbaide.assets import AssetStore
 from dbaide.core.errors import DBAideError, ErrorCode
 from dbaide.core.result import ExecutionPolicy, ValidationReport
@@ -65,6 +68,7 @@ class AskOrchestrator:
         llm: LLMClient | None = None,
         *,
         asset_store: AssetStore | None = None,
+        join_catalog: JoinCatalogStore | None = None,
         execution_policy: ExecutionPolicy = ExecutionPolicy.SAFE_AUTO,
         progress: Callable[[Any], None] | None = None,
     ) -> None:
@@ -73,6 +77,7 @@ class AskOrchestrator:
         self.instance = session.connection.name
         self.llm = llm or NullLLMClient()
         self.asset_store = asset_store or AssetStore()
+        self.join_catalog = join_catalog or JoinCatalogStore()
         self.execution_policy = execution_policy
         self.progress = progress or (lambda _msg: None)
 
@@ -114,6 +119,7 @@ class AskOrchestrator:
         self._loop_sql_feedback = ""
         self._loop_pending_question = ""
         self._loop_pending_options = []
+        self._loop_fail_reason = ""
 
     def run(
         self,
@@ -152,10 +158,12 @@ class AskOrchestrator:
                 return loop_response
         except Exception as exc:
             logger.warning("agent_loop_failed: %s", exc, exc_info=True)
+            self._loop_fail_reason = self._loop_fail_reason or f"exception: {exc}"
 
         logger.info("agent_loop_fallback_to_staged question=%s", question[:80])
         staged = self._run_staged(question, database=database, execute=execute, disclosures=disclosures)
-        staged.warnings.append("Agent used staged pipeline (tool loop unavailable).")
+        reason = (self._loop_fail_reason or "unknown").strip()
+        staged.warnings.append(f"Tool loop unavailable ({reason}); using staged pipeline.")
         return staged
 
     def _run_staged(self, question: str, *, database: str = "", execute: bool, disclosures: list[str]) -> AssistantResponse:
@@ -219,9 +227,15 @@ class AskOrchestrator:
                 warnings=self._collect_warnings(ctx),
             )
 
-    def _discover(self, question: str):
+    def _discover(self, question: str, *, parent: str = ""):
         agent = ProgressiveSchemaAgent(self.llm, self.asset_store, self.instance)
-        return agent.discover(question, schema_tools=self.schema)
+        progress_cb = self.progress if parent else None
+        return agent.discover(
+            question,
+            schema_tools=self.schema,
+            progress=progress_cb,
+            parent=parent,
+        )
 
     def _pick_table(self, question: str, active_database: str) -> tuple[str, str]:
         try:
@@ -325,9 +339,22 @@ class AskOrchestrator:
         self, ctx: AgentContext, disclosures: list[str], active_database: str,
         execute: bool, start: float,
     ) -> AssistantResponse:
-        self._step(ctx, "discover", "Progressive schema discovery…")
-        discovery = self._discover(ctx.question)
-        targets = table_targets_from_discovery(discovery, active_database)
+        discovery = None
+        targets: list[tuple[str, str]] = []
+        loop_tables = disclosed_table_keys(self)
+
+        if self._loop_discovery and self._loop_discovery.hits:
+            discovery = self._loop_discovery
+            self._step(ctx, "discover", f"Reusing tool-loop discovery ({len(discovery.hits)} hit(s))")
+            targets = table_targets_from_discovery(discovery, active_database)
+        elif loop_tables:
+            self._step(ctx, "discover", f"Reusing {len(loop_tables)} table(s) from tool loop")
+            targets = loop_tables
+        else:
+            self._step(ctx, "discover", "Progressive schema discovery…")
+            discovery = self._discover(ctx.question)
+            targets = table_targets_from_discovery(discovery, active_database)
+
         if not targets:
             table, table_database = self._pick_table(ctx.question, active_database)
             if table:
@@ -344,6 +371,18 @@ class AskOrchestrator:
 
         disclosed: list[tuple[str, str, list[ColumnInfo]]] = []
         for database, table in targets:
+            schema_key = f"{database}.{table}" if database else table
+            cached = self._loop_schemas.get(schema_key)
+            if cached is None:
+                for key, columns in self._loop_schemas.items():
+                    if key == table or key.endswith(f".{table}"):
+                        cached = columns
+                        database = self._loop_schema_db.get(key, database)
+                        break
+            if cached is not None:
+                self._step(ctx, "describe", f"Reusing schema for {database}.{table}")
+                disclosed.append((database, table, cached))
+                continue
             self._step(ctx, "describe", f"Describing table {database}.{table}…")
             columns = self.schema.describe_table(table, database=database)
             disclosed.append((database, table, columns))
@@ -351,7 +390,14 @@ class AskOrchestrator:
         ctx.columns = [c.name for c in disclosed[0][2]]
         table_database = disclosed[0][0]
 
-        relations = collect_relations(self, targets)
+        relations = self._loop_relations or collect_relations(
+            self,
+            targets,
+            question=ctx.question,
+            disclosed_schemas=disclosed,
+            parent="staged",
+        )
+        self._loop_relations = relations
         sql_context = merge_sql_context(self.session.disclosure.summary(), relations)
 
         draft = None
@@ -424,6 +470,9 @@ class AskOrchestrator:
             plan_confidence=float(draft.confidence),
             table_count=max(1, len(tables_in_sql)),
             has_joins=" join " in normalized_sql.lower(),
+            join_confidence=join_confidence_for_sql(self._loop_relations, normalized_sql)
+            if " join " in normalized_sql.lower()
+            else 1.0,
         )
         self._step(ctx, "risk", f"Risk decision: {risk.action} ({risk.reason})")
 

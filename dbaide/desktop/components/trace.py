@@ -87,12 +87,21 @@ class TracePanel(QTreeWidget):
         duration_ms = float(event.get("duration_ms") or 0)
 
         if status == "info" or kind == "substep":
-            parent = self._running_tools.get(stage)
-            if parent is not None:
+            parent_key = str(event.get("parent") or "").strip()
+            parent_row = self._running_tools.get(parent_key) if parent_key else None
+            if parent_row is None:
+                parent_row = self._running_tools.get(stage)
+            if parent_row is not None:
+                agent_name = str(event.get("agent") or "").strip()
                 line = title or detail
+                if agent_name and line and not line.startswith(f"{agent_name}:"):
+                    line = f"{agent_name}: {line}"
                 if line:
-                    parent.addChild(QTreeWidgetItem(["", line[:400], ""]))
-                    parent.setExpanded(True)
+                    child = QTreeWidgetItem(["", line[:400], ""])
+                    if detail and detail != line:
+                        child.addChild(QTreeWidgetItem(["", detail[:400], ""]))
+                    parent_row.addChild(child)
+                    parent_row.setExpanded(True)
                 return
 
         if status == "running" and stage not in {"loop", "agent", "decision", "build_assets"}:

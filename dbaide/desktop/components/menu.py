@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from PyQt6.QtCore import Qt, pyqtSignal
-from PyQt6.QtGui import QFontMetrics
+from PyQt6.QtCore import Qt, pyqtSignal, QSize
+from PyQt6.QtGui import QFontMetrics, QIcon
 from PyQt6.QtWidgets import QMenu, QSizePolicy, QToolButton
 
 from dbaide.desktop.theme import Theme
@@ -42,24 +42,65 @@ def _style_menu(menu: QMenu) -> None:
 class MenuButton(QToolButton):
     """Single trigger that opens a dropdown menu."""
 
-    def __init__(self, text: str = "⋯", *, parent=None, max_width: int = 0) -> None:
+    def __init__(
+        self,
+        text: str = "⋯",
+        *,
+        parent=None,
+        max_width: int = 0,
+        icon: QIcon | None = None,
+        tooltip: str = "",
+        icon_only: bool = False,
+    ) -> None:
         super().__init__(parent)
         self._full_text = text
         self._max_width = max_width
-        self.setText(text)
+        self._icon_only = icon_only
+        if icon_only and icon is not None:
+            self.setIcon(icon)
+            self.setIconSize(QSize(16, 16))
+            self.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonIconOnly)
+            self.setFixedSize(28, 28)
+            self.setAutoRaise(True)
+            if tooltip:
+                self.setToolTip(tooltip)
+        else:
+            self.setText(text)
+            self.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextOnly)
+            self.setFixedHeight(32)
         self.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
         self._menu = QMenu(self)
         _style_menu(self._menu)
         self.setMenu(self._menu)
-        self.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextOnly)
         self.setCursor(Qt.CursorShape.PointingHandCursor)
         self.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Fixed)
-        if max_width:
+        if max_width and not icon_only:
             self.setMaximumWidth(max_width)
-        self.setFixedHeight(32)
-        self._apply_style(pill=False)
+        self._apply_style(pill=False, icon_only=icon_only)
 
-    def _apply_style(self, *, pill: bool) -> None:
+    def _apply_style(self, *, pill: bool, icon_only: bool = False) -> None:
+        if icon_only:
+            self.setStyleSheet(
+                f"""
+                QToolButton {{
+                    background: transparent;
+                    border: none;
+                    border-radius: 6px;
+                    padding: 0;
+                }}
+                QToolButton:hover {{
+                    background: {Theme.PANEL_2};
+                }}
+                QToolButton:pressed {{
+                    background: {Theme.PANEL_3};
+                }}
+                QToolButton::menu-indicator {{
+                    image: none;
+                    width: 0px;
+                }}
+                """
+            )
+            return
         radius = 16 if pill else 8
         bg = "transparent" if pill else Theme.PANEL_2
         border = Theme.BORDER_SOFT if pill else Theme.BORDER
@@ -85,13 +126,16 @@ class MenuButton(QToolButton):
         )
 
     def setText(self, text: str) -> None:
+        if self._icon_only:
+            return
         self._full_text = text
         super().setText(self._elided(text))
 
     def resizeEvent(self, event) -> None:
         super().resizeEvent(event)
-        if self._max_width:
-            super().setText(self._elided(self._full_text))
+        if self._icon_only or not self._max_width:
+            return
+        super().setText(self._elided(self._full_text))
 
     def _elided(self, text: str) -> str:
         if not self._max_width:

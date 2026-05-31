@@ -123,8 +123,9 @@ class SQLWriter:
         )
         if multi_table:
             base += (
-                " Multiple tables are disclosed; use JOIN only when the question requires it. "
-                "Join only on columns listed above; do not invent tables, columns, or join conditions."
+                " Multiple tables are disclosed; use JOIN when needed. "
+                "Join hints are ranked by confidence — prefer higher-confidence edges; "
+                "low-confidence joins may need casts or manual verification."
             )
         return base
 
@@ -164,16 +165,48 @@ class SQLWriter:
         return {k: v for k, v in context.items() if k != "foreign_keys"}
 
     @staticmethod
+    def _format_relation_line(fk: dict[str, Any]) -> str:
+        base = f"- {fk.get('table')}.{fk.get('column')} -> {fk.get('ref_table')}.{fk.get('ref_column')}"
+        join_type = str(fk.get("join_type") or "").strip()
+        validation = fk.get("validation") if isinstance(fk.get("validation"), dict) else {}
+        conf = fk.get("confidence")
+        if conf is None:
+            conf = validation.get("confidence")
+        tags: list[str] = []
+        if conf is not None:
+            tags.append(f"conf={float(conf):.0%}")
+        if join_type and join_type != "unknown":
+            tags.append(join_type)
+        match_rate = validation.get("match_rate")
+        if match_rate is not None and float(match_rate) > 0:
+            tags.append(f"match={float(match_rate):.0%}")
+        reason = str(fk.get("reason") or validation.get("message") or "").strip()
+        suffix = f" [{', '.join(tags)}]" if tags else ""
+        if reason:
+            suffix += f" — {reason[:120]}"
+        return base + suffix
+
+    @staticmethod
     def _format_relations(context: dict) -> str:
-        relations = context.get("foreign_keys")
+        relations = sorted(
+            list(context.get("foreign_keys") or []),
+            key=lambda r: float(r.get("confidence") or 0),
+            reverse=True,
+        )
         if not relations:
             return ""
-        lines = ["Declared foreign keys (database facts; use only these for JOINs):"]
-        for fk in relations:
-            lines.append(
-                f"- {fk.get('table')}.{fk.get('column')} -> {fk.get('ref_table')}.{fk.get('ref_column')}"
-            )
-        return "\n".join(lines)
+        declared = [fk for fk in relations if fk.get("source") != "semantic"]
+        semantic = [fk for fk in relations if fk.get("source") == "semantic"]
+        blocks: list[str] = []
+        if declared:
+            lines = ["Declared foreign keys (schema facts; highest priority):"]
+            lines.extend(SQLWriter._format_relation_line(fk) for fk in declared)
+            blocks.append("\n".join(lines))
+        if semantic:
+            lines = ["Semantic join hints (LLM + sample confidence; use when helpful):"]
+            lines.extend(SQLWriter._format_relation_line(fk) for fk in semantic)
+            blocks.append("\n".join(lines))
+        return "\n\n".join(blocks)
 
     @staticmethod
     def _format_columns(columns: list[ColumnInfo]) -> str:

@@ -1,0 +1,166 @@
+"""Tests for LLM semantic join inference."""
+
+from __future__ import annotations
+
+import sqlite3
+
+from dbaide.adapters import build_adapter
+from dbaide.agent.join_inference import (
+    SemanticJoinInferencer,
+    merge_relation_lists,
+    tables_fully_connected,
+)
+from dbaide.agent.orchestrator import AskOrchestrator
+from dbaide.agent.schema_context import collect_relations
+from dbaide.agent.sql_writer import SQLWriter
+from dbaide.agent.toolkit import build_tool_registry
+from dbaide.assets import AssetStore
+from dbaide.llm import LLMClient, LLMMessage
+from dbaide.models import ColumnInfo, ConnectionConfig
+from dbaide.session import Session
+from dbaide.tools.registry import ToolContext
+
+
+class JoinInferMockLLM(LLMClient):
+    """Returns semantic joins when asked to infer JOIN relationships."""
+
+    last_user: str = ""
+
+    def complete_json(self, messages: list[LLMMessage], *, schema_hint: str = "") -> dict:
+        system = messages[0].content if messages else ""
+        self.last_user = messages[-1].content if messages else ""
+        if "infer JOIN relationships" in system:
+            return {
+                "joins": [
+                    {
+                        "left_table": "asset_sensors",
+                        "left_column": "asset_id",
+                        "right_table": "assets",
+                        "right_column": "id",
+                        "confidence": 0.88,
+                        "reason": "Each sensor reading belongs to one asset master row.",
+                    }
+                ]
+            }
+        return {"sql": "SELECT 1", "rationale": "test", "confidence": 0.8}
+
+    def complete_text(self, messages: list[LLMMessage]) -> str:
+        return "ok"
+
+
+def make_unlinked_db(path):
+    conn = sqlite3.connect(path)
+    conn.executescript(
+        """
+        CREATE TABLE assets (
+            id INTEGER PRIMARY KEY,
+            name TEXT
+        );
+        CREATE TABLE asset_sensors (
+            id INTEGER PRIMARY KEY,
+            asset_id INTEGER,
+            reading REAL
+        );
+        INSERT INTO assets VALUES (1, 'pump'), (2, 'valve');
+        INSERT INTO asset_sensors VALUES (10, 1, 1.1), (11, 1, 1.2), (12, 2, 2.1);
+        """
+    )
+    conn.commit()
+    conn.close()
+
+
+def test_tables_fully_connected():
+    rels = [{"table": "orders", "column": "user_id", "ref_table": "users", "ref_column": "id"}]
+    assert tables_fully_connected(rels, {"orders", "users"})
+    assert not tables_fully_connected(rels, {"orders", "users", "products"})
+    assert not tables_fully_connected([], {"a", "b"})
+
+
+def test_semantic_join_inferencer_validates_columns():
+    llm = JoinInferMockLLM()
+    inferencer = SemanticJoinInferencer(llm, AssetStore(), "local")
+    disclosed = [
+        ("", "assets", [ColumnInfo(name="id", data_type="INTEGER", primary_key=True)]),
+        ("", "asset_sensors", [ColumnInfo(name="asset_id", data_type="INTEGER")]),
+    ]
+    joins = inferencer.infer("sensors per asset", disclosed)
+    assert len(joins) == 1
+    assert joins[0]["source"] == "semantic"
+    assert joins[0]["ref_table"] == "assets"
+
+
+def test_collect_relations_adds_semantic_when_no_fk(tmp_path):
+    db = tmp_path / "unlinked.db"
+    make_unlinked_db(db)
+    conn = ConnectionConfig(name="local", type="sqlite", path=str(db))
+    adapter = build_adapter(conn)
+    orch = AskOrchestrator(adapter, Session(connection=conn), JoinInferMockLLM())
+    orch._reset_loop_state("sensors without reading", "", True)
+    registry = build_tool_registry(orch)
+    ctx = ToolContext()
+    registry.invoke("describe_table", {"table": "assets"}, ctx)
+    registry.invoke("describe_table", {"table": "asset_sensors"}, ctx)
+    result = registry.invoke("get_relations", {}, ctx)
+    assert result.ok
+    rels = result.data["relations"]
+    assert result.data["semantic_count"] == 1
+    assert rels[0]["source"] == "semantic"
+    assert rels[0]["column"] == "asset_id"
+    assert rels[0].get("validated") is True
+    assert rels[0].get("join_type") == "many_to_one"
+
+
+def test_collect_relations_skips_semantic_when_fk_connects(tmp_path):
+    db = tmp_path / "fk.db"
+    conn = sqlite3.connect(db)
+    conn.executescript(
+        """
+        CREATE TABLE users (id INTEGER PRIMARY KEY);
+        CREATE TABLE orders (
+            id INTEGER PRIMARY KEY,
+            user_id INTEGER,
+            FOREIGN KEY (user_id) REFERENCES users(id)
+        );
+        INSERT INTO users VALUES (1), (2);
+        INSERT INTO orders VALUES (1, 1), (2, 1), (3, 2);
+        """
+    )
+    conn.commit()
+    conn.close()
+    cfg = ConnectionConfig(name="local", type="sqlite", path=str(db))
+    adapter = build_adapter(cfg)
+    orch = AskOrchestrator(adapter, Session(connection=cfg), JoinInferMockLLM())
+    relations = collect_relations(orch, [("", "orders"), ("", "users")])
+    assert len(relations) == 1
+    assert relations[0]["source"] == "foreign_key"
+    assert relations[0].get("validated") is True
+    assert relations[0].get("join_type") == "many_to_one"
+
+
+def test_merge_relation_lists_prefers_declared():
+    declared = [{"table": "a", "column": "x", "ref_table": "b", "ref_column": "id", "source": "foreign_key"}]
+    semantic = [{"table": "a", "column": "x", "ref_table": "b", "ref_column": "id", "source": "semantic"}]
+    merged = merge_relation_lists(declared, semantic)
+    assert len(merged) == 1
+    assert merged[0]["source"] == "foreign_key"
+
+
+def test_sql_writer_formats_semantic_joins():
+    llm = JoinInferMockLLM()
+    writer = SQLWriter(llm, dialect="sqlite")
+    ctx = {
+        "foreign_keys": [
+            {
+                "table": "asset_sensors",
+                "column": "asset_id",
+                "ref_table": "assets",
+                "ref_column": "id",
+                "source": "semantic",
+                "confidence": 0.9,
+                "reason": "sensor belongs to asset",
+            }
+        ]
+    }
+    writer.write("q", "asset_sensors", [ColumnInfo(name="asset_id", data_type="INTEGER")], context=ctx)
+    assert "Semantic join hints" in llm.last_user
+    assert "conf=90%" in llm.last_user

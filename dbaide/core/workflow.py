@@ -22,6 +22,7 @@ from dbaide.core.result import (
 )
 from dbaide.session import Session
 from dbaide.assets import AssetStore
+from dbaide.joins import JoinCatalogStore
 from dbaide.llm import LLMClient
 from dbaide.models import ConnectionConfig
 from dbaide.tools import QueryTools
@@ -40,10 +41,12 @@ class WorkflowEngine:
         connection: ConnectionConfig,
         llm: LLMClient | None = None,
         asset_store: AssetStore | None = None,
+        join_catalog: JoinCatalogStore | None = None,
     ) -> None:
         self.connection = connection
         self.llm = llm
         self.asset_store = asset_store or AssetStore()
+        self.join_catalog = join_catalog or JoinCatalogStore()
         self._adapter = None
         self._session = None
 
@@ -197,6 +200,7 @@ class WorkflowEngine:
             session,
             self.llm,
             asset_store=self.asset_store,
+            join_catalog=self.join_catalog,
             execution_policy=request.execution_policy,
         )
 

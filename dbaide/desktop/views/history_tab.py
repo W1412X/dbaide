@@ -4,13 +4,14 @@ import datetime
 from typing import Any
 
 from PyQt6.QtCore import Qt, pyqtSignal
-from PyQt6.QtWidgets import QListWidget, QListWidgetItem, QVBoxLayout, QWidget
+from PyQt6.QtWidgets import QLabel, QListWidget, QListWidgetItem, QVBoxLayout, QWidget
 
-from dbaide.desktop.components.base import SectionLabel
 from dbaide.desktop.theme import Theme
 
 
 class HistoryTab(QWidget):
+    """Workflow history list for the history popup."""
+
     history_selected = pyqtSignal(str)
     history_preview = pyqtSignal(str)
 
@@ -18,11 +19,15 @@ class HistoryTab(QWidget):
         super().__init__(parent)
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
-        layout.addWidget(SectionLabel("WORKFLOW HISTORY"))
+        layout.setSpacing(6)
+        hint = QLabel("Click to preview trace · double-click to open in Ask")
+        hint.setWordWrap(True)
+        hint.setStyleSheet(f"color: {Theme.MUTED}; font-size: 11px;")
+        layout.addWidget(hint)
         self.list = QListWidget()
         self.list.itemClicked.connect(self._preview)
         self.list.itemDoubleClicked.connect(self._open)
-        layout.addWidget(self.list)
+        layout.addWidget(self.list, 1)
 
     def load(self, entries: list[dict[str, Any]]) -> None:
         self.list.clear()
@@ -64,4 +69,5 @@ def _fmt_time(ts: float) -> str:
 
 def _color(hex_color: str):
     from PyQt6.QtGui import QColor
+
     return QColor(hex_color)

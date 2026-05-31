@@ -141,9 +141,17 @@ QScrollArea {{
 QScrollArea QWidget {{
     background: {Theme.BG};
 }}
-QFormLayout QLabel {{
+QLabel#formLabel {{
+    background-color: rgba(0, 0, 0, 0);
+    background: transparent;
+    border: none;
+    border-width: 0;
+    border-radius: 0;
     color: {Theme.TEXT_2};
-    min-width: 88px;
+    font-size: 13px;
+    font-weight: 400;
+    padding: 0 10px 0 0;
+    margin: 0;
 }}
 QTabWidget::pane {{
     border: 1px solid {Theme.BORDER_SOFT};
@@ -236,6 +244,32 @@ QTabBar[segmented="true"]::tab:first {{
 QTabBar[segmented="true"]::tab:last {{
     border-top-right-radius: 8px;
     border-bottom-right-radius: 8px;
+}}
+QTabBar[panelTabs="true"]::tab {{
+    background: transparent;
+    color: {Theme.MUTED};
+    padding: 4px 12px;
+    border: none;
+    margin: 0;
+    min-height: 28px;
+    max-height: 28px;
+    font-size: 12px;
+    font-weight: 500;
+}}
+QTabBar[panelTabs="true"]::tab:selected {{
+    background: {Theme.PANEL_3};
+    color: {Theme.TEXT};
+    border-radius: 6px;
+}}
+QTabBar[panelTabs="true"]::tab:hover:!selected {{
+    color: {Theme.TEXT_2};
+    background: {Theme.PANEL_2};
+    border-radius: 6px;
+}}
+QFrame[panelContent="true"] {{
+    background: {Theme.SURFACE};
+    border: 1px solid {Theme.BORDER_SOFT};
+    border-radius: 10px;
 }}
 QStatusBar {{
     background: {Theme.BG};

@@ -1,3 +1,5 @@
+"""Form field labels and shared input helpers."""
+
 from __future__ import annotations
 
 from PyQt6.QtCore import Qt
@@ -11,6 +13,58 @@ from PyQt6.QtWidgets import (
     QSpinBox,
     QTextEdit,
 )
+
+from dbaide.desktop.theme import Theme
+
+# Scoped on form containers — QFormLayout is not a widget, so parent #id rules are required.
+FORM_INNER_LABEL_RULES = f"""
+    QLabel#formLabel {{
+        background-color: rgba(0, 0, 0, 0);
+        background: transparent;
+        border: none;
+        border-width: 0;
+        border-radius: 0;
+        outline: none;
+        color: {Theme.TEXT_2};
+        font-size: 13px;
+        font-weight: 400;
+        padding: 0 10px 0 0;
+        margin: 0;
+    }}
+"""
+
+
+class FormLabel(QLabel):
+    """Right-aligned caption only — never a boxed field."""
+
+    def __init__(self, text: str, parent=None) -> None:
+        super().__init__(text, parent)
+        self.setObjectName("formLabel")
+        self.setAutoFillBackground(False)
+        self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
+        self.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+        self.setFixedHeight(34)
+        self.setMinimumWidth(96)
+        self.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
+        self.setStyleSheet(
+            f"""
+            QLabel#formLabel {{
+                background-color: rgba(0, 0, 0, 0);
+                background: transparent;
+                border: none;
+                border-width: 0;
+                border-radius: 0;
+                color: {Theme.TEXT_2};
+                font-size: 13px;
+                padding: 0 10px 0 0;
+                margin: 0;
+            }}
+            """
+        )
+
+
+def form_label(text: str) -> FormLabel:
+    return FormLabel(text)
 
 
 def configure_form(form: QFormLayout) -> None:

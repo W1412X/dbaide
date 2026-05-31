@@ -1,69 +1,13 @@
-"""Plan validator, risk controller, result interpreter, error router for DBAide."""
+"""Risk controller, result interpreter, error router for DBAide."""
 from __future__ import annotations
 
 import logging
 from typing import Any
 
 from dbaide.core.errors import DBAideError, ErrorCode, RepairAction
-from dbaide.core.result import ExecutionPolicy, QueryPlan, ValidationReport
+from dbaide.core.result import ExecutionPolicy, ValidationReport
 
 logger = logging.getLogger("dbaide.agent.controllers")
-
-
-# ─────────────────────────────────────────────────────────────────────────────
-# PlanValidator
-# ─────────────────────────────────────────────────────────────────────────────
-
-class PlanValidator:
-    """Validates QueryPlan against known schema.
-
-    Deterministic validation - no LLM dependency.
-    """
-
-    def validate(
-        self,
-        plan: QueryPlan,
-        known_tables: set[str],
-        known_columns: dict[str, set[str]],
-    ) -> tuple[bool, list[str], list[str]]:
-        """Validate a query plan.
-
-        Returns:
-            (ok, issues, warnings)
-        """
-        issues = []
-        warnings = []
-
-        # Check tables exist
-        for table in plan.target_entities:
-            if table not in known_tables:
-                issues.append(f"Unknown table: {table}")
-
-        # Check columns exist
-        for col_ref in plan.selected_columns:
-            if "." in col_ref:
-                table, col = col_ref.split(".", 1)
-                if table in known_columns and col not in known_columns[table]:
-                    issues.append(f"Unknown column: {col_ref}")
-
-        # Check joins reference valid tables
-        for join in plan.joins:
-            from_table = join.get("from_table", "")
-            to_table = join.get("to_table", "")
-            if from_table and from_table not in known_tables:
-                issues.append(f"Join references unknown table: {from_table}")
-            if to_table and to_table not in known_tables:
-                issues.append(f"Join references unknown table: {to_table}")
-
-        # Warnings
-        if not plan.target_entities:
-            warnings.append("No target entities specified")
-        if plan.confidence < 0.65:
-            warnings.append(f"Low confidence: {plan.confidence:.2f}")
-        if len(plan.target_entities) > 3:
-            warnings.append(f"Query involves {len(plan.target_entities)} tables - may be complex")
-
-        return len(issues) == 0, issues, warnings
 
 
 # ─────────────────────────────────────────────────────────────────────────────

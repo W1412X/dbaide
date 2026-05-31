@@ -4,9 +4,16 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
+import logging
+
+from dbaide.llm import NullLLMClient
+from dbaide.models import ColumnInfo
+
 if TYPE_CHECKING:
     from dbaide.agent.orchestrator import AskOrchestrator
     from dbaide.agent.progressive_schema import DiscoveryResult, SchemaHit
+
+logger = logging.getLogger("dbaide.schema_context")
 
 MAX_DISCLOSED_TABLES = 4
 
@@ -62,9 +69,37 @@ def foreign_keys_for_table(orchestrator: AskOrchestrator, database: str, table: 
     ]
 
 
-def collect_relations(orchestrator: AskOrchestrator, tables: list[tuple[str, str]]) -> list[dict[str, Any]]:
-    """Collect unique FK records for the given tables."""
-    relations: list[dict[str, Any]] = []
+def collect_relations(
+    orchestrator: AskOrchestrator,
+    tables: list[tuple[str, str]],
+    *,
+    question: str = "",
+    disclosed_schemas: list[tuple[str, str, list[ColumnInfo]]] | None = None,
+    infer_semantic: bool = True,
+    validate_sample: bool = True,
+    sample_size: int = 150,
+    parent: str = "",
+) -> list[dict[str, Any]]:
+    """Catalog (user/agent) → FK → LLM semantic; sample evidence adjusts confidence."""
+    from dbaide.joins.catalog import merge_relation_layers
+    from dbaide.agent.join_inference import tables_fully_connected
+
+    schemas = disclosed_schemas or _disclosed_schemas_for_tables(orchestrator, tables)
+    table_names = {table for _, table in tables}
+    active_db = ""
+    if tables:
+        active_db = tables[0][0] or getattr(orchestrator, "_loop_database", "") or ""
+
+    catalog_relations: list[dict[str, Any]] = []
+    catalog = getattr(orchestrator, "join_catalog", None)
+    if catalog is not None and len(table_names) >= 1:
+        catalog_relations = catalog.relations_for_tables(
+            orchestrator.instance,
+            tables,
+            database=active_db,
+        )
+
+    declared: list[dict[str, Any]] = []
     seen: set[tuple[str, str, str, str]] = set()
     for database, table in tables:
         for fk in foreign_keys_for_table(orchestrator, database, table):
@@ -77,8 +112,99 @@ def collect_relations(orchestrator: AskOrchestrator, tables: list[tuple[str, str
             if not key[1] or key in seen:
                 continue
             seen.add(key)
-            relations.append(fk)
+            declared.append(fk)
+
+    semantic: list[dict[str, Any]] = []
+    combined_for_connectivity = merge_relation_layers(catalog_relations, declared)
+    need_semantic = (
+        len(table_names) >= 2
+        and infer_semantic
+        and not isinstance(orchestrator.llm, NullLLMClient)
+        and not tables_fully_connected(combined_for_connectivity, table_names)
+        and len(schemas) >= 2
+    )
+    if need_semantic:
+        from dbaide.agent.join_inference import SemanticJoinInferencer, merge_relation_lists
+
+        try:
+            inferencer = SemanticJoinInferencer(orchestrator.llm, orchestrator.asset_store, orchestrator.instance)
+            semantic = inferencer.infer(
+                question or getattr(orchestrator, "_loop_question", "") or "",
+                schemas,
+                declared=combined_for_connectivity,
+                progress=orchestrator.progress,
+                parent=parent or "get_relations",
+            )
+            semantic = merge_relation_lists([], semantic)
+        except Exception as exc:
+            logger.warning("semantic_join_inference_failed: %s", exc)
+
+    relations = merge_relation_layers(catalog_relations, declared, semantic)
+
+    if validate_sample and relations and schemas:
+        from dbaide.agent.join_validation import validate_join_relations
+
+        relations = validate_join_relations(
+            orchestrator,
+            relations,
+            schemas,
+            sample_size=sample_size,
+            progress=orchestrator.progress,
+            parent=parent or "get_relations",
+            drop_invalid_semantic=True,
+        )
+        # Re-apply catalog user joins at full confidence after validation reorder.
+        if catalog_relations:
+            user_edges = [r for r in catalog_relations if str(r.get("source") or "") == "user"]
+            if user_edges:
+                relations = merge_relation_layers(user_edges, relations)
+
     return relations
+
+
+def disclosed_schemas_for_tables(
+    orchestrator: AskOrchestrator,
+    tables: list[tuple[str, str]],
+) -> list[tuple[str, str, list[ColumnInfo]]]:
+    return _disclosed_schemas_for_tables(orchestrator, tables)
+
+
+def _disclosed_schemas_for_tables(
+    orchestrator: AskOrchestrator,
+    tables: list[tuple[str, str]],
+) -> list[tuple[str, str, list[ColumnInfo]]]:
+    schemas: list[tuple[str, str, list[ColumnInfo]]] = []
+    for database, table in tables:
+        schema_key = f"{database}.{table}" if database else table
+        columns = orchestrator._loop_schemas.get(schema_key)
+        if columns is None:
+            for key, cols in orchestrator._loop_schemas.items():
+                if key == table or key.endswith(f".{table}"):
+                    columns = cols
+                    database = orchestrator._loop_schema_db.get(key, database)
+                    break
+        if columns is None:
+            columns = orchestrator.schema.describe_table(table, database=database)
+        schemas.append((database, table, columns))
+    return schemas
+
+
+def collect_relations_declared_only(
+    orchestrator: AskOrchestrator,
+    tables: list[tuple[str, str]],
+) -> list[dict[str, Any]]:
+    """FK-only collection (legacy helper)."""
+    return collect_relations(orchestrator, tables, infer_semantic=False)
+
+
+def disclosed_table_keys(orchestrator: AskOrchestrator) -> list[tuple[str, str]]:
+    """(database, table) pairs already described in the tool loop."""
+    keys: list[tuple[str, str]] = []
+    for schema_key in orchestrator._loop_schemas:
+        db = str(orchestrator._loop_schema_db.get(schema_key) or orchestrator._loop_database or "")
+        table = schema_key.split(".", 1)[1] if "." in schema_key else schema_key
+        keys.append((db, table))
+    return keys
 
 
 def merge_sql_context(base: dict[str, Any], relations: list[dict[str, Any]]) -> dict[str, Any]:
@@ -94,3 +220,18 @@ def validation_feedback(issues: list[str]) -> str:
     if "unknown table" in lowered or "unknown column" in lowered:
         text += " Hint: call describe_table for missing objects before generate_sql."
     return text
+
+
+def join_confidence_for_sql(relations: list[dict[str, Any]], sql: str) -> float:
+    """Minimum confidence among join edges relevant to SQL (soft signal for risk gate)."""
+    if not relations:
+        return 1.0
+    sql_lower = sql.lower()
+    matched: list[dict[str, Any]] = []
+    for rel in relations:
+        left = str(rel.get("table") or "").strip().lower()
+        right = str(rel.get("ref_table") or "").strip().lower()
+        if left and right and left in sql_lower and right in sql_lower:
+            matched.append(rel)
+    pool = matched or relations
+    return min(float(rel.get("confidence") or 0.0) for rel in pool)

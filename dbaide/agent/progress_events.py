@@ -13,6 +13,11 @@ TOOL_TRACE_STAGES = frozenset({
     "validate_sql",
     "execute_sql",
     "get_relations",
+    "validate_joins",
+    "list_joins",
+    "add_join",
+    "update_join",
+    "delete_join",
     "ask_user",
     "profile_table",
     "synthesize_schema_answer",
@@ -30,6 +35,8 @@ def progress_event(
     kind: str = "agent",
     detail: str = "",
     duration_ms: float = 0.0,
+    parent: str = "",
+    agent: str = "",
 ) -> dict[str, Any]:
     payload: dict[str, Any] = {
         "stage": stage,
@@ -41,7 +48,32 @@ def progress_event(
         payload["detail"] = detail
     if duration_ms > 0:
         payload["duration_ms"] = duration_ms
+    if parent:
+        payload["parent"] = parent
+    if agent:
+        payload["agent"] = agent
     return payload
+
+
+def subagent_event(
+    *,
+    agent: str,
+    title: str,
+    parent: str = "",
+    detail: str = "",
+    status: str = "info",
+    stage: str = "",
+) -> dict[str, Any]:
+    """Progress line for a nested sub-agent (schema_link, sql_writer, risk, …)."""
+    return progress_event(
+        stage=stage or agent,
+        title=title,
+        status=status,
+        kind="substep",
+        detail=detail,
+        parent=parent,
+        agent=agent,
+    )
 
 
 def from_trace_event(event: TraceEvent) -> dict[str, Any]:
@@ -90,7 +122,22 @@ def brief_tool_summary(tool: str, result: Any) -> str:
             return f"disclosed {', '.join(str(t) for t in tables)}"
         return f"{len(cols)} column(s)"
     if tool == "get_relations":
-        return f"{data.get('count', len(data.get('relations') or []))} FK(s)"
+        rels = data.get("relations") or []
+        declared = sum(1 for r in rels if r.get("source") != "semantic")
+        semantic = sum(1 for r in rels if r.get("source") == "semantic")
+        validated = data.get("validated_count", sum(1 for r in rels if r.get("validated")))
+        parts = [f"{validated}/{len(rels)} validated"]
+        if semantic:
+            parts.append(f"{declared} FK + {semantic} semantic")
+        else:
+            parts.append(f"{len(rels)} relation(s)")
+        return ", ".join(parts)
+    if tool == "validate_joins":
+        rels = data.get("relations") or []
+        validated = data.get("validated_count", sum(1 for r in rels if r.get("validated")))
+        types = sorted({str(r.get("join_type") or "") for r in rels if r.get("join_type")})
+        suffix = f" ({', '.join(types)})" if types else ""
+        return f"{validated}/{len(rels)} joins valid{suffix}"
     if tool == "generate_sql":
         sql = str(data.get("sql") or "").strip()
         tables = data.get("tables") or []
@@ -157,7 +204,13 @@ def conversation_trace_step(event: dict[str, Any]) -> tuple[str, str, str] | Non
 
     if status == "info" or kind == "substep":
         line = title or summary or detail
-        return (line, "info", "") if line else None
+        agent_name = str(event.get("agent") or "").strip()
+        parent = str(event.get("parent") or "").strip()
+        if agent_name and line and not line.startswith(f"{agent_name}:"):
+            line = f"{agent_name}: {line}"
+        elif parent and line and parent not in line:
+            line = f"{parent} › {line}"
+        return (line, "info", detail if detail != line else "") if line else None
 
     if stage in TOOL_TRACE_STAGES or actor == "tool":
         message = f"{stage}: {title}" if stage and title else (title or summary or stage)

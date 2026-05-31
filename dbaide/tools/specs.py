@@ -102,10 +102,106 @@ DESCRIBE_TABLE = ToolSpec(
 
 GET_RELATIONS = ToolSpec(
     name="get_relations",
-    description="Load declared foreign keys for disclosed tables (from assets or live catalog)",
-    input_schema={"tables": "list[string]", "table": "string", "database": "string"},
-    output_schema={"relations": "list[dict]", "count": "integer"},
+    description=(
+        "Join hints for disclosed tables: declared FKs plus LLM semantic inference when needed. "
+        "Returns confidence-ranked edges with optional sample evidence."
+    ),
+    input_schema={"tables": "list[string]", "table": "string", "database": "string", "sample_size": "integer"},
+    output_schema={"relations": "list[dict]", "count": "integer", "validated_count": "integer"},
+    permission_level=SAFE_PROFILE,
+    timeout_seconds=30,
+    safe_for_auto_call=True,
+)
+
+VALIDATE_JOINS = ToolSpec(
+    name="validate_joins",
+    description=(
+        "Refresh sample evidence and confidence scores for join relations "
+        "(type alignment and match rate adjust ranking; does not hard-reject odd business joins)."
+    ),
+    input_schema={"sample_size": "integer"},
+    output_schema={"relations": "list[dict]", "count": "integer", "validated_count": "integer"},
+    permission_level=SAFE_PROFILE,
+    timeout_seconds=45,
+    safe_for_auto_call=True,
+)
+
+LIST_JOINS = ToolSpec(
+    name="list_joins",
+    description=(
+        "List saved join catalog for this connection. Filter by tables, min_confidence, "
+        "or exact endpoint (table, column, ref_table, ref_column)."
+    ),
+    input_schema={
+        "database": "string",
+        "tables": "list[string]",
+        "min_confidence": "number",
+        "table": "string",
+        "column": "string",
+        "ref_table": "string",
+        "ref_column": "string",
+    },
+    output_schema={"joins": "list[dict]", "count": "integer"},
     permission_level=SAFE_METADATA,
+    timeout_seconds=10,
+    safe_for_auto_call=True,
+)
+
+ADD_JOIN = ToolSpec(
+    name="add_join",
+    description=(
+        "Add or upsert a join in the catalog. source=user sets confidence 0.99; "
+        "source=agent for agent-pinned candidates."
+    ),
+    input_schema={
+        "table": "string",
+        "column": "string",
+        "ref_table": "string",
+        "ref_column": "string",
+        "database": "string",
+        "source": "string",
+        "join_type": "string",
+        "reason": "string",
+        "confidence": "number",
+    },
+    output_schema={"join": "dict", "relation": "dict"},
+    permission_level=CONFIG_WRITE,
+    timeout_seconds=10,
+    safe_for_auto_call=True,
+)
+
+UPDATE_JOIN = ToolSpec(
+    name="update_join",
+    description="Update a saved join by id (endpoints, join_type, reason; user joins keep confidence 0.99).",
+    input_schema={
+        "id": "string",
+        "database": "string",
+        "table": "string",
+        "column": "string",
+        "ref_table": "string",
+        "ref_column": "string",
+        "join_type": "string",
+        "reason": "string",
+        "confidence": "number",
+    },
+    output_schema={"join": "dict", "relation": "dict"},
+    permission_level=CONFIG_WRITE,
+    timeout_seconds=10,
+    safe_for_auto_call=True,
+)
+
+DELETE_JOIN = ToolSpec(
+    name="delete_join",
+    description="Delete a saved join by id or by full endpoint.",
+    input_schema={
+        "id": "string",
+        "table": "string",
+        "column": "string",
+        "ref_table": "string",
+        "ref_column": "string",
+    },
+    output_schema={"deleted": "boolean"},
+    permission_level=CONFIG_WRITE,
     timeout_seconds=10,
     safe_for_auto_call=True,
 )

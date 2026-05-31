@@ -5,13 +5,15 @@ from __future__ import annotations
 import logging
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any, Callable
 
 from dbaide.assets import AssetStore
 from dbaide.llm import LLMClient, LLMMessage, NullLLMClient
 
 if TYPE_CHECKING:
     from dbaide.tools.schema import SchemaTools
+
+ProgressFn = Callable[[dict[str, Any]], None]
 
 logger = logging.getLogger("dbaide.progressive_schema")
 
@@ -54,16 +56,29 @@ class ProgressiveSchemaAgent:
         self.store = store
         self.instance = instance
 
-    def discover(self, question: str, *, schema_tools: SchemaTools | None = None) -> DiscoveryResult:
+    def discover(
+        self,
+        question: str,
+        *,
+        schema_tools: SchemaTools | None = None,
+        progress: ProgressFn | None = None,
+        parent: str = "",
+    ) -> DiscoveryResult:
         if self.store.has_instance(self.instance):
-            return self._discover_from_assets(question)
+            return self._discover_from_assets(question, progress=progress, parent=parent)
         if schema_tools is not None:
-            return self._discover_from_live(schema_tools, question)
+            return self._discover_from_live(schema_tools, question, progress=progress, parent=parent)
         result = DiscoveryResult(question=question)
         result.trace.append("No offline assets — build assets first, or connect with live schema access.")
         return result
 
-    def _discover_from_assets(self, question: str) -> DiscoveryResult:
+    def _discover_from_assets(
+        self,
+        question: str,
+        *,
+        progress: ProgressFn | None = None,
+        parent: str = "",
+    ) -> DiscoveryResult:
         result = DiscoveryResult(question=question)
         if not self.store.has_instance(self.instance):
             result.trace.append("No offline assets for this connection — build assets first.")
@@ -75,6 +90,13 @@ class ProgressiveSchemaAgent:
             return result
 
         result.trace.append(f"Screening {len(databases)} database(s)…")
+        self._emit_progress(
+            progress,
+            parent,
+            "schema_link",
+            f"Screening {len(databases)} database(s)",
+            detail=f"connection={self.instance}",
+        )
         db_items = [
             {
                 "index": i,
@@ -89,8 +111,17 @@ class ProgressiveSchemaAgent:
             level="database",
             items=db_items,
             context=f"connection={self.instance}",
+            progress=progress,
+            parent=parent,
         )
         result.trace.append(f"LLM kept {len(db_indices)} database(s).")
+        self._emit_progress(
+            progress,
+            parent,
+            "schema_link",
+            f"Kept {len(db_indices)} database(s)",
+            detail=", ".join(db_items[i]["name"] for i in db_indices[:6]),
+        )
 
         table_hits: list[SchemaHit] = []
         column_hits: list[SchemaHit] = []
@@ -114,6 +145,8 @@ class ProgressiveSchemaAgent:
                 level="table",
                 items=table_items,
                 context=f"database={db_name}",
+                progress=progress,
+                parent=parent,
             )
             local_tables: list[SchemaHit] = []
             local_columns: list[SchemaHit] = []
@@ -150,6 +183,8 @@ class ProgressiveSchemaAgent:
                         level="column",
                         items=col_items,
                         context=f"table={db_name}.{table_name}",
+                        progress=progress,
+                        parent=parent,
                     )
                     for ci in col_kept:
                         cdoc = cols[ci]
@@ -175,9 +210,11 @@ class ProgressiveSchemaAgent:
                     table_hits.extend(tables)
                     column_hits.extend(columns)
                     result.trace.append(note)
+                    self._emit_progress(progress, parent, "schema_link", note)
                 except Exception as exc:
                     logger.warning("database_scan_failed: %s", exc)
                     result.trace.append(f"scan error: {exc}")
+                    self._emit_progress(progress, parent, "schema_link", f"scan error: {exc}", status="failed")
 
         for db_index in db_indices:
             db_name = db_items[db_index]["name"]
@@ -199,7 +236,14 @@ class ProgressiveSchemaAgent:
         result.hits.sort(key=lambda h: (0 if h.kind == "table" else 1 if h.kind == "column" else 2, h.path))
         return result
 
-    def _discover_from_live(self, schema_tools: SchemaTools, question: str) -> DiscoveryResult:
+    def _discover_from_live(
+        self,
+        schema_tools: SchemaTools,
+        question: str,
+        *,
+        progress: ProgressFn | None = None,
+        parent: str = "",
+    ) -> DiscoveryResult:
         """LLM-filter live adapter metadata when offline assets are unavailable."""
         result = DiscoveryResult(question=question)
         result.trace.append("Live schema discovery (no offline assets)…")
@@ -212,6 +256,7 @@ class ProgressiveSchemaAgent:
         db_items = [{"index": i, "name": db, "summary": ""} for i, db in enumerate(databases)]
         db_indices = self._filter_indices(
             question, level="database", items=db_items, context=f"connection={self.instance}",
+            progress=progress, parent=parent,
         )
         result.trace.append(f"LLM kept {len(db_indices)} database(s) from live catalog.")
 
@@ -233,6 +278,7 @@ class ProgressiveSchemaAgent:
             ]
             kept = self._filter_indices(
                 question, level="table", items=table_items, context=f"database={db_name}",
+                progress=progress, parent=parent,
             )
             local_tables: list[SchemaHit] = []
             local_columns: list[SchemaHit] = []
@@ -266,6 +312,8 @@ class ProgressiveSchemaAgent:
                         level="column",
                         items=col_items,
                         context=f"table={db_name}.{hit.table}",
+                        progress=progress,
+                        parent=parent,
                     )
                     for ci in col_kept:
                         cdoc = cols[ci]
@@ -290,16 +338,25 @@ class ProgressiveSchemaAgent:
                     table_hits.extend(tables)
                     column_hits.extend(columns)
                     result.trace.append(note)
+                    self._emit_progress(progress, parent, "schema_link", note)
                 except Exception as exc:
                     logger.warning("live_database_scan_failed: %s", exc)
                     result.trace.append(f"scan error: {exc}")
+                    self._emit_progress(progress, parent, "schema_link", f"scan error: {exc}", status="failed")
 
         result.hits.extend(table_hits)
         result.hits.extend(column_hits)
         result.hits.sort(key=lambda h: (0 if h.kind == "table" else 1 if h.kind == "column" else 2, h.path))
         return result
 
-    def synthesize_answer(self, question: str, discovery: DiscoveryResult) -> str:
+    def synthesize_answer(
+        self,
+        question: str,
+        discovery: DiscoveryResult,
+        *,
+        progress: ProgressFn | None = None,
+        parent: str = "",
+    ) -> str:
         if not discovery.hits:
             return (
                 "没有在离线资产中找到与问题明显相关的 schema。\n\n"
@@ -308,6 +365,12 @@ class ProgressiveSchemaAgent:
                 "- 换更具体的业务词（如「产线」「production line」「line_id」）\n"
                 "- 或直接指定库/表名"
             )
+        self._emit_progress(
+            progress,
+            parent,
+            "schema_synth",
+            f"Synthesizing answer from {len(discovery.hits)} hit(s)",
+        )
         lines = ["Relevant schema (progressive LLM screening):", ""]
         for hit in discovery.hits[:24]:
             prefix = f"**{hit.path}**"
@@ -327,21 +390,49 @@ class ProgressiveSchemaAgent:
                 LLMMessage("user", f"Question:\n{question}\n\nSchema:\n{context}"),
             ]
         )
+        self._emit_progress(progress, parent, "schema_synth", "Answer synthesized", status="completed")
         return text.strip()
 
-    def top_table(self, discovery: DiscoveryResult) -> tuple[str, str]:
-        for hit in discovery.hits:
-            if hit.kind == "table" and hit.table:
-                return hit.table, hit.database
-        return "", ""
+    def _emit_progress(
+        self,
+        progress: ProgressFn | None,
+        parent: str,
+        agent: str,
+        title: str,
+        *,
+        detail: str = "",
+        status: str = "info",
+    ) -> None:
+        if not progress:
+            return
+        from dbaide.agent.progress_events import subagent_event
 
-    def _filter_indices(self, question: str, *, level: str, items: list[dict], context: str) -> list[int]:
+        progress(subagent_event(agent=agent, title=title, parent=parent, detail=detail, status=status))
+
+    def _filter_indices(
+        self,
+        question: str,
+        *,
+        level: str,
+        items: list[dict],
+        context: str,
+        progress: ProgressFn | None = None,
+        parent: str = "",
+    ) -> list[int]:
         if not items:
             return []
         kept: list[int] = []
         last_error: Exception | None = None
         for start in range(0, len(items), BATCH_SIZE):
             batch = items[start : start + BATCH_SIZE]
+            batch_no = start // BATCH_SIZE + 1
+            self._emit_progress(
+                progress,
+                parent,
+                "schema_link",
+                f"LLM filter {level} · batch {batch_no}",
+                detail=f"{len(batch)} object(s) · {context}",
+            )
             payload: dict | None = None
             for attempt in range(FILTER_RETRIES):
                 try:
@@ -372,7 +463,21 @@ class ProgressiveSchemaAgent:
                 if 0 <= idx < len(batch):
                     global_idx = int(batch[idx]["index"])
                     kept.append(global_idx)
+            reason = str(payload.get("reason") or "").strip()
+            self._emit_progress(
+                progress,
+                parent,
+                "schema_link",
+                f"Batch {batch_no}: kept {len(indices)}",
+                detail=reason[:160] if reason else context,
+            )
         return sorted(set(kept))
+
+    def top_table(self, discovery: DiscoveryResult) -> tuple[str, str]:
+        for hit in discovery.hits:
+            if hit.kind == "table" and hit.table:
+                return hit.table, hit.database
+        return "", ""
 
 
 def _filter_system(level: str) -> str:

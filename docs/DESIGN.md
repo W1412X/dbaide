@@ -1,104 +1,130 @@
-# DBAide Design
+# DBAide Architecture Design
 
 ## Positioning
 
-DBAide is a CLI-first database assistant. It is not a pure SQL generator. The assistant can inspect schema, profile data, generate safe queries, execute read-only SQL, diagnose SQL, and explain results.
+DBAide is a database assistant (CLI + desktop GUI). It is not a pure SQL generator. The system can inspect schema, profile data, generate safe read-only SQL, execute queries, diagnose SQL, and explain results.
 
-## Lessons Taken From AskDB
+Core philosophy (Codex-style):
 
-AskDB has strong safety and correctness ideas:
+- **LLM decides** what to do next and how to write SQL.
+- **Tools provide evidence** (schema, joins, validation, samples)—not hard business rules disguised as heuristics.
+- **Code enforces safety** (validation, execution policy, risk gate, budgets).
+- **Progressive disclosure**—never dump the whole database into the prompt at once.
 
-- SchemaLink avoids giving the model the entire database at once.
-- SQL validation blocks multi-statement and write SQL.
-- Real database `EXPLAIN` catches syntax and object errors before execution.
-- Read-only execution, timeout, and row limits reduce blast radius.
-- Step logs make the workflow inspectable.
+Offline assets accelerate discovery; live adapters remain the fallback when assets are missing or stale.
 
-DBAide keeps these ideas but removes first-version weight:
+---
 
-- No embedding initialization.
-- No semantic vector search.
-- No Web/SSE workflow.
-- No multi-intent DAG executor.
-- No heavy repository/checkpoint persistence.
+## End-to-End Overview
 
-The replacement is a smaller progressive-disclosure loop that is easier to reason about in a CLI.
+```mermaid
+flowchart TB
+    subgraph Entry["Entry layer"]
+        GUI["GUI / CLI / DesktopService"]
+        WF["WorkflowEngine"]
+    end
 
-## Progressive Disclosure
+    subgraph Offline["Offline preparation (recommended)"]
+        BA["AssetBuilder.build()"]
+        AS[("AssetStore<br/>~/.dbaide/assets/instances/{conn}/")]
+        JC[("JoinCatalogStore<br/>~/.dbaide/joins/instances/{conn}/")]
+    end
 
-DBAide initializes offline assets first, then reveals database information as a directory tree:
+    subgraph Online["Online Ask path"]
+        DA["DataAssistant.ask()"]
+        ORCH["AskOrchestrator.run()"]
+        LOOP["AskAgentLoop<br/>primary · 12-step budget"]
+        STAGED["Staged pipeline<br/>fallback"]
+    end
 
-```text
-L0 instance/connection
-L1 database/schema under an instance
-L2 table list and coarse table metadata under a database/schema
-L3 columns under a table
-L4 column profiles and samples
-L5 explain plans, execution evidence, and result interpretation
+    subgraph Output["Output"]
+        WR["WorkflowResult"]
+        AR["AssistantResponse<br/>answer / sql / result / warnings"]
+    end
+
+    GUI -->|build_assets| BA
+    GUI -->|ask| WF
+    WF --> DA
+    DA --> ORCH
+    ORCH --> LOOP
+    LOOP -->|fail / budget exhausted| STAGED
+    LOOP --> AR
+    STAGED --> AR
+    AR --> WR
+
+    BA --> AS
+    ORCH --> AS
+    ORCH --> JC
+    LOOP --> AS
+    LOOP --> JC
 ```
 
-The context is stored in `DisclosureContext`. Paths are represented as
-`instance.database.table.column` when all levels are known. Tools update the
-context after every schema/profile/query call. The assistant receives only the
-context it has earned through tool calls.
+---
 
-Multiple configured connections are treated as multiple instances. Fan-out
-queries can inspect several instances independently, but cross-instance joins
-are intentionally not attempted.
-
-## Offline Asset Initialization
-
-`connect add` is not only a config write. By default it runs an initialization
-workflow. This is the lightweight version of AskDB-style initialize assets:
-there is no embedding model and no vector index, but the hierarchical JSON
-documents are still mandatory because they are the primary schema-linking
-surface.
+## Progressive Disclosure Layers
 
 ```text
-connect add
-  -> test instance
-  -> list databases/schemas
-  -> list tables per database
-  -> describe every table
-  -> sample rows
-  -> profile columns according to policy
-  -> write one document per column
-  -> synthesize table documents from column documents
-  -> synthesize database documents from table documents
-  -> synthesize instance document from database documents
+L0  instance / connection
+L1  database / schema
+L2  table list + table metadata
+L3  columns under a table
+L4  column profiles and samples (offline assets)
+L5  join relations, EXPLAIN, execution evidence, result interpretation
 ```
 
-The default profiling policy is `auto`: every column gets a document, but heavy
-profile queries are only run for columns that are likely useful for schema
-linking and SQL generation: primary keys, indexed columns, `*_id` link
-candidates, time columns, status/category columns, and numeric measure columns.
-Use `--profile-mode all` for full profiling, `--profile-mode none` for pure
-structure assets, and `assets enrich` for selected table/column profiling.
+`DisclosureContext` (session) records what has been disclosed at runtime. Tools update context after schema/profile/query calls. The assistant only receives context earned through tool calls or loaded assets.
 
-Column documents are the most detailed asset. Profiled column documents include:
+Multiple connections are separate instances. Cross-instance joins are intentionally not attempted.
 
-- physical metadata: type, nullability, default, primary key, index flag
-- semantic role: identifier, time, numeric measure, categorical status, text, boolean
-- quality: row count, null count, null rate, distinct count, distinct ratio
-- range: min/max, temporal range, numeric average where available
-- distribution: top values, top-value coverage, sample values, distinct truncation marker
-- examples: bounded random samples and table sample rows
-- usage hints: whether the column is suitable for filtering, grouping, joining, time aggregation, or measures
+---
 
-Unprofiled column documents still include physical metadata, inferred role,
-semantic tags, and usage hints. Runtime tools can fall back to live exploration
-or `assets enrich` can update selected columns without rebuilding the whole
-instance.
+## Phase 1: Build Assets
 
-Table documents are synthesized from column documents and include role indexes,
-join hints, sample rows, source comments, and a natural-language table
-description. Database documents are synthesized from table documents. Instance
-documents are synthesized from database documents.
+### Flow
 
-The asset tree is stored under `~/.dbaide/assets`:
+```mermaid
+flowchart LR
+    subgraph In["Input"]
+        I1["ConnectionConfig<br/>name, type, host/path…"]
+        I2["BuildOptions<br/>sample, profile_mode, top_k,<br/>sample_limit, timeout"]
+        I3["LLMClient (optional)<br/>table/column summaries"]
+    end
+
+    subgraph Process["Process"]
+        P1["adapter.test()"]
+        P2["list_databases / list_tables"]
+        P3["describe_table + row sample"]
+        P4["ColumnProfiler (auto / top_k / all)"]
+        P5["AssetSummarizer (LLM summaries)"]
+        P6["Parallel: database / table ThreadPool"]
+    end
+
+    subgraph Out["Output · AssetStore"]
+        O1["instance.json"]
+        O2["databases.json + database.json"]
+        O3["tables.json + table.json"]
+        O4["columns/*.json<br/>profile, FK, comments"]
+        O5["BuildStats<br/>tables / columns / errors / elapsed"]
+    end
+
+    I1 --> P1 --> P2 --> P3 --> P4 --> P5 --> O3
+    P5 --> O1 & O2 & O4
+    P6 -.-> P3
+    Process --> O5
+```
+
+### Triggers
+
+| Entry | Action |
+|-------|--------|
+| GUI TopBar → Build Assets | `DesktopService.build_assets` |
+| CLI | `dbaide assets build` |
+| `connect add` (default) | builds assets on save |
+
+### Asset tree
 
 ```text
-instances/<instance>/
+~/.dbaide/assets/instances/<instance>/
   instance.json
   databases.json
   databases/<database>/
@@ -106,117 +132,348 @@ instances/<instance>/
     tables.json
     tables/<table>/
       table.json
-      columns.json
       columns/<column>.json
 ```
 
-Runtime tools prefer these assets. If an asset is missing, tools can still fall
-back to the live adapter and record the newly disclosed layer in memory. This
-preserves exploratory tools: assets guide the normal path, but the agent can
-still inspect/profiling/query the live database when the stored documents are
-not enough.
+### Build exception handling
 
-## Programmer Workflows
+| Scenario | Strategy | User-visible |
+|----------|----------|--------------|
+| Single DB/table failure | Log to `BuildStats.errors[]`, continue others | Partial ready |
+| Time budget (`deadline`) | Skip remaining DBs/tables, record skip | Warning list |
+| No LLM | Summaries degrade to rule-based text | Build still completes |
+| Connection test fails | Abort instance build | Error message |
 
-DBAide is optimized for developer tasks around an unfamiliar or changing
-database:
+---
 
-- `tree`: quick directory-style view of instance/database/table/column assets
-- `find`: locate where a concept probably lives, such as "user email" or "order amount"
-- `ddl`: get copyable table DDL from the live adapter
-- `relations`: inspect foreign keys and heuristic join hints
-- `doc`: export a Markdown schema brief for code review or handoff
-- `diff`: compare two asset schemas, such as dev vs prod
-- `ask --no-execute`: generate validated SQL without running it
+## Phase 2: Ask — Primary Path (Tool Loop)
 
-These commands use offline assets first and only call the live database when the
-operation is inherently live, such as DDL retrieval, SQL validation, execution,
-or explicit profile/enrich.
+### Request / response
 
-## Desktop GUI
+**Input (`WorkflowRequest`):**
 
-The PyQt GUI is a thin interface over the same backend modules used by the CLI.
-It does not introduce separate business logic. Long-running operations such as
-asset builds, profiling, SQL execution, and LLM-backed asking run in a background
-thread and stream progress into the active panel.
+| Field | Meaning |
+|-------|---------|
+| `question` | Natural language question |
+| `database_scope` | Optional database filter |
+| `execution_policy` | `safe_auto` / `sql_only` / `inspect_only` / `expert` |
+| `resume_state` + `user_reply` | Resume after `ask_user` clarification |
 
-GUI tabs map to CLI workflows:
+**Output (`WorkflowResult` / `AssistantResponse`):**
 
-- Connections: `connect add`, `connect test`, asset build on save
-- Assets: `assets build/status/show/enrich` plus hierarchical asset tree preview
-- Explore: `tree`, `ddl`, `relations`, `doc`
-- Find & Ask: `find`, `ask`, with an execution log panel showing selected instance, asset availability, plan notes, and disclosure steps
-- SQL: `sql`, `diagnose`
-- Diff: `diff`
+| Field | Meaning |
+|-------|---------|
+| `answer` | Markdown answer |
+| `sql` | Generated SQL (if any) |
+| `result` | Query rows (if executed) |
+| `warnings` | Policy blocks, fallback notices, risk confirms |
+| `status` | `completed` / `wait_user` / `failed` / `cancelled` |
+| `resume_state` | Serialized loop state when waiting for user |
 
-SQLite, MySQL/MariaDB, PostgreSQL drivers and PyQt are default package
-dependencies so a normal install can run both CLI and GUI without extra feature
-flags.
+### Loop flow
 
-## Candidate Discovery Without Vectors
+```mermaid
+flowchart TB
+    subgraph Req["Input"]
+        Q["question"]
+        POL["execution_policy"]
+        RS["resume_state (optional)"]
+    end
 
-Candidate tables and columns are selected by deterministic lightweight signals:
+    WF["WorkflowEngine.run()"]
+    ENV{"adapter.test()"}
+    DA["DataAssistant → AskOrchestrator"]
 
-- table/column name match
-- comments when available
-- built-in Chinese/English alias dictionary
-- primary key and index hints
-- optional value profiling when a query needs enum or range information
+    subgraph Loop["AskAgentLoop"]
+        DEC["LLM complete_json<br/>action: call_tool | finish"]
+        T1["discover_schema"]
+        T2["describe_table × N"]
+        T2A["auto get_relations<br/>deterministic when ≥2 tables"]
+        T3["get_relations"]
+        T4["generate_sql"]
+        T5["validate_sql"]
+        T6["execute_sql"]
+        T7["ask_user → WAIT_USER"]
+        FIN["finish → AssistantResponse"]
+    end
 
-This avoids startup cost and keeps the failure mode visible. If ambiguity remains, the CLI should ask the user or return the candidate list.
+    subgraph Risk["Pre-execution gate"]
+        RC["RiskController.decide()"]
+    end
+
+    Req --> WF --> ENV
+    ENV -->|connection failed| FAIL1["FAILED · CONNECTION_FAILED"]
+    ENV -->|OK| DA --> Loop
+
+    DEC --> T1 --> T2 --> T2A --> T3 --> T4 --> T5
+    T5 -->|sql_only / no execute| FIN
+    T5 --> T6
+    T6 --> RC
+    RC -->|auto_execute| EXEC["QueryTools.execute_sql<br/>read-only + LIMIT"]
+    RC -->|confirm / blocked| BLOCK["Return SQL + reason<br/>no execution"]
+    EXEC --> FIN
+    T7 --> PAUSE["status=wait_user"]
+    DEC --> FIN
+```
+
+### Tool I/O (query path)
+
+| Tool | Input | Output |
+|------|-------|--------|
+| `discover_schema` | `question` | `hits[]`, `trace` |
+| `describe_table` | `table`, `database?` | `columns[]` → `_loop_schemas` |
+| `get_relations` | disclosed tables | `relations[]` + confidence; may persist agent candidates |
+| `generate_sql` | question + schemas + relations | `sql`, `rationale`, `confidence` |
+| `validate_sql` | `sql` | `ok`, `normalized_sql`, `issues`, `risk_level` |
+| `execute_sql` | `sql` | `rows`, `row_count` or `blocked` |
+| `ask_user` | `question`, `options?` | `pending: true` → workflow pause |
+
+Join catalog CRUD (`list/add/update/delete_join`) is available via GUI/Service but **not exposed to the loop LLM** during normal queries.
+
+### Schema discovery source
+
+```mermaid
+flowchart LR
+    Q["User question"] --> PSA["ProgressiveSchemaAgent.discover()"]
+    PSA --> H1{"AssetStore<br/>has_instance?"}
+    H1 -->|yes| A["_discover_from_assets<br/>LLM filters db → table → column"]
+    H1 -->|no| H2{"SchemaTools<br/>available?"}
+    H2 -->|yes| L["_discover_from_live<br/>scan live catalog"]
+    H2 -->|no| E["empty hits + trace: build assets"]
+    A --> HITS["DiscoveryResult"]
+    L --> HITS
+```
+
+---
+
+## Phase 3: Staged Fallback
+
+When the tool loop returns `None` (invalid decision, step budget exhausted, exception), the orchestrator runs a staged pipeline that **reuses warm loop state** when available.
+
+```mermaid
+flowchart TB
+    LOOP_FAIL["Loop returns None"]
+    LOOP_FAIL --> REUSE["Reuse _loop_discovery<br/>_loop_schemas<br/>_loop_relations"]
+    REUSE --> ROUTE["TaskRouter.route(question)"]
+    ROUTE --> P1["schema_explore"]
+    ROUTE --> P2["data_profile"]
+    ROUTE --> P3["sql_diagnose / rewrite"]
+    ROUTE --> P4["data_query (default)"]
+
+    P4 --> DISC["discover / pick_table"]
+    DISC --> DESC["describe_table(s)"]
+    DESC --> REL["collect_relations"]
+    REL --> GEN["SQLWriter.write()"]
+    GEN --> VAL["validate_sql · up to 2 retries"]
+    VAL --> RISK["RiskController"]
+    RISK --> EXEC2["execute_sql or SQL-only response"]
+    EXEC2 --> RESP["AssistantResponse + warning:<br/>Tool loop unavailable"]
+```
+
+Both paths share: `collect_relations`, `SQLWriter`, `validate_sql`, `RiskController`, `ResultInterpreter`.
+
+---
+
+## Join Relation Pipeline
+
+Used inside `get_relations` (and optionally on `generate_sql` when relations cache is empty for multi-table queries).
+
+```mermaid
+flowchart LR
+    IN["disclosed tables + question"] --> C1["JoinCatalog user/agent edges<br/>user = 0.99 pinned"]
+    C1 --> C2["Declared FK<br/>assets or live catalog"]
+    C2 --> C3{"Graph connected?"}
+    C3 -->|no| C4["SemanticJoinInferencer<br/>LLM proposes joins"]
+    C3 -->|yes| MERGE["merge_relation_layers"]
+    C4 --> MERGE
+    MERGE --> C5["JoinSampleValidator<br/>sample evidence → soft confidence"]
+    C5 --> C6["Re-apply user catalog edges on top"]
+    C6 --> OUT["relations[] → generate_sql prompt"]
+    C5 --> PERSIST["persist_agent_candidates<br/>conf ≥ 0.55"]
+```
+
+Principles:
+
+- **LLM proposes** semantic joins when FK + catalog do not connect all tables.
+- **No column-name keyword heuristics** (e.g. no `*_id` matching rules).
+- Sample validation **adjusts confidence only**; it does not hard-block unusual business joins.
+- Semantic edges with confidence &lt; 0.18 are dropped; user/FK edges are not.
+- Join catalog CRUD is a **fact layer** for users; the agent reads it via `get_relations`.
+
+### Join confidence → risk gate
+
+When SQL contains `JOIN`, `join_confidence_for_sql()` takes the **minimum confidence** among relations whose tables appear in the SQL. `RiskController` uses this as a soft signal:
+
+| `join_confidence` | Effect |
+|-------------------|--------|
+| ≥ 0.8 | May `auto_execute` (if other checks pass) |
+| &lt; 0.8 | `confirm` — return SQL without auto execution |
+
+User catalog joins (0.99) and strong FK edges typically pass; low-confidence semantic edges trigger confirmation.
+
+---
+
+## Exception Handling
+
+```mermaid
+flowchart TB
+    subgraph Layers["Layered handling"]
+        L1["Tool layer · ToolResult<br/>ok=false + DBAideError<br/>retryable flag"]
+        L2["Loop layer<br/>unknown tool → transcript retry<br/>bad decision → 3 retries → fallback<br/>12 steps exhausted → fallback"]
+        L3["Workflow layer<br/>connection fail → FAILED<br/>user cancel → CANCELLED<br/>ask_user → WAIT_USER"]
+        L4["Staged layer · ErrorRouter<br/>SQL exec fail → rerender_sql (budget)<br/>budget exhausted → error + SQL"]
+        L5["Risk layer · RiskController<br/>reject / confirm / auto_execute"]
+    end
+
+    L1 --> L2 --> L3
+    L2 -->|fallback| L4
+    L4 --> L5
+```
+
+| Scenario | Strategy | User-visible |
+|----------|----------|--------------|
+| No LLM configured | Loop skipped; prompt to configure Models | Settings guidance |
+| No offline assets | `discover_schema` uses live catalog | Trace suggests build assets |
+| `validate_sql` unknown table/column | Feedback → `describe_table` → retry `generate_sql` | Self-heal in loop transcript |
+| Execute blocked by policy | `blocked: true` + SQL | SQL shown + reason |
+| Low join confidence | `confirm`, no auto execute | SQL shown; manual confirm |
+| Loop failure overall | Staged pipeline + warning | Answer/SQL still possible |
+| Partial asset build | Errors in `BuildStats.errors` | Partial ready state |
+| SQL execution error | `ErrorRouter` → one self-correction attempt | Error + optional corrected SQL |
+
+### ErrorRouter repair budget
+
+- Max **2 repairs per stage**, **5 total** per workflow.
+- Maps error codes to actions: `REFRESH_SCHEMA`, `RERENDER_SQL`, `REPLAN`, `ASK_USER`, `STOP`, etc.
+- Used primarily in staged execution path after SQL failures.
+
+---
+
+## Runtime State & Persistence
+
+```mermaid
+flowchart LR
+    subgraph Persistent["Persistent"]
+        AS[("Assets")]
+        JN[("Join catalog")]
+        HI[("Workflow history")]
+    end
+
+    subgraph Runtime["_loop_* session state"]
+        LD["_loop_discovery"]
+        LS["_loop_schemas"]
+        LR["_loop_relations"]
+        LQ["_loop_sql / _loop_query_result"]
+    end
+
+    AS -->|discover / FK| LD
+    JN -->|get_relations read-first| LR
+    LD --> LS --> LR --> LQ
+    LR -->|agent candidates| JN
+    LQ --> HI
+```
+
+---
 
 ## Module Boundaries
 
 ```text
-CLI
-  parses commands and displays output
+CLI / GUI
+  command dispatch, progress UI
 
-Agent
-  routes task, plans disclosure, writes SQL, formats answers
+WorkflowEngine
+  connection check, trace, WorkflowResult assembly
 
-Tools
-  schema/profile/query/diagnose capabilities with clear inputs and outputs
+DataAssistant / AskOrchestrator
+  routes to loop or staged pipeline
 
-Context
-  records disclosed schema and execution evidence
+AskAgentLoop
+  LLM tool-calling loop, auto get_relations, ask_user pause/resume
+
+Tools (toolkit)
+  discover, describe, relations, SQL gen/validate/execute, profile
+
+Agent helpers
+  ProgressiveSchemaAgent, SemanticJoinInferencer, SQLWriter, JoinSampleValidator
+
+Controllers
+  RiskController (execute gate), ResultInterpreter, ErrorRouter
+
+Assets
+  AssetBuilder, AssetStore, AssetSummarizer, ColumnProfiler
+
+Joins
+  JoinCatalogStore (user + agent-saved edges)
 
 Validation
-  deterministic SQL and schema guards
+  deterministic SQL guards (single statement, read-only, LIMIT, EXPLAIN)
 
 Adapters
   database-specific metadata, EXPLAIN, read-only execute
 ```
 
-Adapters are the only layer that knows database driver details.
+Adapters are the only layer that knows driver details.
+
+---
 
 ## Safety Defaults
 
 - Single SQL statement only.
-- Only `SELECT`, `WITH`, and `EXPLAIN` are allowed.
-- DDL/DML keywords are blocked.
-- Dangerous functions and file/program access patterns are blocked.
-- SQL gets a default limit unless explicitly bounded.
-- Execution runs through `EXPLAIN` first.
-- Adapters execute in read-only mode where supported.
-- Result explanation is based on actual returned rows.
+- Only `SELECT`, `WITH`, and `EXPLAIN` allowed.
+- DDL/DML keywords blocked.
+- Dangerous functions and file access patterns blocked.
+- Default `LIMIT` unless query is explicitly bounded.
+- `EXPLAIN` preflight where supported.
+- Read-only execution mode where the driver supports it.
+- Result explanation based on **actual returned rows**, not fabrication.
+
+### Execution policies
+
+| Policy | Behavior |
+|--------|----------|
+| `safe_auto` | Validate + risk gate; auto execute when low risk |
+| `expert` | Relaxed auto execute |
+| `sql_only` | Generate and validate; never execute |
+| `inspect_only` | Schema/profile answers; reject execution |
+
+---
+
+## Design Principles (anti-complexity)
+
+1. **Two execution paths, one core** — Loop decides steps; staged fallback reuses the same SQL/join/risk stack.
+2. **Assets are an accelerator, not a hard dependency** — Live discovery works when assets are missing.
+3. **Join catalog is a fact layer** — User pins at 0.99; agent reads, does not CRUD during queries.
+4. **Risk gate only at execute** — Validation checks syntax/safety; `RiskController` checks whether to run.
+5. **Soft signals, hard safety** — Join confidence and sample match rates inform ranking and confirm; they do not replace LLM judgment for SQL.
+6. **Deterministic helpers in code** — Auto `get_relations`, persist join candidates, validation, budgets—not extra LLM agents.
+
+---
 
 ## Extensibility
 
-Add a database:
+**Add a database adapter**
 
 1. Implement `DatabaseAdapter`.
-2. Register it in `adapters/__init__.py`.
-3. Add adapter tests using a disposable database.
+2. Register in `adapters/__init__.py`.
+3. Add adapter tests with a disposable database.
 
-Add a task:
+**Add an agent tool**
 
-1. Add a `TaskType`.
-2. Extend `TaskRouter`.
-3. Add a tool or assistant branch.
-4. Add deterministic validation before execution.
+1. Define spec in `tools/specs.py`.
+2. Register handler in `agent/toolkit.py`.
+3. Add to `LOOP_DECISION_TOOL_NAMES` if the loop LLM should see it.
+4. Add tests via `build_tool_registry`.
 
-Add a model provider:
+**Add a model provider**
 
 1. Implement `LLMClient`.
-2. Register it in `build_llm_client`.
-3. Keep JSON outputs validated at the caller boundary.
+2. Register in `build_llm_client`.
+3. Validate JSON outputs at caller boundaries.
+
+---
+
+## Related Docs
+
+- [README.md](../README.md) — quick start and CLI usage
+- Join catalog path: `~/.dbaide/joins/instances/{instance}/joins.json`
+- Asset path: `~/.dbaide/assets/instances/{instance}/`

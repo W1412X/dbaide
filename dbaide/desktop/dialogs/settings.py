@@ -20,7 +20,7 @@ from PyQt6.QtWidgets import (
 )
 
 from dbaide.desktop.components.base import compact_button
-from dbaide.desktop.components.inputs import configure_form
+from dbaide.desktop.components.inputs import FORM_INNER_LABEL_RULES, configure_form, form_label
 from dbaide.desktop.components.menu import MenuButton
 from dbaide.desktop.dialogs.connection import ConnectionForm
 from dbaide.desktop.theme import APP_STYLE, Theme
@@ -51,7 +51,9 @@ class ModelForm(QWidget):
         scroll.setFrameShape(QFrame.Shape.NoFrame)
         inner = QWidget()
         inner.setObjectName("modelFormInner")
-        inner.setStyleSheet(f"QWidget#modelFormInner {{ background: {Theme.BG}; }}")
+        inner.setStyleSheet(
+            f"QWidget#modelFormInner {{ background: {Theme.BG}; }}{FORM_INNER_LABEL_RULES}"
+        )
         form = QFormLayout(inner)
         configure_form(form)
         self.profile_name = QLineEdit()
@@ -63,7 +65,7 @@ class ModelForm(QWidget):
         self.base_url.setFixedHeight(34)
         self.api_key = QLineEdit()
         self.api_key.setFixedHeight(34)
-        self.api_key.setPlaceholderText("Required for new profiles; leave blank to keep saved key")
+        self.api_key.setPlaceholderText("Leave blank to keep existing key")
         self.api_key.setEchoMode(QLineEdit.EchoMode.Password)
         self.model_id = QLineEdit()
         self.model_id.setFixedHeight(34)
@@ -72,12 +74,12 @@ class ModelForm(QWidget):
         self.timeout.setMaximumWidth(120)
         self.timeout.setRange(5, 600)
         self.timeout.setValue(60)
-        form.addRow("Profile", self.profile_name)
-        form.addRow("Provider", self.provider)
-        form.addRow("Base URL", self.base_url)
-        form.addRow("API Key", self.api_key)
-        form.addRow("Model ID", self.model_id)
-        form.addRow("Timeout (s)", self.timeout)
+        form.addRow(form_label("Profile"), self.profile_name)
+        form.addRow(form_label("Provider"), self.provider)
+        form.addRow(form_label("Base URL"), self.base_url)
+        form.addRow(form_label("API Key"), self.api_key)
+        form.addRow(form_label("Model ID"), self.model_id)
+        form.addRow(form_label("Timeout (s)"), self.timeout)
         scroll.setWidget(inner)
         outer.addWidget(scroll)
 

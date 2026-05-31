@@ -8,6 +8,7 @@ from dbaide.adapters.base import DatabaseAdapter
 from dbaide.agent.orchestrator import AgentContext, AgentStep, AskOrchestrator, format_inspect
 from dbaide.agent.orchestrator import _format_diagnose  # re-export for tests/tools
 from dbaide.assets import AssetStore
+from dbaide.joins import JoinCatalogStore
 from dbaide.core.result import ExecutionPolicy
 from dbaide.llm import LLMClient
 from dbaide.models import AssistantResponse
@@ -31,6 +32,7 @@ class DataAssistant:
         llm: LLMClient | None = None,
         *,
         asset_store: AssetStore | None = None,
+        join_catalog: JoinCatalogStore | None = None,
         execution_policy: ExecutionPolicy = ExecutionPolicy.SAFE_AUTO,
         progress: Callable[[str], None] | None = None,
     ) -> None:
@@ -39,6 +41,7 @@ class DataAssistant:
             session,
             llm,
             asset_store=asset_store,
+            join_catalog=join_catalog,
             execution_policy=execution_policy,
             progress=progress,
         )

@@ -4,6 +4,7 @@ from dbaide.agent.progress_events import (
     normalize_trace_key,
     progress_event,
     progress_label,
+    subagent_event,
     trace_dedupe_keys,
 )
 
@@ -53,6 +54,22 @@ def test_conversation_trace_step_substep():
         progress_event(stage="discover_schema", title="Screening 3 database(s)", status="info", kind="substep")
     )
     assert step == ("Screening 3 database(s)", "info", "")
+
+
+def test_subagent_event_nested():
+    ev = subagent_event(agent="schema_link", title="LLM filter table · batch 1", parent="discover_schema", detail="18 objects")
+    assert ev["parent"] == "discover_schema"
+    assert ev["agent"] == "schema_link"
+    assert ev["kind"] == "substep"
+
+
+def test_conversation_trace_step_subagent_agent_prefix():
+    step = conversation_trace_step(
+        subagent_event(agent="schema_link", title="Kept 2 database(s)", parent="discover_schema"),
+    )
+    assert step is not None
+    assert step[0].startswith("schema_link:")
+    assert "Kept 2" in step[0]
 
 
 def test_conversation_trace_step_skips_planning():

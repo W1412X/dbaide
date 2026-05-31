@@ -11,6 +11,7 @@ from dbaide.desktop.components.base import SectionLabel, compact_button
 class Sidebar(QWidget):
     schema_preview = pyqtSignal(dict)
     schema_selected = pyqtSignal(dict)
+    semantic_search_requested = pyqtSignal(str)
     settings_requested = pyqtSignal()
 
     def __init__(self, parent=None) -> None:
@@ -22,9 +23,10 @@ class Sidebar(QWidget):
         layout.setSpacing(10)
         layout.addWidget(SectionLabel("SCHEMA"))
         self.search = QLineEdit()
-        self.search.setPlaceholderText("Search table or column")
+        self.search.setPlaceholderText("Filter tree · Enter to semantic search")
         self.search.setFixedHeight(34)
         self.search.textChanged.connect(self._filter_tree)
+        self.search.returnPressed.connect(self._semantic_search)
         layout.addWidget(self.search)
         self.tree = QTreeWidget()
         self.tree.setHeaderHidden(True)
@@ -88,6 +90,11 @@ class Sidebar(QWidget):
             if db_copy["children"]:
                 filtered.append(db_copy)
         self._render(filtered)
+
+    def _semantic_search(self) -> None:
+        query = self.search.text().strip()
+        if query:
+            self.semantic_search_requested.emit(query)
 
     def _selection_changed(self) -> None:
         items = self.tree.selectedItems()
