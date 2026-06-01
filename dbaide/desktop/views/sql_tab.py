@@ -1,12 +1,12 @@
 from __future__ import annotations
 
 from PyQt6.QtCore import pyqtSignal
-from PyQt6.QtGui import QFont
+from PyQt6.QtGui import QFont, QIcon
 from PyQt6.QtWidgets import QHBoxLayout, QPlainTextEdit, QTabWidget, QTextBrowser, QVBoxLayout, QWidget
 
 from dbaide.desktop.components.base import compact_button
 from dbaide.desktop.components.inputs import configure_multiline_text_edit, configure_readonly_text_view
-from dbaide.desktop.components.spinner import BusyAnimator
+from dbaide.desktop.components.spinner import BusyAnimator, spinner_icon
 from dbaide.desktop.components.table import ResultTableWidget
 from dbaide.desktop.theme import Theme
 
@@ -23,13 +23,13 @@ class SqlTab(QWidget):
         toolbar = QHBoxLayout()
         # Run is the only action: validation/explain happen automatically and any
         # problem surfaces as an execution error in Messages — no separate buttons.
-        self.run_btn = compact_button(t("sql.run"), primary=True, width=84)
+        self.run_btn = compact_button(t("sql.run"), primary=True, width=96)
         self.run_btn.setToolTip(t("sql.run_tooltip"))
         self.run_btn.clicked.connect(lambda: self.run_requested.emit(self.editor.toPlainText(), "execute"))
         toolbar.addWidget(self.run_btn)
         toolbar.addStretch(1)
         layout.addLayout(toolbar)
-        self._busy = BusyAnimator(lambda f: self.run_btn.setText(f"{f} {self._t('sql.running')}"))
+        self._busy = BusyAnimator(lambda: self.run_btn.setIcon(spinner_icon(self._busy.angle, color="#ffffff")))
         self.editor = QPlainTextEdit()
         self.editor.setPlaceholderText(t("sql.placeholder"))
         self.editor.setFont(QFont("Menlo", 11))
@@ -49,9 +49,11 @@ class SqlTab(QWidget):
 
     def set_running(self, running: bool) -> None:
         if running:
+            self.run_btn.setText(self._t("sql.running"))
             self._busy.start()
         else:
             self._busy.stop()
+            self.run_btn.setIcon(QIcon())
             self.run_btn.setText(self._t("sql.run"))
         self.run_btn.setEnabled(not running)
         self.editor.setEnabled(not running)

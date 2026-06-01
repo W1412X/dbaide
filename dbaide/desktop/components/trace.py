@@ -22,7 +22,7 @@ from PyQt6.QtWidgets import (
 from dbaide.agent.progress_events import STEP_TYPE_LABELS
 from dbaide.agent.trace_model import TraceModel, TraceNode
 from dbaide.desktop.components.inputs import configure_readonly_text_view
-from dbaide.desktop.components.spinner import BusyAnimator
+from dbaide.desktop.components.spinner import BusyAnimator, spinner_icon
 from dbaide.desktop.theme import Theme
 
 # Types that get a leading category chip in the tree (plain tool/substep don't —
@@ -109,8 +109,8 @@ class TracePanel(QWidget):
         self._selected_id: str = ""
         # Running rows show a spinning circle (instead of a static ▶) until they
         # resolve. We update just those rows' glyph on each tick — no full re-render.
-        self._running_items: list[tuple[QTreeWidgetItem, int]] = []
-        self._busy = BusyAnimator(self._on_spin_frame)
+        self._running_items: list[QTreeWidgetItem] = []
+        self._busy = BusyAnimator(self._on_spin)
         # Live builds can fire many events per second; coalesce re-renders so the
         # tree stays smooth instead of rebuilding on every single event.
         self._render_timer = QTimer(self)
@@ -217,20 +217,22 @@ class TracePanel(QWidget):
         else:
             self._busy.stop()
 
-    def _on_spin_frame(self, frame: str) -> None:
-        for item, step in self._running_items:
+    def _on_spin(self) -> None:
+        icon = spinner_icon(self._busy.angle, color=Theme.BLUE)
+        for item in self._running_items:
             try:
-                item.setText(0, f"{frame} {step}" if step else frame)
+                item.setIcon(0, icon)
             except RuntimeError:
                 pass  # item deleted by a concurrent re-render
 
     def _add_node(self, parent, node: TraceNode) -> QTreeWidgetItem:
         running = node.status == "running"
-        glyph = self._busy.frame if running else _GLYPH.get(node.status, "·")
+        # Running rows get a spinning-ring icon (set below); others a status glyph.
+        glyph = "" if running else _GLYPH.get(node.status, "·")
         is_tool = node.parent_id == "__root__"
         if is_tool:
             # Step row: bright phase name, status glyph carries colour, duration muted.
-            indicator = f"{glyph} {node.step}" if node.step else glyph
+            indicator = f"{glyph} {node.step}".strip() if node.step else glyph
             head = _head_text(node)
             if node.duration_ms > 0 and node.status in ("completed", "failed"):
                 status_text = _fmt_ms(node.duration_ms)
@@ -258,7 +260,8 @@ class TracePanel(QWidget):
             "thought": node.thought, "node_type": node.node_type, "raw": node.raw,
         })
         if running:
-            self._running_items.append((item, node.step if is_tool else 0))
+            item.setIcon(0, spinner_icon(self._busy.angle, color=Theme.BLUE))
+            self._running_items.append(item)
 
         parent_is_tree = isinstance(parent, QTreeWidget)
         if parent_is_tree:
