@@ -24,6 +24,14 @@ from dbaide.desktop.dialogs.build_assets import BuildAssetsDialog
 from dbaide.desktop.dialogs.settings import SettingsDialog
 from dbaide.agent.progress_events import progress_label
 from dbaide.desktop.theme import APP_STYLE
+from dbaide.desktop.event_bus import (
+    ASSETS_CHANGED,
+    CONNECTIONS_CHANGED,
+    JOINS_CHANGED,
+    MODELS_CHANGED,
+    QUERY_COMPLETED,
+    EventBus,
+)
 from dbaide.desktop.service import DesktopService
 from dbaide.desktop.views.ask_tab import AskTab
 from dbaide.desktop.views.right_panel import RightPanel
@@ -37,6 +45,7 @@ class MainWindow(QMainWindow):
     def __init__(self, service: DesktopService) -> None:
         super().__init__()
         self.service = service
+        self.bus = EventBus()
         self.pool = QThreadPool.globalInstance()
         self.bootstrap: dict[str, Any] = {}
         self.schema_rows: list[dict[str, Any]] = []
@@ -52,7 +61,17 @@ class MainWindow(QMainWindow):
         self.setMinimumSize(1000, 720)
         self.setStyleSheet(APP_STYLE)
         self._build()
+        self._wire_bus()
         self.refresh_all()
+
+    def _wire_bus(self) -> None:
+        """Central map of data-change events → who re-fetches. Components react to
+        events instead of every action handler knowing what to refresh."""
+        self.bus.subscribe(CONNECTIONS_CHANGED, lambda _p: self.refresh_all())
+        self.bus.subscribe(MODELS_CHANGED, lambda _p: self.refresh_all())
+        self.bus.subscribe(ASSETS_CHANGED, lambda _p: self.refresh_all())
+        self.bus.subscribe(JOINS_CHANGED, lambda _p: self.refresh_joins())
+        self.bus.subscribe(QUERY_COMPLETED, lambda _p: self._load_history(self.current_connection()))
 
     def _build(self) -> None:
         root = QWidget()
@@ -303,7 +322,7 @@ class MainWindow(QMainWindow):
         try:
             payload = {**payload, "connection_name": conn, "source": "user"}
             self.service.dispatch("add_join", payload)
-            self.refresh_joins()
+            self.bus.emit(JOINS_CHANGED, {"instance": conn})
             self.toast("Join saved")
         except Exception as exc:
             self.toast(str(exc))
@@ -314,7 +333,7 @@ class MainWindow(QMainWindow):
             return
         try:
             self.service.dispatch("update_join", {**payload, "connection_name": conn})
-            self.refresh_joins()
+            self.bus.emit(JOINS_CHANGED, {"instance": conn})
             self.toast("Join updated")
         except Exception as exc:
             self.toast(str(exc))
@@ -325,7 +344,7 @@ class MainWindow(QMainWindow):
             return
         try:
             self.service.dispatch("delete_join", {"connection_name": conn, "id": join_id})
-            self.refresh_joins()
+            self.bus.emit(JOINS_CHANGED, {"instance": conn})
             self.toast("Join deleted")
         except Exception as exc:
             self.toast(str(exc))
@@ -505,7 +524,7 @@ class MainWindow(QMainWindow):
             return
         try:
             self.service.dispatch("set_default_model", {"name": model_name})
-            self.refresh_all()
+            self.bus.emit(MODELS_CHANGED, {"model": model_name})
             active = self.bootstrap.get("model") or {}
             label = str(active.get("model") or model_name)
             self.toast(f"Model: {label}")
@@ -522,7 +541,7 @@ class MainWindow(QMainWindow):
                 dialog._default_connection = payload["name"]
             dialog._reload_connection_list()
             self.toast("Connection saved")
-            self.refresh_all()
+            self.bus.emit(CONNECTIONS_CHANGED, {"instance": payload.get("name")})
 
         def on_fail(exc: object) -> None:
             dialog.set_save_busy(False, target="connection")
@@ -533,7 +552,7 @@ class MainWindow(QMainWindow):
     def _settings_delete_connection(self, name: str) -> None:
         try:
             self.service.dispatch("delete_connection", {"name": name})
-            self.refresh_all()
+            self.bus.emit(CONNECTIONS_CHANGED, {"instance": name})
             self.toast("Connection removed")
         except Exception as exc:
             self.fail(exc)
@@ -561,7 +580,7 @@ class MainWindow(QMainWindow):
                 dialog._default_model = payload["name"]
             dialog._reload_model_list()
             self.toast("Model saved")
-            self.refresh_all()
+            self.bus.emit(MODELS_CHANGED, {"model": payload.get("name")})
 
         def on_fail(exc: object) -> None:
             dialog.set_save_busy(False, target="model")
@@ -572,7 +591,7 @@ class MainWindow(QMainWindow):
     def _settings_delete_model(self, name: str) -> None:
         try:
             self.service.dispatch("delete_model", {"name": name})
-            self.refresh_all()
+            self.bus.emit(MODELS_CHANGED, {"model": name})
             self.toast("Model removed")
         except Exception as exc:
             self.fail(exc)
@@ -721,7 +740,8 @@ class MainWindow(QMainWindow):
                 "Assets built",
                 f"```json\n{json.dumps(stats, ensure_ascii=False, indent=2)}\n```",
             )
-            self.refresh_all()
+            if not stats.get("estimated_queries"):  # a dry-run changes no assets
+                self.bus.emit(ASSETS_CHANGED, {"instance": self.current_connection()})
             self.switch_tab("Ask")
             if stats.get("estimated_queries"):
                 self.toast(f"Dry-run: ~{stats.get('estimated_queries')} queries estimated")
@@ -750,7 +770,7 @@ class MainWindow(QMainWindow):
             self.ask_tab.append_result(result)
             self.right.show_trace(result.get("trace") or [])
             self.right.show_plan(result)
-            self._load_history(self.current_connection())
+            self.bus.emit(QUERY_COMPLETED, {"instance": self.current_connection()})
             self._restore_composer_placeholder()
             return
         if action == "search_assets":
