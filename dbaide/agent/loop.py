@@ -193,6 +193,13 @@ class AskAgentLoop:
             )
             if executed_sql:
                 done_event["sql"] = executed_sql
+                # Carry the SQL facts so the typed SQL step can show rows/db on click.
+                data = result.data if isinstance(result.data, dict) else {}
+                if data.get("row_count") is not None:
+                    done_event["row_count"] = data.get("row_count")
+                db = str(data.get("database") or orch._loop_database or "").strip()
+                if db:
+                    done_event["database"] = db
             self.progress(done_event)
 
             if tool_name == "ask_user" and result.ok and isinstance(result.data, dict) and result.data.get("pending"):

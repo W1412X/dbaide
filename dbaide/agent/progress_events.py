@@ -61,6 +61,54 @@ AGENT_LABELS: dict[str, str] = {
 }
 
 
+# ── Step types ───────────────────────────────────────────────────────────────
+# Every trace node is classified into one of these canonical types so the UI can
+# render each kind of work consistently (a SQL execution always shows its query,
+# a build phase groups its children, a thought reads as reasoning, …).
+STEP_TYPES = ("phase", "tool", "sql", "llm", "decision", "io", "substep", "info")
+
+# Stages that *are* a SQL execution regardless of how they were emitted.
+SQL_STEP_STAGES = frozenset({"execute_sql", "execute_readonly_sql", "explain_sql"})
+
+# Short, human label per type — shown as a chip on the step so types are legible.
+STEP_TYPE_LABELS: dict[str, str] = {
+    "phase": "Phase",
+    "tool": "Tool",
+    "sql": "SQL",
+    "llm": "Model",
+    "decision": "Think",
+    "io": "I/O",
+    "substep": "",
+    "info": "",
+}
+
+
+def step_type(event: dict[str, Any], *, is_tool: bool = False) -> str:
+    """Classify a progress/trace event into one canonical :data:`STEP_TYPES` value.
+
+    SQL is detected first (a step that ran a query is a ``sql`` step no matter what
+    ``kind`` it carried), then explicit kinds, then structural fallbacks.
+    """
+    kind = str(event.get("kind") or "").strip()
+    stage = str(event.get("stage") or "").strip()
+    if event.get("sql") or stage in SQL_STEP_STAGES or kind == "sql":
+        return "sql"
+    if kind == "decision" or stage == "decision":
+        return "decision"
+    if kind == "llm":
+        return "llm"
+    if kind == "io":
+        return "io"
+    if kind == "substep":
+        return "substep"
+    node_id = str(event.get("node_id") or "")
+    if kind == "phase" or stage == "build_assets" or node_id.startswith("build:"):
+        return "phase"
+    if is_tool:
+        return "tool"
+    return "info"
+
+
 def phase_for(stage: str) -> str:
     """Map a tool/stage name to the human phase it belongs to."""
     return PHASE_LABELS.get(str(stage or "").strip(), "")

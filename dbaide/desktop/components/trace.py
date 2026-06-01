@@ -15,9 +15,14 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 
+from dbaide.agent.progress_events import STEP_TYPE_LABELS
 from dbaide.agent.trace_model import TraceModel, TraceNode
 from dbaide.desktop.components.inputs import configure_readonly_text_view
 from dbaide.desktop.theme import Theme
+
+# Types that get a leading category chip in the tree (plain tool/substep don't —
+# their phase label already says what they are).
+_CHIP_TYPES = frozenset({"sql", "phase", "llm", "decision", "io"})
 
 # Status glyphs so state is readable at a glance.
 _GLYPH = {
@@ -167,7 +172,7 @@ class TracePanel(QWidget):
         if is_tool:
             # Step row: bright phase name, status glyph carries colour, duration muted.
             indicator = f"{glyph} {node.step}" if node.step else glyph
-            head = node.phase or node.stage
+            head = _head_text(node)
             if node.duration_ms > 0 and node.status in ("completed", "failed"):
                 status_text = _fmt_ms(node.duration_ms)
             elif node.status in ("running", "waiting"):
@@ -191,7 +196,7 @@ class TracePanel(QWidget):
             "node_id": node.id, "stage": node.stage, "phase": node.phase,
             "agent": node.agent_name, "status": node.status, "title": node.title,
             "detail": node.detail, "duration_ms": node.duration_ms, "step": node.step,
-            "thought": node.thought, "raw": node.raw,
+            "thought": node.thought, "node_type": node.node_type, "raw": node.raw,
         })
 
         parent_is_tree = isinstance(parent, QTreeWidget)
@@ -243,13 +248,23 @@ class TracePanel(QWidget):
         self._detail.setPlainText(_format_detail(data))
 
 
+def _head_text(node: TraceNode) -> str:
+    """Step head with a leading category chip for the 'special' step types."""
+    base = node.phase or node.stage or node.title
+    chip = STEP_TYPE_LABELS.get(node.node_type, "")
+    if chip and node.node_type in _CHIP_TYPES:
+        return f"{chip} · {base}"
+    return base
+
+
 def _format_detail(data: dict) -> str:
     if data.get("__summary__"):
         return str(data.get("title") or "")
+    node_type = str(data.get("node_type") or "info")
     lines: list[str] = []
     title = str(data.get("title") or data.get("phase") or data.get("stage") or "step")
     lines.append(title)
-    meta = []
+    meta = [f"type: {node_type}"]
     if data.get("phase"):
         meta.append(f"phase: {data['phase']}")
     if data.get("stage"):
@@ -262,19 +277,39 @@ def _format_detail(data: dict) -> str:
     if data.get("duration_ms"):
         meta.append(f"{float(data['duration_ms']):.0f} ms")
     lines.append(" · ".join(meta))
-    if data.get("thought"):
-        lines.append("")
-        lines.append(f"thought: {data['thought']}")
-    if data.get("detail"):
-        lines.append("")
-        lines.append(str(data["detail"]))
-    raw = data.get("raw")
-    if isinstance(raw, dict) and raw:
-        # Surface useful payload keys explicitly, then the full event.
-        for key in ("sql", "args"):
-            if raw.get(key):
-                lines.append("")
-                lines.append(f"{key}: {raw[key]}")
+
+    raw = data.get("raw") if isinstance(data.get("raw"), dict) else {}
+
+    # SQL steps lead with the query itself — that is the whole point of the step.
+    if node_type == "sql":
+        sql = str(raw.get("sql") or data.get("detail") or "").strip()
+        facts = []
+        if raw.get("row_count") not in (None, ""):
+            facts.append(f"{raw['row_count']} rows")
+        if raw.get("database"):
+            facts.append(f"db={raw['database']}")
+        if facts:
+            lines.append("")
+            lines.append(" · ".join(facts))
+        if sql:
+            lines.append("")
+            lines.append("─ SQL ─")
+            lines.append(sql)
+    else:
+        if data.get("thought"):
+            lines.append("")
+            lines.append(f"thought: {data['thought']}")
+        if data.get("detail"):
+            lines.append("")
+            lines.append(str(data["detail"]))
+
+    if raw:
+        # For non-SQL steps also surface explicit payload keys, then the full event.
+        if node_type != "sql":
+            for key in ("sql", "args"):
+                if raw.get(key):
+                    lines.append("")
+                    lines.append(f"{key}: {raw[key]}")
         lines.append("")
         lines.append("─ raw event ─")
         try:

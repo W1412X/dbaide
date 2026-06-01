@@ -20,7 +20,7 @@ from __future__ import annotations
 import time
 from dataclasses import dataclass, field
 
-from dbaide.agent.progress_events import agent_label, normalize_trace_key, phase_for
+from dbaide.agent.progress_events import agent_label, normalize_trace_key, phase_for, step_type
 
 ROOT_ID = "__root__"
 _ACTIVE = "running"
@@ -35,6 +35,7 @@ class TraceNode:
     phase: str = ""
     agent: str = ""
     kind: str = ""
+    node_type: str = "info"
     status: str = "running"
     title: str = ""
     detail: str = ""
@@ -141,7 +142,8 @@ class TraceModel:
                 id=node_id, parent_id=parent.id, stage=stage,
                 phase=str(event.get("phase") or "").strip() or phase_for(stage) or (stage if is_tool else ""),
                 agent=str(event.get("agent") or "").strip(),
-                kind=kind, status=status, title=title, detail=detail,
+                kind=kind, node_type=step_type(event, is_tool=is_tool),
+                status=status, title=title, detail=detail,
                 duration_ms=duration, step=int(event.get("step") or 0),
                 started_at=self._last_ts, raw=dict(event),
             )
@@ -160,6 +162,11 @@ class TraceModel:
                 node.detail = detail
             if duration > 0:
                 node.duration_ms = duration
+            # A later event may reveal the step actually ran SQL (the "Calling"
+            # frame had no sql; the "done" frame does) — upgrade the type.
+            new_type = step_type(event, is_tool=(node.parent_id == ROOT_ID))
+            if new_type == "sql" or node.node_type in ("info", "tool"):
+                node.node_type = new_type
             node.raw = dict(event)
 
     def _identify(self, event: dict, stage: str, kind: str, status: str, title: str) -> tuple[str, str, bool]:
