@@ -647,8 +647,11 @@ def dispatch_find(args: argparse.Namespace, cfg: ConfigManager) -> int:
 
 def build_adapter_session(cfg: ConfigManager, args: argparse.Namespace):
     conn = cfg.get_connection(args.conn or None)
-    adapter = build_adapter(conn, policy=cfg.policy_for(conn), caller="cli")
-    session = Session(connection=conn, default_limit=args.limit, timeout_seconds=args.timeout)
+    policy = cfg.policy_for(conn)
+    adapter = build_adapter(conn, policy=policy, caller="cli")
+    session = Session.from_policy(
+        conn, policy, default_limit=args.limit, timeout_seconds=args.timeout,
+    )
     _populate_disclosure(adapter, session, conn.name, args.database)
     return adapter, session
 
@@ -733,8 +736,11 @@ def build_any_assistant(cfg: ConfigManager, args: argparse.Namespace):
     llm = build_llm_client(cfg.model())
     if len(targets) == 1:
         conn = targets[0].config
-        adapter = build_adapter(conn, policy=cfg.policy_for(conn), caller="agent")
-        session = Session(connection=conn, default_limit=args.limit, timeout_seconds=args.timeout)
+        policy = cfg.policy_for(conn)
+        adapter = build_adapter(conn, policy=policy, caller="agent")
+        session = Session.from_policy(
+            conn, policy, default_limit=args.limit, timeout_seconds=args.timeout,
+        )
         assistant = DataAssistant(adapter, session, llm)
         return _SingleAssistantWithDatabase(assistant, targets[0].database)
     return _MultiAssistantWithDatabase(

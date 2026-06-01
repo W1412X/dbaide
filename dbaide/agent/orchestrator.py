@@ -59,7 +59,7 @@ class AgentContext:
 class AskOrchestrator:
     """Codex-style Ask agent: route → discover → act → validate → execute (with risk gate)."""
 
-    MAX_SQL_RETRIES = 2
+    MAX_SQL_RETRIES = 2  # default; the effective value comes from session.agent_sql_retries
 
     def __init__(
         self,
@@ -343,17 +343,18 @@ class AskOrchestrator:
         targets: list[tuple[str, str]] = []
         loop_tables = disclosed_table_keys(self)
 
+        max_tables = self.session.agent_max_disclosed_tables
         if self._loop_discovery and self._loop_discovery.hits:
             discovery = self._loop_discovery
             self._step(ctx, "discover", f"Reusing tool-loop discovery ({len(discovery.hits)} hit(s))")
-            targets = table_targets_from_discovery(discovery, active_database)
+            targets = table_targets_from_discovery(discovery, active_database, limit=max_tables)
         elif loop_tables:
             self._step(ctx, "discover", f"Reusing {len(loop_tables)} table(s) from tool loop")
             targets = loop_tables
         else:
             self._step(ctx, "discover", "Progressive schema discovery…")
             discovery = self._discover(ctx.question)
-            targets = table_targets_from_discovery(discovery, active_database)
+            targets = table_targets_from_discovery(discovery, active_database, limit=max_tables)
 
         if not targets:
             table, table_database = self._pick_table(ctx.question, active_database)
@@ -403,7 +404,8 @@ class AskOrchestrator:
         draft = None
         validation = None
         feedback = ""
-        for attempt in range(self.MAX_SQL_RETRIES + 1):
+        max_retries = self.session.agent_sql_retries
+        for attempt in range(max_retries + 1):
             self._step(ctx, "generate", f"Generating SQL (attempt {attempt + 1})…")
             if len(disclosed) == 1:
                 database, table, columns = disclosed[0]
@@ -428,7 +430,7 @@ class AskOrchestrator:
             issues = [issue.message for issue in validation.issues]
             ctx.error = "; ".join(issues)
             feedback = validation_feedback(issues)
-            if attempt < self.MAX_SQL_RETRIES:
+            if attempt < max_retries:
                 self._step(ctx, "retry", f"Validation failed: {feedback}. Retrying…")
                 continue
             return AssistantResponse(

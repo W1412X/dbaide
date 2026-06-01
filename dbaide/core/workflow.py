@@ -217,7 +217,12 @@ class WorkflowEngine:
 
     def _get_session(self):
         if self._session is None:
-            self._session = Session(self.connection)
+            try:
+                from dbaide.config import ConfigManager
+                policy = ConfigManager().policy_for(self.connection)
+                self._session = Session.from_policy(self.connection, policy)
+            except Exception:
+                self._session = Session(self.connection)
         return self._session
 
     def _validate_sql(self, sql: str, *, database: str = "") -> ValidationReport:

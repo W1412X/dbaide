@@ -24,7 +24,7 @@ class AgentRuntime:
     - Supports cancellation
     """
 
-    MAX_STEPS = 12
+    MAX_STEPS = 12  # default; overridable per-run via the ``max_steps`` argument
 
     def __init__(
         self,
@@ -33,11 +33,13 @@ class AgentRuntime:
         tool_registry: ToolRegistry | None = None,
         execution_policy: ExecutionPolicy = ExecutionPolicy.SAFE_AUTO,
         trace_sink: Callable[[TraceEvent], None] | None = None,
+        max_steps: int | None = None,
     ) -> None:
         self.llm = llm or NullLLMClient()
         self.tool_registry = tool_registry or ToolRegistry()
         self.execution_policy = execution_policy
         self.trace_sink = trace_sink or (lambda _: None)
+        self.max_steps = max(1, int(max_steps)) if max_steps else self.MAX_STEPS
         self._step_count = 0
         self._cancelled = False
         self._start_time = time.perf_counter()
@@ -52,14 +54,14 @@ class AgentRuntime:
 
     @property
     def steps_remaining(self) -> int:
-        return max(0, self.MAX_STEPS - self._step_count)
+        return max(0, self.max_steps - self._step_count)
 
     def check_budget(self) -> None:
         """Check if execution budget is exhausted."""
         if self._cancelled:
             raise RuntimeError("Execution cancelled by user")
-        if self._step_count >= self.MAX_STEPS:
-            raise RuntimeError(f"Execution budget exhausted ({self.MAX_STEPS} steps)")
+        if self._step_count >= self.max_steps:
+            raise RuntimeError(f"Execution budget exhausted ({self.max_steps} steps)")
 
     def emit_trace(self, event: TraceEvent) -> None:
         """Emit a trace event."""

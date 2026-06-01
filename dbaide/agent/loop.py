@@ -117,6 +117,7 @@ class AskAgentLoop:
             tool_registry=self.registry,
             execution_policy=orch.execution_policy,
             trace_sink=self._trace_sink,
+            max_steps=orch.session.agent_max_steps,
         )
 
         step_no = 0
