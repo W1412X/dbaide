@@ -146,3 +146,21 @@ def test_save_model_reports_missing_fields(tmp_path):
         raise AssertionError("expected validation error")
     except ValueError as exc:
         assert "Model ID" in str(exc)
+
+
+def test_delete_history_removes_workflow(tmp_path):
+    from dbaide.core.result import WorkflowResult, WorkflowStatus
+    from dbaide.history.store import WorkflowHistoryStore
+
+    cfg = ConfigManager(tmp_path / "config.toml")
+    service = DesktopService(cfg, AssetStore(tmp_path / "assets"))
+    service.history = WorkflowHistoryStore(tmp_path / "history")
+    service.history.save(WorkflowResult(
+        workflow_id="wf1", status=WorkflowStatus.COMPLETED,
+        question="q", connection_name="local",
+    ))
+    assert any(e["workflow_id"] == "wf1" for e in service.dispatch("list_history", {"connection_name": "local"}))
+
+    res = service.dispatch("delete_history", {"connection_name": "local", "workflow_id": "wf1"})
+    assert res["deleted"] is True
+    assert service.dispatch("list_history", {"connection_name": "local"}) == []

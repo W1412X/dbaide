@@ -12,6 +12,7 @@ from dbaide.desktop.views.history_tab import HistoryTab
 class HistoryDialog(QDialog):
     history_selected = pyqtSignal(str)
     history_preview = pyqtSignal(str)
+    history_delete = pyqtSignal(str)
 
     def __init__(self, history: HistoryTab, *, parent=None) -> None:
         super().__init__(parent)
@@ -29,6 +30,7 @@ class HistoryDialog(QDialog):
 
         history.history_selected.connect(self._on_open)
         history.history_preview.connect(self.history_preview.emit)
+        history.history_delete.connect(self.history_delete.emit)
 
     def _on_open(self, workflow_id: str) -> None:
         self.history_selected.emit(workflow_id)

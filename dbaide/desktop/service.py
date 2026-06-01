@@ -146,6 +146,7 @@ class DesktopService:
             "explain_sql": self.explain_sql,
             "list_history": self.list_history,
             "load_history": self.load_history,
+            "delete_history": self.delete_history,
             "asset_markdown": self.asset_markdown,
             "preview_asset": self.asset_markdown,
             "test_model": self.test_model,
@@ -455,6 +456,12 @@ class DesktopService:
         if data is None:
             raise FileNotFoundError(f"History not found: {conn}/{workflow_id}")
         return data
+
+    def delete_history(self, payload: dict[str, Any]) -> dict[str, Any]:
+        conn = str(payload.get("connection_name") or "") or self.cfg.get_connection(None).name
+        workflow_id = str(payload.get("workflow_id") or "")
+        deleted = self.history.delete(conn, workflow_id)
+        return {"deleted": deleted, "workflow_id": workflow_id}
 
     def asset_markdown(self, payload: dict[str, Any]) -> dict[str, Any]:
         path = str(payload.get("path") or "")

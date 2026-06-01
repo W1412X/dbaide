@@ -4,7 +4,8 @@ import datetime
 from typing import Any
 
 from PyQt6.QtCore import Qt, pyqtSignal
-from PyQt6.QtWidgets import QLabel, QListWidget, QListWidgetItem, QVBoxLayout, QWidget
+from PyQt6.QtGui import QAction
+from PyQt6.QtWidgets import QLabel, QListWidget, QListWidgetItem, QMenu, QVBoxLayout, QWidget
 
 from dbaide.desktop.theme import Theme
 
@@ -14,19 +15,22 @@ class HistoryTab(QWidget):
 
     history_selected = pyqtSignal(str)
     history_preview = pyqtSignal(str)
+    history_delete = pyqtSignal(str)
 
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(6)
-        hint = QLabel("Click to preview trace · double-click to open in Ask")
+        hint = QLabel("Click to preview · double-click to open · right-click to delete")
         hint.setWordWrap(True)
         hint.setStyleSheet(f"color: {Theme.MUTED}; font-size: 11px;")
         layout.addWidget(hint)
         self.list = QListWidget()
         self.list.itemClicked.connect(self._preview)
         self.list.itemDoubleClicked.connect(self._open)
+        self.list.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self.list.customContextMenuRequested.connect(self._context_menu)
         layout.addWidget(self.list, 1)
 
     def load(self, entries: list[dict[str, Any]]) -> None:
@@ -59,6 +63,19 @@ class HistoryTab(QWidget):
         wid = item.data(Qt.ItemDataRole.UserRole)
         if wid:
             self.history_selected.emit(str(wid))
+
+    def _context_menu(self, pos) -> None:
+        item = self.list.itemAt(pos)
+        if item is None:
+            return
+        wid = item.data(Qt.ItemDataRole.UserRole)
+        if not wid:
+            return
+        menu = QMenu(self)
+        delete = QAction("Delete", menu)
+        delete.triggered.connect(lambda: self.history_delete.emit(str(wid)))
+        menu.addAction(delete)
+        menu.exec(self.list.mapToGlobal(pos))
 
 
 def _fmt_time(ts: float) -> str:

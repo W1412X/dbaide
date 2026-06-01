@@ -23,6 +23,7 @@ class RightPanel(QWidget):
     clear_conversation_requested = pyqtSignal()
     history_selected = pyqtSignal(str)
     history_preview = pyqtSignal(str)
+    history_delete = pyqtSignal(str)
     joins_refresh_requested = pyqtSignal()
     joins_add_requested = pyqtSignal(dict)
     joins_update_requested = pyqtSignal(dict)
@@ -90,6 +91,7 @@ class RightPanel(QWidget):
             dialog = HistoryDialog(self.history, parent=self.window())
             dialog.history_selected.connect(self.history_selected.emit)
             dialog.history_preview.connect(self.history_preview.emit)
+            dialog.history_delete.connect(self.history_delete.emit)
             self._history_dialog = dialog
         return self._history_dialog
 

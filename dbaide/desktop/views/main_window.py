@@ -175,6 +175,7 @@ class MainWindow(QMainWindow):
         self.right.clear_conversation_requested.connect(self.ask_tab.clear_conversation)
         self.right.history_selected.connect(self.load_history)
         self.right.history_preview.connect(self.preview_history)
+        self.right.history_delete.connect(self.delete_history)
         self.right.joins_refresh_requested.connect(self.refresh_joins)
         self.right.joins_add_requested.connect(self._add_join)
         self.right.joins_update_requested.connect(self._update_join)
@@ -738,6 +739,20 @@ class MainWindow(QMainWindow):
             self.right.show_trace(entry.get("trace") or [])
             self.right.focus_trace()
             self.toast(f"Preview: {workflow_id}")
+        except Exception as exc:
+            self.toast(str(exc))
+
+    def delete_history(self, workflow_id: str) -> None:
+        conn = self.current_connection()
+        if not conn or not workflow_id:
+            return
+        try:
+            self.service.dispatch("delete_history", {
+                "connection_name": conn,
+                "workflow_id": workflow_id,
+            })
+            self._load_history(conn)
+            self.toast(f"Deleted: {workflow_id}")
         except Exception as exc:
             self.toast(str(exc))
 
