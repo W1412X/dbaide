@@ -65,9 +65,23 @@ _STRINGS: dict[str, dict[str, str]] = {
     },
     "settings.resources.title": {"en": "Resources & Safety", "zh": "资源与安全"},
     "settings.resources.subtitle": {
-        "en": "Hard limits that keep database load negligible. Blank/zero uses the connection's load profile.",
-        "zh": "将数据库负载控制到极低的硬性限制。留空/为 0 时使用连接的负载档位。",
+        "en": "Hard limits that keep database load negligible. Values shown are the connection's load-profile defaults; change one to override it.",
+        "zh": "将数据库负载控制到极低的硬性限制。显示的是连接负载档位的默认值，修改某项即为覆盖该默认值。",
     },
+    "settings.restart_required": {
+        "en": "Language will apply after you restart DBAide.",
+        "zh": "语言将在重启 DBAide 后生效。",
+    },
+    # Resources page field labels
+    "res.max_inflight_queries": {"en": "Max concurrent queries", "zh": "最大并发查询数"},
+    "res.statement_timeout_seconds": {"en": "Statement timeout (s)", "zh": "语句超时（秒）"},
+    "res.build_max_workers": {"en": "Build workers", "zh": "构建并发数"},
+    "res.default_row_limit": {"en": "Default row limit", "zh": "默认行数上限"},
+    "res.max_row_limit": {"en": "Max row limit (hard cap)", "zh": "最大行数（硬上限）"},
+    "res.big_table_rows": {"en": "Big-table threshold (rows)", "zh": "大表阈值（行）"},
+    "res.explain_max_rows": {"en": "EXPLAIN cost gate (rows)", "zh": "EXPLAIN 成本闸（行）"},
+    "res.max_join_tables": {"en": "Max joined tables", "zh": "最大关联表数"},
+    "res.join_sample_size": {"en": "Join sample size (rows)", "zh": "关联采样行数"},
     # Common buttons
     "btn.save": {"en": "Save", "zh": "保存"},
     "btn.cancel": {"en": "Cancel", "zh": "取消"},

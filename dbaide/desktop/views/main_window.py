@@ -520,34 +520,23 @@ class MainWindow(QMainWindow):
         dialog.exec()
 
     def _change_language(self, lang: str) -> None:
-        from dbaide.i18n import get_language, set_language, t
-        if lang == get_language():
+        # Language is applied at startup from config (UI + the model's answer
+        # language), so a change persists and takes effect on the next launch —
+        # we ask the user to restart rather than retranslate every live widget.
+        from dbaide.i18n import normalize, t
+        if normalize(lang) == self.service.cfg.ui_language():
             return
         try:
             self.service.cfg.set_ui_language(lang)
-        except Exception:
-            pass
-        set_language(lang)
-        self._retranslate()
-        self.toast(t("toast.language_changed"))
-
-    def _retranslate(self) -> None:
-        """Update the live, main-window-owned labels after a language change.
-        Sub-widgets that expose retranslate() are refreshed; dialogs pick up the
-        new language when reopened."""
-        for i, name in enumerate(self._tab_names):
-            if i < self.tabbar.count():
-                self.tabbar.setTabText(i, _tab_label(name))
-        conn = self.current_connection()
-        if conn:
-            self._refresh_connection_context(conn)  # re-applies composer placeholder
-        for widget in (self.topbar, self.composer, self.right, self.sidebar, self.ask_tab, self.sql_tab):
-            fn = getattr(widget, "retranslate", None)
-            if callable(fn):
-                try:
-                    fn()
-                except Exception:
-                    pass
+        except Exception as exc:
+            self.fail(exc)
+            return
+        # Show the notice in the chosen language directly (i18n stays unchanged in-process).
+        from dbaide.i18n import _STRINGS, DEFAULT_LANGUAGE
+        code = normalize(lang)
+        entry = _STRINGS.get("settings.restart_required", {})
+        msg = entry.get(code) or entry.get(DEFAULT_LANGUAGE) or "Restart to apply."
+        QMessageBox.information(self, "DBAide", msg)
 
     def _settings_save_resources(self, payload: dict[str, Any]) -> None:
         try:

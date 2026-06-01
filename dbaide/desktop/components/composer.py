@@ -120,10 +120,6 @@ class ComposerWidget(Panel):
         self.policy_select.setEnabled(not running)
         self.model_select.setEnabled(not running)
 
-    def retranslate(self) -> None:
-        from dbaide.i18n import t
-        self.action_btn.setText(t("composer.stop") if self._running else t("composer.send"))
-
     def set_placeholder(self, text: str) -> None:
         self.input.setPlaceholderText(text)
 

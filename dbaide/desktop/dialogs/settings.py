@@ -128,17 +128,18 @@ class SettingsDialog(QDialog):
     resource_saved = pyqtSignal(dict)
     language_changed = pyqtSignal(str)
 
-    # Numeric resource knobs shown on the Resources page: (key, label, min, max).
+    # Numeric resource knobs shown on the Resources page: (key, min, max).
+    # The display label comes from i18n ("res.<key>").
     _RESOURCE_FIELDS = (
-        ("max_inflight_queries", "Max concurrent queries", 1, 64),
-        ("statement_timeout_seconds", "Statement timeout (s)", 1, 600),
-        ("build_max_workers", "Build workers", 1, 32),
-        ("default_row_limit", "Default row limit", 1, 100000),
-        ("max_row_limit", "Max row limit (hard cap)", 1, 1000000),
-        ("big_table_rows", "Big-table threshold (rows)", 1000, 1000000000),
-        ("explain_max_rows", "EXPLAIN cost gate (rows)", 1000, 1000000000),
-        ("max_join_tables", "Max joined tables", 1, 16),
-        ("join_sample_size", "Join sample size (rows)", 10, 1000),
+        ("max_inflight_queries", 1, 64),
+        ("statement_timeout_seconds", 1, 600),
+        ("build_max_workers", 1, 32),
+        ("default_row_limit", 1, 100000),
+        ("max_row_limit", 1, 1000000),
+        ("big_table_rows", 1000, 1000000000),
+        ("explain_max_rows", 1000, 1000000000),
+        ("max_join_tables", 1, 16),
+        ("join_sample_size", 10, 1000),
     )
 
     def __init__(
@@ -296,17 +297,19 @@ class SettingsDialog(QDialog):
 
         prod = self._resource_presets.get("production", {})
         self._resource_spins: dict[str, QSpinBox] = {}
-        for key, label, lo, hi in self._RESOURCE_FIELDS:
+        self._resource_baselines: dict[str, int] = {}
+        for key, lo, hi in self._RESOURCE_FIELDS:
             spin = QSpinBox()
-            spin.setRange(0, hi)  # 0 = "use load profile default"
+            spin.setRange(lo, hi)
             spin.setMinimumWidth(160)
+            # Show a concrete number: the user's override if set, else the load-profile
+            # default. Saving only persists fields the user changed away from the default.
+            baseline = int(prod.get(key, lo))
+            self._resource_baselines[key] = baseline
             current = self._resource_values.get(key)
-            spin.setValue(int(current) if current not in (None, "") else 0)
-            hint = prod.get(key)
-            spin.setSpecialValueText(f"default ({hint})" if hint is not None else "default")
-            spin.setToolTip(f"production default: {hint}" if hint is not None else "")
+            spin.setValue(int(current) if current not in (None, "") else baseline)
             self._resource_spins[key] = spin
-            form.addRow(label, spin)
+            form.addRow(_t(f"res.{key}"), spin)
 
         scroll.setWidget(inner)
         card_layout.addWidget(scroll, 1)
@@ -325,13 +328,15 @@ class SettingsDialog(QDialog):
         return page
 
     def _reset_resources(self) -> None:
-        for spin in getattr(self, "_resource_spins", {}).values():
-            spin.setValue(0)
+        # Back to the load-profile defaults (which persists no overrides).
+        for key, spin in getattr(self, "_resource_spins", {}).items():
+            spin.setValue(self._resource_baselines.get(key, spin.value()))
 
     def _save_resources(self) -> None:
+        # Persist only values the user changed away from the profile default.
         values: dict = {}
         for key, spin in getattr(self, "_resource_spins", {}).items():
-            if spin.value() > 0:  # 0 means "use load profile default"
+            if int(spin.value()) != self._resource_baselines.get(key):
                 values[key] = int(spin.value())
         self._resource_values = values
         self.resource_saved.emit({"values": values})
