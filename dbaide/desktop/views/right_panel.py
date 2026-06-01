@@ -35,8 +35,8 @@ class RightPanel(QWidget):
         super().__init__(parent)
         self.setMinimumWidth(300)
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(12, 12, 12, 12)
-        layout.setSpacing(8)
+        layout.setContentsMargins(14, 14, 14, 14)
+        layout.setSpacing(12)
 
         from dbaide.i18n import t
         self.header = PanelHeader((t("panel.inspector"), t("panel.trace"), t("panel.plan")))

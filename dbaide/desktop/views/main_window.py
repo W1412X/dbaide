@@ -115,8 +115,8 @@ class MainWindow(QMainWindow):
 
         center = QWidget()
         center_layout = QVBoxLayout(center)
-        center_layout.setContentsMargins(12, 12, 12, 8)
-        center_layout.setSpacing(8)
+        center_layout.setContentsMargins(16, 14, 16, 12)
+        center_layout.setSpacing(12)
         tab_row = QHBoxLayout()
         self.tabbar = QTabBar()
         self.tabbar.setProperty("segmented", True)

@@ -15,9 +15,11 @@ class Theme:
     TEXT_2 = "#b7bec9"
     MUTED = "#737b89"
     MUTED_2 = "#515865"
-    ACCENT = "#f3f4f6"
-    ACCENT_TEXT = "#07080a"
+    ACCENT = "#3b82f6"
+    ACCENT_HOVER = "#5b9bff"
+    ACCENT_TEXT = "#ffffff"
     BLUE = "#67a7ff"
+    FOCUS = "#3b82f6"
     GREEN = "#55c985"
     YELLOW = "#e9c46a"
     RED = "#ff6b6b"
@@ -29,9 +31,9 @@ _INPUT = f"""
     background: {Theme.PANEL};
     color: {Theme.TEXT};
     border: 1px solid {Theme.BORDER};
-    border-radius: 8px;
-    min-height: 32px;
-    max-height: 32px;
+    border-radius: 9px;
+    min-height: 34px;
+    max-height: 34px;
     selection-background-color: {Theme.PANEL_3};
 """
 
@@ -39,6 +41,7 @@ APP_STYLE = f"""
 * {{
     font-family: Inter, -apple-system, BlinkMacSystemFont, "Segoe UI";
     color: {Theme.TEXT};
+    font-size: 13px;
 }}
 QMainWindow, QWidget#root {{
     background: {Theme.BG};
@@ -63,10 +66,10 @@ QPushButton {{
     background: {Theme.PANEL_2};
     color: {Theme.TEXT_2};
     border: 1px solid {Theme.BORDER};
-    border-radius: 8px;
-    padding: 0px 14px;
-    min-height: 32px;
-    max-height: 32px;
+    border-radius: 9px;
+    padding: 0px 16px;
+    min-height: 34px;
+    max-height: 34px;
 }}
 QPushButton:hover {{
     background: {Theme.PANEL_3};
@@ -81,9 +84,19 @@ QPushButton[primary="true"] {{
     color: {Theme.ACCENT_TEXT};
     border: 1px solid {Theme.ACCENT};
     font-weight: 600;
-    padding: 0px 14px;
-    min-height: 32px;
-    max-height: 32px;
+    padding: 0px 16px;
+    min-height: 34px;
+    max-height: 34px;
+}}
+QPushButton[primary="true"]:hover {{
+    background: {Theme.ACCENT_HOVER};
+    border: 1px solid {Theme.ACCENT_HOVER};
+    color: {Theme.ACCENT_TEXT};
+}}
+QPushButton[primary="true"]:disabled {{
+    background: {Theme.PANEL_2};
+    color: {Theme.MUTED_2};
+    border: 1px solid {Theme.BORDER};
 }}
 QPushButton[tab="true"] {{
     border-radius: 8px 8px 0 0;
@@ -98,6 +111,9 @@ QPushButton[tab="true"][active="true"] {{
 QLineEdit {{
     {_INPUT}
     padding: 0px 12px;
+}}
+QLineEdit:focus, QTextEdit:focus, QPlainTextEdit:focus, QComboBox:focus, QSpinBox:focus {{
+    border: 1px solid {Theme.FOCUS};
 }}
 QComboBox {{
     {_INPUT}
@@ -214,10 +230,10 @@ QToolButton {{
     background: {Theme.PANEL_2};
     color: {Theme.TEXT_2};
     border: 1px solid {Theme.BORDER};
-    border-radius: 8px;
+    border-radius: 9px;
     padding: 0px 10px;
-    min-height: 32px;
-    max-height: 32px;
+    min-height: 34px;
+    max-height: 34px;
 }}
 QToolButton:hover {{
     background: {Theme.PANEL_3};
@@ -226,11 +242,11 @@ QToolButton:hover {{
 QTabBar[segmented="true"]::tab {{
     background: {Theme.PANEL};
     color: {Theme.MUTED};
-    padding: 6px 16px;
+    padding: 7px 18px;
     border: 1px solid {Theme.BORDER_SOFT};
     margin-right: 0;
-    min-width: 64px;
-    max-height: 32px;
+    min-width: 68px;
+    max-height: 34px;
 }}
 QTabBar[segmented="true"]::tab:selected {{
     background: {Theme.PANEL_3};
