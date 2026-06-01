@@ -182,6 +182,20 @@ class ConfigManager:
         from dbaide.db import policy as _policy
         _policy.clear_cache()
 
+    # ── UI language ──────────────────────────────────────────────────────────
+
+    def ui_language(self) -> str:
+        from dbaide.i18n import normalize
+        ui = self._data.get("ui") or {}
+        return normalize(ui.get("language") if isinstance(ui, dict) else None)
+
+    def set_ui_language(self, lang: str) -> None:
+        from dbaide.i18n import normalize
+        ui = self._data.setdefault("ui", {})
+        if isinstance(ui, dict):
+            ui["language"] = normalize(lang)
+        self.save()
+
     def policy_for(self, connection: "ConnectionConfig"):
         """Resolve the effective ResourcePolicy for a connection.
 
@@ -203,14 +217,15 @@ class ConfigManager:
         if data.get("default_model"):
             lines.append(f"default_model = {_toml_quote(str(data['default_model']))}")
             lines.append("")
-        resource_defaults = data.get("resource_defaults") or {}
-        if isinstance(resource_defaults, dict) and resource_defaults:
-            lines.append("[resource_defaults]")
-            for key, value in resource_defaults.items():
-                if value in (None, "", {}, []):
-                    continue
-                lines.append(f"{key} = {self._format_value(value)}")
-            lines.append("")
+        for table in ("ui", "resource_defaults"):
+            values = data.get(table) or {}
+            if isinstance(values, dict) and values:
+                lines.append(f"[{table}]")
+                for key, value in values.items():
+                    if value in (None, "", {}, []):
+                        continue
+                    lines.append(f"{key} = {self._format_value(value)}")
+                lines.append("")
         for section in ("connections", "models"):
             groups = data.get(section) or {}
             for name, values in groups.items():

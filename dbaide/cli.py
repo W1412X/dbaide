@@ -31,6 +31,8 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     _setup_logging(getattr(args, "verbose", 0), getattr(args, "quiet", False))
     cfg = ConfigManager()
+    from dbaide.i18n import set_language
+    set_language(cfg.ui_language())
     try:
         return dispatch(args, cfg)
     except KeyboardInterrupt:

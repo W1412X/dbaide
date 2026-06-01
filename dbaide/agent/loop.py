@@ -10,6 +10,7 @@ from typing import Any, Callable
 from dbaide.agent.loop_state import dump_loop_state, restore_loop_state
 from dbaide.agent.progress_events import brief_tool_summary, from_trace_event, progress_event, progress_label
 from dbaide.agent.schema_context import disclosed_table_keys
+from dbaide.i18n import answer_language_directive
 from dbaide.agent.runtime import AgentRuntime
 from dbaide.agent.toolkit import build_tool_registry, loop_tool_specs
 from dbaide.core.events import TraceEvent, TraceKind, TraceLevel
@@ -286,7 +287,8 @@ class AskAgentLoop:
             "- Profile questions: discover_schema → profile_table → finish\n"
             "- SQL explain: validate_sql or explain_sql as needed → finish\n"
             "- Do not invent tables or columns. Prefer precision over listing everything.\n"
-            "- When you have enough to answer, use action=finish."
+            "- When you have enough to answer, use action=finish.\n"
+            f"- {answer_language_directive()}"
         )
 
         history = "\n\n".join(transcript[-8:]) if transcript else "(no tool calls yet)"

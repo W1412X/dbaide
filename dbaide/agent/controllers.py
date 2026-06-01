@@ -221,7 +221,15 @@ class ResultInterpreter:
 
 
 def _prefers_chinese(text: str) -> bool:
-    return any("\u4e00" <= ch <= "\u9fff" for ch in text)
+    # The user's actual language wins (CJK in the question \u2192 Chinese); otherwise
+    # fall back to the configured default answer language.
+    if any("\u4e00" <= ch <= "\u9fff" for ch in text):
+        return True
+    try:
+        from dbaide.i18n import get_language
+        return get_language() == "zh"
+    except Exception:
+        return False
 
 
 # ─────────────────────────────────────────────────────────────────────────────
