@@ -9,6 +9,7 @@ from PyQt6.QtWidgets import QFrame, QStackedWidget, QTextBrowser, QVBoxLayout, Q
 from dbaide.desktop.components.inputs import configure_readonly_text_view
 from dbaide.desktop.components.markdown import MarkdownView
 from dbaide.desktop.components.panel_header import PanelHeader
+from dbaide.desktop.components.query_log_view import QueryLogView
 from dbaide.desktop.components.trace import TracePanel
 from dbaide.desktop.dialogs.history import HistoryDialog
 from dbaide.desktop.dialogs.joins import JoinsDialog
@@ -30,6 +31,7 @@ class RightPanel(QWidget):
     _TAB_INSPECTOR = 0
     _TAB_TRACE = 1
     _TAB_PLAN = 2
+    _TAB_QUERIES = 3
 
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
@@ -39,7 +41,7 @@ class RightPanel(QWidget):
         layout.setSpacing(12)
 
         from dbaide.i18n import t
-        self.header = PanelHeader((t("panel.inspector"), t("panel.trace"), t("panel.plan")))
+        self.header = PanelHeader((t("panel.inspector"), t("panel.trace"), t("panel.plan"), t("panel.queries")))
         self.header.tab_changed.connect(self._switch_tab)
         self.header.history_clicked.connect(self.open_history)
         self.header.joins_clicked.connect(self.open_joins)
@@ -72,9 +74,11 @@ class RightPanel(QWidget):
         self.joins = JoinsTab()
         self._history_dialog: HistoryDialog | None = None
         self._joins_dialog: JoinsDialog | None = None
+        self.queries = QueryLogView()
         self.stack.addWidget(inspect)
         self.stack.addWidget(self.trace)
         self.stack.addWidget(self.plan_view)
+        self.stack.addWidget(self.queries)
         content_layout.addWidget(self.stack, 1)
         layout.addWidget(content_frame, 1)
 
@@ -186,6 +190,16 @@ class RightPanel(QWidget):
 
     def show_joins(self, records: list[dict[str, Any]]) -> None:
         self.joins.load(records)
+
+    def load_queries(self, entries: list[dict[str, Any]]) -> None:
+        self.queries.load(entries)
+
+    def append_query(self, entry: dict[str, Any]) -> None:
+        self.queries.append(entry)
+
+    def focus_queries(self) -> None:
+        self.header.set_current_tab(self._TAB_QUERIES)
+        self._switch_tab(self._TAB_QUERIES)
 
     def clear_all(self) -> None:
         self.trace.clear_trace()

@@ -27,6 +27,22 @@ def isolated_join_catalog(tmp_path: Path) -> None:
 
 
 @pytest.fixture(autouse=True)
+def drain_qt_pool():
+    """Wait for any background ServiceWorker to finish and deliver its queued signals
+    before the test ends, so a late callback can't fire at a half-destroyed widget and
+    crash Qt during interpreter shutdown. No-op when there's no QApplication."""
+    yield
+    try:
+        from PyQt6.QtCore import QCoreApplication, QThreadPool
+    except Exception:
+        return
+    app = QCoreApplication.instance()
+    if app is not None:
+        QThreadPool.globalInstance().waitForDone(3000)
+        app.processEvents()
+
+
+@pytest.fixture(autouse=True)
 def isolated_query_log(tmp_path: Path) -> None:
     """Redirect query-log writes to a temp dir and reset resource registries."""
     from dbaide.db import budget as budget_mod

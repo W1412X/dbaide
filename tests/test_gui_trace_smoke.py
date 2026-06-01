@@ -146,4 +146,45 @@ def test_main_window_constructs_and_bus_wired(qapp, tmp_path):
     assert win.bus.subscriber_count(JOINS_CHANGED) == 1
     # Emitting must not raise (handlers spawn background work / refresh).
     win.bus.emit(JOINS_CHANGED, {"instance": "local"})
+    # Construction kicks off a background bootstrap worker; drain it and deliver its
+    # queued signals to the live window before tearing down (else it fires at a
+    # half-destroyed receiver and crashes Qt during interpreter shutdown).
+    from PyQt6.QtCore import QThreadPool
+    QThreadPool.globalInstance().waitForDone(3000)
+    qapp.processEvents()
     win.deleteLater()
+    qapp.processEvents()
+
+
+def test_query_log_view_lists_and_inspects(qapp):
+    from dbaide.desktop.components.query_log_view import QueryLogView
+    v = QueryLogView()
+    v.load([
+        {"ts": 1.0, "caller": "build", "database": "main", "sql": "SELECT 1", "elapsed_ms": 2.0, "row_count": 1, "status": "ok"},
+        {"ts": 2.0, "caller": "agent", "database": "main", "sql": "SELECT * FROM t LIMIT 10", "elapsed_ms": 9.0, "row_count": 10, "status": "ok"},
+    ])
+    assert v._tree.topLevelItemCount() == 2
+    v.append({"ts": 3.0, "caller": "gui", "database": "main", "sql": "SELECT 2", "elapsed_ms": 1.0, "row_count": 0, "status": "ok"})
+    assert v._tree.topLevelItemCount() == 3
+    v._on_click(v._tree.topLevelItem(1), 0)
+    detail = v._detail.toPlainText()
+    assert "agent" in detail and "SELECT * FROM t LIMIT 10" in detail
+
+
+def test_query_log_bridge_marshals_entries(qapp, tmp_path):
+    import os
+    os.environ["DBAIDE_LOG_DIR"] = str(tmp_path / "logs")
+    from dbaide.observability import query_log
+    from dbaide.desktop.components.query_log_view import QueryLogBridge
+
+    class _Svc:
+        def subscribe_queries(self, instance, cb):
+            return query_log.for_instance(instance).subscribe(cb)
+
+    got = []
+    bridge = QueryLogBridge(_Svc())
+    bridge.entry.connect(lambda d: got.append(d))
+    bridge.watch("inst")
+    query_log.for_instance("inst").record(caller="build", database="db", sql="SELECT 1", elapsed_ms=1.0, row_count=1)
+    qapp.processEvents()
+    assert got and got[-1]["sql"] == "SELECT 1" and got[-1]["caller"] == "build"

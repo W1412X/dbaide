@@ -25,6 +25,9 @@ _STRINGS: dict[str, dict[str, str]] = {
     "panel.inspector": {"en": "Inspector", "zh": "检查器"},
     "panel.trace": {"en": "Trace", "zh": "执行轨迹"},
     "panel.plan": {"en": "Plan", "zh": "计划"},
+    "panel.queries": {"en": "SQL Log", "zh": "SQL 日志"},
+    "queries.empty": {"en": "Every SQL the system runs appears here.", "zh": "系统执行的每一条 SQL 都会显示在这里。"},
+    "queries.cleared": {"en": "(no queries yet)", "zh": "（暂无查询）"},
     # Top bar
     "topbar.build": {"en": "Build Assets", "zh": "构建资产"},
     "topbar.settings": {"en": "Settings", "zh": "设置"},
