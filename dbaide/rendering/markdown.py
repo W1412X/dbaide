@@ -166,66 +166,70 @@ def _process_blocks(text: str) -> str:
     """Process block Markdown elements."""
     lines = text.split('\n')
     result = []
-    in_list = False
+    list_tag = ""  # "ul" | "ol" | "" — track the open list type to close it correctly
 
     for line in lines:
         stripped = line.strip()
 
         # Headers
         if stripped.startswith('### '):
-            if in_list:
-                result.append('</ul>')
-                in_list = False
+            if list_tag:
+                result.append(f'</{list_tag}>')
+                list_tag = ""
             result.append(f'<h3>{stripped[4:]}</h3>')
         elif stripped.startswith('## '):
-            if in_list:
-                result.append('</ul>')
-                in_list = False
+            if list_tag:
+                result.append(f'</{list_tag}>')
+                list_tag = ""
             result.append(f'<h2>{stripped[3:]}</h2>')
         elif stripped.startswith('# '):
-            if in_list:
-                result.append('</ul>')
-                in_list = False
+            if list_tag:
+                result.append(f'</{list_tag}>')
+                list_tag = ""
             result.append(f'<h1>{stripped[2:]}</h1>')
 
         # Unordered list
         elif stripped.startswith('- ') or stripped.startswith('* '):
-            if not in_list:
+            if list_tag != "ul":
+                if list_tag:
+                    result.append(f'</{list_tag}>')
                 result.append('<ul>')
-                in_list = True
+                list_tag = "ul"
             result.append(f'<li>{stripped[2:]}</li>')
 
         # Ordered list
         elif re.match(r'^\d+\.\s', stripped):
-            if not in_list:
+            if list_tag != "ol":
+                if list_tag:
+                    result.append(f'</{list_tag}>')
                 result.append('<ol>')
-                in_list = True
+                list_tag = "ol"
             content = re.sub(r'^\d+\.\s', '', stripped)
             result.append(f'<li>{content}</li>')
 
         # Empty line
         elif not stripped:
-            if in_list:
-                result.append('</ul>' if result[-1].startswith('<li>') else '</ol>')
-                in_list = False
+            if list_tag:
+                result.append(f'</{list_tag}>')
+                list_tag = ""
             result.append('')
 
         # Preserved HTML blocks (fenced code converted to <pre>)
         elif _BLOCK_TOKEN.fullmatch(stripped):
-            if in_list:
-                result.append('</ul>')
-                in_list = False
+            if list_tag:
+                result.append(f'</{list_tag}>')
+                list_tag = ""
             result.append(stripped)
 
         # Regular paragraph
         else:
-            if in_list:
-                result.append('</ul>')
-                in_list = False
+            if list_tag:
+                result.append(f'</{list_tag}>')
+                list_tag = ""
             result.append(f'<p>{stripped}</p>')
 
-    if in_list:
-        result.append('</ul>')
+    if list_tag:
+        result.append(f'</{list_tag}>')
 
     return '\n'.join(result)
 

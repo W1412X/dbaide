@@ -98,3 +98,30 @@ def test_join_cardinality_no_product_inflation(tmp_path: Path):
     stats = JoinSampleValidator(orch, sample_size=50)._sample_stats("l", "v", "r", "k", database="")
     assert stats["max_left_per_right"] == 3   # 3 left rows map to key 1 (was 6 = 3×2 before fix)
     assert stats["max_right_per_left"] == 2
+
+
+# 6) MEDIUM: ordered lists are closed with </ol>, not </ul>.
+def test_ordered_list_closes_with_ol():
+    from dbaide.rendering.markdown import _process_blocks
+    out = _process_blocks("1. a\n2. b\n\nafter")
+    assert "<ol>" in out and "</ol>" in out and "</ul>" not in out
+    out2 = _process_blocks("- a\n- b\n\nx")
+    assert "<ul>" in out2 and "</ul>" in out2 and "</ol>" not in out2
+
+
+# 7) LOW: a failed run marks the in-flight node failed, not completed.
+def test_finalize_failed_marks_running_node_failed():
+    from dbaide.agent.progress_events import progress_event
+    from dbaide.agent.trace_model import TraceModel
+    m = TraceModel()
+    m.ingest(progress_event(stage="execute_sql", title="x", status="running", kind="tool", step=1), now=1.0)
+    m.finalize(failed=True)
+    assert m.overall == "failed"
+    assert m.steps[0].status == "failed"
+
+
+# 8) LOW: highlight_sql no longer raises NameError and highlights strings.
+def test_highlight_sql_runs():
+    from dbaide.rendering.sanitize import highlight_sql
+    out = highlight_sql("SELECT * FROM t WHERE name = 'bob' AND n = 5")
+    assert "color:#22863a" in out  # string span, no NameError

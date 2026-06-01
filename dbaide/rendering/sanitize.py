@@ -69,14 +69,15 @@ def highlight_sql(sql: str) -> str:
     """
     escaped = escape_user_text(sql)
 
-    # Highlight strings
+    # Highlight quoted strings. The text is already HTML-escaped, so quotes appear
+    # as entities (' → &#x27;, " → &quot;); match those, non-greedily.
     escaped = re.sub(
-        r&#39;(?:[^&#39;\\]|\\.)*&#39;',
+        r'&#x27;.*?&#x27;',
         r'<span style="color:#22863a;">\g<0></span>',
         escaped,
     )
     escaped = re.sub(
-        r'&quot;(?:[^&quot;\\]|\\.)*&quot;',
+        r'&quot;.*?&quot;',
         r'<span style="color:#22863a;">\g<0></span>',
         escaped,
     )

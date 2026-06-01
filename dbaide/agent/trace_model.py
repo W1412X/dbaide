@@ -184,9 +184,13 @@ class TraceModel:
 
     def finalize(self, *, failed: bool = False) -> None:
         self.overall = "failed" if failed else ("failed" if self.overall == "failed" else "done")
+        # A node still running when the turn ended is resolved to the turn's outcome:
+        # on failure the in-flight node is the likely culprit, so mark it failed (red),
+        # not completed (green).
+        resolved = "failed" if self.overall == "failed" else "completed"
         for node in self._index.values():
             if node.id != ROOT_ID and node.status == _ACTIVE:
-                node.status = "completed"
+                node.status = resolved
 
     # ── Derived view ──────────────────────────────────────────────────────────
 

@@ -203,6 +203,10 @@ class AssetBuilder:
         """
         self.progress(f"[assets] dry-run estimate for {instance}")
         db_names = self._resolve_databases(databases)
+        # SQLite folds count/distinct/top-K/sample into a single guarded query, so a
+        # profiled column costs 2 queries (profile + context sample) regardless of tier.
+        # MySQL/Postgres issue the top-K as a separate query, so heavy = 3, light = 2.
+        sqlite = self.adapter.dialect == "sqlite"
         estimated = 0
         for database in db_names:
             stats.databases += 1
@@ -216,8 +220,7 @@ class AssetBuilder:
                     estimated += 1  # sample_rows
                 for column in columns:
                     if should_profile_column(column, mode=options.profile_mode):
-                        # 1 aggregate scan + (top-K if heavy) + 1 sample scan
-                        estimated += 3 if heavy else 2
+                        estimated += 2 if (sqlite or not heavy) else 3
                         stats.profiled_columns += 1
                     else:
                         stats.skipped_profiles += 1
