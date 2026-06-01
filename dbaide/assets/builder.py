@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import threading
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import asdict, dataclass, field
@@ -61,6 +62,18 @@ class AssetBuilder:
         self.store = store or AssetStore()
         self.summarizer = AssetSummarizer(llm)
         self.progress = progress or (lambda _msg: None)
+        # Tables build on a shared thread pool and mutate one BuildStats; guard the
+        # counter/error updates so they're correct even under free-threaded Python.
+        self._stats_lock = threading.Lock()
+
+    def _bump(self, stats: BuildStats, **deltas: int) -> None:
+        with self._stats_lock:
+            for name, delta in deltas.items():
+                setattr(stats, name, getattr(stats, name) + delta)
+
+    def _record_error(self, stats: BuildStats, message: str) -> None:
+        with self._stats_lock:
+            stats.errors.append(message)
 
     def build(
         self,
@@ -333,20 +346,20 @@ class AssetBuilder:
         for database in db_names:
             if self._is_expired(options.deadline):
                 self.progress(f"[assets] time budget exhausted, skipping database {database}")
-                stats.errors.append(f"{instance}.{database}: skipped (time budget)")
+                self._record_error(stats, f"{instance}.{database}: skipped (time budget)")
                 continue
             try:
                 doc = self._build_database(instance, database, options=options, stats=stats,
                                            profiler=profiler, executor=executor)
                 database_docs.append(doc)
             except Exception as exc:
-                stats.errors.append(f"{instance}.{database}: {type(exc).__name__}: {exc}")
+                self._record_error(stats, f"{instance}.{database}: {type(exc).__name__}: {exc}")
         return database_docs
 
     def _build_database(self, instance: str, database: str, *, options: BuildOptions,
                         stats: BuildStats, profiler: ColumnProfiler, executor: ThreadPoolExecutor) -> dict:
         self.progress(f"[assets] listing tables {instance}.{database}")
-        stats.databases += 1
+        self._bump(stats, databases=1)
         tables = self.adapter.list_tables(database=database)
         self.progress(f"[assets] database={database}, found {len(tables)} table(s)")
 
@@ -356,7 +369,7 @@ class AssetBuilder:
         for table in tables:
             if self._is_expired(options.deadline):
                 self.progress(f"[assets] time budget exhausted, skipping table {table.name}")
-                stats.errors.append(f"{instance}.{database}.{table.name}: skipped (time budget)")
+                self._record_error(stats, f"{instance}.{database}.{table.name}: skipped (time budget)")
                 continue
             futures[executor.submit(self._build_table, instance, database, table,
                                     options=options, stats=stats, profiler=profiler)] = table
@@ -365,7 +378,7 @@ class AssetBuilder:
             try:
                 table_docs.append(future.result())
             except Exception as exc:
-                stats.errors.append(f"{instance}.{database}.{table.name}: {type(exc).__name__}: {exc}")
+                self._record_error(stats, f"{instance}.{database}.{table.name}: {type(exc).__name__}: {exc}")
 
         # Write database-level document (depends on all tables)
         self.store.write_json(
@@ -381,14 +394,14 @@ class AssetBuilder:
     def _build_table(self, instance: str, database: str, table, *, options: BuildOptions,
                      stats: BuildStats, profiler: ColumnProfiler) -> dict:
         self.progress(f"[assets] describing {instance}.{database}.{table.name}")
-        stats.tables += 1
+        self._bump(stats, tables=1)
         columns = self.adapter.describe_table(table.name, database=database)
         foreign_keys = self.adapter.foreign_keys(table.name, database=database)
 
         # Large tables drop to metadata-only profiling so we never full-scan them.
         heavy = self._is_heavy(table, options)
         if not heavy:
-            stats.light_tables += 1
+            self._bump(stats, light_tables=1)
 
         # Get sample rows (bounded by LIMIT — cheap even on big tables)
         sample_rows = []
@@ -399,7 +412,7 @@ class AssetBuilder:
                     limit=min(options.sample_limit, max(20, options.top_k)),
                 ).rows
             except Exception as exc:
-                stats.errors.append(f"{instance}.{database}.{table.name}.sample: {type(exc).__name__}: {exc}")
+                self._record_error(stats, f"{instance}.{database}.{table.name}.sample: {type(exc).__name__}: {exc}")
 
         # Columns are profiled serially within the table; the shared pool already
         # gives table-level parallelism and the QueryBudget caps real DB concurrency.
@@ -437,30 +450,27 @@ class AssetBuilder:
                     heavy_scan=heavy,
                 )
             except Exception as exc:
-                stats.errors.append(
-                    f"{instance}.{database}.{table_name}.{column.name}: {type(exc).__name__}: {exc}"
+                self._record_error(
+                    stats, f"{instance}.{database}.{table_name}.{column.name}: {type(exc).__name__}: {exc}"
                 )
         else:
-            stats.skipped_profiles += 1
+            self._bump(stats, skipped_profiles=1)
         doc = self.summarizer.column_doc(instance=instance, database=database,
                                           table=table_name, column=column, profile=profile_obj)
         self.store.write_json(
             self.store.column_dir(instance, database, table_name) / f"{column.name}.json", doc
         )
-        stats.columns += 1
-        if profile_obj:
-            stats.profiled_columns += 1
+        self._bump(stats, columns=1, profiled_columns=1 if profile_obj else 0)
         return doc
 
     def _build_column_expired(self, instance: str, database: str, table_name: str, column, stats: BuildStats) -> dict:
-        stats.skipped_profiles += 1
-        stats.timed_out_columns += 1
+        self._bump(stats, skipped_profiles=1, timed_out_columns=1)
         doc = self.summarizer.column_doc(instance=instance, database=database,
                                           table=table_name, column=column, profile=None)
         self.store.write_json(
             self.store.column_dir(instance, database, table_name) / f"{column.name}.json", doc
         )
-        stats.columns += 1
+        self._bump(stats, columns=1)
         return doc
 
     @staticmethod

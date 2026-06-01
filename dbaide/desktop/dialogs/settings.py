@@ -462,12 +462,10 @@ class SettingsDialog(QDialog):
         if not payload["name"]:
             QMessageBox.warning(self, "Settings", "Connection name is required.")
             return
-        self.connection_saved.emit(payload)
-        self._connections[payload["name"]] = payload
+        # Remember which row to select; the controller updates the list only after
+        # the save actually succeeds (no optimistic write that lies on failure).
         self._selected_conn = payload["name"]
-        if payload.get("make_default"):
-            self._default_connection = payload["name"]
-        self._reload_connection_list()
+        self.connection_saved.emit(payload)
 
     def _test_connection(self) -> None:
         payload = self.conn_form.payload()
@@ -510,12 +508,9 @@ class SettingsDialog(QDialog):
         if not payload["name"]:
             QMessageBox.warning(self, "Settings", "Profile name is required.")
             return
-        self.model_saved.emit(payload)
-        self._models[payload["name"]] = payload
+        # The controller updates the list on save success; don't write optimistically.
         self._selected_model = payload["name"]
-        if payload.get("make_default"):
-            self._default_model = payload["name"]
-        self._reload_model_list()
+        self.model_saved.emit(payload)
 
     def _test_model(self) -> None:
         payload = self.model_form.payload()

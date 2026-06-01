@@ -96,8 +96,12 @@ class PostgresAdapter(DatabaseAdapter):
         start = time.perf_counter()
         conn = self._connect(database if database and "." not in database else "")
         try:
-            conn.execute("BEGIN READ ONLY")
-            conn.execute("SET LOCAL statement_timeout = %s", (max(1, int(timeout_seconds * 1000)),))
+            # psycopg3 manages the transaction itself, so an explicit "BEGIN READ ONLY"
+            # races its implicit BEGIN and may be ignored. Set read-only on the
+            # connection before the first statement instead — the transaction it opens
+            # is then genuinely read-only.
+            conn.read_only = True
+            conn.execute("SET statement_timeout = %s", (max(1, int(timeout_seconds * 1000)),))
             rows = conn.execute(bounded).fetchall()
             conn.rollback()
         except Exception:
