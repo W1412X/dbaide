@@ -481,8 +481,27 @@ class DesktopService:
         return {"ok": True, "message": text.strip()[:120]}
 
     def test_model_profile(self, payload: dict[str, Any]) -> dict[str, Any]:
-        self.save_model(payload)
-        return self.test_model({"name": payload.get("name")})
+        # Test the form values as-is without persisting them — pressing "Test"
+        # must not silently save unsaved edits (or a typo'd api key).
+        name = str(payload.get("name") or "default")
+        existing = self.cfg.models().get(name)
+        api_key = str(payload.get("api_key") or "") or (existing.api_key if existing else "")
+        api_key_env = str(payload.get("api_key_env") or "") or (existing.api_key_env if existing else "")
+        model = ModelConfig(
+            name=name,
+            provider=str(payload.get("provider") or "openai_compatible"),
+            base_url=str(payload.get("base_url") or ""),
+            api_key_env=api_key_env,
+            api_key=api_key,
+            model=str(payload.get("model") or ""),
+            timeout_seconds=int(payload.get("timeout_seconds") or payload.get("timeout") or 60),
+        )
+        _validate_model_config(model)
+        llm = build_llm_client(model)
+        if isinstance(llm, NullLLMClient):
+            return {"ok": False, "message": "No model configured"}
+        text = llm.complete_text([LLMMessage("user", "Reply with OK only.")])
+        return {"ok": True, "message": text.strip()[:120]}
 
     def cli_command(
         self,
