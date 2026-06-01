@@ -573,11 +573,6 @@ class DesktopService:
             entries = log.tail_file(limit=limit)
         return {"connection": name, "queries": entries, "summary": log.summary()}
 
-    def subscribe_queries(self, instance: str, callback) -> Callable[[], None]:
-        """Subscribe a callback to live query-log entries (used by the SQL detail view)."""
-        from dbaide.observability import query_log
-        return query_log.for_instance(instance).subscribe(callback)
-
     def _connection_from_payload(self, payload: dict[str, Any]) -> ConnectionConfig:
         port = payload.get("port")
         if isinstance(port, str) and port.strip():

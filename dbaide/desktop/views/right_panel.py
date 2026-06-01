@@ -9,7 +9,6 @@ from PyQt6.QtWidgets import QFrame, QStackedWidget, QTextBrowser, QVBoxLayout, Q
 from dbaide.desktop.components.inputs import configure_readonly_text_view
 from dbaide.desktop.components.markdown import MarkdownView
 from dbaide.desktop.components.panel_header import PanelHeader
-from dbaide.desktop.components.query_log_view import QueryLogView
 from dbaide.desktop.components.trace import TracePanel
 from dbaide.desktop.dialogs.history import HistoryDialog
 from dbaide.desktop.dialogs.joins import JoinsDialog
@@ -31,10 +30,10 @@ class RightPanel(QWidget):
     reveal_requested = pyqtSignal()  # the panel wants to be shown (activity / preview)
 
     # Trace is the primary, default view; Inspector is contextual (auto-shown when
-    # you preview an asset); SQL Log is the audit. Plan was redundant with the trace.
+    # you preview an asset). SQL is now visible inline in the trace, so the separate
+    # SQL Log tab was dropped; the jsonl audit log is unchanged.
     _TAB_TRACE = 0
     _TAB_INSPECTOR = 1
-    _TAB_QUERIES = 2
 
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
@@ -44,7 +43,7 @@ class RightPanel(QWidget):
         layout.setSpacing(12)
 
         from dbaide.i18n import t
-        self.header = PanelHeader((t("panel.trace"), t("panel.inspector"), t("panel.queries")))
+        self.header = PanelHeader((t("panel.trace"), t("panel.inspector")))
         self.header.tab_changed.connect(self._switch_tab)
         self.header.history_clicked.connect(self.open_history)
         self.header.joins_clicked.connect(self.open_joins)
@@ -74,11 +73,9 @@ class RightPanel(QWidget):
         self.joins = JoinsTab()
         self._history_dialog: HistoryDialog | None = None
         self._joins_dialog: JoinsDialog | None = None
-        self.queries = QueryLogView()
-        # Order matches _TAB_* (Trace, Inspector, SQL Log); Trace is default.
+        # Order matches _TAB_* (Trace, Inspector); Trace is default.
         self.stack.addWidget(self.trace)
         self.stack.addWidget(inspect)
-        self.stack.addWidget(self.queries)
         content_layout.addWidget(self.stack, 1)
         layout.addWidget(content_frame, 1)
 
@@ -172,16 +169,6 @@ class RightPanel(QWidget):
 
     def show_joins(self, records: list[dict[str, Any]]) -> None:
         self.joins.load(records)
-
-    def load_queries(self, entries: list[dict[str, Any]]) -> None:
-        self.queries.load(entries)
-
-    def append_query(self, entry: dict[str, Any]) -> None:
-        self.queries.append(entry)
-
-    def focus_queries(self) -> None:
-        self.header.set_current_tab(self._TAB_QUERIES)
-        self._switch_tab(self._TAB_QUERIES)
 
     def clear_all(self) -> None:
         self.trace.clear_trace()

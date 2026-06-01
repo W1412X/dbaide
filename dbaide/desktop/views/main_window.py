@@ -66,10 +66,6 @@ class MainWindow(QMainWindow):
         self.setMinimumSize(1000, 720)
         self.setStyleSheet(APP_STYLE)
         self._build()
-        # Live SQL audit: pipe every recorded query (any caller) to the SQL Log view.
-        from dbaide.desktop.components.query_log_view import QueryLogBridge
-        self._qlog_bridge = QueryLogBridge(self.service)
-        self._qlog_bridge.entry.connect(self.right.append_query)
         # Restore whether the activity panel was collapsed last session.
         if str(self._settings.value("panel_visible", "true")).lower() == "false":
             self.right.setVisible(False)
@@ -287,15 +283,6 @@ class MainWindow(QMainWindow):
         if conn:
             self._refresh_connection_context(conn)
 
-    def _load_queries(self, conn_name: str) -> None:
-        # Point the live bridge at this instance and load its recorded queries.
-        self._qlog_bridge.watch(conn_name)
-        try:
-            payload = self.service.dispatch("recent_queries", {"connection_name": conn_name, "limit": 500})
-            self.right.load_queries(payload.get("queries") or [])
-        except Exception:
-            self.right.load_queries([])
-
     def _database_changed(self, _text: str) -> None:
         database = self.current_database()
         self.toast(_i18n_t("toast.db_scope", scope=database or "auto"))
@@ -304,7 +291,6 @@ class MainWindow(QMainWindow):
         conns = self.bootstrap.get("connections") or []
         self._load_schema(conn_name)
         self._load_history(conn_name)
-        self._load_queries(conn_name)
         self.refresh_joins()
         asset_status = "missing"
         for c in conns:
