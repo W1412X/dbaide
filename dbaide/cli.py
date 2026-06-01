@@ -13,7 +13,7 @@ from dbaide.assets import AssetBuilder, AssetSearch, AssetStore
 from dbaide.assets.profiler import ColumnProfiler
 from dbaide.assets.summarizer import AssetSummarizer
 from dbaide.config import ConfigManager
-from dbaide.core.result import ExecutionPolicy, WorkflowRequest
+from dbaide.core.result import ExecutionPolicy, WorkflowRequest, WorkflowResult, WorkflowStatus
 from dbaide.core.workflow import WorkflowEngine
 from dbaide.history.debug_bundle import create_debug_bundle
 from dbaide.llm import NullLLMClient, build_llm_client
@@ -656,27 +656,24 @@ def build_adapter_session(cfg: ConfigManager, args: argparse.Namespace):
 def run_workflow_cli(cfg: ConfigManager, args: argparse.Namespace):
     targets = resolve_targets(cfg, args.conn, args.database)
     if len(targets) != 1:
+        # Cross-instance fan-out: the MultiInstanceAssistant already queries every
+        # target. Build the result straight from its merged response — do NOT also
+        # run a single-instance WorkflowEngine (that re-executed the query against
+        # targets[0] and returned its trace/JSON, inconsistent with the answer).
         assistant = build_any_assistant(cfg, args)
         response = assistant.ask(args.question, database=args.database, execute=not args.no_execute)
-        result = WorkflowEngine(targets[0].config, llm=safe_llm(cfg), asset_store=AssetStore()).run(
-            WorkflowRequest(
-                question=args.question,
-                connection_name=targets[0].config.name,
-                database_scope=[targets[0].database] if targets[0].database else [],
-                execution_policy=ExecutionPolicy.SQL_ONLY if args.no_execute else _cli_policy(args.policy),
-                limit=args.limit,
-                timeout_seconds=args.timeout,
-                show_trace=True,
-            )
+        return WorkflowResult(
+            status=WorkflowStatus.COMPLETED,
+            question=args.question,
+            connection_name=", ".join(t.config.name for t in targets),
+            database_scope=[t.database for t in targets if t.database],
+            execution_policy=ExecutionPolicy.SQL_ONLY if args.no_execute else _cli_policy(args.policy),
+            answer_markdown=response.answer,
+            answer_plaintext=response.answer,
+            selected_sql=response.sql,
+            execution_result=response.result,
+            warnings=response.warnings,
         )
-        result.answer_markdown = response.answer
-        result.answer_plaintext = response.answer
-        result.warnings = response.warnings
-        if response.sql:
-            result.selected_sql = response.sql
-        if response.result:
-            result.execution_result = response.result
-        return result
 
     target = targets[0]
     policy = ExecutionPolicy.SQL_ONLY if args.no_execute else _cli_policy(args.policy)
