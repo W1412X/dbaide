@@ -719,7 +719,6 @@ class MainWindow(QMainWindow):
                 "workflow_id": workflow_id,
             })
             self.right.show_trace(entry.get("trace") or [])
-            self.right.show_plan(entry)
             self.right.focus_trace()
             self.toast(f"Preview: {workflow_id}")
         except Exception as exc:
@@ -822,7 +821,6 @@ class MainWindow(QMainWindow):
             # jump from a detailed run to a sparser summary.
             if self.right.trace.is_empty():
                 self.right.show_trace(result.get("trace") or [])
-            self.right.show_plan(result)
             self.bus.emit(QUERY_COMPLETED, {"instance": self.current_connection()})
             self._restore_composer_placeholder()
             return
@@ -856,7 +854,6 @@ class MainWindow(QMainWindow):
         if action == "load_history":
             self.ask_tab.append_result(result)
             self.right.show_trace(result.get("trace") or [])
-            self.right.show_plan(result)
             self.switch_tab("Ask")
             return
         if action == "test_connection":

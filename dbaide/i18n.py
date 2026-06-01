@@ -184,9 +184,11 @@ _STRINGS: dict[str, dict[str, str]] = {
     "toast.join_deleted": {"en": "Join deleted", "zh": "关联已删除"},
     "toast.enter_question": {"en": "Enter a question first", "zh": "请先输入问题"},
     "toast.enter_reply": {"en": "Enter a reply first", "zh": "请先输入回复"},
-    "panel.copy_trace": {"en": "Copy Trace", "zh": "复制轨迹"},
-    "panel.clear_trace": {"en": "Clear Trace", "zh": "清空轨迹"},
-    "panel.clear_conversation": {"en": "Clear Conversation", "zh": "清空对话"},
+    "panel.copy_trace": {"en": "Copy trace", "zh": "复制轨迹"},
+    "panel.clear_trace": {"en": "Clear trace", "zh": "清空轨迹"},
+    "panel.clear_conversation": {"en": "Clear conversation", "zh": "清空对话"},
+    "menu.history": {"en": "History…", "zh": "历史记录…"},
+    "menu.joins": {"en": "Saved joins…", "zh": "已保存的关联…"},
 }
 
 _current = DEFAULT_LANGUAGE

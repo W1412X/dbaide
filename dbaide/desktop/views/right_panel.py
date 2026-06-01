@@ -28,10 +28,11 @@ class RightPanel(QWidget):
     joins_update_requested = pyqtSignal(dict)
     joins_delete_requested = pyqtSignal(str)
 
-    _TAB_INSPECTOR = 0
-    _TAB_TRACE = 1
-    _TAB_PLAN = 2
-    _TAB_QUERIES = 3
+    # Trace is the primary, default view; Inspector is contextual (auto-shown when
+    # you preview an asset); SQL Log is the audit. Plan was redundant with the trace.
+    _TAB_TRACE = 0
+    _TAB_INSPECTOR = 1
+    _TAB_QUERIES = 2
 
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
@@ -41,7 +42,7 @@ class RightPanel(QWidget):
         layout.setSpacing(12)
 
         from dbaide.i18n import t
-        self.header = PanelHeader((t("panel.inspector"), t("panel.trace"), t("panel.plan"), t("panel.queries")))
+        self.header = PanelHeader((t("panel.trace"), t("panel.inspector"), t("panel.queries")))
         self.header.tab_changed.connect(self._switch_tab)
         self.header.history_clicked.connect(self.open_history)
         self.header.joins_clicked.connect(self.open_joins)
@@ -58,9 +59,6 @@ class RightPanel(QWidget):
 
         self.stack = QStackedWidget()
         self.trace = TracePanel()
-        self.plan_view = QTextBrowser()
-        self.plan_view.setFontFamily("Menlo")
-        configure_readonly_text_view(self.plan_view)
         self.inspect_preview = MarkdownView()
         self.inspect_json = QTextBrowser()
         self.inspect_json.setFontFamily("Menlo")
@@ -75,9 +73,9 @@ class RightPanel(QWidget):
         self._history_dialog: HistoryDialog | None = None
         self._joins_dialog: JoinsDialog | None = None
         self.queries = QueryLogView()
-        self.stack.addWidget(inspect)
+        # Order matches _TAB_* (Trace, Inspector, SQL Log); Trace is default.
         self.stack.addWidget(self.trace)
-        self.stack.addWidget(self.plan_view)
+        self.stack.addWidget(inspect)
         self.stack.addWidget(self.queries)
         content_layout.addWidget(self.stack, 1)
         layout.addWidget(content_frame, 1)
@@ -118,28 +116,6 @@ class RightPanel(QWidget):
 
     def show_trace(self, events: list[dict[str, Any]]) -> None:
         self.trace.load_events(events)
-
-    def show_plan(self, result: dict[str, Any]) -> None:
-        plan = result.get("query_plan") or {}
-        validation = result.get("validation_report") or {}
-        lines = ["Query Plan", ""]
-        if plan.get("intent_summary"):
-            lines.append(f"Intent: {plan['intent_summary']}")
-        if plan.get("target_entities"):
-            lines.append(f"Tables: {', '.join(plan['target_entities'])}")
-        if plan.get("selected_columns"):
-            lines.append(f"Columns: {', '.join(plan['selected_columns'])}")
-        if plan.get("filters"):
-            lines.append("Filters:")
-            lines.extend(f"  - {f}" for f in plan["filters"])
-        if plan.get("assumptions"):
-            lines.append("Assumptions:")
-            lines.extend(f"  - {a}" for a in plan["assumptions"])
-        if plan.get("confidence"):
-            lines.append(f"Confidence: {plan['confidence']}")
-        if validation:
-            lines.extend(["", "Validation:", json.dumps(validation, ensure_ascii=False, indent=2)])
-        self.plan_view.setPlainText("\n".join(lines))
 
     def show_inspector(
         self,
@@ -203,6 +179,5 @@ class RightPanel(QWidget):
 
     def clear_all(self) -> None:
         self.trace.clear_trace()
-        self.plan_view.clear()
         self.inspect_preview.clear_view()
         self.inspect_json.clear()

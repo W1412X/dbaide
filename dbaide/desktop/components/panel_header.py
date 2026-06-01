@@ -5,8 +5,7 @@ from __future__ import annotations
 from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtWidgets import QHBoxLayout, QTabBar, QWidget
 
-from dbaide.desktop.components.icon_button import IconToolButton
-from dbaide.desktop.components.icons import clock_icon, link_icon, more_icon
+from dbaide.desktop.components.icons import more_icon
 from dbaide.desktop.components.menu import MenuButton
 
 
@@ -40,24 +39,17 @@ class PanelHeader(QWidget):
         row.addWidget(self.tabbar)
         row.addStretch(1)
 
-        actions = QWidget()
-        actions.setFixedHeight(28)
-        action_row = QHBoxLayout(actions)
-        action_row.setContentsMargins(0, 0, 0, 0)
-        action_row.setSpacing(2)
-        self._btn_history = IconToolButton(clock_icon(), "Workflow history")
-        self._btn_joins = IconToolButton(link_icon(), "Saved joins")
-        self._btn_history.clicked.connect(self.history_clicked.emit)
-        self._btn_joins.clicked.connect(self.joins_clicked.emit)
-        action_row.addWidget(self._btn_history)
-        action_row.addWidget(self._btn_joins)
+        # One overflow menu holds the secondary navigation/management and the
+        # contextual trace actions — keeps the header to "[views] · [⋯]".
         from dbaide.i18n import t
-        self._menu = MenuButton(icon=more_icon(), tooltip="Panel actions", icon_only=True)
+        self._menu = MenuButton(icon=more_icon(), tooltip="More", icon_only=True)
+        self._menu.add_action(t("menu.history"), self.history_clicked.emit)
+        self._menu.add_action(t("menu.joins"), self.joins_clicked.emit)
+        self._menu.add_separator()
         self._menu.add_action(t("panel.copy_trace"), self.copy_trace_requested.emit)
         self._menu.add_action(t("panel.clear_trace"), self.clear_trace_requested.emit)
         self._menu.add_action(t("panel.clear_conversation"), self.clear_conversation_requested.emit)
-        action_row.addWidget(self._menu)
-        row.addWidget(actions, 0, Qt.AlignmentFlag.AlignVCenter)
+        row.addWidget(self._menu, 0, Qt.AlignmentFlag.AlignVCenter)
 
     def set_current_tab(self, index: int) -> None:
         if 0 <= index < self.tabbar.count():
