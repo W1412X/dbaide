@@ -18,7 +18,16 @@ _MODEL_KEYS = {"name", "provider", "base_url", "api_key_env", "api_key", "model"
 
 
 def _toml_quote(value: str) -> str:
-    return '"' + value.replace("\\", "\\\\").replace('"', '\\"') + '"'
+    # Escape per the TOML basic-string spec. Without escaping control characters
+    # (newline/tab/etc.) a value such as a pasted password produces invalid TOML,
+    # which on the next load is silently treated as an empty config — wiping every
+    # saved connection and model.
+    text = value.replace("\\", "\\\\").replace('"', '\\"')
+    for raw, esc in (("\n", "\\n"), ("\t", "\\t"), ("\r", "\\r"), ("\b", "\\b"), ("\f", "\\f")):
+        text = text.replace(raw, esc)
+    # Any remaining control character (ord < 0x20) → \uXXXX so the TOML stays valid.
+    text = "".join(ch if ord(ch) >= 0x20 else f"\\u{ord(ch):04X}" for ch in text)
+    return '"' + text + '"'
 
 
 def _to_dict(obj: Any) -> dict[str, Any]:

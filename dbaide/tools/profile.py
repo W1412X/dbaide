@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-import dataclasses
-
 from dbaide.adapters.base import DatabaseAdapter
 from dbaide.assets import AssetStore
 from dbaide.context.disclosure import DisclosureContext
@@ -24,16 +22,44 @@ class ProfileTools:
         database = database or self._asset_database_for_table(table) or self._default_asset_database()
         for doc in self.assets.column_docs(self.instance, database, table) if database else []:
             if doc.get("name") == column or doc.get("column") == column:
-                profile_data = doc.get("profile") or {}
-                if profile_data:
-                    valid_keys = {f.name for f in dataclasses.fields(ColumnProfile)}
-                    filtered = {k: v for k, v in profile_data.items() if k in valid_keys}
-                    profile = ColumnProfile(**filtered)
-                    self.context.record_profile(table, profile, instance=self.instance, database=database)
-                    return profile
+                cached = self._profile_from_doc(table, column, doc)
+                if cached is not None:
+                    self.context.record_profile(table, cached, instance=self.instance, database=database)
+                    return cached
         profile = self.adapter.profile_column(table, column, database=database, top_k=top_k)
         self.context.record_profile(table, profile, instance=self.instance, database=database)
         return profile
+
+    @staticmethod
+    def _profile_from_doc(table: str, column: str, doc: dict) -> ColumnProfile | None:
+        """Reconstruct a ColumnProfile from a stored asset column document so a
+        fresh offline profile avoids a live DB scan. Returns None when the column
+        was not profiled. The persisted stats live under the ``statistics`` key
+        (with top/sample values at the top level), not ``profile``."""
+        if doc.get("profile_status") != "profiled":
+            return None
+        stats = doc.get("statistics") or {}
+        if not stats:
+            return None
+        return ColumnProfile(
+            table=table,
+            column=column,
+            row_count=int(stats.get("row_count") or 0),
+            null_count=int(stats.get("null_count") or 0),
+            distinct_count=stats.get("distinct_count"),
+            min_value=stats.get("min_value"),
+            max_value=stats.get("max_value"),
+            top_values=doc.get("top_values") or [],
+            sample_values=doc.get("sample_values") or [],
+            data_kind=stats.get("data_kind") or "unknown",
+            null_rate=stats.get("null_rate"),
+            distinct_ratio=stats.get("distinct_ratio"),
+            numeric_stats=stats.get("numeric_stats") or {},
+            text_stats=stats.get("text_stats") or {},
+            temporal_stats=stats.get("temporal_stats") or {},
+            distribution=stats.get("distribution") or {},
+            sample_rows=stats.get("sample_rows") or [],
+        )
 
     def profile_table(self, table: str, columns: list[str] | None = None, *, database: str = "", top_k: int = 10) -> list[ColumnProfile]:
         if columns is None:

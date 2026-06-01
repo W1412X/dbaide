@@ -274,13 +274,14 @@ SELECT MAX(cnt) AS max_cnt FROM (
 ) g
 """.strip()
 
-        # Left rows per matched right key — pre-aggregated join (already non-correlated).
+        # Left rows per matched right key. Join to DISTINCT right keys so a duplicated
+        # right key cannot inflate the count into the (left×right) join product.
         max_left_sql = f"""
 SELECT MAX(cnt) AS max_cnt FROM (
-  SELECT r.{rc} AS k, COUNT(*) AS cnt
+  SELECT l.v AS k, COUNT(*) AS cnt
   FROM (SELECT {lc} AS v FROM {lt} WHERE {lc} IS NOT NULL LIMIT {n}) l
-  JOIN {rt} r ON l.v = r.{rc}
-  GROUP BY r.{rc}
+  JOIN (SELECT DISTINCT {rc} AS rk FROM {rt}) r ON l.v = r.rk
+  GROUP BY l.v
 ) g
 """.strip()
 

@@ -210,9 +210,10 @@ class SQLGuard:
         )
 
     def ensure_limit(self, sql: str, limit: int) -> str:
-        """Ensure SQL has a LIMIT clause."""
+        """Ensure the SQL has a *top-level* LIMIT clause (subquery/CTE limits don't count)."""
+        from dbaide.adapters.base import outer_limit_value
         stripped = sql.strip().rstrip(";")
-        if re.search(r"\blimit\s+\d+\b", stripped, re.I):
+        if outer_limit_value(stripped) is not None:
             return stripped
         return f"{stripped} LIMIT {int(limit)}"
 
@@ -255,10 +256,11 @@ class SQLGuard:
 # Helper functions
 # ─────────────────────────────────────────────────────────────────────────────
 
-def _explicit_limit(stripped_lower_sql: str) -> int | None:
-    """Return the explicit LIMIT value if present (SQL already stripped+lowered)."""
-    match = re.search(r"\blimit\s+(\d+)\b", stripped_lower_sql)
-    return int(match.group(1)) if match else None
+def _explicit_limit(sql: str) -> int | None:
+    """Top-level LIMIT row-count if present. Delegates to the dialect-agnostic
+    parser so subquery/CTE/string LIMITs and ``LIMIT offset, count`` are handled."""
+    from dbaide.adapters.base import outer_limit_value
+    return outer_limit_value(sql)
 
 
 def _is_unfiltered_star(stripped_lower_sql: str) -> bool:

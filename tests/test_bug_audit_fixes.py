@@ -1,0 +1,100 @@
+"""Regression tests for bugs found in the comprehensive audit."""
+
+from __future__ import annotations
+
+import sqlite3
+from pathlib import Path
+
+import pytest
+
+from dbaide.adapters.base import append_limit, outer_limit_value
+from dbaide.agent.runtime import AgentRuntime
+from dbaide.config import ConfigManager, _toml_quote
+from dbaide.models import ConnectionConfig
+from dbaide.tools.profile import ProfileTools
+from dbaide.tools.registry import ToolResult
+from dbaide.validation.sql_guard import SQLGuard
+
+
+# 1) CRITICAL: agent loop step budget actually decrements.
+class _FakeRegistry:
+    def invoke(self, name, args, ctx):
+        return ToolResult(ok=True, data={})
+
+
+def test_call_tool_consumes_step_budget():
+    rt = AgentRuntime(tool_registry=_FakeRegistry())
+    assert rt.steps_remaining == AgentRuntime.MAX_STEPS
+    for _ in range(AgentRuntime.MAX_STEPS):
+        rt.call_tool("x", {}, None)
+    assert rt.steps_remaining == 0
+    with pytest.raises(RuntimeError):
+        rt.call_tool("x", {}, None)  # budget exhausted → loop terminates
+
+
+# 2) HIGH: LIMIT detection is top-level only; offset form parsed correctly.
+def test_limit_bypass_and_offset():
+    assert outer_limit_value("SELECT * FROM (SELECT x FROM big LIMIT 5) q") is None
+    assert "LIMIT 100" in append_limit("SELECT * FROM (SELECT x LIMIT 5) q", 100)
+    assert outer_limit_value("SELECT * FROM t WHERE n = 'limit 5'") is None
+    assert outer_limit_value("SELECT * FROM t LIMIT 10") == 10
+    assert outer_limit_value("SELECT * FROM t LIMIT 0, 999999") == 999999  # offset,count
+    g = SQLGuard(default_limit=100, max_row_limit=1000)
+    assert g.validate("SELECT * FROM t LIMIT 0, 999999").ok is False  # cap not bypassed
+    assert g.validate("SELECT id FROM t LIMIT 0, 50").ok is True
+
+
+# 3) HIGH: config survives control characters instead of being wiped.
+def test_config_survives_control_chars(tmp_path: Path):
+    import tomllib
+    assert tomllib.loads(f"x = {_toml_quote('a' + chr(10) + 'b')}")["x"] == "a\nb"
+    cfg = ConfigManager(path=tmp_path / "c.toml")
+    cfg.upsert_connection(ConnectionConfig(name="c1", type="sqlite", path="/x.db", password="a\nb\tc"))
+    reloaded = ConfigManager(path=tmp_path / "c.toml")
+    assert "c1" in reloaded.connections()  # not wiped
+    assert reloaded.connections()["c1"].password == "a\nb\tc"
+
+
+# 4) HIGH: offline profile cache reads the persisted 'statistics' shape.
+def test_profile_cache_reconstructs_from_statistics():
+    doc = {
+        "name": "amount", "profile_status": "profiled",
+        "statistics": {"data_kind": "numeric", "row_count": 100, "null_count": 2,
+                       "distinct_count": 90, "min_value": 1, "max_value": 9,
+                       "numeric_stats": {"avg": 5}},
+        "top_values": [{"value": 1, "count": 3}], "sample_values": [1, 2, 3],
+    }
+    profile = ProfileTools._profile_from_doc("orders", "amount", doc)
+    assert profile is not None
+    assert profile.row_count == 100 and profile.distinct_count == 90
+    assert profile.numeric_stats == {"avg": 5}
+    assert profile.sample_values == [1, 2, 3]
+    # not-profiled docs don't reconstruct (forces a live scan)
+    assert ProfileTools._profile_from_doc("orders", "x", {"profile_status": "not_profiled"}) is None
+
+
+# 5) MEDIUM: join max_left_per_right is not inflated by duplicate right keys.
+def test_join_cardinality_no_product_inflation(tmp_path: Path):
+    from dbaide.adapters import build_adapter
+    from dbaide.agent.join_validation import JoinSampleValidator
+    from dbaide.agent.orchestrator import AskOrchestrator
+    from dbaide.llm import LLMClient
+    from dbaide.session import Session
+
+    class _M(LLMClient):
+        def complete_json(self, m, *, schema_hint=""):
+            return {}
+        def complete_text(self, m):
+            return "ok"
+
+    db = tmp_path / "j.db"
+    c = sqlite3.connect(db)
+    c.executescript("CREATE TABLE l(v INT); INSERT INTO l VALUES (1),(1),(1);"
+                    "CREATE TABLE r(k INT); INSERT INTO r VALUES (1),(1);")
+    c.commit()
+    c.close()
+    conn = ConnectionConfig(name="j", type="sqlite", path=str(db))
+    orch = AskOrchestrator(build_adapter(conn), Session(connection=conn), _M())
+    stats = JoinSampleValidator(orch, sample_size=50)._sample_stats("l", "v", "r", "k", database="")
+    assert stats["max_left_per_right"] == 3   # 3 left rows map to key 1 (was 6 = 3×2 before fix)
+    assert stats["max_right_per_left"] == 2

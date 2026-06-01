@@ -225,10 +225,63 @@ def rows_to_result(rows: list[dict[str, Any]], *, sql: str = "", elapsed_ms: flo
     return QueryResult(columns=columns, rows=rows, row_count=len(rows), truncated=truncated, sql=sql, elapsed_ms=elapsed_ms)
 
 
+def _sql_top_level(sql: str) -> str:
+    """Return the SQL with string/comment literals and any parenthesised regions
+    blanked out, so keyword scans only see the *outer* (top-level) statement."""
+    out: list[str] = []
+    i, n = 0, len(sql)
+    quote = ""
+    depth = 0
+    while i < n:
+        ch = sql[i]
+        nxt = sql[i + 1] if i + 1 < n else ""
+        if quote:
+            if ch == "\\":
+                i += 2
+                continue
+            if ch == quote:
+                quote = ""
+            i += 1
+            continue
+        if ch in {"'", '"', "`"}:
+            quote = ch
+            i += 1
+            continue
+        if ch == "-" and nxt == "-":
+            j = sql.find("\n", i + 2)
+            i = n if j < 0 else j
+            continue
+        if ch == "/" and nxt == "*":
+            j = sql.find("*/", i + 2)
+            i = n if j < 0 else j + 2
+            continue
+        if ch == "(":
+            depth += 1
+            out.append(" ")
+        elif ch == ")":
+            depth = max(0, depth - 1)
+            out.append(" ")
+        else:
+            out.append(" " if depth > 0 else ch)
+        i += 1
+    return "".join(out)
+
+
+def outer_limit_value(sql: str) -> int | None:
+    """The effective row-count of a top-level LIMIT, or None if the outer query has
+    none. Handles ``LIMIT n``, ``LIMIT offset, count`` (count is the cap) and
+    ``LIMIT n OFFSET m``. Limits hidden inside subqueries/CTEs/strings are ignored."""
+    match = re.search(r"\blimit\s+(\d+)(?:\s*,\s*(\d+))?", _sql_top_level(sql), re.I)
+    if not match:
+        return None
+    # "LIMIT a, b" → b is the row count; "LIMIT n" → n.
+    return int(match.group(2) if match.group(2) is not None else match.group(1))
+
+
 def append_limit(sql: str, limit: int | None) -> str:
     if limit is None:
         return sql
     stripped = sql.strip().rstrip(";")
-    if re.search(r"\blimit\s+\d+\b", stripped, re.I):
+    if outer_limit_value(stripped) is not None:
         return stripped
     return f"{stripped} LIMIT {int(limit)}"

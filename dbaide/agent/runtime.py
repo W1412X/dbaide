@@ -87,8 +87,10 @@ class AgentRuntime:
         )
 
     def call_tool(self, name: str, args: dict[str, Any], ctx: ToolContext) -> ToolResult:
-        """Call a tool with budget checking."""
+        """Call a tool with budget checking. Each call consumes one step so the
+        agent loop (driven by ``steps_remaining``) is actually bounded by MAX_STEPS."""
         self.check_budget()
+        self._step_count += 1
         return self.tool_registry.invoke(name, args, ctx)
 
     def elapsed_ms(self) -> float:
