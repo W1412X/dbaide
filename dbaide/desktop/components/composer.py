@@ -35,8 +35,10 @@ class ComposerWidget(Panel):
         outer.setContentsMargins(14, 12, 14, 12)
         outer.setSpacing(10)
 
+        from dbaide.i18n import t
+        self._running = False
         self.input = QTextEdit()
-        self.input.setPlaceholderText("Ask about your data…  Enter 换行 · ⌘Enter 发送")
+        self.input.setPlaceholderText(t("composer.placeholder.ready") + t("composer.hint"))
         configure_multiline_text_edit(
             self.input,
             min_height=_INPUT_MIN,
@@ -69,7 +71,7 @@ class ComposerWidget(Panel):
         self.model_select = PillSelect("Model", max_width=132)
         self.model_select.value_changed.connect(self.model_changed.emit)
         footer.addWidget(self.model_select)
-        self.action_btn = compact_button("Send", primary=True, width=72)
+        self.action_btn = compact_button(t("composer.send"), primary=True, width=72)
         self.action_btn.clicked.connect(self._on_action)
         footer.addWidget(self.action_btn)
         outer.addLayout(footer)
@@ -111,10 +113,16 @@ class ComposerWidget(Panel):
         self.model_select.set_value(active)
 
     def set_running(self, running: bool) -> None:
-        self.action_btn.setText("Stop" if running else "Send")
+        from dbaide.i18n import t
+        self._running = running
+        self.action_btn.setText(t("composer.stop") if running else t("composer.send"))
         self.input.setEnabled(not running)
         self.policy_select.setEnabled(not running)
         self.model_select.setEnabled(not running)
+
+    def retranslate(self) -> None:
+        from dbaide.i18n import t
+        self.action_btn.setText(t("composer.stop") if self._running else t("composer.send"))
 
     def set_placeholder(self, text: str) -> None:
         self.input.setPlaceholderText(text)
@@ -142,7 +150,8 @@ class ComposerWidget(Panel):
         return self.model_select.value()
 
     def _on_action(self) -> None:
-        if self.action_btn.text() == "Stop":
+        # Decide by state, not button text (text is translated).
+        if self._running:
             self.stop_requested.emit()
             return
         self.submit_requested.emit(self.question(), self.policy())

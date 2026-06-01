@@ -29,12 +29,14 @@ from dbaide.desktop.theme import APP_STYLE, Theme
 class _SectionCard(QFrame):
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
+        # Flat container: a subtle background groups the section without adding a
+        # heavy bordered/rounded box on top of the already-bordered inputs inside it.
         self.setStyleSheet(
             f"""
             QFrame {{
-                background: {Theme.SURFACE};
-                border: 1px solid {Theme.BORDER_SOFT};
-                border-radius: 12px;
+                background: {Theme.PANEL};
+                border: none;
+                border-radius: 8px;
             }}
             """
         )
