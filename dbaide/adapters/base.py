@@ -6,7 +6,7 @@ from abc import ABC, abstractmethod
 from contextlib import contextmanager
 from typing import Any, Iterator
 
-from dbaide.models import ColumnInfo, ColumnProfile, ConnectionConfig, ForeignKeyInfo, QueryResult, TableInfo
+from dbaide.models import ColumnInfo, ColumnProfile, ConnectionConfig, ForeignKeyInfo, IndexInfo, QueryResult, TableInfo
 
 
 class DatabaseAdapter(ABC):
@@ -75,6 +75,11 @@ class DatabaseAdapter(ABC):
         raise NotImplementedError
 
     def foreign_keys(self, table: str, database: str = "") -> list[ForeignKeyInfo]:
+        return []
+
+    def indexes(self, table: str, database: str = "") -> list[IndexInfo]:
+        """Index definitions for a table (name, column list, uniqueness, type).
+        Default: none. Concrete adapters override with catalog queries."""
         return []
 
     def get_table_ddl(self, table: str, database: str = "") -> str:

@@ -138,6 +138,23 @@ class ForeignKeyInfo:
         self.ref_column = ref_column
 
 
+class IndexInfo:
+    """Index definition — its column list, uniqueness and type matter for SQL planning
+    (composite indexes, unique constraints), which a single ``indexed`` bool can't convey."""
+
+    def __init__(self, name: str, columns: list[str], *, unique: bool = False,
+                 type: str = "", primary: bool = False) -> None:
+        self.name = name
+        self.columns = list(columns)
+        self.unique = unique
+        self.type = type
+        self.primary = primary
+
+    def to_dict(self) -> dict[str, Any]:
+        return {"name": self.name, "columns": self.columns, "unique": self.unique,
+                "type": self.type, "primary": self.primary}
+
+
 class ColumnProfile:
     """Column profile data."""
 

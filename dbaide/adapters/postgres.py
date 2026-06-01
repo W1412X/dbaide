@@ -5,7 +5,7 @@ import os
 import time
 
 from dbaide.adapters.base import DatabaseAdapter, append_limit, quote_identifier, rows_to_result
-from dbaide.models import ColumnInfo, ColumnProfile, ForeignKeyInfo, QueryResult, TableInfo
+from dbaide.models import ColumnInfo, ColumnProfile, ForeignKeyInfo, IndexInfo, QueryResult, TableInfo
 
 logger = logging.getLogger("dbaide.postgres")
 
@@ -89,6 +89,36 @@ class PostgresAdapter(DatabaseAdapter):
         """
         with self._connect(database if database and "." not in database else "") as conn:
             return [ForeignKeyInfo(**row) for row in conn.execute(sql, (table_name, schema, schema)).fetchall()]
+
+    def indexes(self, table: str, database: str = "") -> list[IndexInfo]:
+        schema, table_name = _split_schema(table)
+        sql = """
+        SELECT i.relname AS name, ix.indisunique AS unique, ix.indisprimary AS primary,
+               am.amname AS type, a.attname AS column, k.ord AS seq
+        FROM pg_class t
+        JOIN pg_namespace n ON n.oid = t.relnamespace
+        JOIN pg_index ix ON ix.indrelid = t.oid
+        JOIN pg_class i ON i.oid = ix.indexrelid
+        JOIN pg_am am ON am.oid = i.relam
+        JOIN LATERAL unnest(ix.indkey) WITH ORDINALITY AS k(attnum, ord) ON true
+        JOIN pg_attribute a ON a.attrelid = t.oid AND a.attnum = k.attnum
+        WHERE t.relname = %s AND (%s = '' OR n.nspname = %s)
+        ORDER BY name, seq
+        """
+        grouped: dict[str, dict] = {}
+        with self._connect(database if database and "." not in database else "") as conn:
+            for row in conn.execute(sql, (table_name, schema, schema)).fetchall():
+                row = dict(row)
+                entry = grouped.setdefault(row["name"], {
+                    "columns": [], "unique": bool(row["unique"]),
+                    "primary": bool(row["primary"]), "type": (row.get("type") or "").lower(),
+                })
+                entry["columns"].append(row["column"])
+        return [
+            IndexInfo(name=name, columns=info["columns"], unique=info["unique"],
+                      type=info["type"], primary=info["primary"])
+            for name, info in grouped.items()
+        ]
 
     def _execute_readonly_impl(self, sql: str, *, database: str = "", limit: int | None = None,
                                timeout_seconds: int = 10) -> QueryResult:

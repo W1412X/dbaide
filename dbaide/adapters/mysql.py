@@ -5,7 +5,7 @@ import os
 import time
 
 from dbaide.adapters.base import DatabaseAdapter, append_limit, quote_identifier, rows_to_result
-from dbaide.models import ColumnInfo, ColumnProfile, ForeignKeyInfo, QueryResult, TableInfo
+from dbaide.models import ColumnInfo, ColumnProfile, ForeignKeyInfo, IndexInfo, QueryResult, TableInfo
 
 logger = logging.getLogger("dbaide.mysql")
 
@@ -128,6 +128,32 @@ class MySQLAdapter(DatabaseAdapter):
                 )
                 for row in cur.fetchall()
             ]
+
+    def indexes(self, table: str, database: str = "") -> list[IndexInfo]:
+        db = database or self.config.database
+        if not db:
+            raise ValueError("Database is required for MySQL. Specify --database or set database in connection config.")
+        sql = """
+        SELECT INDEX_NAME, NON_UNIQUE, SEQ_IN_INDEX, COLUMN_NAME, INDEX_TYPE
+        FROM information_schema.STATISTICS
+        WHERE TABLE_SCHEMA = %s AND TABLE_NAME = %s
+        ORDER BY INDEX_NAME, SEQ_IN_INDEX
+        """
+        grouped: dict[str, dict] = {}
+        with self._connect(db) as conn, conn.cursor() as cur:
+            cur.execute(sql, (db, table))
+            for row in cur.fetchall():
+                name = row["INDEX_NAME"]
+                entry = grouped.setdefault(name, {
+                    "columns": [], "unique": not bool(row["NON_UNIQUE"]),
+                    "type": (row.get("INDEX_TYPE") or "").lower(),
+                })
+                entry["columns"].append(row["COLUMN_NAME"])
+        return [
+            IndexInfo(name=name, columns=info["columns"], unique=info["unique"],
+                      type=info["type"], primary=(name == "PRIMARY"))
+            for name, info in grouped.items()
+        ]
 
     def get_table_ddl(self, table: str, database: str = "") -> str:
         db = database or self.config.database

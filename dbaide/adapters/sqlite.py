@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import Any, Iterator
 
 from dbaide.adapters.base import DatabaseAdapter, append_limit, quote_identifier, rows_to_result
-from dbaide.models import ColumnInfo, ColumnProfile, ForeignKeyInfo, QueryResult, TableInfo
+from dbaide.models import ColumnInfo, ColumnProfile, ForeignKeyInfo, IndexInfo, QueryResult, TableInfo
 
 logger = logging.getLogger("dbaide.sqlite")
 
@@ -102,6 +102,31 @@ class SQLiteAdapter(DatabaseAdapter):
                 ForeignKeyInfo(table=table, column=row["from"], ref_table=row["table"], ref_column=row["to"])
                 for row in rows
             ]
+
+    def indexes(self, table: str, database: str = "") -> list[IndexInfo]:
+        out: list[IndexInfo] = []
+        with self._connect() as conn:
+            try:
+                idx_list = conn.execute(
+                    f"PRAGMA index_list({quote_identifier(table, self.dialect)})"
+                ).fetchall()
+            except sqlite3.Error:
+                return out
+            for idx in idx_list:
+                name = str(idx["name"])
+                cols = [
+                    str(r["name"])
+                    for r in conn.execute(
+                        f"PRAGMA index_info({quote_identifier(name, self.dialect)})"
+                    ).fetchall()
+                ]
+                # origin: 'pk' (primary key), 'u' (unique constraint), 'c' (CREATE INDEX)
+                origin = str(idx["origin"]) if "origin" in idx.keys() else "c"
+                out.append(IndexInfo(
+                    name=name, columns=cols,
+                    unique=bool(idx["unique"]), type="btree", primary=(origin == "pk"),
+                ))
+        return out
 
     def get_table_ddl(self, table: str, database: str = "") -> str:
         with self._connect() as conn:
