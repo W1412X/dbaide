@@ -47,21 +47,24 @@ class TracePanel(QWidget):
 
         split = QSplitter(Qt.Orientation.Vertical)
         self._tree = QTreeWidget()
-        self._tree.setHeaderLabels(["", "Step", "Status"])
+        self._tree.setColumnCount(3)
+        self._tree.setHeaderHidden(True)
         self._tree.header().setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
         self._tree.header().setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
         self._tree.header().setSectionResizeMode(2, QHeaderView.ResizeMode.ResizeToContents)
         self._tree.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self._tree.setWordWrap(True)
-        self._tree.setTextElideMode(Qt.TextElideMode.ElideNone)
-        self._tree.setFont(QFont("Menlo", 10))
+        self._tree.setUniformRowHeights(False)
+        self._tree.setIndentation(16)
+        self._tree.setTextElideMode(Qt.TextElideMode.ElideRight)
+        self._tree.setFont(QFont("Inter", 11))
         self._tree.itemClicked.connect(self._on_click)
 
         self._detail = QTextBrowser()
         self._detail.setFont(QFont("Menlo", 10))
         configure_readonly_text_view(self._detail)
         self._detail.setPlaceholderText("Click a step to inspect it.")
-        self._detail.setMinimumHeight(80)
+        self._detail.setMinimumHeight(96)
 
         split.addWidget(self._tree)
         split.addWidget(self._detail)
@@ -143,7 +146,7 @@ class TracePanel(QWidget):
             return
 
         summary = QTreeWidgetItem(["", model.summary_line(), ""])
-        summary.setFont(1, _bold())
+        summary.setFont(1, _semibold())
         summary.setForeground(1, _overall_color(model.overall))
         summary.setData(0, _NODE_ROLE, {"__summary__": True, "title": model.summary_line(),
                                         "status": model.overall})
@@ -164,19 +167,28 @@ class TracePanel(QWidget):
         glyph = _GLYPH.get(node.status, "·")
         is_tool = node.parent_id == "__root__"
         if is_tool:
-            head = node.phase or node.stage
-            if node.title and node.title not in head:
-                head = f"{head} — {node.title}"
+            # Step row: bright phase name, status glyph carries colour, duration muted.
             indicator = f"{glyph} {node.step}" if node.step else glyph
+            head = node.phase or node.stage
+            if node.duration_ms > 0 and node.status in ("completed", "failed"):
+                status_text = _fmt_ms(node.duration_ms)
+            elif node.status in ("running", "waiting"):
+                status_text = node.status
+            else:
+                status_text = ""
+            item = QTreeWidgetItem([indicator, head, status_text])
+            item.setForeground(0, _status_color(node.status))
+            item.setForeground(1, _red() if node.status == "failed" else _bright())
+            item.setForeground(2, _red() if node.status == "failed" else _muted())
+            item.setFont(1, _semibold())
         else:
-            head = f"{node.agent_name}: {node.title}" if node.agent_name else node.title
+            # Sub-agent row: muted "label: detail", glyph shows status (no "completed" word).
             indicator = glyph
-        status_text = f"{node.duration_ms:.0f} ms" if (node.status == "completed" and node.duration_ms > 0) else node.status
+            head = f"{node.agent_name} · {node.title}" if node.agent_name else node.title
+            item = QTreeWidgetItem([indicator, head, ""])
+            item.setForeground(0, _status_color(node.status))
+            item.setForeground(1, _muted())
 
-        item = QTreeWidgetItem([indicator, head, status_text])
-        color = _status_color(node.status)
-        item.setForeground(1, color)
-        item.setForeground(2, color)
         item.setData(0, _NODE_ROLE, {
             "node_id": node.id, "stage": node.stage, "phase": node.phase,
             "agent": node.agent_name, "status": node.status, "title": node.title,
@@ -184,22 +196,31 @@ class TracePanel(QWidget):
             "thought": node.thought, "raw": node.raw,
         })
 
-        if node.thought:
-            t = QTreeWidgetItem(["", f"💭 {node.thought[:300]}", ""])
-            t.setForeground(1, _muted())
-            item.addChild(t)
-
         parent_is_tree = isinstance(parent, QTreeWidget)
         if parent_is_tree:
             parent.addTopLevelItem(item)
         else:
             parent.addChild(item)
 
+        if node.thought:
+            self._add_leaf(item, f"💭 {node.thought}", muted=True)
+        # Surface the useful result/summary (not the boilerplate "Calling X / X done").
+        if is_tool:
+            secondary = _secondary_text(node)
+            if secondary:
+                self._add_leaf(item, secondary, muted=True)
+
         for child in node.children:
             self._add_node(item, child)
 
         item.setExpanded(True)
         return item
+
+    def _add_leaf(self, parent: QTreeWidgetItem, text: str, *, muted: bool = True) -> None:
+        leaf = QTreeWidgetItem(["", text[:160], ""])
+        leaf.setForeground(1, _muted() if muted else _bright())
+        leaf.setFirstColumnSpanned(True)
+        parent.addChild(leaf)
 
     def _find_node_data(self, node_id: str) -> dict | None:
         stack = [self._tree.topLevelItem(i) for i in range(self._tree.topLevelItemCount())]
@@ -266,9 +287,26 @@ def _format_detail(data: dict) -> str:
     return "\n".join(lines)
 
 
-def _bold() -> QFont:
-    f = QFont("Menlo", 10)
-    f.setBold(True)
+def _secondary_text(node: TraceNode) -> str:
+    """The useful one-line summary for a tool step: its result detail, or a
+    non-boilerplate title. Returns '' when there's nothing worth a second line
+    (the loop's "Calling X" / "X done" frames carry no information)."""
+    detail = (node.detail or "").strip()
+    if detail:
+        return " ".join(detail.split())
+    title = (node.title or "").strip()
+    if not title or title.startswith("Calling ") or title.endswith("done"):
+        return ""
+    return " ".join(title.split())
+
+
+def _fmt_ms(ms: float) -> str:
+    return f"{ms/1000:.1f}s" if ms >= 1000 else f"{ms:.0f}ms"
+
+
+def _semibold() -> QFont:
+    f = QFont("Inter", 11)
+    f.setWeight(QFont.Weight.DemiBold)
     return f
 
 
@@ -301,3 +339,7 @@ def _yellow() -> QColor:
 
 def _muted() -> QColor:
     return QColor(Theme.MUTED)
+
+
+def _bright() -> QColor:
+    return QColor(Theme.TEXT)
