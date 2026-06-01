@@ -26,6 +26,49 @@ TOOL_TRACE_STAGES = frozenset({
     "list_tables",
 })
 
+# Human-readable phase for each tool stage — what the agent is *doing* right now.
+PHASE_LABELS: dict[str, str] = {
+    "discover_schema": "Exploring schema",
+    "list_databases": "Exploring schema",
+    "list_tables": "Exploring schema",
+    "describe_table": "Reading tables",
+    "get_relations": "Mapping relations",
+    "validate_joins": "Mapping relations",
+    "list_joins": "Mapping relations",
+    "add_join": "Mapping relations",
+    "update_join": "Mapping relations",
+    "delete_join": "Mapping relations",
+    "generate_sql": "Writing SQL",
+    "validate_sql": "Validating SQL",
+    "explain_sql": "Checking query cost",
+    "execute_sql": "Running query",
+    "profile_table": "Profiling data",
+    "synthesize_schema_answer": "Answering",
+    "ask_user": "Waiting for you",
+}
+
+# Friendly names for the named sub-agents that report nested progress.
+AGENT_LABELS: dict[str, str] = {
+    "schema_link": "Schema discovery",
+    "sql_writer": "SQL writer",
+    "join_infer": "Join inference",
+    "join_validate": "Join validation",
+    "join_catalog": "Join catalog",
+    "risk": "Risk gate",
+    "explain": "Cost estimate",
+    "sql": "SQL",
+}
+
+
+def phase_for(stage: str) -> str:
+    """Map a tool/stage name to the human phase it belongs to."""
+    return PHASE_LABELS.get(str(stage or "").strip(), "")
+
+
+def agent_label(agent: str) -> str:
+    name = str(agent or "").strip()
+    return AGENT_LABELS.get(name, name.replace("_", " ").title() if name else "")
+
 
 def progress_event(
     *,
@@ -37,6 +80,8 @@ def progress_event(
     duration_ms: float = 0.0,
     parent: str = "",
     agent: str = "",
+    step: int = 0,
+    phase: str = "",
 ) -> dict[str, Any]:
     payload: dict[str, Any] = {
         "stage": stage,
@@ -52,6 +97,11 @@ def progress_event(
         payload["parent"] = parent
     if agent:
         payload["agent"] = agent
+    if step > 0:
+        payload["step"] = step
+    resolved_phase = phase or phase_for(stage)
+    if resolved_phase:
+        payload["phase"] = resolved_phase
     return payload
 
 

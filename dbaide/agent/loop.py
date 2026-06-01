@@ -103,6 +103,7 @@ class AskAgentLoop:
             trace_sink=self._trace_sink,
         )
 
+        step_no = 0
         while runtime.steps_remaining > 0:
             try:
                 decision = self._decide(state, transcript)
@@ -141,6 +142,7 @@ class AskAgentLoop:
                     progress_event(stage="decision", title=thought[:200], status="completed", kind="decision"),
                 )
 
+            step_no += 1
             self.progress(
                 progress_event(
                     stage=tool_name,
@@ -148,6 +150,7 @@ class AskAgentLoop:
                     status="running",
                     kind="tool",
                     detail=str(args)[:200] if args else "",
+                    step=step_no,
                 )
             )
             result = runtime.call_tool(tool_name, args, tool_ctx)
@@ -163,6 +166,7 @@ class AskAgentLoop:
                     kind="tool",
                     detail=brief,
                     duration_ms=float(getattr(result, "duration_ms", 0) or 0),
+                    step=step_no,
                 )
             )
 
