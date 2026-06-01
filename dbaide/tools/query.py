@@ -8,13 +8,31 @@ from dbaide.validation import SchemaGuard, SQLGuard
 
 
 class QueryTools:
-    def __init__(self, adapter: DatabaseAdapter, context: DisclosureContext, *, instance: str = "", default_limit: int = 100, timeout_seconds: int = 10) -> None:
+    def __init__(self, adapter: DatabaseAdapter, context: DisclosureContext, *, instance: str = "",
+                 default_limit: int | None = None, timeout_seconds: int | None = None,
+                 max_row_limit: int | None = None) -> None:
         self.adapter = adapter
         self.context = context
         self.instance = instance or adapter.config.name
-        self.sql_guard = SQLGuard(default_limit=default_limit)
+        # Defaults come from the adapter's resource policy unless explicitly overridden.
+        policy = getattr(adapter, "policy", None)
+        if default_limit is None:
+            default_limit = policy.default_row_limit if policy else 100
+        if timeout_seconds is None:
+            timeout_seconds = policy.statement_timeout_seconds if policy else 10
+        if max_row_limit is None:
+            max_row_limit = policy.max_row_limit if policy else 1000
+        self.sql_guard = SQLGuard(default_limit=default_limit, max_row_limit=max_row_limit)
         self.schema_guard = SchemaGuard()
         self.timeout_seconds = timeout_seconds
+        self.explain_max_rows = policy.explain_max_rows if policy else 0
+
+    def estimate_rows(self, sql: str, *, database: str = "") -> int | None:
+        """Best-effort EXPLAIN row estimate for cost gating (None if unavailable)."""
+        try:
+            return self.adapter.explain_estimated_rows(sql, database=database)
+        except Exception:
+            return None
 
     def validate_sql(self, sql: str, *, add_limit: bool = True) -> ValidationResult:
         first = self.sql_guard.validate(sql, add_limit=add_limit)

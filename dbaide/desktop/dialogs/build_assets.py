@@ -5,11 +5,14 @@ from __future__ import annotations
 from PyQt6.QtCore import Qt
 from PyQt6.QtWidgets import (
     QCheckBox,
+    QComboBox,
     QDialog,
+    QFormLayout,
     QFrame,
     QHBoxLayout,
     QLabel,
     QScrollArea,
+    QSpinBox,
     QVBoxLayout,
     QWidget,
 )
@@ -24,13 +27,16 @@ class BuildAssetsDialog(QDialog):
         *,
         connection_name: str,
         databases: list[dict[str, object]],
+        load_profile: str = "production",
+        default_profile_mode: str = "light",
+        default_max_workers: int = 1,
         parent=None,
     ) -> None:
         super().__init__(parent)
         self.setWindowTitle("Build Assets")
         self.setModal(True)
-        self.resize(440, 420)
-        self.setMinimumSize(360, 280)
+        self.resize(440, 520)
+        self.setMinimumSize(360, 360)
         self.setStyleSheet(f"QDialog {{ background: {Theme.BG}; }}")
 
         root = QVBoxLayout(self)
@@ -85,6 +91,36 @@ class BuildAssetsDialog(QDialog):
         select_row.addStretch(1)
         root.addLayout(select_row)
 
+        # ── Resource options (Profile depth / concurrency / total timeout) ──
+        options = QFormLayout()
+        options.setSpacing(8)
+
+        self._profile = QComboBox()
+        self._profile.addItems(["none", "light", "auto", "all"])
+        idx = max(0, self._profile.findText(str(default_profile_mode or "light")))
+        self._profile.setCurrentIndex(idx)
+        options.addRow("Profile depth", self._profile)
+
+        self._workers = QSpinBox()
+        self._workers.setRange(1, 32)
+        self._workers.setValue(max(1, int(default_max_workers or 1)))
+        options.addRow("Concurrency (workers)", self._workers)
+
+        self._timeout = QSpinBox()
+        self._timeout.setRange(0, 7200)
+        self._timeout.setValue(3600)
+        self._timeout.setSuffix(" s  (0 = unlimited)")
+        options.addRow("Total time budget", self._timeout)
+
+        profile_hint = QLabel(
+            f"Connection load profile: {load_profile}. "
+            "Large tables auto-fall back to metadata-only profiling."
+        )
+        profile_hint.setWordWrap(True)
+        profile_hint.setProperty("muted", True)
+        options.addRow(profile_hint)
+        root.addLayout(options)
+
         actions = QHBoxLayout()
         actions.setSpacing(8)
         actions.addStretch(1)
@@ -114,3 +150,10 @@ class BuildAssetsDialog(QDialog):
 
     def selected_databases(self) -> list[str]:
         return [str(box.property("db_name") or box.text()) for box in self._checks if box.isChecked()]
+
+    def build_options(self) -> dict[str, object]:
+        return {
+            "profile_mode": self._profile.currentText(),
+            "max_workers": int(self._workers.value()),
+            "timeout": int(self._timeout.value()),
+        }

@@ -33,7 +33,7 @@ def test_asset_builder_creates_hierarchy(tmp_path):
     conn = ConnectionConfig(name="local", type="sqlite", path=str(db))
     adapter = build_adapter(conn)
     store = AssetStore(tmp_path / "assets")
-    stats = AssetBuilder(connection=conn, adapter=adapter, store=store).build()
+    stats = AssetBuilder(connection=conn, adapter=adapter, store=store).build(profile_mode="auto")
     assert stats.databases == 1
     assert stats.tables == 1
     assert stats.columns == 5
@@ -160,7 +160,7 @@ class FakeAdapter(DatabaseAdapter):
     def describe_table(self, table: str, database: str = "") -> list[ColumnInfo]:
         return []
 
-    def execute_readonly(self, sql: str, *, database: str = "", limit: int | None = None, timeout_seconds: int = 10):
+    def _execute_readonly_impl(self, sql: str, *, database: str = "", limit: int | None = None, timeout_seconds: int = 10):
         return rows_to_result([], sql=sql)
 
     def explain(self, sql: str, *, database: str = "", timeout_seconds: int = 10):
@@ -170,7 +170,7 @@ class FakeAdapter(DatabaseAdapter):
         return rows_to_result([], sql="")
 
     def profile_column(self, table: str, column: str, *, database: str = "", top_k: int = 10,
-                       timeout_seconds: int = 30) -> ColumnProfile:
+                       timeout_seconds: int = 30, **kwargs) -> ColumnProfile:
         return ColumnProfile(table=table, column=column, row_count=0, null_count=0)
 
 

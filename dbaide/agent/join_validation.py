@@ -259,20 +259,24 @@ FROM (
 LEFT JOIN {rt} r ON l.v = r.{rc}
 """.strip()
 
+        # Right rows per sampled left key — pre-aggregated join, no correlated subquery.
         max_right_sql = f"""
 SELECT MAX(cnt) AS max_cnt FROM (
-  SELECT (SELECT COUNT(*) FROM {rt} r2 WHERE r2.{rc} = ls.v) AS cnt
+  SELECT r.{rc} AS k, COUNT(*) AS cnt
   FROM (SELECT DISTINCT {lc} AS v FROM {lt} WHERE {lc} IS NOT NULL LIMIT {n}) ls
-)
+  JOIN {rt} r ON r.{rc} = ls.v
+  GROUP BY r.{rc}
+) g
 """.strip()
 
+        # Left rows per matched right key — pre-aggregated join (already non-correlated).
         max_left_sql = f"""
 SELECT MAX(cnt) AS max_cnt FROM (
-  SELECT COUNT(*) AS cnt
+  SELECT r.{rc} AS k, COUNT(*) AS cnt
   FROM (SELECT {lc} AS v FROM {lt} WHERE {lc} IS NOT NULL LIMIT {n}) l
-  INNER JOIN {rt} r ON l.v = r.{rc}
+  JOIN {rt} r ON l.v = r.{rc}
   GROUP BY r.{rc}
-)
+) g
 """.strip()
 
         try:
@@ -334,11 +338,14 @@ def validate_join_relations(
     relations: list[dict[str, Any]],
     disclosed: list[DisclosedSchema],
     *,
-    sample_size: int = DEFAULT_SAMPLE_SIZE,
+    sample_size: int | None = None,
     progress: ProgressFn | None = None,
     parent: str = "",
     drop_invalid_semantic: bool = True,
 ) -> list[dict[str, Any]]:
+    if sample_size is None:
+        policy = getattr(orchestrator.adapter, "policy", None)
+        sample_size = policy.join_sample_size_small if policy else DEFAULT_SAMPLE_SIZE
     validator = JoinSampleValidator(orchestrator, sample_size=sample_size)
     return validator.validate_relations(
         relations,

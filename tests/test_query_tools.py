@@ -46,7 +46,7 @@ class ExplainSpyAdapter(DatabaseAdapter):
     def describe_table(self, table: str, database: str = "") -> list[ColumnInfo]:
         return []
 
-    def execute_readonly(self, sql: str, *, database: str = "", limit: int | None = None, timeout_seconds: int = 10):
+    def _execute_readonly_impl(self, sql: str, *, database: str = "", limit: int | None = None, timeout_seconds: int = 10):
         return rows_to_result([], sql=sql)
 
     def explain(self, sql: str, *, database: str = "", timeout_seconds: int = 10):
@@ -57,5 +57,5 @@ class ExplainSpyAdapter(DatabaseAdapter):
         return rows_to_result([], sql="")
 
     def profile_column(self, table: str, column: str, *, database: str = "", top_k: int = 10,
-                       timeout_seconds: int = 30) -> ColumnProfile:
+                       timeout_seconds: int = 30, **kwargs) -> ColumnProfile:
         return ColumnProfile(table=table, column=column, row_count=0, null_count=0)

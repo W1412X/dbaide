@@ -13,7 +13,7 @@ DEFAULT_CONFIG_DIR = Path.home() / ".dbaide"
 DEFAULT_CONFIG_PATH = DEFAULT_CONFIG_DIR / "config.toml"
 
 # Valid keys for ConnectionConfig and ModelConfig
-_CONNECTION_KEYS = {"name", "type", "database", "host", "port", "user", "password_env", "password", "path"}
+_CONNECTION_KEYS = {"name", "type", "database", "host", "port", "user", "password_env", "password", "path", "load_profile"}
 _MODEL_KEYS = {"name", "provider", "base_url", "api_key_env", "api_key", "model", "timeout_seconds"}
 
 
@@ -158,6 +158,34 @@ class ConfigManager:
         self._data["default_model"] = name
         self.save()
 
+    # ── Resource defaults (user-configurable numeric limits) ─────────────────
+
+    def resource_defaults(self) -> dict[str, Any]:
+        """Return the ``[resource_defaults]`` overrides (may be empty)."""
+        raw = self._data.get("resource_defaults") or {}
+        return dict(raw) if isinstance(raw, dict) else {}
+
+    def set_resource_defaults(self, values: dict[str, Any]) -> None:
+        """Persist ``[resource_defaults]`` (drops None/empty values)."""
+        clean = {k: v for k, v in (values or {}).items() if v is not None and v != ""}
+        self._data["resource_defaults"] = clean
+        self.save()
+        from dbaide.db import policy as _policy
+        _policy.clear_cache()
+
+    def policy_for(self, connection: "ConnectionConfig"):
+        """Resolve the effective ResourcePolicy for a connection.
+
+        Combines the connection's ``load_profile`` preset with the user's
+        ``[resource_defaults]`` overrides, cached per instance name.
+        """
+        from dbaide.db.policy import resolve_policy
+        return resolve_policy(
+            load_profile=getattr(connection, "load_profile", "production"),
+            overrides=self.resource_defaults(),
+            instance=connection.name,
+        )
+
     def _render_toml(self, data: dict[str, Any]) -> str:
         lines: list[str] = []
         if data.get("default_connection"):
@@ -165,6 +193,14 @@ class ConfigManager:
             lines.append("")
         if data.get("default_model"):
             lines.append(f"default_model = {_toml_quote(str(data['default_model']))}")
+            lines.append("")
+        resource_defaults = data.get("resource_defaults") or {}
+        if isinstance(resource_defaults, dict) and resource_defaults:
+            lines.append("[resource_defaults]")
+            for key, value in resource_defaults.items():
+                if value in (None, "", {}, []):
+                    continue
+                lines.append(f"{key} = {self._format_value(value)}")
             lines.append("")
         for section in ("connections", "models"):
             groups = data.get(section) or {}

@@ -1,30 +1,77 @@
-# Python
+# Python bytecode / caches
 __pycache__/
 **/__pycache__/
 *.py[cod]
+*$py.class
+*.pyo
+*.pyd
+.Python
+
+# Packaging / build artifacts
+*.egg
 *.egg-info/
 .eggs/
 dist/
 build/
-*.egg
+sdist/
+wheels/
+*.whl
+*.manifest
+pip-log.txt
+pip-wheel-metadata/
+
+# Virtual environments
 .venv/
 venv/
-.env
+env/
+ENV/
+__pypackages__/
 
-# Test / tooling
+# Environment / secrets
+.env
+.env.*
+!.env.example
+
+# Test / type / lint / coverage tooling
 .pytest_cache/
 .mypy_cache/
 .ruff_cache/
+.dmypy.json
+.tox/
+.nox/
+.hypothesis/
 .coverage
+.coverage.*
+coverage.xml
+*.cover
 htmlcov/
+
+# Native / compiled extensions
+*.so
+*.dylib
+*.dll
 
 # Node / desktop frontend
 node_modules/
 apps/desktop/dist/
 *.tsbuildinfo
 
+# PyInstaller / desktop packaging output
+*.app/
+*.dmg
+*.exe
+
+# Logs / scratch / backups
+*.log
+*.bak
+*.orig
+*.tmp
+*.swp
+*.swo
+*~
+
 # IDE / OS
 .idea/
 .vscode/
 .DS_Store
-*.swp
+Thumbs.db

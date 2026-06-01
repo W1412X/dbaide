@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import re
+import time
 from abc import ABC, abstractmethod
 from contextlib import contextmanager
 from typing import Any, Iterator
@@ -13,6 +14,49 @@ class DatabaseAdapter(ABC):
 
     def __init__(self, config: ConnectionConfig) -> None:
         self.config = config
+        self.caller = "agent"
+        self._policy = None
+        self._budget = None
+        self._query_log = None
+
+    # ── Resource wiring (lazy defaults keep direct construction working) ──────
+
+    @property
+    def policy(self):
+        if self._policy is None:
+            from dbaide.db.policy import ResourcePolicy
+            self._policy = ResourcePolicy.for_load_profile(getattr(self.config, "load_profile", "production"))
+        return self._policy
+
+    @policy.setter
+    def policy(self, value) -> None:
+        self._policy = value
+        self._budget = None  # force budget rebuild against the new limit
+
+    @property
+    def budget(self):
+        if self._budget is None:
+            from dbaide.db import budget as budget_registry
+            self._budget = budget_registry.for_instance(
+                self.config.name, max_inflight=self.policy.max_inflight_queries
+            )
+        return self._budget
+
+    @property
+    def query_log(self):
+        if self._query_log is None:
+            from dbaide.observability import query_log
+            self._query_log = query_log.for_instance(self.config.name)
+        return self._query_log
+
+    def attach_resources(self, *, policy=None, caller: str | None = None) -> "DatabaseAdapter":
+        if policy is not None:
+            self.policy = policy
+        if caller is not None:
+            self.caller = caller
+        return self
+
+    # ── Abstract surface ──────────────────────────────────────────────────────
 
     @abstractmethod
     def test(self) -> None:
@@ -47,13 +91,75 @@ class DatabaseAdapter(ABC):
             lines.append(line)
         return f"CREATE TABLE {quote_identifier(table, self.dialect)} (\n" + ",\n".join(lines) + "\n);"
 
+    # ── Guarded read path: every SQL statement goes through here ──────────────
+
+    def execute_readonly(self, sql: str, *, database: str = "", limit: int | None = None,
+                         timeout_seconds: int | None = None, caller: str | None = None) -> QueryResult:
+        """Template method: acquire budget → apply policy timeout → run → audit.
+
+        Subclasses implement :meth:`_execute_readonly_impl`; they must not be called
+        directly so that the concurrency budget and query log always apply.
+        """
+        effective_timeout = self.policy.statement_timeout_seconds if timeout_seconds is None else timeout_seconds
+        who = caller or self.caller
+        start = time.perf_counter()
+        status, error, result = "ok", "", None
+        with self.budget.acquire(who):
+            try:
+                result = self._execute_readonly_impl(sql, database=database, limit=limit,
+                                                      timeout_seconds=effective_timeout)
+                return result
+            except Exception as exc:  # noqa: BLE001 - record then re-raise
+                status, error = "error", f"{type(exc).__name__}: {exc}"
+                raise
+            finally:
+                elapsed = (time.perf_counter() - start) * 1000
+                self.query_log.record(
+                    caller=who, database=database,
+                    sql=result.sql if result is not None else sql,
+                    elapsed_ms=elapsed,
+                    row_count=result.row_count if result is not None else 0,
+                    status=status, error=error,
+                )
+
     @abstractmethod
-    def execute_readonly(self, sql: str, *, database: str = "", limit: int | None = None, timeout_seconds: int = 10) -> QueryResult:
+    def _execute_readonly_impl(self, sql: str, *, database: str = "", limit: int | None = None,
+                               timeout_seconds: int = 10) -> QueryResult:
         raise NotImplementedError
+
+    @contextmanager
+    def _record_query(self, sql: str, *, database: str = "", caller: str | None = None) -> Iterator[None]:
+        """Budget + audit wrapper for adapters that run SQL outside execute_readonly
+        (e.g. sqlite's multi-statement profile path on a single connection)."""
+        who = caller or self.caller
+        start = time.perf_counter()
+        status, error = "ok", ""
+        with self.budget.acquire(who):
+            try:
+                yield
+            except Exception as exc:  # noqa: BLE001
+                status, error = "error", f"{type(exc).__name__}: {exc}"
+                raise
+            finally:
+                elapsed = (time.perf_counter() - start) * 1000
+                self.query_log.record(caller=who, database=database, sql=sql,
+                                      elapsed_ms=elapsed, status=status, error=error)
 
     @abstractmethod
     def explain(self, sql: str, *, database: str = "", timeout_seconds: int = 10) -> QueryResult:
         raise NotImplementedError
+
+    def explain_estimated_rows(self, sql: str, *, database: str = "") -> int | None:
+        """Best-effort row estimate from EXPLAIN. Returns None when not parseable.
+
+        Used as a pre-execution cost gate. SQLite's EXPLAIN QUERY PLAN gives no
+        row estimate, so it returns None (no gate possible there).
+        """
+        try:
+            result = self.explain(sql, database=database)
+        except Exception:
+            return None
+        return _parse_explain_rows(self.dialect, result)
 
     @abstractmethod
     def sample_rows(self, table: str, *, database: str = "", limit: int = 20) -> QueryResult:
@@ -61,12 +167,44 @@ class DatabaseAdapter(ABC):
 
     @abstractmethod
     def profile_column(self, table: str, column: str, *, database: str = "", top_k: int = 10,
-                       timeout_seconds: int = 30) -> ColumnProfile:
+                       timeout_seconds: int = 30, heavy_scan: bool = True,
+                       include_avg: bool = False, include_length: bool = False) -> ColumnProfile:
         raise NotImplementedError
 
     @contextmanager
     def lifecycle(self) -> Iterator["DatabaseAdapter"]:
         yield self
+
+
+def _parse_explain_rows(dialect: str, result: QueryResult) -> int | None:
+    rows = result.rows or []
+    if not rows:
+        return None
+    if dialect == "mysql":
+        best = None
+        for row in rows:
+            value = row.get("rows") if isinstance(row, dict) else None
+            if value is None and isinstance(row, dict):
+                # case-insensitive lookup
+                for k, v in row.items():
+                    if str(k).lower() == "rows":
+                        value = v
+                        break
+            try:
+                n = int(value)
+            except (TypeError, ValueError):
+                continue
+            best = n if best is None else max(best, n)
+        return best
+    if dialect == "postgres":
+        best = None
+        for row in rows:
+            text = " ".join(str(v) for v in row.values()) if isinstance(row, dict) else str(row)
+            for match in re.finditer(r"rows=(\d+)", text):
+                n = int(match.group(1))
+                best = n if best is None else max(best, n)
+        return best
+    return None
 
 
 def quote_identifier(name: str, dialect: str = "generic") -> str:

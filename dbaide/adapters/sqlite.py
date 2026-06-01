@@ -113,7 +113,7 @@ class SQLiteAdapter(DatabaseAdapter):
             return str(row["sql"])
         return super().get_table_ddl(table, database=database)
 
-    def execute_readonly(self, sql: str, *, database: str = "", limit: int | None = None, timeout_seconds: int = 10) -> QueryResult:
+    def _execute_readonly_impl(self, sql: str, *, database: str = "", limit: int | None = None, timeout_seconds: int = 10) -> QueryResult:
         bounded_sql = append_limit(sql, limit)
         start = time.perf_counter()
         with self._guarded_conn(timeout_seconds) as conn:
@@ -125,8 +125,9 @@ class SQLiteAdapter(DatabaseAdapter):
     def explain(self, sql: str, *, database: str = "", timeout_seconds: int = 10) -> QueryResult:
         explain_sql = "EXPLAIN QUERY PLAN " + sql.strip().rstrip(";")
         start = time.perf_counter()
-        with self._guarded_conn(timeout_seconds) as conn:
-            rows = [dict(row) for row in conn.execute(explain_sql).fetchall()]
+        with self._record_query(explain_sql, database=database):
+            with self._guarded_conn(timeout_seconds) as conn:
+                rows = [dict(row) for row in conn.execute(explain_sql).fetchall()]
         elapsed = (time.perf_counter() - start) * 1000
         logger.debug("explain elapsed_ms=%.1f sql=%s", elapsed, explain_sql[:200])
         return rows_to_result(rows, sql=explain_sql, elapsed_ms=elapsed)
@@ -136,39 +137,57 @@ class SQLiteAdapter(DatabaseAdapter):
         return self.execute_readonly(f"SELECT * FROM {table_q}", limit=limit)
 
     def profile_column(self, table: str, column: str, *, database: str = "", top_k: int = 10,
-                       timeout_seconds: int = 30) -> ColumnProfile:
+                       timeout_seconds: int = 30, heavy_scan: bool = True,
+                       include_avg: bool = False, include_length: bool = False) -> ColumnProfile:
         tq = quote_identifier(table, self.dialect)
         cq = quote_identifier(column, self.dialect)
+        # Build a single aggregate scan; fold in avg/length so we never scan twice.
+        agg_parts = [
+            "COUNT(*) AS row_count",
+            f"SUM(CASE WHEN {cq} IS NULL THEN 1 ELSE 0 END) AS null_count",
+            f"MIN({cq}) AS min_value",
+            f"MAX({cq}) AS max_value",
+        ]
+        if heavy_scan:
+            agg_parts.insert(2, f"COUNT(DISTINCT {cq}) AS distinct_count")
+        if include_avg:
+            agg_parts.append(f"AVG({cq}) AS avg_value")
+        if include_length:
+            agg_parts.append(f"MIN(LENGTH({cq})) AS min_length")
+            agg_parts.append(f"MAX(LENGTH({cq})) AS max_length")
+            agg_parts.append(f"AVG(LENGTH({cq})) AS avg_length")
+        agg_sql = f"SELECT {', '.join(agg_parts)} FROM {tq}"
+        top_sql = (
+            f"SELECT {cq} AS value, COUNT(*) AS count FROM {tq} "
+            f"WHERE {cq} IS NOT NULL GROUP BY {cq} ORDER BY count DESC LIMIT ?"
+        )
+        sample_sql = f"SELECT DISTINCT {cq} AS value FROM {tq} WHERE {cq} IS NOT NULL LIMIT ?"
         start = time.perf_counter()
-        with self._guarded_conn(timeout_seconds) as conn:
-            row = conn.execute(
-                f"SELECT COUNT(*) AS row_count, "
-                f"SUM(CASE WHEN {cq} IS NULL THEN 1 ELSE 0 END) AS null_count, "
-                f"COUNT(DISTINCT {cq}) AS distinct_count, "
-                f"MIN({cq}) AS min_value, MAX({cq}) AS max_value "
-                f"FROM {tq}"
-            ).fetchone()
-            top = conn.execute(
-                f"SELECT {cq} AS value, COUNT(*) AS count FROM {tq} "
-                f"WHERE {cq} IS NOT NULL GROUP BY {cq} ORDER BY count DESC LIMIT ?",
-                (top_k,),
-            ).fetchall()
-            sample = conn.execute(
-                f"SELECT DISTINCT {cq} AS value FROM {tq} WHERE {cq} IS NOT NULL LIMIT ?",
-                (top_k,),
-            ).fetchall()
+        with self._record_query(agg_sql, database=database):
+            with self._guarded_conn(timeout_seconds) as conn:
+                row = conn.execute(agg_sql).fetchone()
+                top = conn.execute(top_sql, (top_k,)).fetchall() if heavy_scan else []
+                sample = conn.execute(sample_sql, (top_k,)).fetchall()
         elapsed = (time.perf_counter() - start) * 1000
-        logger.debug("profile_column %s.%s elapsed_ms=%.1f", table, column, elapsed)
+        logger.debug("profile_column %s.%s elapsed_ms=%.1f heavy=%s", table, column, elapsed, heavy_scan)
+        keys = row.keys() if row is not None else []
+        numeric_stats = {"avg": row["avg_value"]} if include_avg and "avg_value" in keys else {}
+        text_stats = (
+            {"min_length": row["min_length"], "max_length": row["max_length"], "avg_length": row["avg_length"]}
+            if include_length and "avg_length" in keys else {}
+        )
         return ColumnProfile(
             table=table,
             column=column,
             row_count=int(row["row_count"] or 0),
             null_count=int(row["null_count"] or 0),
-            distinct_count=int(row["distinct_count"] or 0),
+            distinct_count=int(row["distinct_count"]) if heavy_scan and row["distinct_count"] is not None else None,
             min_value=row["min_value"],
             max_value=row["max_value"],
             top_values=[{"value": item["value"], "count": item["count"]} for item in top],
             sample_values=[item["value"] for item in sample],
+            numeric_stats=numeric_stats,
+            text_stats=text_stats,
         )
 
     def _estimate_rows_fast(self, conn: sqlite3.Connection, table: str) -> int | None:

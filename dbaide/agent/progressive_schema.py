@@ -329,8 +329,9 @@ class ProgressiveSchemaAgent:
                         )
             return local_tables, local_columns, f"{db_name}: kept {len(local_tables)} table(s)"
 
-        workers = min(6, max(1, len(db_indices)))
-        with ThreadPoolExecutor(max_workers=workers) as pool:
+        # Live catalog reads (list_tables/describe_table) hit the database directly,
+        # so keep discovery single-threaded to avoid spraying concurrent connections.
+        with ThreadPoolExecutor(max_workers=1) as pool:
             futures = {pool.submit(_scan_live_database, idx): idx for idx in db_indices}
             for future in as_completed(futures):
                 try:

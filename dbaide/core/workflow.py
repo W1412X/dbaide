@@ -206,7 +206,13 @@ class WorkflowEngine:
 
     def _get_adapter(self):
         if self._adapter is None:
-            self._adapter = build_adapter(self.connection)
+            policy = None
+            try:
+                from dbaide.config import ConfigManager
+                policy = ConfigManager().policy_for(self.connection)
+            except Exception:
+                policy = None
+            self._adapter = build_adapter(self.connection, policy=policy, caller="agent")
         return self._adapter
 
     def _get_session(self):

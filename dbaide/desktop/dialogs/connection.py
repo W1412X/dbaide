@@ -61,6 +61,13 @@ class ConnectionForm(QWidget):
         self.password = QLineEdit()
         self.password.setFixedHeight(34)
         self.password.setEchoMode(QLineEdit.EchoMode.Password)
+        self.load_profile = QComboBox()
+        self.load_profile.setFixedHeight(34)
+        self.load_profile.addItems(["production", "staging", "dev"])
+        self.load_profile.setToolTip(
+            "production: lowest DB load (light profiling, low concurrency, strict limits).\n"
+            "staging: balanced. dev: highest concurrency and limits."
+        )
 
         browse = compact_button("Browse…", width=88)
         browse.clicked.connect(self._browse)
@@ -79,6 +86,7 @@ class ConnectionForm(QWidget):
         form.addRow(form_label("Database"), self.database)
         form.addRow(form_label("User"), self.user)
         form.addRow(form_label("Password"), self.password)
+        form.addRow(form_label("Load profile"), self.load_profile)
         scroll.setWidget(inner)
         outer.addWidget(scroll)
 
@@ -102,6 +110,7 @@ class ConnectionForm(QWidget):
         self.database.setText(str(payload.get("database") or ""))
         self.user.setText(str(payload.get("user") or ""))
         self.password.clear()
+        self.load_profile.setCurrentText(str(payload.get("load_profile") or "production"))
         self._sync_fields(self.type_select.currentText(), reset_port=port in (None, ""))
 
     def clear(self, *, conn_type: str = "sqlite") -> None:
@@ -112,6 +121,7 @@ class ConnectionForm(QWidget):
         self.database.clear()
         self.user.clear()
         self.password.clear()
+        self.load_profile.setCurrentText("production")
         self._sync_fields(conn_type, reset_port=True)
 
     def _browse(self) -> None:
@@ -142,6 +152,7 @@ class ConnectionForm(QWidget):
             "database": self.database.text().strip(),
             "user": self.user.text().strip(),
             "password": self.password.text(),
+            "load_profile": self.load_profile.currentText().strip(),
             "make_default": make_default,
         }
 
