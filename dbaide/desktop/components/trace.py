@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 from typing import Any
 
-from PyQt6.QtCore import Qt
+from PyQt6.QtCore import Qt, QTimer
 from PyQt6.QtGui import QColor, QFont
 from PyQt6.QtWidgets import (
     QHeaderView,
@@ -82,6 +82,12 @@ class TracePanel(QWidget):
         # resolve. We update just those rows' glyph on each tick — no full re-render.
         self._running_items: list[tuple[QTreeWidgetItem, int]] = []
         self._busy = BusyAnimator(self._on_spin_frame)
+        # Live builds can fire many events per second; coalesce re-renders so the
+        # tree stays smooth instead of rebuilding on every single event.
+        self._render_timer = QTimer(self)
+        self._render_timer.setSingleShot(True)
+        self._render_timer.setInterval(60)
+        self._render_timer.timeout.connect(self._render)
 
     # ── Public API (preserved for callers) ───────────────────────────────────
 
@@ -116,9 +122,11 @@ class TracePanel(QWidget):
             self.begin_live()
         assert self._model is not None
         self._model.ingest(event)
-        self._render()
+        if not self._render_timer.isActive():
+            self._render_timer.start()  # coalesce bursts into one render per ~60ms
 
     def end_live(self) -> None:
+        self._render_timer.stop()
         if self._model is not None:
             self._model.finalize()
         self._render()

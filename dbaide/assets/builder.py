@@ -129,20 +129,25 @@ class AssetBuilder:
         self._emit(title, node_id=f"build:db:{database}", parent_id=_BUILD_ROOT,
                    status=status, kind="substep")
 
-    def _emit_table_node(self, database: str, table: str, *, failed: bool) -> None:
-        """Emit a typed SQL node for one finished table, carrying the queries it ran
-        so clicking the table in the trace shows exactly what was executed."""
-        with self._table_sql_lock:
-            entries = self._table_sql.pop(f"{database}.{table}", [])
+    def _emit_table(self, database: str, table: str, *, status: str, note: str = "") -> None:
+        """Emit/refresh one table's trace node. Called live from the worker as the
+        table runs (status=running) and once at the end (completed/failed), so the
+        trace shows which table is active, what it has run, and what it's running now.
+        The node carries the queries captured so far, so clicking it shows them."""
+        entries = list(getattr(self._tls, "bucket", None) or [])
         ok = sum(1 for e in entries if getattr(e, "status", "ok") == "ok")
         errs = len(entries) - ok
         total_rows = sum(int(getattr(e, "row_count", 0) or 0) for e in entries)
-        suffix = f" · {errs} failed" if errs else ""
-        title = f"{table} · {len(entries)} quer{'y' if len(entries) == 1 else 'ies'}{suffix}"
+        count = f"{len(entries)} quer{'y' if len(entries) == 1 else 'ies'}"
+        fail_suffix = f" · {errs} failed" if errs else ""
+        if status == "running":
+            title = f"{table} · {note}" if note else f"{table} · {count}"
+        else:
+            title = f"{table} · {count}{fail_suffix}"
         event: dict = {
             "stage": "build_assets",
             "title": title,
-            "status": "failed" if failed else "completed",
+            "status": status,
             "kind": "sql",
             "node_id": f"build:table:{database}.{table}",
             "parent_id": f"build:db:{database}",
@@ -465,13 +470,12 @@ class AssetBuilder:
         for future in as_completed(futures):
             table = futures[future]
             done += 1
-            failed = False
             try:
                 table_docs.append(future.result())
             except Exception as exc:
-                failed = True
                 self._record_error(stats, f"{instance}.{database}.{table.name}: {type(exc).__name__}: {exc}")
-            self._emit_table_node(database, table.name, failed=failed)
+            # The table node itself is emitted live from the worker; here we only
+            # advance the database-level progress counter.
             self._emit_db(database, f"{database} · {done}/{total} tables · {table.name}", status="running")
         cols = sum(int(td.get("column_count") or 0) for td in table_docs)
         self._emit_db(database, f"{database} · {len(table_docs)} tables · {cols} columns", status="completed")
@@ -489,12 +493,19 @@ class AssetBuilder:
 
     def _build_table(self, instance: str, database: str, table, *, options: BuildOptions,
                      stats: BuildStats, profiler: ColumnProfiler) -> dict:
-        # Capture every query this table runs (this worker owns the table end-to-end).
+        # Capture every query this table runs (this worker owns the table end-to-end)
+        # and emit the table node live so the trace shows it the moment it starts.
         self._tls.bucket = []
+        failed = False
+        self._emit_table(database, table.name, status="running", note="starting…")
         try:
             return self._build_table_inner(instance, database, table, options=options,
                                            stats=stats, profiler=profiler)
+        except Exception:
+            failed = True
+            raise
         finally:
+            self._emit_table(database, table.name, status="failed" if failed else "completed")
             captured = self._tls.bucket
             self._tls.bucket = None
             with self._table_sql_lock:
@@ -502,7 +513,7 @@ class AssetBuilder:
 
     def _build_table_inner(self, instance: str, database: str, table, *, options: BuildOptions,
                            stats: BuildStats, profiler: ColumnProfiler) -> dict:
-        self._emit_db(database, f"{database} · describing {table.name}…", status="running")
+        self._emit_table(database, table.name, status="running", note="describing…")
         self._bump(stats, tables=1)
         columns = self.adapter.describe_table(table.name, database=database)
         foreign_keys = self.adapter.foreign_keys(table.name, database=database)
@@ -526,7 +537,11 @@ class AssetBuilder:
         # Columns are profiled serially within the table; the shared pool already
         # gives table-level parallelism and the QueryBudget caps real DB concurrency.
         column_docs: list[dict] = []
-        for column in columns:
+        total_cols = len(columns)
+        for idx, column in enumerate(columns):
+            # Live: show which column is being profiled right now (and queries so far).
+            self._emit_table(database, table.name, status="running",
+                             note=f"{idx + 1}/{total_cols} · {column.name}")
             column_docs.append(
                 self._build_column(instance, database, table.name, column, options, stats, profiler, heavy=heavy)
             )

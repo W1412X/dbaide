@@ -55,6 +55,7 @@ def test_trace_panel_click_shows_detail(qapp):
     panel.begin_live()
     panel.append_live_event(progress_event(stage="execute_sql", title="ran query", detail="SELECT 1",
                                             status="completed", kind="tool", step=1, duration_ms=7))
+    panel.end_live()  # flush the coalesced render
     tree = panel._tree
     step = tree.topLevelItem(1)
     panel._on_click(step, 1)
