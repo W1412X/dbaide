@@ -38,7 +38,8 @@ class RightPanel(QWidget):
         layout.setContentsMargins(12, 12, 12, 12)
         layout.setSpacing(8)
 
-        self.header = PanelHeader(("Inspector", "Trace", "Plan"))
+        from dbaide.i18n import t
+        self.header = PanelHeader((t("panel.inspector"), t("panel.trace"), t("panel.plan")))
         self.header.tab_changed.connect(self._switch_tab)
         self.header.history_clicked.connect(self.open_history)
         self.header.joins_clicked.connect(self.open_joins)

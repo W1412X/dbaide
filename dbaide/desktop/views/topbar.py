@@ -43,12 +43,13 @@ class TopBar(QWidget):
         self.status = StatusBadge("Idle", "idle")
         row.addWidget(self.status)
 
+        from dbaide.i18n import t
         self.menu = MenuButton("⋯")
         self.menu.setFixedSize(36, 32)
-        self.menu.add_action("Build Assets", self.build_assets.emit)
-        self.menu.add_action("Refresh", self.refresh.emit)
+        self.menu.add_action(t("topbar.build"), self.build_assets.emit)
+        self.menu.add_action(t("topbar.refresh"), self.refresh.emit)
         self.menu.add_separator()
-        self.menu.add_action("Settings…", self.settings.emit)
+        self.menu.add_action(t("topbar.settings") + "…", self.settings.emit)
         row.addWidget(self.menu)
 
     def _emit_connection(self, _index: int) -> None:

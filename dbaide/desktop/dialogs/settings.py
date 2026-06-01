@@ -122,6 +122,7 @@ class SettingsDialog(QDialog):
     model_deleted = pyqtSignal(str)
     model_test = pyqtSignal(dict)
     resource_saved = pyqtSignal(dict)
+    language_changed = pyqtSignal(str)
 
     # Numeric resource knobs shown on the Resources page: (key, label, min, max).
     _RESOURCE_FIELDS = (
@@ -144,11 +145,14 @@ class SettingsDialog(QDialog):
         default_connection: str = "",
         default_model: str = "",
         resource_defaults: dict | None = None,
+        language: str = "en",
         parent=None,
         initial_page: str = "connections",
     ) -> None:
         super().__init__(parent)
-        self.setWindowTitle("Settings")
+        from dbaide.i18n import t as _t
+        self._language = language
+        self.setWindowTitle(_t("settings.title"))
         self.setMinimumSize(760, 540)
         self.resize(800, 580)
         self.setStyleSheet(APP_STYLE)
@@ -172,7 +176,7 @@ class SettingsDialog(QDialog):
         nav_layout = QVBoxLayout(nav_wrap)
         nav_layout.setContentsMargins(0, 12, 0, 12)
         nav_layout.setSpacing(4)
-        back = compact_button("← Back", width=120)
+        back = compact_button(_t("settings.back"), width=120)
         back.clicked.connect(self.accept)
         nav_layout.addWidget(back, alignment=Qt.AlignmentFlag.AlignHCenter)
         nav_layout.addSpacing(8)
@@ -184,7 +188,9 @@ class SettingsDialog(QDialog):
             QListWidget::item:selected {{ background: {Theme.PANEL_3}; color: {Theme.TEXT}; border-radius: 8px; }}
             """
         )
-        for label, key in (("Connections", "connections"), ("Models", "models"), ("Resources", "resources")):
+        from dbaide.i18n import t as _t
+        for label, key in ((_t("settings.connections"), "connections"), (_t("settings.models"), "models"),
+                           (_t("settings.resources"), "resources"), (_t("settings.general"), "general")):
             item = QListWidgetItem(label)
             item.setData(Qt.ItemDataRole.UserRole, key)
             self.nav.addItem(item)
@@ -199,10 +205,11 @@ class SettingsDialog(QDialog):
         self.stack.addWidget(self._build_connections_page())
         self.stack.addWidget(self._build_models_page())
         self.stack.addWidget(self._build_resources_page())
+        self.stack.addWidget(self._build_general_page())
         body.addWidget(self.stack, 1)
         root.addLayout(body, 1)
 
-        page_map = {"connections": 0, "models": 1, "model": 1, "resources": 2}
+        page_map = {"connections": 0, "models": 1, "model": 1, "resources": 2, "general": 3}
         self.nav.setCurrentRow(page_map.get(initial_page, 0))
         self._reload_connection_list()
         self._reload_model_list()
@@ -268,9 +275,9 @@ class SettingsDialog(QDialog):
         layout = QVBoxLayout(page)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(16)
+        from dbaide.i18n import t as _t
         layout.addWidget(self._page_header(
-            "Resources & Safety",
-            "Hard limits that keep DB load negligible. Blank/zero falls back to the connection's load profile.",
+            _t("settings.resources.title"), _t("settings.resources.subtitle"),
         ))
         card = _SectionCard()
         card_layout = QVBoxLayout(card)
@@ -324,6 +331,34 @@ class SettingsDialog(QDialog):
                 values[key] = int(spin.value())
         self._resource_values = values
         self.resource_saved.emit({"values": values})
+
+    def _build_general_page(self) -> QWidget:
+        from PyQt6.QtWidgets import QComboBox, QFormLayout
+        from dbaide.i18n import LANGUAGE_NAMES, t
+
+        page = QWidget()
+        layout = QVBoxLayout(page)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(16)
+        layout.addWidget(self._page_header(t("settings.general"), t("settings.language.hint")))
+        card = _SectionCard()
+        card_layout = QVBoxLayout(card)
+        card_layout.setContentsMargins(16, 16, 16, 16)
+        form = QFormLayout()
+        form.setSpacing(10)
+        self.language_select = QComboBox()
+        for code in ("en", "zh"):
+            self.language_select.addItem(LANGUAGE_NAMES[code], code)
+        idx = max(0, self.language_select.findData(self._language))
+        self.language_select.setCurrentIndex(idx)
+        self.language_select.currentIndexChanged.connect(
+            lambda _i: self.language_changed.emit(self.language_select.currentData())
+        )
+        form.addRow(t("settings.language"), self.language_select)
+        card_layout.addLayout(form)
+        layout.addWidget(card)
+        layout.addStretch(1)
+        return page
 
     def _page_header(self, title: str, subtitle: str) -> QWidget:
         wrap = QWidget()

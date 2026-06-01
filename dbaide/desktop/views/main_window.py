@@ -32,7 +32,12 @@ from dbaide.desktop.event_bus import (
     QUERY_COMPLETED,
     EventBus,
 )
+from dbaide.i18n import t as _i18n_t
 from dbaide.desktop.service import DesktopService
+
+
+def _tab_label(tab_id: str) -> str:
+    return _i18n_t("tab.ask") if tab_id == "Ask" else _i18n_t("tab.sql") if tab_id == "SQL" else tab_id
 from dbaide.desktop.views.ask_tab import AskTab
 from dbaide.desktop.views.right_panel import RightPanel
 from dbaide.desktop.views.sidebar import Sidebar
@@ -119,7 +124,7 @@ class MainWindow(QMainWindow):
         self.tabbar.setUsesScrollButtons(True)
         self.tabbar.setExpanding(False)
         for name in self._tab_names:
-            self.tabbar.addTab(name)
+            self.tabbar.addTab(_tab_label(name))
         self.tabbar.currentChanged.connect(self._on_tab_changed)
         tab_row.addWidget(self.tabbar)
         tab_row.addStretch(1)
@@ -199,7 +204,7 @@ class MainWindow(QMainWindow):
         if has_conn:
             self._refresh_connection_context(conn_name)
         else:
-            self.composer.set_placeholder("Add or select a connection to start")
+            self.composer.set_placeholder(_i18n_t("composer.placeholder.no_conn"))
 
     def _run_background(
         self,
@@ -275,15 +280,8 @@ class MainWindow(QMainWindow):
                 asset_status = c.get("asset_status") or "missing"
                 break
         self.topbar.set_asset_status(asset_status)
-        hint = "  Enter 换行 · ⌘Enter 发送"
-        self.composer.set_placeholder(
-            (
-                "Ask about your data, e.g. \"最近 7 天每天订单数\""
-                if asset_status == "ready"
-                else "Ask a question, or build assets for better accuracy"
-            )
-            + hint
-        )
+        key = "composer.placeholder.ready" if asset_status == "ready" else "composer.placeholder.build"
+        self.composer.set_placeholder(_i18n_t(key) + _i18n_t("composer.hint"))
 
     def _load_schema(self, name: str) -> None:
         self._run_background(
@@ -427,7 +425,7 @@ class MainWindow(QMainWindow):
     def _restore_composer_placeholder(self) -> None:
         conn = self.current_connection()
         if not conn:
-            self.composer.set_placeholder("Add or select a connection to start")
+            self.composer.set_placeholder(_i18n_t("composer.placeholder.no_conn"))
             return
         conns = self.bootstrap.get("connections") or []
         asset_status = "missing"
@@ -435,15 +433,8 @@ class MainWindow(QMainWindow):
             if c["name"] == conn:
                 asset_status = c.get("asset_status") or "missing"
                 break
-        hint = "  Enter 换行 · ⌘Enter 发送"
-        self.composer.set_placeholder(
-            (
-                "Ask about your data, e.g. \"最近 7 天每天订单数\""
-                if asset_status == "ready"
-                else "Ask a question, or build assets for better accuracy"
-            )
-            + hint
-        )
+        key = "composer.placeholder.ready" if asset_status == "ready" else "composer.placeholder.build"
+        self.composer.set_placeholder(_i18n_t(key) + _i18n_t("composer.hint"))
 
     def build_assets(self) -> None:
         conn = self.current_connection()
@@ -507,12 +498,14 @@ class MainWindow(QMainWindow):
             resource_defaults = self.service.dispatch("resource_defaults", {})
         except Exception:
             resource_defaults = {}
+        from dbaide.i18n import get_language
         dialog = SettingsDialog(
             connections=self.bootstrap.get("connections") or [],
             models=self.bootstrap.get("models") or [],
             default_connection=str(self.bootstrap.get("default_connection") or ""),
             default_model=str(self.bootstrap.get("default_model") or "default"),
             resource_defaults=resource_defaults,
+            language=get_language(),
             parent=self,
             initial_page=page,
         )
@@ -523,7 +516,38 @@ class MainWindow(QMainWindow):
         dialog.model_deleted.connect(self._settings_delete_model)
         dialog.model_test.connect(lambda payload: self._settings_test_model(dialog, payload))
         dialog.resource_saved.connect(self._settings_save_resources)
+        dialog.language_changed.connect(self._change_language)
         dialog.exec()
+
+    def _change_language(self, lang: str) -> None:
+        from dbaide.i18n import get_language, set_language, t
+        if lang == get_language():
+            return
+        try:
+            self.service.cfg.set_ui_language(lang)
+        except Exception:
+            pass
+        set_language(lang)
+        self._retranslate()
+        self.toast(t("toast.language_changed"))
+
+    def _retranslate(self) -> None:
+        """Update the live, main-window-owned labels after a language change.
+        Sub-widgets that expose retranslate() are refreshed; dialogs pick up the
+        new language when reopened."""
+        for i, name in enumerate(self._tab_names):
+            if i < self.tabbar.count():
+                self.tabbar.setTabText(i, _tab_label(name))
+        conn = self.current_connection()
+        if conn:
+            self._refresh_connection_context(conn)  # re-applies composer placeholder
+        for widget in (self.topbar, self.composer, self.right, self.sidebar, self.ask_tab, self.sql_tab):
+            fn = getattr(widget, "retranslate", None)
+            if callable(fn):
+                try:
+                    fn()
+                except Exception:
+                    pass
 
     def _settings_save_resources(self, payload: dict[str, Any]) -> None:
         try:
@@ -780,7 +804,7 @@ class MainWindow(QMainWindow):
                 self._last_question = str(result.get("question") or self._last_question)
                 self.ask_tab.append_result(result)
                 self.right.show_trace(result.get("trace") or [])
-                self.composer.set_placeholder("Reply to continue…  Enter 换行 · ⌘Enter 发送")
+                self.composer.set_placeholder(_i18n_t("composer.placeholder.reply"))
                 self.toast("Waiting for your reply")
                 return
             self._pending_resume = None
