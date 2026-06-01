@@ -6,6 +6,8 @@ from PyQt6.QtCore import pyqtSignal
 from PyQt6.QtWidgets import QHBoxLayout, QLabel, QSizePolicy, QWidget
 
 from dbaide.desktop.components.base import StatusBadge
+from dbaide.desktop.components.icon_button import IconToolButton
+from dbaide.desktop.components.icons import panel_icon
 from dbaide.desktop.components.inputs import DropdownCombo
 from dbaide.desktop.components.menu import MenuButton
 from dbaide.desktop.theme import Theme
@@ -17,6 +19,7 @@ class TopBar(QWidget):
     refresh = pyqtSignal()
     build_assets = pyqtSignal()
     settings = pyqtSignal()
+    toggle_panel = pyqtSignal()
 
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
@@ -42,6 +45,10 @@ class TopBar(QWidget):
 
         self.status = StatusBadge("Idle", "idle")
         row.addWidget(self.status)
+
+        self.panel_toggle = IconToolButton(panel_icon(), "Toggle activity panel")
+        self.panel_toggle.clicked.connect(self.toggle_panel.emit)
+        row.addWidget(self.panel_toggle)
 
         from dbaide.i18n import t
         self.menu = MenuButton("⋯")

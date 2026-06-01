@@ -55,4 +55,14 @@ def more_icon(*, color: str = Theme.MUTED, size: int = 18) -> QIcon:
     return _line_icon(size, draw, color)
 
 
+def panel_icon(*, color: str = Theme.MUTED, size: int = 18) -> QIcon:
+    """A side panel: a rounded frame with a divided right column."""
+    def draw(p: QPainter, s: int) -> None:
+        p.drawRoundedRect(3, 4, s - 6, s - 8, 2, 2)
+        x = int(s * 0.62)
+        p.drawLine(x, 4, x, s - 4)
+
+    return _line_icon(size, draw, color)
+
+
 ICON_SIZE = QSize(16, 16)

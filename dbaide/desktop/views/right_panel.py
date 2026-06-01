@@ -27,6 +27,7 @@ class RightPanel(QWidget):
     joins_add_requested = pyqtSignal(dict)
     joins_update_requested = pyqtSignal(dict)
     joins_delete_requested = pyqtSignal(str)
+    reveal_requested = pyqtSignal()  # the panel wants to be shown (activity / preview)
 
     # Trace is the primary, default view; Inspector is contextual (auto-shown when
     # you preview an asset); SQL Log is the audit. Plan was redundant with the trace.
@@ -132,6 +133,7 @@ class RightPanel(QWidget):
         if focus:
             self.header.set_current_tab(self._TAB_INSPECTOR)
             self._switch_tab(self._TAB_INSPECTOR)
+            self.reveal_requested.emit()
 
     def show_search_hits(self, query: str, hits: list[dict[str, Any]]) -> None:
         self.inspect_preview.clear_view()
@@ -150,6 +152,7 @@ class RightPanel(QWidget):
             self.inspect_preview.append_card("Asset search", "\n".join(lines))
         self.header.set_current_tab(self._TAB_INSPECTOR)
         self._switch_tab(self._TAB_INSPECTOR)
+        self.reveal_requested.emit()
 
     def load_history(self, entries: list[dict[str, Any]]) -> None:
         self.history.load(entries)
@@ -157,6 +160,7 @@ class RightPanel(QWidget):
     def focus_trace(self) -> None:
         self.header.set_current_tab(self._TAB_TRACE)
         self._switch_tab(self._TAB_TRACE)
+        self.reveal_requested.emit()
 
     def focus_history(self) -> None:
         self.open_history()

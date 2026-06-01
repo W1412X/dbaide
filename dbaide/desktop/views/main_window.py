@@ -70,8 +70,23 @@ class MainWindow(QMainWindow):
         from dbaide.desktop.components.query_log_view import QueryLogBridge
         self._qlog_bridge = QueryLogBridge(self.service)
         self._qlog_bridge.entry.connect(self.right.append_query)
+        # Restore whether the activity panel was collapsed last session.
+        if str(self._settings.value("panel_visible", "true")).lower() == "false":
+            self.right.setVisible(False)
         self._wire_bus()
         self.refresh_all()
+
+    def _toggle_panel(self) -> None:
+        self._set_panel_visible(not self.right.isVisible())
+
+    def _show_panel(self) -> None:
+        self._set_panel_visible(True)
+
+    def _set_panel_visible(self, visible: bool) -> None:
+        if visible == self.right.isVisible():
+            return
+        self.right.setVisible(visible)
+        self._settings.setValue("panel_visible", "true" if visible else "false")
 
     def _wire_bus(self) -> None:
         """Central map of data-change events → who re-fetches. Components react to
@@ -104,6 +119,7 @@ class MainWindow(QMainWindow):
         self.topbar.refresh.connect(self.refresh_all)
         self.topbar.build_assets.connect(self.build_assets)
         self.topbar.settings.connect(lambda: self.open_settings("connections"))
+        self.topbar.toggle_panel.connect(self._toggle_panel)
         layout.addWidget(self.topbar)
 
         body = QSplitter(Qt.Orientation.Horizontal)
@@ -163,6 +179,7 @@ class MainWindow(QMainWindow):
         self.right.joins_add_requested.connect(self._add_join)
         self.right.joins_update_requested.connect(self._update_join)
         self.right.joins_delete_requested.connect(self._delete_join)
+        self.right.reveal_requested.connect(self._show_panel)
 
         body.addWidget(self.sidebar)
         body.addWidget(center)
