@@ -477,6 +477,13 @@ def build_tool_registry(orchestrator: AskOrchestrator) -> ToolRegistry:
         if not sql:
             return ToolResult(ok=False, error=_err("explain_sql", "sql is required"))
         report = orchestrator.diagnose.diagnose_sql(sql, database=database)
+        # Surface the diagnosis as the loop answer so it is not lost if the model
+        # finishes without restating it (mirrors profile_table's behaviour).
+        hints = report.get("issues") or report.get("hints") or []
+        if hints:
+            lines = [f"EXPLAIN diagnosis for:\n```sql\n{sql}\n```", ""]
+            lines += [f"- {hint}" for hint in hints]
+            orchestrator._loop_answer = "\n".join(lines)
         return ToolResult(ok=bool(report.get("ok")), data=report)
 
     def _profile_table(args: dict[str, Any], _ctx: ToolContext) -> ToolResult:

@@ -53,8 +53,14 @@ class DisclosureContext:
 
     def record_columns(self, table: str, columns: list[ColumnInfo], *, instance: str = "", database: str = "") -> None:
         entry = self._entry_for(table, instance=instance, database=database)
-        if entry:
-            entry.columns = list(columns)
+        if entry is None:
+            # describe_table may be reached without a prior list_tables/discover
+            # (e.g. a direct table question, or a resumed loop). Register the table
+            # here so SchemaGuard stays fail-closed instead of silently dropping it.
+            ref = self.table_ref(instance, database, table)
+            entry = TableDisclosure(table=TableInfo(name=table, schema=database), instance=instance, database=database)
+            self.tables[ref] = entry
+        entry.columns = list(columns)
         self.events.append(f"L3 columns disclosed: {self.path(instance, database, table)} ({len(columns)} column(s))")
 
     def record_profile(self, table: str, profile: ColumnProfile, *, instance: str = "", database: str = "") -> None:

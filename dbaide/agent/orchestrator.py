@@ -513,7 +513,9 @@ class AskOrchestrator:
             if repair.value == "rerender_sql":
                 corrected = self._attempt_self_correction(ctx, columns := self.schema.describe_table(ctx.table, database=table_database), table_database)
                 if corrected:
-                    result = corrected
+                    # The corrected query is what actually produced `result`; the
+                    # answer must reflect that SQL/rationale, not the failed original.
+                    result, normalized_sql, draft = corrected
                 else:
                     return AssistantResponse(
                         answer=f"SQL execution failed:\n{exc}\n\nSQL:\n```sql\n{normalized_sql}\n```",
@@ -563,9 +565,10 @@ class AskOrchestrator:
             validation = self.query.validate_sql(draft.sql, add_limit=True)
             if validation.ok:
                 self._step(ctx, "corrected", "Self-correction successful")
-                return self.query.execute_sql(
+                result = self.query.execute_sql(
                     validation.normalized_sql, database=database, limit=self.session.default_limit,
                 )
+                return result, validation.normalized_sql, draft
         except Exception as exc:
             logger.debug("self_correction_failed: %s", exc)
         return None
