@@ -36,6 +36,36 @@ def test_trace_model_assigns_sql_type_and_upgrades_on_done():
     assert step.raw.get("row_count") == 3
 
 
+def test_trace_model_supports_arbitrary_depth():
+    """A sub-step can nest under another sub-step (not just under a tool), so the
+    tree has no 2-level cap."""
+    model = TraceModel()
+    model.ingest({"stage": "discover_schema", "title": "Calling", "status": "running",
+                  "kind": "tool", "step": 1})
+    model.ingest({"stage": "schema_link", "title": "scan", "status": "running",
+                  "kind": "substep", "node_id": "sl", "parent": "discover_schema"})
+    model.ingest({"stage": "db", "title": "shop", "status": "running",
+                  "kind": "substep", "node_id": "sl:shop", "parent_id": "sl"})
+    model.ingest({"stage": "tbl", "title": "orders", "status": "completed",
+                  "kind": "substep", "node_id": "sl:shop:orders", "parent_id": "sl:shop"})
+    model.finalize()
+
+    def depth(nid):
+        d, n = 0, model.find(nid)
+        while n and n.parent_id and n.parent_id != "__root__":
+            d += 1
+            n = model.find(n.parent_id)
+        return d
+
+    assert depth("sl") == 1
+    assert depth("sl:shop") == 2
+    assert depth("sl:shop:orders") == 3  # nests three levels under the tool step
+    # nesting by `parent` stage name also resolves to a non-tool node
+    model.ingest({"stage": "x", "title": "leaf", "status": "completed",
+                  "kind": "substep", "node_id": "leaf1", "parent": "tbl"})
+    assert model.find("leaf1").parent_id == "sl:shop:orders"
+
+
 def test_trace_model_build_phase_nodes_are_typed_phase():
     model = TraceModel()
     model.ingest({"stage": "build_assets", "title": "Building assets · shop",

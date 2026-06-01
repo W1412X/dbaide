@@ -150,8 +150,12 @@ class TraceModel:
             if is_tool:
                 node.thought = self._pending_thought
                 self._pending_thought = ""
-                self._stage_index[stage] = node_id
                 self._last_tool_id = node_id
+            # Index every node's stage (last wins), so a later sub-step can nest under
+            # any node by naming it as `parent` — enabling arbitrary tree depth, not
+            # just tool→substep.
+            if stage:
+                self._stage_index[stage] = node_id
             parent.children.append(node)
             self._index[node_id] = node
         else:

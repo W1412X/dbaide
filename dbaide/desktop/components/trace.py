@@ -203,7 +203,7 @@ class TracePanel(QWidget):
 
         last: QTreeWidgetItem = summary
         for node in model.steps:
-            last = self._add_node(self._tree, node)
+            last = self._add_node(self._tree, node, depth=0)
 
         self._tree.scrollToItem(last)
         # Re-show the previously selected node's detail (don't lose it on live re-render).
@@ -225,33 +225,27 @@ class TracePanel(QWidget):
             except RuntimeError:
                 pass  # item deleted by a concurrent re-render
 
-    def _add_node(self, parent, node: TraceNode) -> QTreeWidgetItem:
+    def _add_node(self, parent, node: TraceNode, *, depth: int) -> QTreeWidgetItem:
+        """Render one node and all its descendants. Styling is driven by depth and
+        node_type (not by a 2-level tool/substep split), so the tree nests without
+        limit: top-level steps read boldest, deeper sub-tasks progressively muted."""
         running = node.status == "running"
         # Running rows get a spinning-ring icon (set below); others a status glyph.
         glyph = "" if running else _GLYPH.get(node.status, "·")
-        is_tool = node.parent_id == "__root__"
-        if is_tool:
-            # Step row: bright phase name, status glyph carries colour, duration muted.
-            indicator = f"{glyph} {node.step}".strip() if node.step else glyph
-            head = _head_text(node)
-            if node.duration_ms > 0 and node.status in ("completed", "failed"):
-                status_text = _fmt_ms(node.duration_ms)
-            elif node.status in ("running", "waiting"):
-                status_text = node.status
-            else:
-                status_text = ""
-            item = QTreeWidgetItem([indicator, head, status_text])
-            item.setForeground(0, _status_color(node.status))
-            item.setForeground(1, _red() if node.status == "failed" else _bright())
-            item.setForeground(2, _red() if node.status == "failed" else _muted())
-            item.setFont(1, _semibold())
+        indicator = f"{glyph} {node.step}".strip() if (depth == 0 and node.step) else glyph
+        head = _node_head(node)
+        if node.duration_ms > 0 and node.status in ("completed", "failed"):
+            status_text = _fmt_ms(node.duration_ms)
+        elif node.status in ("running", "waiting"):
+            status_text = node.status
         else:
-            # Sub-agent row: muted "label: detail", glyph shows status (no "completed" word).
-            indicator = glyph
-            head = f"{node.agent_name} · {node.title}" if node.agent_name else node.title
-            item = QTreeWidgetItem([indicator, head, ""])
-            item.setForeground(0, _status_color(node.status))
-            item.setForeground(1, _muted())
+            status_text = ""
+        item = QTreeWidgetItem([indicator, head, status_text])
+        item.setForeground(0, _status_color(node.status))
+        item.setForeground(1, _red() if node.status == "failed" else _depth_color(depth))
+        item.setForeground(2, _red() if node.status == "failed" else _muted())
+        if depth == 0:
+            item.setFont(1, _semibold())
 
         item.setData(0, _NODE_ROLE, {
             "node_id": node.id, "stage": node.stage, "phase": node.phase,
@@ -263,22 +257,20 @@ class TracePanel(QWidget):
             item.setIcon(0, spinner_icon(self._busy.angle, color=Theme.BLUE))
             self._running_items.append(item)
 
-        parent_is_tree = isinstance(parent, QTreeWidget)
-        if parent_is_tree:
+        if isinstance(parent, QTreeWidget):
             parent.addTopLevelItem(item)
         else:
             parent.addChild(item)
 
         if node.thought:
             self._add_leaf(item, f"💭 {node.thought}", muted=True)
-        # Surface the useful result/summary (not the boilerplate "Calling X / X done").
-        if is_tool:
-            secondary = _secondary_text(node)
-            if secondary:
-                self._add_leaf(item, secondary, muted=True)
+        # Surface the useful result/summary unless it's already in the head.
+        secondary = _secondary_text(node)
+        if secondary and secondary not in head:
+            self._add_leaf(item, secondary, muted=True)
 
         for child in node.children:
-            self._add_node(item, child)
+            self._add_node(item, child, depth=depth + 1)
 
         item.setExpanded(True)
         return item
@@ -394,13 +386,26 @@ def _code_block(text: str, *, escaped: bool = False) -> str:
     )
 
 
-def _head_text(node: TraceNode) -> str:
-    """Step head with a leading category chip for the 'special' step types."""
-    base = node.phase or node.stage or node.title
+def _node_head(node: TraceNode) -> str:
+    """Row label, used at any depth. Sub-agent nodes read 'agent · title'; others
+    show a category chip in front of their phase/stage."""
+    if node.agent_name:
+        title = node.title or node.phase or node.stage or "step"
+        return f"{node.agent_name} · {title}"
+    base = node.phase or node.stage or node.title or "step"
     chip = STEP_TYPE_LABELS.get(node.node_type, "")
     if chip and node.node_type in _CHIP_TYPES:
         return f"{chip} · {base}"
     return base
+
+
+def _depth_color(depth: int) -> QColor:
+    """Top-level steps read brightest; deeper sub-tasks fade so the hierarchy is legible."""
+    if depth <= 0:
+        return _bright()
+    if depth == 1:
+        return QColor(Theme.TEXT_2)
+    return _muted()
 
 
 def _secondary_text(node: TraceNode) -> str:
