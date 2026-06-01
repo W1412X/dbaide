@@ -134,6 +134,28 @@ _STRINGS: dict[str, dict[str, str]] = {
     # Connection dialog
     "conn.browse": {"en": "Browse…", "zh": "浏览…"},
     "conn.add_title": {"en": "Add Connection", "zh": "添加连接"},
+    "conn.name": {"en": "Name", "zh": "名称"},
+    "conn.type": {"en": "Type", "zh": "类型"},
+    "conn.sqlite_path": {"en": "SQLite path", "zh": "SQLite 路径"},
+    "conn.host": {"en": "Host", "zh": "主机"},
+    "conn.port": {"en": "Port", "zh": "端口"},
+    "conn.database": {"en": "Database", "zh": "数据库"},
+    "conn.user": {"en": "User", "zh": "用户"},
+    "conn.password": {"en": "Password", "zh": "密码"},
+    "conn.load_profile": {"en": "Load profile", "zh": "负载档位"},
+    # Settings page headers
+    "settings.connections.subtitle": {"en": "Manage database connections.", "zh": "管理数据库连接。"},
+    "settings.models.subtitle": {
+        "en": "Configure LLM providers. Switch models from the composer.",
+        "zh": "配置 LLM 提供方。可在输入栏切换模型。",
+    },
+    # Model form
+    "model.profile": {"en": "Profile", "zh": "配置名"},
+    "model.provider": {"en": "Provider", "zh": "提供方"},
+    "model.base_url": {"en": "Base URL", "zh": "Base URL"},
+    "model.api_key": {"en": "API Key", "zh": "API Key"},
+    "model.model_id": {"en": "Model ID", "zh": "模型 ID"},
+    "model.timeout": {"en": "Timeout (s)", "zh": "超时（秒）"},
     # Right-panel header menu
     "toast.join_saved": {"en": "Join saved", "zh": "关联已保存"},
     "toast.join_updated": {"en": "Join updated", "zh": "关联已更新"},

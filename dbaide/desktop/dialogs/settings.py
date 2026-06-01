@@ -24,6 +24,7 @@ from dbaide.desktop.components.inputs import FORM_INNER_LABEL_RULES, configure_f
 from dbaide.desktop.components.menu import MenuButton
 from dbaide.desktop.dialogs.connection import ConnectionForm
 from dbaide.desktop.theme import APP_STYLE, Theme
+from dbaide.i18n import t as _pt
 
 
 class _SectionCard(QFrame):
@@ -45,6 +46,7 @@ class _SectionCard(QFrame):
 class ModelForm(QWidget):
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
+        from dbaide.i18n import t
         outer = QVBoxLayout(self)
         outer.setContentsMargins(0, 0, 0, 0)
         scroll = QScrollArea()
@@ -76,12 +78,12 @@ class ModelForm(QWidget):
         self.timeout.setMaximumWidth(120)
         self.timeout.setRange(5, 600)
         self.timeout.setValue(60)
-        form.addRow(form_label("Profile"), self.profile_name)
-        form.addRow(form_label("Provider"), self.provider)
-        form.addRow(form_label("Base URL"), self.base_url)
-        form.addRow(form_label("API Key"), self.api_key)
-        form.addRow(form_label("Model ID"), self.model_id)
-        form.addRow(form_label("Timeout (s)"), self.timeout)
+        form.addRow(form_label(t("model.profile")), self.profile_name)
+        form.addRow(form_label(t("model.provider")), self.provider)
+        form.addRow(form_label(t("model.base_url")), self.base_url)
+        form.addRow(form_label(t("model.api_key")), self.api_key)
+        form.addRow(form_label(t("model.model_id")), self.model_id)
+        form.addRow(form_label(t("model.timeout")), self.timeout)
         scroll.setWidget(inner)
         outer.addWidget(scroll)
 
@@ -221,7 +223,7 @@ class SettingsDialog(QDialog):
         layout = QVBoxLayout(page)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(16)
-        layout.addWidget(self._page_header("Connections", "Manage database connections."))
+        layout.addWidget(self._page_header(_pt("settings.connections"), _pt("settings.connections.subtitle")))
         card = _SectionCard()
         card_layout = QVBoxLayout(card)
         card_layout.setContentsMargins(16, 16, 16, 16)
@@ -248,7 +250,7 @@ class SettingsDialog(QDialog):
         layout = QVBoxLayout(page)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(16)
-        layout.addWidget(self._page_header("Models", "Configure LLM providers. Switch models from the composer."))
+        layout.addWidget(self._page_header(_pt("settings.models"), _pt("settings.models.subtitle")))
         card = _SectionCard()
         card_layout = QVBoxLayout(card)
         card_layout.setContentsMargins(16, 16, 16, 16)
@@ -311,8 +313,8 @@ class SettingsDialog(QDialog):
 
         actions = QHBoxLayout()
         actions.addStretch(1)
-        reset = compact_button("Reset to defaults", width=150)
-        save = compact_button("Save", primary=True, width=96)
+        reset = compact_button(_pt("btn.reset_defaults"), width=150)
+        save = compact_button(_pt("btn.save"), primary=True, width=96)
         reset.clicked.connect(self._reset_resources)
         save.clicked.connect(self._save_resources)
         actions.addWidget(reset)
@@ -396,11 +398,11 @@ class SettingsDialog(QDialog):
     def _conn_actions(self) -> QHBoxLayout:
         actions = QHBoxLayout()
         actions.setSpacing(8)
-        self.add_conn_btn = compact_button("Add", width=72)
+        self.add_conn_btn = compact_button(_pt("btn.add"), width=72)
         self.add_conn_btn.clicked.connect(self._add_connection)
-        self.save_conn_btn = compact_button("Save", primary=True, width=80)
+        self.save_conn_btn = compact_button(_pt("btn.save"), primary=True, width=80)
         self.save_conn_btn.clicked.connect(self._save_connection)
-        self.test_conn_btn = compact_button("Test", width=72)
+        self.test_conn_btn = compact_button(_pt("btn.test"), width=72)
         self.test_conn_btn.clicked.connect(self._test_connection)
         self.conn_more = MenuButton("More ▾", max_width=88)
         self.conn_more.add_action("Set as default", self._set_default_connection)
@@ -415,11 +417,11 @@ class SettingsDialog(QDialog):
     def _model_actions(self) -> QHBoxLayout:
         actions = QHBoxLayout()
         actions.setSpacing(8)
-        self.add_model_btn = compact_button("Add", width=72)
+        self.add_model_btn = compact_button(_pt("btn.add"), width=72)
         self.add_model_btn.clicked.connect(self._add_model)
-        self.save_model_btn = compact_button("Save", primary=True, width=80)
+        self.save_model_btn = compact_button(_pt("btn.save"), primary=True, width=80)
         self.save_model_btn.clicked.connect(self._save_model)
-        self.test_model_btn = compact_button("Test", width=72)
+        self.test_model_btn = compact_button(_pt("btn.test"), width=72)
         self.test_model_btn.clicked.connect(self._test_model)
         self.model_more = MenuButton("More ▾", max_width=88)
         self.model_more.add_action("Set as default", self._set_default_model)
