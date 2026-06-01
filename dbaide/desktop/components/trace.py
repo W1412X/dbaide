@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 from typing import Any
 
-from PyQt6.QtCore import Qt, pyqtSignal
+from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QColor, QFont
 from PyQt6.QtWidgets import (
     QHeaderView,
@@ -36,8 +36,6 @@ class TracePanel(QWidget):
     """Execution-tree view of a run: a live summary on top, the tool/sub-agent tree
     in the middle (parallel work shown as sibling nodes), and a detail pane below
     that shows everything about whichever node you click."""
-
-    event_selected = pyqtSignal(dict)
 
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
@@ -240,7 +238,6 @@ class TracePanel(QWidget):
             return
         self._selected_id = str(data.get("node_id") or "")
         self._show_detail(data)
-        self.event_selected.emit(data)
 
     def _show_detail(self, data: dict) -> None:
         self._detail.setPlainText(_format_detail(data))

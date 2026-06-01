@@ -158,8 +158,6 @@ class DesktopService:
             "resource_defaults": self.resource_defaults,
             "save_resource_defaults": self.save_resource_defaults,
             "recent_queries": self.recent_queries,
-            "query_summary": self.query_summary,
-            "build_status": self.build_status,
         }
         if action not in handlers:
             raise ValueError(f"Unknown desktop action: {action}")
@@ -574,27 +572,6 @@ class DesktopService:
         if not entries:
             entries = log.tail_file(limit=limit)
         return {"connection": name, "queries": entries, "summary": log.summary()}
-
-    def query_summary(self, payload: dict[str, Any]) -> dict[str, Any]:
-        from dbaide.observability import query_log
-        name = str(payload.get("connection_name") or payload.get("name") or "")
-        if not name:
-            name = self.cfg.get_connection(None).name
-        return {"connection": name, "summary": query_log.for_instance(name).summary()}
-
-    def build_status(self, payload: dict[str, Any]) -> dict[str, Any]:
-        name = str(payload.get("connection_name") or payload.get("name") or "")
-        if not name:
-            name = self.cfg.get_connection(None).name
-        from dbaide.db import budget as budget_mod
-        policy = self.cfg.policy_for(self.cfg.get_connection(name))
-        budget = budget_mod.for_instance(name, max_inflight=policy.max_inflight_queries)
-        return {
-            "connection": name,
-            "building": self._build_active(name),
-            "inflight": budget.inflight,
-            "max_inflight": budget.max_inflight,
-        }
 
     def subscribe_queries(self, instance: str, callback) -> Callable[[], None]:
         """Subscribe a callback to live query-log entries (used by the SQL detail view)."""
