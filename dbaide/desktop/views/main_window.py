@@ -699,7 +699,11 @@ class MainWindow(QMainWindow):
             self.toast(str(exc))
 
     def run_action(self, action: str, payload: dict[str, Any]) -> None:
-        if self.running:
+        # Guard on the worker handle too, not just `running`: the stop_task escape
+        # hatch can clear `running` while the background worker is still in flight.
+        # Without this, a second worker could run concurrently on the shared
+        # DesktopService/adapters and corrupt state when the orphan finishes.
+        if self.running or self._current_worker is not None:
             self.toast("A task is already running")
             return
         self._last_action = action
@@ -719,9 +723,12 @@ class MainWindow(QMainWindow):
             self._current_worker.cancel()
             self.toast("Cancelling…")
             return
+        # Already cancelled / no worker: reset the UI. The run_action guard keeps a
+        # new task from starting until the (possibly orphaned) worker truly finishes.
         self.running = False
         self.composer.set_running(False)
         self.sql_tab.set_running(False)
+        self.right.trace.end_live()
         self._restore_status_badge()
 
     def on_progress(self, message: object) -> None:

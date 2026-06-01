@@ -24,6 +24,8 @@ if True:  # TYPE_CHECKING without circular import at runtime
 logger = logging.getLogger("dbaide.agent.loop")
 
 DECISION_RETRIES = 3
+# Both names bind to the same execute handler; the loop must treat them alike.
+_EXECUTE_TOOLS = frozenset({"execute_sql", "execute_readonly_sql"})
 RESULT_PREVIEW_LIMIT = 3500
 
 
@@ -133,6 +135,7 @@ class AskAgentLoop:
             tool_name = str(decision.get("tool") or "").strip()
             if tool_name not in self.registry._handlers:  # noqa: SLF001
                 transcript.append(f"Error: unknown tool {tool_name!r}. Use a registered tool name.")
+                runtime.consume_step()  # charge budget so a repeated bad name can't loop forever
                 continue
 
             args = decision.get("args") if isinstance(decision.get("args"), dict) else {}
@@ -183,9 +186,9 @@ class AskAgentLoop:
                     )
                     transcript.append(f"Tool `get_relations` (auto) → {summary}")
 
-            if tool_name == "execute_sql" and result.ok:
+            if tool_name in _EXECUTE_TOOLS and result.ok:
                 break
-            if tool_name == "execute_sql" and isinstance(result.data, dict) and result.data.get("blocked"):
+            if tool_name in _EXECUTE_TOOLS and isinstance(result.data, dict) and result.data.get("blocked"):
                 sql = str(result.data.get("sql") or orch._loop_sql or "")
                 reason = str(result.data.get("reason") or "Execution blocked")
                 orch._loop_answer = f"SQL:\n```sql\n{sql}\n```\n\n_{reason}_"

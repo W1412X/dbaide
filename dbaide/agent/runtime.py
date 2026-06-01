@@ -93,6 +93,11 @@ class AgentRuntime:
         self._step_count += 1
         return self.tool_registry.invoke(name, args, ctx)
 
+    def consume_step(self) -> None:
+        """Charge one step without invoking a tool (e.g. an unknown-tool attempt),
+        so non-tool iterations of the loop still count against the budget."""
+        self._step_count += 1
+
     def elapsed_ms(self) -> float:
         """Get elapsed time in milliseconds."""
         return (time.perf_counter() - self._start_time) * 1000

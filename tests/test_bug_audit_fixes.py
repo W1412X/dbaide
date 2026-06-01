@@ -125,3 +125,34 @@ def test_highlight_sql_runs():
     from dbaide.rendering.sanitize import highlight_sql
     out = highlight_sql("SELECT * FROM t WHERE name = 'bob' AND n = 5")
     assert "color:#22863a" in out  # string span, no NameError
+
+
+# 9) loop charges budget for unknown tools (no infinite loop) + consume_step.
+def test_consume_step_charges_budget():
+    rt = AgentRuntime(tool_registry=_FakeRegistry())
+    before = rt.steps_remaining
+    rt.consume_step()
+    assert rt.steps_remaining == before - 1
+
+
+# 10) execute_readonly_sql is treated as an execute tool by the loop.
+def test_execute_alias_recognized():
+    from dbaide.agent.loop import _EXECUTE_TOOLS
+    assert "execute_sql" in _EXECUTE_TOOLS
+    assert "execute_readonly_sql" in _EXECUTE_TOOLS
+
+
+# 11) sqlite row estimate via dbstat uses valid columns (no error) when ANALYZE absent.
+def test_sqlite_estimate_rows_dbstat(tmp_path: Path):
+    from dbaide.adapters import build_adapter
+    db = tmp_path / "e.db"
+    c = sqlite3.connect(db)
+    c.executescript("CREATE TABLE t(id INTEGER PRIMARY KEY, v TEXT);"
+                    + "".join(f"INSERT INTO t VALUES ({i},'x{i}');" for i in range(50)))
+    c.commit()
+    c.close()
+    adapter = build_adapter(ConnectionConfig(name="e", type="sqlite", path=str(db)))
+    tables = {t.name: t for t in adapter.list_tables()}
+    # estimated_rows should be a non-negative int or None — never raise.
+    est = tables["t"].estimated_rows
+    assert est is None or est >= 0

@@ -193,11 +193,10 @@ class SQLiteAdapter(DatabaseAdapter):
     def _estimate_rows_fast(self, conn: sqlite3.Connection, table: str) -> int | None:
         """Estimate row count without a full table scan.
 
-        Tries ``sqlite_stat1`` first (populated by ``ANALYZE``).  Falls back to
-        the page-level estimate from ``dbstat`` (virtual table, fast).  Returns
-        ``None`` if neither is available rather than blocking on COUNT(*).
+        Uses ``sqlite_stat1`` (populated by ``ANALYZE``); falls back to the
+        page-level ``dbstat`` virtual table when available. Returns ``None`` if
+        neither is available rather than blocking on COUNT(*).
         """
-        safe = quote_identifier(table, self.dialect).replace("'", "''")
         # sqlite_stat1: "NNN ..."  where NNN is the row count estimate
         try:
             row = conn.execute(
@@ -208,11 +207,11 @@ class SQLiteAdapter(DatabaseAdapter):
                 return int(row["stat"].split()[0])
         except (sqlite3.Error, ValueError):
             pass
-        # dbstat: sum of cell counts across leaf pages
+        # dbstat: sum of leaf-cell counts for the table (columns are name/pageno/ncell;
+        # there is no 'pgno'/'aggregate' column — the aggregate form is dbstat(schema,1)).
         try:
             row = conn.execute(
-                "SELECT SUM(ncell) AS cnt FROM dbstat WHERE aggregate = TRUE AND pgno IN "
-                "(SELECT pgno FROM dbstat WHERE name = ? AND aggregate = FALSE)",
+                "SELECT SUM(ncell) AS cnt FROM dbstat WHERE name = ? AND pagetype = 'leaf'",
                 (table,),
             ).fetchone()
             if row and row["cnt"] is not None:
