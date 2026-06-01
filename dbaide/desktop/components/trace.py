@@ -89,6 +89,9 @@ class TracePanel(QTreeWidget):
         self._live = False
         self.clear()
 
+    def is_empty(self) -> bool:
+        return self._model is None or not self._model.steps
+
     # ── Rendering ─────────────────────────────────────────────────────────────
 
     def _render(self) -> None:

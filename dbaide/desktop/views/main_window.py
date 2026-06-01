@@ -68,10 +68,20 @@ class MainWindow(QMainWindow):
         """Central map of data-change events → who re-fetches. Components react to
         events instead of every action handler knowing what to refresh."""
         self.bus.subscribe(CONNECTIONS_CHANGED, lambda _p: self.refresh_all())
-        self.bus.subscribe(MODELS_CHANGED, lambda _p: self.refresh_all())
         self.bus.subscribe(ASSETS_CHANGED, lambda _p: self.refresh_all())
+        # A model change only affects the model selector — don't reload the schema
+        # tree / history / joins for the current connection.
+        self.bus.subscribe(MODELS_CHANGED, lambda _p: self._refresh_models_only())
         self.bus.subscribe(JOINS_CHANGED, lambda _p: self.refresh_joins())
         self.bus.subscribe(QUERY_COMPLETED, lambda _p: self._load_history(self.current_connection()))
+
+    def _refresh_models_only(self) -> None:
+        def on_loaded(bootstrap: dict[str, Any]) -> None:
+            self.bootstrap = bootstrap
+            models = bootstrap.get("models") or []
+            default_model = str(bootstrap.get("default_model") or "default")
+            self.composer.set_models(models, default_model)
+        self._run_background("bootstrap", {}, on_loaded)
 
     def _build(self) -> None:
         root = QWidget()
@@ -712,10 +722,12 @@ class MainWindow(QMainWindow):
         self._restore_status_badge()
 
     def on_progress(self, message: object) -> None:
-        label = progress_label(message if isinstance(message, dict) else str(message or ""))
-        self.statusbar.showMessage(label)
+        # Ignore progress that arrives after the task finished, so the status bar
+        # and trace never show a stale "doing X" once we are idle again.
         if not self.running:
             return
+        label = progress_label(message if isinstance(message, dict) else str(message or ""))
+        self.statusbar.showMessage(label)
         if isinstance(message, dict):
             if self._last_action == "ask":
                 self.ask_tab.append_activity_event(message)
@@ -768,7 +780,11 @@ class MainWindow(QMainWindow):
                 self.toast("Cancelled")
                 return
             self.ask_tab.append_result(result)
-            self.right.show_trace(result.get("trace") or [])
+            # Keep the rich live trace (finalized above); only fall back to the
+            # persisted trace if nothing was captured live, so the view doesn't
+            # jump from a detailed run to a sparser summary.
+            if self.right.trace.is_empty():
+                self.right.show_trace(result.get("trace") or [])
             self.right.show_plan(result)
             self.bus.emit(QUERY_COMPLETED, {"instance": self.current_connection()})
             self._restore_composer_placeholder()
@@ -788,6 +804,7 @@ class MainWindow(QMainWindow):
             return
         if action == "execute_sql":
             self.sql_tab.show_result(result)
+            self.bus.emit(QUERY_COMPLETED, {"instance": self.current_connection()})
             return
         if action == "explain_sql":
             self.sql_tab.show_explain(result)
