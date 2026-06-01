@@ -20,6 +20,7 @@ from PyQt6.QtWidgets import (
 )
 
 from dbaide.agent.progress_events import conversation_trace_step, trace_dedupe_keys
+from dbaide.agent.trace_model import TraceModel
 from dbaide.desktop.components.base import compact_button
 from dbaide.desktop.components.inputs import configure_readonly_text_view, configure_wrapped_label
 from dbaide.desktop.theme import Theme
@@ -129,6 +130,7 @@ class CollapsibleTracePanel(QFrame):
 
         self._steps: list[TraceStep] = []
         self._running = True
+        self._model = TraceModel()
         self._refresh_header()
 
     def append(self, message: str, *, kind: str = "", detail: str = "") -> None:
@@ -143,8 +145,10 @@ class CollapsibleTracePanel(QFrame):
         self._refresh_header()
 
     def append_from_event(self, event: dict[str, Any]) -> None:
+        self._model.ingest(event)
         step = conversation_trace_step(event)
         if step is None:
+            self._refresh_header()
             return
         message, kind, detail = step
         self.append(message, kind=kind, detail=detail)
@@ -154,6 +158,7 @@ class CollapsibleTracePanel(QFrame):
         for existing in self._steps:
             seen |= set(trace_dedupe_keys({"title": existing.message, "detail": existing.detail}))
         for event in events:
+            self._model.ingest(event)
             step = conversation_trace_step(event)
             if step is None:
                 continue
@@ -182,12 +187,21 @@ class CollapsibleTracePanel(QFrame):
         chevron = "▾" if self._toggle.isChecked() else "▸"
         count = len(self._steps)
         if self._running:
-            status = "running…"
             color = Theme.BLUE
+            # Show what the agent is doing right now, plus how many sub-agents.
+            phase = self._model.current_phase
+            agents = self._model.active_agents
+            bits = [f"{count} steps"]
+            if phase:
+                bits.append(phase)
+            if agents:
+                bits.append(f"{len(agents)} agent{'s' if len(agents) != 1 else ''}")
+            label = "Agent trace · " + " · ".join(bits) + " …"
         else:
-            status = "done" if ok else "failed"
             color = Theme.GREEN if ok else Theme.RED
-        self._toggle.setText(f"{chevron}  Agent trace · {count} steps · {status}")
+            status = "done" if ok else "failed"
+            label = f"Agent trace · {count} steps · {status}"
+        self._toggle.setText(f"{chevron}  {label}")
         self._toggle.setStyleSheet(
             f"""
             QPushButton {{

@@ -6,15 +6,31 @@ from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtGui import QFont, QColor
 from PyQt6.QtWidgets import QHeaderView, QTreeWidget, QTreeWidgetItem
 
+from dbaide.agent.trace_model import TraceModel, TraceStep
 from dbaide.desktop.theme import Theme
+
+# Compact status glyphs so you can see state at a glance.
+_GLYPH = {
+    "running": "▶",
+    "completed": "✓",
+    "failed": "✗",
+    "waiting": "⏸",
+    "info": "·",
+    "idle": "·",
+    "done": "✓",
+}
 
 
 class TracePanel(QTreeWidget):
+    """Renders the agent trace from a TraceModel: a live summary row on top, then
+    one row per step (phase + title + status/duration) with nested sub-agent activity.
+    """
+
     event_selected = pyqtSignal(dict)
 
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
-        self.setHeaderLabels(["Time", "Stage", "Status"])
+        self.setHeaderLabels(["", "Step", "Status"])
         self.header().setStretchLastSection(True)
         self.header().setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
         self.header().setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
@@ -24,140 +40,117 @@ class TracePanel(QTreeWidget):
         self.setTextElideMode(Qt.TextElideMode.ElideNone)
         self.setFont(QFont("Menlo", 10))
         self.itemClicked.connect(self._on_click)
-        self._live_root: QTreeWidgetItem | None = None
-        self._running_tools: dict[str, QTreeWidgetItem] = {}
+        self._model: TraceModel | None = None
+        self._live = False
+
+    # ── Public API (preserved for callers) ───────────────────────────────────
 
     def load_events(self, events: list[dict[str, Any]]) -> None:
-        self._live_root = None
-        self._running_tools = {}
-        self.clear()
-        for event in events:
-            ts = event.get("timestamp") or 0
-            time_text = _fmt_time(ts) if ts else "--:--:--"
-            stage = str(event.get("stage") or "")
-            status = str(event.get("status") or "")
-            title = str(event.get("title") or "")
-            item = QTreeWidgetItem([time_text, stage, status])
-            item.setData(0, Qt.ItemDataRole.UserRole, event)
-            self.addTopLevelItem(item)
-            detail = QTreeWidgetItem(["", title, ""])
-            item.addChild(detail)
-            summary = str(event.get("summary") or "")
-            if summary and summary != title:
-                detail.addChild(QTreeWidgetItem(["", summary[:240], ""]))
-            output = str(event.get("output_preview") or "")
-            if output:
-                detail.addChild(QTreeWidgetItem(["", output[:240], ""]))
-            duration = event.get("duration_ms")
-            if duration:
-                detail.addChild(QTreeWidgetItem(["", f"{duration:.0f} ms", ""]))
-            item.setExpanded(True)
-            if status == "failed":
-                for col in range(3):
-                    item.setForeground(col, _red())
+        model = TraceModel()
+        for event in events or []:
+            model.ingest(event)
+        if model.overall == "running":
+            model.overall = "done"
+        self._model = model
+        self._live = False
+        self._render()
 
     def begin_live(self) -> None:
-        self.clear()
-        self._running_tools = {}
-        self._live_root = QTreeWidgetItem(["", "Live workflow", "running"])
-        self._live_root.setForeground(1, _blue())
-        self.addTopLevelItem(self._live_root)
-        self._live_root.setExpanded(True)
+        self._model = TraceModel()
+        self._live = True
+        self._render()
 
     def append_live(self, message: str) -> None:
         if not message.strip():
             return
-        stage = "agent"
-        title = message.strip()
-        if message.startswith("[assets]"):
-            stage = "build_assets"
-            title = message.replace("[assets]", "", 1).strip()
-        self.append_live_event(
-            {"stage": stage, "title": title, "status": "running", "kind": "info"},
-        )
+        text = message.strip()
+        if text.startswith("[assets]"):
+            self.append_live_event(
+                {"stage": "build_assets", "title": text.replace("[assets]", "", 1).strip(),
+                 "status": "running", "kind": "info"}
+            )
+        else:
+            self.append_live_event({"stage": "agent", "title": text, "status": "running", "kind": "info"})
 
     def append_live_event(self, event: dict[str, Any]) -> None:
-        if self._live_root is None:
+        if self._model is None:
             self.begin_live()
-        stage = str(event.get("stage") or "agent")
-        title = str(event.get("title") or "").strip()
-        status = str(event.get("status") or "running")
-        kind = str(event.get("kind") or "")
-        detail = str(event.get("detail") or event.get("summary") or "").strip()
-        duration_ms = float(event.get("duration_ms") or 0)
-
-        if status == "info" or kind == "substep":
-            parent_key = str(event.get("parent") or "").strip()
-            parent_row = self._running_tools.get(parent_key) if parent_key else None
-            if parent_row is None:
-                parent_row = self._running_tools.get(stage)
-            if parent_row is not None:
-                agent_name = str(event.get("agent") or "").strip()
-                line = title or detail
-                if agent_name and line and not line.startswith(f"{agent_name}:"):
-                    line = f"{agent_name}: {line}"
-                if line:
-                    child = QTreeWidgetItem(["", line[:400], ""])
-                    if detail and detail != line:
-                        child.addChild(QTreeWidgetItem(["", detail[:400], ""]))
-                    parent_row.addChild(child)
-                    parent_row.setExpanded(True)
-                return
-
-        if status == "running" and stage not in {"loop", "agent", "decision", "build_assets"}:
-            if stage in self._running_tools:
-                old = self._running_tools.pop(stage)
-                old.setText(2, "…")
-                old.setForeground(2, _yellow())
-            row = QTreeWidgetItem(["", stage, "running"])
-            row.addChild(QTreeWidgetItem(["", title, ""]))
-            if detail:
-                row.addChild(QTreeWidgetItem(["", detail[:400], ""]))
-            self._running_tools[stage] = row
-            self._live_root.addChild(row)
-            row.setForeground(1, _blue())
-        elif status in {"completed", "failed", "waiting"} and stage in self._running_tools:
-            row = self._running_tools.pop(stage)
-            row.setText(2, status)
-            row.setText(1, stage)
-            if title and row.childCount() > 0:
-                row.child(0).setText(1, title)
-            if detail:
-                row.addChild(QTreeWidgetItem(["", detail[:400], ""]))
-            if duration_ms > 0:
-                row.addChild(QTreeWidgetItem(["", f"{duration_ms:.0f} ms", ""]))
-            color = _green() if status == "completed" else _yellow() if status == "waiting" else _red()
-            row.setForeground(1, color)
-            row.setForeground(2, color)
-        else:
-            row = QTreeWidgetItem(["", stage, status])
-            if title:
-                row.addChild(QTreeWidgetItem(["", title[:400], ""]))
-            if detail:
-                row.addChild(QTreeWidgetItem(["", detail[:400], ""]))
-            if duration_ms > 0:
-                row.addChild(QTreeWidgetItem(["", f"{duration_ms:.0f} ms", ""]))
-            self._live_root.addChild(row)
-            if status == "failed":
-                row.setForeground(1, _red())
-
-        self._live_root.setExpanded(True)
-        self.scrollToItem(self._live_root)
+        assert self._model is not None
+        self._model.ingest(event)
+        self._render()
 
     def end_live(self) -> None:
-        for row in self._running_tools.values():
-            row.setText(2, "…")
-            row.setForeground(2, _yellow())
-        self._running_tools.clear()
-        if self._live_root is not None:
-            self._live_root.setText(2, "done")
-            self._live_root.setForeground(1, _green())
-        self._live_root = None
+        if self._model is not None and self._model.overall == "running":
+            self._model.overall = "done"
+        self._live = False
+        self._render()
 
     def clear_trace(self) -> None:
+        self._model = None
+        self._live = False
         self.clear()
-        self._live_root = None
-        self._running_tools = {}
+
+    # ── Rendering ─────────────────────────────────────────────────────────────
+
+    def _render(self) -> None:
+        self.clear()
+        model = self._model
+        if model is None:
+            return
+
+        summary = QTreeWidgetItem(["", model.summary_line(), ""])
+        summary.setFont(1, _bold())
+        summary.setForeground(1, _overall_color(model.overall))
+        summary.setData(0, Qt.ItemDataRole.UserRole, {
+            "stage": "summary", "title": model.summary_line(),
+            "status": model.overall, "kind": "info",
+        })
+        self.addTopLevelItem(summary)
+
+        last_item: QTreeWidgetItem | None = summary
+        for step in model.steps:
+            item = self._render_step(step)
+            self.addTopLevelItem(item)
+            last_item = item
+
+        if last_item is not None:
+            self.scrollToItem(last_item)
+
+    def _render_step(self, step: TraceStep) -> QTreeWidgetItem:
+        glyph = _GLYPH.get(step.status, "·")
+        head = step.phase or step.stage
+        if step.title and step.title not in head:
+            head = f"{head} — {step.title}"
+        status_text = f"{step.duration_ms:.0f} ms" if (step.status == "completed" and step.duration_ms > 0) else step.status
+        prefix = f"{glyph} {step.step}" if step.step else glyph
+        item = QTreeWidgetItem([prefix, head, status_text])
+        color = _status_color(step.status)
+        item.setForeground(1, color)
+        item.setForeground(2, color)
+        item.setData(0, Qt.ItemDataRole.UserRole, {
+            "stage": step.stage, "title": step.title or step.phase,
+            "status": step.status, "kind": "tool", "detail": step.detail,
+            "duration_ms": step.duration_ms, "phase": step.phase, "step": step.step,
+        })
+
+        if step.thought:
+            thought = QTreeWidgetItem(["", f"💭 {step.thought[:300]}", ""])
+            thought.setForeground(1, _muted())
+            item.addChild(thought)
+
+        for sub in step.substeps:
+            line = f"{sub.label}: {sub.title}" if sub.label else sub.title
+            child = QTreeWidgetItem(["", line[:400], _GLYPH.get(sub.status, "")])
+            child.setForeground(1, _agent_color(sub.status))
+            if sub.detail:
+                child.addChild(QTreeWidgetItem(["", sub.detail[:400], ""]))
+            item.addChild(child)
+
+        if step.detail and step.status != "running":
+            item.addChild(QTreeWidgetItem(["", step.detail[:400], ""]))
+
+        item.setExpanded(True)
+        return item
 
     def _on_click(self, item: QTreeWidgetItem, _column: int) -> None:
         data = item.data(0, Qt.ItemDataRole.UserRole)
@@ -165,11 +158,35 @@ class TracePanel(QTreeWidget):
             self.event_selected.emit(data)
 
 
-def _fmt_time(ts: float) -> str:
-    import datetime
-    if ts <= 0:
-        return "--:--:--"
-    return datetime.datetime.fromtimestamp(ts).strftime("%H:%M:%S")
+def _bold() -> QFont:
+    f = QFont("Menlo", 10)
+    f.setBold(True)
+    return f
+
+
+def _overall_color(overall: str) -> QColor:
+    return {
+        "done": _green(),
+        "failed": _red(),
+        "running": _blue(),
+    }.get(overall, _blue())
+
+
+def _status_color(status: str) -> QColor:
+    return {
+        "completed": _green(),
+        "failed": _red(),
+        "waiting": _yellow(),
+        "running": _blue(),
+    }.get(status, _blue())
+
+
+def _agent_color(status: str) -> QColor:
+    if status == "failed":
+        return _red()
+    if status == "completed":
+        return _green()
+    return _muted()
 
 
 def _red() -> QColor:
@@ -186,3 +203,7 @@ def _green() -> QColor:
 
 def _yellow() -> QColor:
     return QColor(Theme.YELLOW)
+
+
+def _muted() -> QColor:
+    return QColor(Theme.MUTED)
