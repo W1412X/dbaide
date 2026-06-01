@@ -19,6 +19,26 @@ logger = logging.getLogger("dbaide.builder")
 # Trace node id for the build root (databases hang under it).
 _BUILD_ROOT = "build:root"
 
+# Cap how many queries we inline into a table's trace detail (a wide table can run
+# hundreds); the full audit always remains in the query-log jsonl.
+_MAX_TRACE_QUERIES = 40
+
+
+def _format_build_queries(entries: list) -> str:
+    """Render captured QueryLogEntry rows as an annotated SQL block for the trace."""
+    lines: list[str] = []
+    for entry in entries[:_MAX_TRACE_QUERIES]:
+        status = getattr(entry, "status", "ok")
+        elapsed = float(getattr(entry, "elapsed_ms", 0.0) or 0.0)
+        rows = int(getattr(entry, "row_count", 0) or 0)
+        lines.append(f"-- {status} · {elapsed:.0f}ms · {rows} rows")
+        lines.append(str(getattr(entry, "sql", "")).strip())
+        lines.append("")
+    if len(entries) > _MAX_TRACE_QUERIES:
+        lines.append(f"… and {len(entries) - _MAX_TRACE_QUERIES} more quer"
+                     f"{'y' if len(entries) - _MAX_TRACE_QUERIES == 1 else 'ies'}")
+    return "\n".join(lines).strip()
+
 
 @dataclass(slots=True)
 class BuildStats:
@@ -68,6 +88,19 @@ class AssetBuilder:
         # Tables build on a shared thread pool and mutate one BuildStats; guard the
         # counter/error updates so they're correct even under free-threaded Python.
         self._stats_lock = threading.Lock()
+        # Per-table SQL capture: each worker builds one table start-to-finish, so a
+        # thread-local bucket fed by a QueryLog subscriber attributes every query to
+        # its table. Workers stash their captured queries here; the main thread reads
+        # them when it emits the table's trace node.
+        self._tls = threading.local()
+        self._table_sql: dict[str, list] = {}
+        self._table_sql_lock = threading.Lock()
+
+    def _on_query_logged(self, entry) -> None:
+        """QueryLog subscriber — runs in the thread that executed the SQL."""
+        bucket = getattr(self._tls, "bucket", None)
+        if bucket is not None:
+            bucket.append(entry)
 
     def _bump(self, stats: BuildStats, **deltas: int) -> None:
         with self._stats_lock:
@@ -95,6 +128,31 @@ class AssetBuilder:
     def _emit_db(self, database: str, title: str, *, status: str = "running") -> None:
         self._emit(title, node_id=f"build:db:{database}", parent_id=_BUILD_ROOT,
                    status=status, kind="substep")
+
+    def _emit_table_node(self, database: str, table: str, *, failed: bool) -> None:
+        """Emit a typed SQL node for one finished table, carrying the queries it ran
+        so clicking the table in the trace shows exactly what was executed."""
+        with self._table_sql_lock:
+            entries = self._table_sql.pop(f"{database}.{table}", [])
+        ok = sum(1 for e in entries if getattr(e, "status", "ok") == "ok")
+        errs = len(entries) - ok
+        total_rows = sum(int(getattr(e, "row_count", 0) or 0) for e in entries)
+        suffix = f" · {errs} failed" if errs else ""
+        title = f"{table} · {len(entries)} quer{'y' if len(entries) == 1 else 'ies'}{suffix}"
+        event: dict = {
+            "stage": "build_assets",
+            "title": title,
+            "status": "failed" if failed else "completed",
+            "kind": "sql",
+            "node_id": f"build:table:{database}.{table}",
+            "parent_id": f"build:db:{database}",
+            "row_count": total_rows,
+            "database": database,
+        }
+        sql_text = _format_build_queries(entries)
+        if sql_text:
+            event["sql"] = sql_text
+        self.progress(event)
 
     def build(
         self,
@@ -162,8 +220,13 @@ class AssetBuilder:
         # Step 3: Build databases. A single shared worker pool (sized by the
         # resource policy) parallelises tables; columns are profiled serially.
         # Real DB concurrency is additionally capped by the QueryBudget semaphore.
-        with ThreadPoolExecutor(max_workers=options.max_workers) as executor:
-            database_docs = self._build_databases(instance, db_names, options, stats, profiler, executor)
+        # Subscribe to the query log so each table's trace node can show its SQL.
+        unsubscribe = self.adapter.query_log.subscribe(self._on_query_logged)
+        try:
+            with ThreadPoolExecutor(max_workers=options.max_workers) as executor:
+                database_docs = self._build_databases(instance, db_names, options, stats, profiler, executor)
+        finally:
+            unsubscribe()
         database_docs = self._merge_database_docs(
             built_docs=database_docs,
             partial=partial,
@@ -402,10 +465,13 @@ class AssetBuilder:
         for future in as_completed(futures):
             table = futures[future]
             done += 1
+            failed = False
             try:
                 table_docs.append(future.result())
             except Exception as exc:
+                failed = True
                 self._record_error(stats, f"{instance}.{database}.{table.name}: {type(exc).__name__}: {exc}")
+            self._emit_table_node(database, table.name, failed=failed)
             self._emit_db(database, f"{database} · {done}/{total} tables · {table.name}", status="running")
         cols = sum(int(td.get("column_count") or 0) for td in table_docs)
         self._emit_db(database, f"{database} · {len(table_docs)} tables · {cols} columns", status="completed")
@@ -423,6 +489,19 @@ class AssetBuilder:
 
     def _build_table(self, instance: str, database: str, table, *, options: BuildOptions,
                      stats: BuildStats, profiler: ColumnProfiler) -> dict:
+        # Capture every query this table runs (this worker owns the table end-to-end).
+        self._tls.bucket = []
+        try:
+            return self._build_table_inner(instance, database, table, options=options,
+                                           stats=stats, profiler=profiler)
+        finally:
+            captured = self._tls.bucket
+            self._tls.bucket = None
+            with self._table_sql_lock:
+                self._table_sql[f"{database}.{table.name}"] = captured or []
+
+    def _build_table_inner(self, instance: str, database: str, table, *, options: BuildOptions,
+                           stats: BuildStats, profiler: ColumnProfiler) -> dict:
         self._emit_db(database, f"{database} · describing {table.name}…", status="running")
         self._bump(stats, tables=1)
         columns = self.adapter.describe_table(table.name, database=database)
