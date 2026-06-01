@@ -4,6 +4,10 @@ from __future__ import annotations
 
 import os
 
+# Run any PyQt6 widget tests headlessly by default (no display needed). Must be set
+# before Qt is imported anywhere, so it lives at the top of the shared conftest.
+os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+
 from pathlib import Path
 
 import pytest
