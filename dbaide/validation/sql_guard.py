@@ -58,8 +58,12 @@ SENSITIVE_COLUMN_PATTERNS = [
 class SQLGuard:
     """SQL validation guard with safety checks and risk assessment."""
 
-    def __init__(self, *, default_limit: int = 100) -> None:
+    def __init__(self, *, default_limit: int = 100, max_row_limit: int = 1000) -> None:
         self.default_limit = default_limit
+        # Hard ceiling: a LIMIT above this is rejected outright (not merely warned).
+        self.max_row_limit = max(1, int(max_row_limit))
+        # SELECT * without WHERE is forced to at most this many rows.
+        self.unfiltered_star_limit = min(100, self.default_limit)
 
     def validate(self, sql: str, *, add_limit: bool = True) -> ValidationResult:
         """Validate SQL for safety and correctness."""
@@ -89,9 +93,21 @@ class SQLGuard:
             if pattern.search(normalized):
                 issues.append(ValidationIssue("FORBIDDEN_FUNCTION", f"Forbidden SQL pattern: {pattern.pattern}"))
 
-        # Add limit if needed
-        if not issues and add_limit and first in {"select", "with"}:
-            normalized = self.ensure_limit(normalized, self.default_limit)
+        # Hard cap: explicit LIMIT above the configured maximum is rejected.
+        explicit_limit = _explicit_limit(stripped)
+        if explicit_limit is not None and explicit_limit > self.max_row_limit:
+            issues.append(ValidationIssue(
+                "LIMIT_TOO_LARGE",
+                f"LIMIT {explicit_limit} exceeds the maximum allowed ({self.max_row_limit}). "
+                f"Reduce the LIMIT or narrow the query.",
+            ))
+
+        if not issues and first in {"select", "with"}:
+            # SELECT * without WHERE is forced to a small bound regardless of add_limit.
+            if _is_unfiltered_star(stripped) and explicit_limit is None:
+                normalized = self.ensure_limit(normalized, self.unfiltered_star_limit)
+            elif add_limit:
+                normalized = self.ensure_limit(normalized, self.default_limit)
 
         return ValidationResult(ok=not issues, issues=issues, normalized_sql=normalized.rstrip(";"))
 
@@ -157,14 +173,32 @@ class SQLGuard:
             if risk_level == "low":
                 risk_level = "medium"
 
-        # Check: large limit
-        limit_match = re.search(r"\blimit\s+(\d+)\b", stripped)
-        if limit_match:
-            limit_val = int(limit_match.group(1))
-            if limit_val > 10000:
-                warnings.append(f"Large LIMIT ({limit_val}) may cause performance issues")
-                risk_level = "high"
-                requires_confirmation = True
+        # Check: large limit (anything above max_row_limit was already rejected by validate)
+        limit_val = _explicit_limit(stripped)
+        if limit_val is not None and limit_val > max(1000, self.max_row_limit // 2):
+            warnings.append(f"Large LIMIT ({limit_val}) may cause performance issues")
+            if risk_level == "low":
+                risk_level = "medium"
+
+        # Check: many joined tables
+        join_count = len(re.findall(r"\bjoin\b", stripped))
+        if join_count >= 3:
+            warnings.append(f"Query joins many tables ({join_count + 1})")
+            risk_level = "high"
+            requires_confirmation = True
+
+        # Check: UNION fan-out
+        union_count = len(re.findall(r"\bunion\b", stripped))
+        if union_count >= 3:
+            warnings.append(f"Query contains {union_count} UNIONs")
+            if risk_level != "high":
+                risk_level = "medium"
+
+        # Check: deep nested subqueries
+        if _max_paren_depth(stripped) >= 4:
+            warnings.append("Query has deeply nested subqueries")
+            if risk_level == "low":
+                risk_level = "medium"
 
         return ValidationReport(
             ok=True,
@@ -220,6 +254,28 @@ class SQLGuard:
 # ─────────────────────────────────────────────────────────────────────────────
 # Helper functions
 # ─────────────────────────────────────────────────────────────────────────────
+
+def _explicit_limit(stripped_lower_sql: str) -> int | None:
+    """Return the explicit LIMIT value if present (SQL already stripped+lowered)."""
+    match = re.search(r"\blimit\s+(\d+)\b", stripped_lower_sql)
+    return int(match.group(1)) if match else None
+
+
+def _is_unfiltered_star(stripped_lower_sql: str) -> bool:
+    return bool(re.search(r"\bselect\s+\*\s+from\b", stripped_lower_sql)) and "where" not in stripped_lower_sql
+
+
+def _max_paren_depth(sql: str) -> int:
+    depth = 0
+    best = 0
+    for ch in sql:
+        if ch == "(":
+            depth += 1
+            best = max(best, depth)
+        elif ch == ")":
+            depth = max(0, depth - 1)
+    return best
+
 
 def _strip_leading_comments(sql: str) -> str:
     text = sql.lstrip()

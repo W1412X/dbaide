@@ -121,6 +121,23 @@ class SettingsDialog(QDialog):
     model_saved = pyqtSignal(dict)
     model_deleted = pyqtSignal(str)
     model_test = pyqtSignal(dict)
+    resource_saved = pyqtSignal(dict)
+
+    # Numeric resource knobs shown on the Resources page: (key, label, min, max).
+    _RESOURCE_FIELDS = (
+        ("max_inflight_queries", "Max concurrent queries", 1, 64),
+        ("max_connections_per_instance", "Max connections / instance", 1, 64),
+        ("statement_timeout_seconds", "Statement timeout (s)", 1, 600),
+        ("build_max_workers", "Build workers", 1, 32),
+        ("agent_max_inflight", "Agent concurrent queries", 1, 32),
+        ("default_row_limit", "Default row limit", 1, 100000),
+        ("max_row_limit", "Max row limit (hard cap)", 1, 1000000),
+        ("big_table_rows", "Big-table threshold (rows)", 1000, 1000000000),
+        ("explain_max_rows", "EXPLAIN cost gate (rows)", 1000, 1000000000),
+        ("max_join_tables", "Max joined tables", 1, 16),
+        ("join_sample_size_small", "Join sample (small tables)", 10, 1000),
+        ("join_sample_size_large", "Join sample (large tables)", 10, 1000),
+    )
 
     def __init__(
         self,
@@ -129,6 +146,7 @@ class SettingsDialog(QDialog):
         models: list[dict],
         default_connection: str = "",
         default_model: str = "",
+        resource_defaults: dict | None = None,
         parent=None,
         initial_page: str = "connections",
     ) -> None:
@@ -143,6 +161,9 @@ class SettingsDialog(QDialog):
         self._default_model = default_model
         self._selected_conn = ""
         self._selected_model = ""
+        rd = resource_defaults or {}
+        self._resource_values = dict(rd.get("values") or {})
+        self._resource_presets = dict(rd.get("presets") or {})
 
         root = QHBoxLayout(self)
         root.setSpacing(0)
@@ -166,7 +187,7 @@ class SettingsDialog(QDialog):
             QListWidget::item:selected {{ background: {Theme.PANEL_3}; color: {Theme.TEXT}; border-radius: 8px; }}
             """
         )
-        for label, key in (("Connections", "connections"), ("Models", "models")):
+        for label, key in (("Connections", "connections"), ("Models", "models"), ("Resources", "resources")):
             item = QListWidgetItem(label)
             item.setData(Qt.ItemDataRole.UserRole, key)
             self.nav.addItem(item)
@@ -180,10 +201,11 @@ class SettingsDialog(QDialog):
         self.stack = QStackedWidget()
         self.stack.addWidget(self._build_connections_page())
         self.stack.addWidget(self._build_models_page())
+        self.stack.addWidget(self._build_resources_page())
         body.addWidget(self.stack, 1)
         root.addLayout(body, 1)
 
-        page_map = {"connections": 0, "models": 1, "model": 1}
+        page_map = {"connections": 0, "models": 1, "model": 1, "resources": 2}
         self.nav.setCurrentRow(page_map.get(initial_page, 0))
         self._reload_connection_list()
         self._reload_model_list()
@@ -241,6 +263,70 @@ class SettingsDialog(QDialog):
         card_layout.addLayout(row)
         layout.addWidget(card, 1)
         return page
+
+    def _build_resources_page(self) -> QWidget:
+        from PyQt6.QtWidgets import QFormLayout, QScrollArea, QSpinBox
+
+        page = QWidget()
+        layout = QVBoxLayout(page)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(16)
+        layout.addWidget(self._page_header(
+            "Resources & Safety",
+            "Hard limits that keep DB load negligible. Blank/zero falls back to the connection's load profile.",
+        ))
+        card = _SectionCard()
+        card_layout = QVBoxLayout(card)
+        card_layout.setContentsMargins(16, 16, 16, 16)
+
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.Shape.NoFrame)
+        inner = QWidget()
+        form = QFormLayout(inner)
+        form.setSpacing(10)
+
+        prod = self._resource_presets.get("production", {})
+        self._resource_spins: dict[str, QSpinBox] = {}
+        for key, label, lo, hi in self._RESOURCE_FIELDS:
+            spin = QSpinBox()
+            spin.setRange(0, hi)  # 0 = "use load profile default"
+            spin.setMinimumWidth(160)
+            current = self._resource_values.get(key)
+            spin.setValue(int(current) if current not in (None, "") else 0)
+            hint = prod.get(key)
+            spin.setSpecialValueText(f"default ({hint})" if hint is not None else "default")
+            spin.setToolTip(f"production default: {hint}" if hint is not None else "")
+            self._resource_spins[key] = spin
+            form.addRow(label, spin)
+
+        scroll.setWidget(inner)
+        card_layout.addWidget(scroll, 1)
+
+        actions = QHBoxLayout()
+        actions.addStretch(1)
+        reset = compact_button("Reset to defaults", width=150)
+        save = compact_button("Save", primary=True, width=96)
+        reset.clicked.connect(self._reset_resources)
+        save.clicked.connect(self._save_resources)
+        actions.addWidget(reset)
+        actions.addWidget(save)
+        card_layout.addLayout(actions)
+
+        layout.addWidget(card, 1)
+        return page
+
+    def _reset_resources(self) -> None:
+        for spin in getattr(self, "_resource_spins", {}).values():
+            spin.setValue(0)
+
+    def _save_resources(self) -> None:
+        values: dict = {}
+        for key, spin in getattr(self, "_resource_spins", {}).items():
+            if spin.value() > 0:  # 0 means "use load profile default"
+                values[key] = int(spin.value())
+        self._resource_values = values
+        self.resource_saved.emit({"values": values})
 
     def _page_header(self, title: str, subtitle: str) -> QWidget:
         wrap = QWidget()

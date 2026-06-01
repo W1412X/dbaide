@@ -143,3 +143,23 @@ def test_incompatible_types_keep_low_confidence(tmp_path):
     )
     assert float(out.get("confidence") or 0) < float(rel["confidence"])
     assert out["validation"]["type_alignment"] < 0.5
+
+
+def test_join_sql_has_no_correlated_subquery(tmp_path):
+    """The max-cardinality probes must use GROUP BY joins, not correlated subqueries."""
+    import re
+    from dbaide.observability import query_log
+
+    db = tmp_path / "linked.db"
+    seed_asset_sensor_db(db)
+    conn = ConnectionConfig(name="joinsql", type="sqlite", path=str(db))
+    adapter = build_adapter(conn)
+    orch = AskOrchestrator(adapter, Session(connection=conn), JoinInferMockLLM())
+    validator = JoinSampleValidator(orch, sample_size=50)
+    stats = validator._sample_stats("asset_sensors", "asset_id", "assets", "id", database="")
+    assert stats["max_left_per_right"] >= 2  # asset 1 has two sensors
+
+    sqls = [e.sql.lower() for e in query_log.for_instance("joinsql").recent()]
+    # No "(SELECT COUNT(*) FROM <t> ... WHERE ... = ...)" correlated pattern.
+    for sql in sqls:
+        assert not re.search(r"\(\s*select\s+count\(\*\)\s+from\s+\w+\s+\w+\s+where", sql)

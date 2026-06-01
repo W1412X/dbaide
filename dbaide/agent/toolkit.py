@@ -388,6 +388,23 @@ def build_tool_registry(orchestrator: AskOrchestrator) -> ToolRegistry:
             if has_joins
             else 1.0
         )
+        # Pre-execution cost gate: estimate the scan size via EXPLAIN.
+        policy_obj = getattr(orchestrator.adapter, "policy", None)
+        explain_max_rows = getattr(orchestrator.query, "explain_max_rows", 0)
+        max_join_tables = policy_obj.max_join_tables if policy_obj else 2
+        estimated_rows = None
+        if explain_max_rows:
+            estimated_rows = orchestrator.query.estimate_rows(validation.normalized_sql, database=database)
+            if estimated_rows is not None:
+                orchestrator.progress(
+                    subagent_event(
+                        agent="explain",
+                        title=f"EXPLAIN ~{estimated_rows:,} rows",
+                        parent="execute_sql",
+                        detail=f"cost gate limit {explain_max_rows:,}",
+                        status="completed" if estimated_rows <= explain_max_rows else "info",
+                    ),
+                )
         risk = orchestrator.risk.decide(
             policy=policy,
             validation=validation_report,
@@ -395,6 +412,9 @@ def build_tool_registry(orchestrator: AskOrchestrator) -> ToolRegistry:
             table_count=max(1, len(_tables_in_sql(validation.normalized_sql))),
             has_joins=has_joins,
             join_confidence=join_conf,
+            estimated_rows=estimated_rows,
+            explain_max_rows=explain_max_rows,
+            max_join_tables=max_join_tables,
         )
         orchestrator.progress(
             subagent_event(
@@ -427,6 +447,15 @@ def build_tool_registry(orchestrator: AskOrchestrator) -> ToolRegistry:
             orchestrator._loop_query_result = result
             orchestrator._loop_sql = validation.normalized_sql
             orchestrator._loop_sql_feedback = ""
+            orchestrator.progress(
+                subagent_event(
+                    agent="sql",
+                    title=f"Executed · {result.row_count} rows · {result.elapsed_ms:.0f}ms",
+                    parent="execute_sql",
+                    detail=validation.normalized_sql,
+                    status="completed",
+                ),
+            )
             return ToolResult(
                 ok=True,
                 data={

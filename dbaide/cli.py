@@ -81,12 +81,15 @@ def build_parser() -> argparse.ArgumentParser:
     add.add_argument("--default", action="store_true")
     add.add_argument("--skip-assets", action="store_true", help="Save connection without building offline schema assets.")
     add.add_argument("--asset-database", action="append", default=[], help="Database/schema to initialize. Repeatable. Default: all visible databases.")
-    add.add_argument("--profile-mode", choices=["none", "auto", "all"], default="auto", help="Column profiling policy during asset initialization.")
+    add.add_argument("--profile-mode", choices=["none", "light", "auto", "all"], default=None, help="Column profiling policy. Default: from load profile (production=light).")
     add.add_argument("--no-profile", action="store_true", help="Skip column profiling during asset initialization.")
     add.add_argument("--no-sample", action="store_true", help="Skip table sampling during asset initialization.")
     add.add_argument("--top-k", type=int, default=30, help="Top distinct values to keep per profiled column.")
     add.add_argument("--sample-limit", type=int, default=50, help="Sample values/rows to keep per table or column.")
     add.add_argument("--timeout", type=lambda v: _bounded_int(v, min_val=0, max_val=7200, name="timeout"), default=0, help="Overall time budget in seconds for asset build. 0 = unlimited.")
+    add.add_argument("--load-profile", choices=["production", "staging", "dev"], default="production", help="Resource safety profile for this connection. Default: production (lowest DB load).")
+    add.add_argument("--max-workers", type=lambda v: _bounded_int(v, min_val=1, max_val=32, name="max-workers"), default=None, help="Build concurrency. Default: from load profile.")
+    add.add_argument("--dry-run", action="store_true", help="Estimate the query count without touching table data.")
     csub.add_parser("list", help="List configured connections")
     test = csub.add_parser("test", help="Test a connection")
     test.add_argument("name", nargs="?")
@@ -160,13 +163,16 @@ def build_parser() -> argparse.ArgumentParser:
     build = asub.add_parser("build", help="Build offline assets for a connection")
     build.add_argument("conn")
     build.add_argument("--database", action="append", default=[], help="Database/schema to initialize. Repeatable. Default: all visible databases.")
-    build.add_argument("--profile-mode", choices=["none", "auto", "all"], default="auto")
+    build.add_argument("--profile-mode", choices=["none", "light", "auto", "all"], default=None, help="Default: from load profile (production=light).")
     build.add_argument("--no-profile", action="store_true")
     build.add_argument("--no-sample", action="store_true")
     build.add_argument("--top-k", type=int, default=30)
     build.add_argument("--sample-limit", type=int, default=50)
     build.add_argument("--timeout", type=lambda v: _bounded_int(v, min_val=0, max_val=7200, name="timeout"), default=0, help="Overall time budget in seconds. 0 = unlimited.")
     build.add_argument("--per-column-timeout", type=lambda v: _bounded_int(v, min_val=1, max_val=300, name="per-column-timeout"), default=30, help="Timeout per column profile in seconds.")
+    build.add_argument("--load-profile", choices=["production", "staging", "dev"], default=None, help="Override the connection's resource profile for this build.")
+    build.add_argument("--max-workers", type=lambda v: _bounded_int(v, min_val=1, max_val=32, name="max-workers"), default=None, help="Build concurrency. Default: from load profile.")
+    build.add_argument("--dry-run", action="store_true", help="Estimate the query count without touching table data.")
     status = asub.add_parser("status", help="Show asset status")
     status.add_argument("conn", nargs="?")
     show = asub.add_parser("show", help="Show an asset document")
@@ -178,6 +184,11 @@ def build_parser() -> argparse.ArgumentParser:
     enrich.add_argument("--columns", default="", help="Comma-separated columns. Default: all columns in table.")
     enrich.add_argument("--top-k", type=int, default=50)
     enrich.add_argument("--sample-limit", type=int, default=80)
+
+    queries = sub.add_parser("queries", help="Show the SQL query audit log for a connection")
+    queries.add_argument("conn", nargs="?", help="Connection name. Default: the default connection.")
+    queries.add_argument("--tail", type=lambda v: _bounded_int(v, min_val=1, max_val=10000, name="tail"), default=50, help="Number of recent queries to show.")
+    queries.add_argument("--json", action="store_true")
     return parser
 
 
@@ -325,7 +336,38 @@ def dispatch(args: argparse.Namespace, cfg: ConfigManager) -> int:
         report = DiagnoseTools(query).diagnose_sql(args.sql, database=args.database)
         print(json.dumps(report, ensure_ascii=False, indent=2, default=str))
         return 0
+    if args.command == "queries":
+        return dispatch_queries(args, cfg)
     raise AssertionError(args.command)
+
+
+def dispatch_queries(args: argparse.Namespace, cfg: ConfigManager) -> int:
+    from dbaide.observability import query_log
+
+    conn = cfg.get_connection(args.conn or None)
+    log = query_log.for_instance(conn.name)
+    entries = log.tail_file(limit=args.tail)
+    if args.json:
+        print(json.dumps(entries, ensure_ascii=False, indent=2, default=str))
+        return 0
+    if not entries:
+        print(f"No query log found for {conn.name}. (logs live under ~/.dbaide/logs/queries/)")
+        return 0
+    import datetime
+    total_ms = 0.0
+    print(f"{'Time':<20} {'Caller':<8} {'ms':>8} {'rows':>6}  SQL")
+    print("-" * 90)
+    for e in entries:
+        ts = datetime.datetime.fromtimestamp(e.get("ts", 0)).strftime("%Y-%m-%d %H:%M:%S")
+        sql = " ".join(str(e.get("sql", "")).split())
+        if len(sql) > 60:
+            sql = sql[:57] + "..."
+        status = "" if e.get("status") == "ok" else " [ERR]"
+        total_ms += float(e.get("elapsed_ms") or 0)
+        print(f"{ts:<20} {e.get('caller',''):<8} {float(e.get('elapsed_ms') or 0):>8.1f} {int(e.get('row_count') or 0):>6}  {sql}{status}")
+    print("-" * 90)
+    print(f"{len(entries)} queries · total {total_ms:.0f}ms")
+    return 0
 
 
 def dispatch_connect(args: argparse.Namespace, cfg: ConfigManager) -> int:
@@ -340,9 +382,10 @@ def dispatch_connect(args: argparse.Namespace, cfg: ConfigManager) -> int:
             user=args.user,
             password_env=args.password_env,
             password=args.password,
+            load_profile=getattr(args, "load_profile", "production"),
         )
         cfg.upsert_connection(conn, make_default=args.default)
-        print(f"saved connection: {args.name}")
+        print(f"saved connection: {args.name} (load_profile={conn.load_profile})")
         if not args.skip_assets:
             build_connection_assets(
                 cfg,
@@ -350,10 +393,12 @@ def dispatch_connect(args: argparse.Namespace, cfg: ConfigManager) -> int:
                 databases=args.asset_database or None,
                 sample=not args.no_sample,
                 profile=not args.no_profile,
-                profile_mode="none" if args.no_profile else args.profile_mode,
+                profile_mode=None if args.no_profile else args.profile_mode,
                 top_k=args.top_k,
                 sample_limit=args.sample_limit,
                 timeout=getattr(args, "timeout", 0),
+                max_workers=getattr(args, "max_workers", None),
+                dry_run=getattr(args, "dry_run", False),
             )
         return 0
     if args.connect_command == "list":
@@ -392,11 +437,14 @@ def dispatch_assets(args: argparse.Namespace, cfg: ConfigManager) -> int:
             databases=args.database or None,
             sample=not args.no_sample,
             profile=not args.no_profile,
-            profile_mode="none" if args.no_profile else args.profile_mode,
+            profile_mode=None if args.no_profile else args.profile_mode,
             top_k=args.top_k,
             sample_limit=args.sample_limit,
             timeout=args.timeout,
             per_column_timeout=args.per_column_timeout,
+            max_workers=getattr(args, "max_workers", None),
+            dry_run=getattr(args, "dry_run", False),
+            load_profile_override=getattr(args, "load_profile", None),
         )
         return 0
     if args.assets_command == "status":
@@ -456,13 +504,21 @@ def build_connection_assets(
     databases: list[str] | None,
     sample: bool,
     profile: bool,
-    profile_mode: str = "auto",
+    profile_mode: str | None = None,
     top_k: int = 30,
     sample_limit: int = 50,
     timeout: int = 0,
     per_column_timeout: int = 30,
+    max_workers: int | None = None,
+    dry_run: bool = False,
+    load_profile_override: str | None = None,
 ) -> None:
-    adapter = build_adapter(conn)
+    if load_profile_override:
+        from dbaide.db.policy import resolve_policy
+        policy = resolve_policy(load_profile=load_profile_override, overrides=cfg.resource_defaults())
+    else:
+        policy = cfg.policy_for(conn)
+    adapter = build_adapter(conn, policy=policy, caller="build")
     try:
         llm = build_llm_client(cfg.model())
     except Exception:
@@ -473,6 +529,17 @@ def build_connection_assets(
         databases=databases, sample=sample, profile_mode=effective_mode,
         top_k=top_k, sample_limit=sample_limit,
         timeout=timeout, per_column_timeout=per_column_timeout,
+        max_workers=max_workers, dry_run=dry_run,
+    )
+    if dry_run:
+        print(
+            f"[assets] dry-run: tables={stats.tables}, columns={stats.columns}, "
+            f"would-profile={stats.profiled_columns}, estimated_queries≈{stats.estimated_queries}"
+        )
+        return
+    print(
+        f"[assets] executed {stats.total_queries} queries (peak in-flight {stats.peak_inflight}), "
+        f"profiled {stats.profiled_columns} column(s), {stats.light_tables} large table(s) profiled light"
     )
     if stats.errors:
         print(f"[assets] {len(stats.errors)} warning(s):", file=sys.stderr)
@@ -568,7 +635,7 @@ def dispatch_find(args: argparse.Namespace, cfg: ConfigManager) -> int:
 
 def build_adapter_session(cfg: ConfigManager, args: argparse.Namespace):
     conn = cfg.get_connection(args.conn or None)
-    adapter = build_adapter(conn)
+    adapter = build_adapter(conn, policy=cfg.policy_for(conn), caller="cli")
     session = Session(connection=conn, default_limit=args.limit, timeout_seconds=args.timeout)
     _populate_disclosure(adapter, session, conn.name, args.database)
     return adapter, session

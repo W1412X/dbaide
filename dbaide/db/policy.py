@@ -1,0 +1,164 @@
+"""Resource policy: per-connection load profiles + user-configurable overrides.
+
+A :class:`ResourcePolicy` carries every numeric knob that governs how much load
+DBAide is allowed to put on a database. Values come from a named ``load_profile``
+preset (``production`` / ``staging`` / ``dev``) and are then overridden, key by
+key, with whatever the user put in ``[resource_defaults]`` of ``config.toml``.
+
+The defaults are deliberately conservative: a fresh connection with no explicit
+profile is treated as ``production`` so that an AI assistant never hammers a live
+database by accident.
+"""
+
+from __future__ import annotations
+
+import threading
+from dataclasses import dataclass, fields, replace
+from typing import Any
+
+# Profiling tiers, ordered from cheapest to most expensive.
+PROFILE_MODES = ("none", "light", "auto", "all")
+LOAD_PROFILE_NAMES = ("production", "staging", "dev")
+DEFAULT_LOAD_PROFILE = "production"
+
+
+@dataclass(frozen=True, slots=True)
+class ResourcePolicy:
+    """All tunable resource limits. Every field is a concrete, user-configurable number."""
+
+    # Concurrency / connections (enforced by QueryBudget).
+    max_connections_per_instance: int = 2
+    max_inflight_queries: int = 2
+    statement_timeout_seconds: int = 8
+
+    # Asset build.
+    build_max_workers: int = 1
+    build_profile_mode: str = "light"
+
+    # Agent execution.
+    agent_max_inflight: int = 1
+    default_row_limit: int = 100
+    max_row_limit: int = 1000
+
+    # Cost gates.
+    big_table_rows: int = 1_000_000      # estimated rows above which profiling drops to metadata-only
+    explain_max_rows: int = 5_000_000    # EXPLAIN estimate above which execution is blocked
+    max_join_tables: int = 3             # joins beyond this require confirmation
+
+    # Join sampling.
+    join_sample_size_small: int = 150
+    join_sample_size_large: int = 50
+
+    def merged_with(self, overrides: dict[str, Any]) -> "ResourcePolicy":
+        """Return a copy with any recognised numeric/string overrides applied."""
+        if not overrides:
+            return self
+        valid = {f.name for f in fields(self)}
+        clean: dict[str, Any] = {}
+        for key, value in overrides.items():
+            if key not in valid or value is None:
+                continue
+            current = getattr(self, key)
+            try:
+                clean[key] = type(current)(value)
+            except (TypeError, ValueError):
+                continue
+        return replace(self, **clean) if clean else self
+
+    @classmethod
+    def for_load_profile(cls, name: str) -> "ResourcePolicy":
+        return LOAD_PROFILES.get(_normalize_profile(name), LOAD_PROFILES[DEFAULT_LOAD_PROFILE])
+
+
+# Three presets. ``production`` is the conservative default.
+LOAD_PROFILES: dict[str, ResourcePolicy] = {
+    "production": ResourcePolicy(
+        max_connections_per_instance=2,
+        max_inflight_queries=2,
+        statement_timeout_seconds=8,
+        build_max_workers=1,
+        build_profile_mode="light",
+        agent_max_inflight=1,
+        default_row_limit=100,
+        max_row_limit=1000,
+        big_table_rows=1_000_000,
+        explain_max_rows=5_000_000,
+        max_join_tables=3,
+        join_sample_size_small=150,
+        join_sample_size_large=50,
+    ),
+    "staging": ResourcePolicy(
+        max_connections_per_instance=4,
+        max_inflight_queries=4,
+        statement_timeout_seconds=10,
+        build_max_workers=2,
+        build_profile_mode="auto",
+        agent_max_inflight=2,
+        default_row_limit=100,
+        max_row_limit=5000,
+        big_table_rows=5_000_000,
+        explain_max_rows=20_000_000,
+        max_join_tables=4,
+        join_sample_size_small=150,
+        join_sample_size_large=80,
+    ),
+    "dev": ResourcePolicy(
+        max_connections_per_instance=8,
+        max_inflight_queries=8,
+        statement_timeout_seconds=30,
+        build_max_workers=4,
+        build_profile_mode="auto",
+        agent_max_inflight=4,
+        default_row_limit=200,
+        max_row_limit=50000,
+        big_table_rows=50_000_000,
+        explain_max_rows=200_000_000,
+        max_join_tables=6,
+        join_sample_size_small=200,
+        join_sample_size_large=120,
+    ),
+}
+
+
+def _normalize_profile(name: str | None) -> str:
+    value = str(name or "").strip().lower()
+    return value if value in LOAD_PROFILES else DEFAULT_LOAD_PROFILE
+
+
+# ── Per-instance policy resolution (cached) ──────────────────────────────────
+
+_lock = threading.Lock()
+_cache: dict[str, ResourcePolicy] = {}
+
+
+def resolve_policy(
+    *,
+    load_profile: str | None,
+    overrides: dict[str, Any] | None = None,
+    instance: str = "",
+) -> ResourcePolicy:
+    """Resolve the effective policy: preset(load_profile) overridden by ``overrides``.
+
+    Results are cached per instance name so repeated ``build_adapter`` calls are cheap.
+    Pass ``instance=""`` to bypass the cache (used by tests).
+    """
+    if instance:
+        with _lock:
+            cached = _cache.get(instance)
+            if cached is not None:
+                return cached
+    policy = ResourcePolicy.for_load_profile(load_profile or DEFAULT_LOAD_PROFILE)
+    policy = policy.merged_with(overrides or {})
+    if instance:
+        with _lock:
+            _cache[instance] = policy
+    return policy
+
+
+def clear_cache(instance: str | None = None) -> None:
+    """Drop cached policies (call after the user edits resource_defaults)."""
+    with _lock:
+        if instance is None:
+            _cache.clear()
+        else:
+            _cache.pop(instance, None)

@@ -14,6 +14,7 @@ class TaskType(str, Enum):
 
 
 _VALID_TYPES = {"sqlite", "mysql", "mariadb", "postgres", "postgresql"}
+_VALID_LOAD_PROFILES = {"production", "staging", "dev"}
 
 
 class ConnectionConfig:
@@ -30,6 +31,7 @@ class ConnectionConfig:
         password_env: str = "",
         password: str = "",
         path: str = "",
+        load_profile: str = "production",
     ) -> None:
         self.name = str(name or "").strip()
         self.type = str(type or "").strip().lower()
@@ -48,6 +50,10 @@ class ConnectionConfig:
         self.password_env = str(password_env or "").strip()
         self.password = str(password or "")
         self.path = str(path or "").strip()
+        profile = str(load_profile or "production").strip().lower()
+        # Default to the conservative production profile: an AI assistant must not
+        # hammer a live database by accident.
+        self.load_profile = profile if profile in _VALID_LOAD_PROFILES else "production"
 
 
 class ModelConfig:

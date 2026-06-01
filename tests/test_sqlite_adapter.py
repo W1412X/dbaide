@@ -44,3 +44,58 @@ def test_sqlite_adapter_schema_and_profile(tmp_path):
     assert profile.row_count == 3
     assert profile.distinct_count == 2
 
+
+
+def test_profile_column_light_skips_distinct_and_topk(tmp_path):
+    db = tmp_path / "app.db"
+    make_db(db)
+    adapter = build_adapter(ConnectionConfig(name="local", type="sqlite", path=str(db)))
+    profile = adapter.profile_column("orders", "status", heavy_scan=False)
+    # No COUNT(DISTINCT) / GROUP BY top-K on big tables.
+    assert profile.distinct_count is None
+    assert profile.top_values == []
+    assert profile.row_count == 3  # cheap COUNT(*) still available
+
+
+def test_profile_column_merges_avg_and_length(tmp_path):
+    db = tmp_path / "app.db"
+    make_db(db)
+    adapter = build_adapter(ConnectionConfig(name="local", type="sqlite", path=str(db)))
+    numeric = adapter.profile_column("orders", "total_amount", include_avg=True)
+    assert numeric.numeric_stats.get("avg") is not None
+    text = adapter.profile_column("orders", "status", include_length=True)
+    assert "avg_length" in text.text_stats
+
+
+def test_every_query_is_audited(tmp_path):
+    from dbaide.observability import query_log
+    db = tmp_path / "app.db"
+    make_db(db)
+    adapter = build_adapter(ConnectionConfig(name="audit", type="sqlite", path=str(db)), caller="build")
+    log = query_log.for_instance("audit")
+    adapter.execute_readonly("SELECT * FROM users", limit=10)
+    adapter.profile_column("orders", "status")
+    entries = log.recent()
+    assert len(entries) >= 2
+    assert all(e.caller == "build" for e in entries)
+    assert any("users" in e.sql for e in entries)
+
+
+def test_budget_caps_concurrency(tmp_path):
+    import threading
+    from dbaide.db.policy import ResourcePolicy
+    db = tmp_path / "app.db"
+    make_db(db)
+    policy = ResourcePolicy.for_load_profile("production").merged_with({"max_inflight_queries": 2})
+    adapter = build_adapter(ConnectionConfig(name="cap", type="sqlite", path=str(db)), policy=policy)
+    assert adapter.budget.max_inflight == 2
+
+    def worker():
+        adapter.execute_readonly("SELECT 1", limit=1)
+
+    threads = [threading.Thread(target=worker) for _ in range(10)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+    assert adapter.budget.stats.peak_inflight <= 2

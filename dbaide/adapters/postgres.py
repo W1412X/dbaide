@@ -90,8 +90,8 @@ class PostgresAdapter(DatabaseAdapter):
         with self._connect(database if database and "." not in database else "") as conn:
             return [ForeignKeyInfo(**row) for row in conn.execute(sql, (table_name, schema, schema)).fetchall()]
 
-    def execute_readonly(self, sql: str, *, database: str = "", limit: int | None = None,
-                         timeout_seconds: int = 10) -> QueryResult:
+    def _execute_readonly_impl(self, sql: str, *, database: str = "", limit: int | None = None,
+                               timeout_seconds: int = 10) -> QueryResult:
         bounded = append_limit(sql, limit)
         start = time.perf_counter()
         conn = self._connect(database if database and "." not in database else "")
@@ -125,32 +125,50 @@ class PostgresAdapter(DatabaseAdapter):
         )
 
     def profile_column(self, table: str, column: str, *, database: str = "", top_k: int = 10,
-                       timeout_seconds: int = 30) -> ColumnProfile:
+                       timeout_seconds: int = 30, heavy_scan: bool = True,
+                       include_avg: bool = False, include_length: bool = False) -> ColumnProfile:
         tq, cq = _quote_table(table), quote_identifier(column, self.dialect)
-        sql = (
-            f"SELECT COUNT(*) row_count, "
-            f"COUNT(*) FILTER (WHERE {cq} IS NULL) null_count, "
-            f"COUNT(DISTINCT {cq}) distinct_count, "
-            f"MIN({cq}) min_value, MAX({cq}) max_value "
-            f"FROM {tq}"
-        )
+        agg_parts = [
+            "COUNT(*) row_count",
+            f"COUNT(*) FILTER (WHERE {cq} IS NULL) null_count",
+            f"MIN({cq}) min_value",
+            f"MAX({cq}) max_value",
+        ]
+        if heavy_scan:
+            agg_parts.insert(2, f"COUNT(DISTINCT {cq}) distinct_count")
+        if include_avg:
+            agg_parts.append(f"AVG({cq}) avg_value")
+        if include_length:
+            agg_parts.append(f"MIN(LENGTH({cq}::text)) min_length")
+            agg_parts.append(f"MAX(LENGTH({cq}::text)) max_length")
+            agg_parts.append(f"AVG(LENGTH({cq}::text)) avg_length")
+        sql = f"SELECT {', '.join(agg_parts)} FROM {tq}"
         rows = self.execute_readonly(sql, database=database, limit=None, timeout_seconds=timeout_seconds).rows
         if not rows:
             return ColumnProfile(table=table, column=column, row_count=0, null_count=0)
         row = rows[0]
-        top_sql = (
-            f"SELECT {cq} value, COUNT(*) count FROM {tq} "
-            f"WHERE {cq} IS NOT NULL GROUP BY {cq} ORDER BY count DESC LIMIT {int(top_k)}"
+        top: list = []
+        if heavy_scan:
+            top_sql = (
+                f"SELECT {cq} value, COUNT(*) count FROM {tq} "
+                f"WHERE {cq} IS NOT NULL GROUP BY {cq} ORDER BY count DESC LIMIT {int(top_k)}"
+            )
+            top = self.execute_readonly(top_sql, database=database, limit=None, timeout_seconds=timeout_seconds).rows
+        numeric_stats = {"avg": row.get("avg_value")} if include_avg else {}
+        text_stats = (
+            {"min_length": row.get("min_length"), "max_length": row.get("max_length"), "avg_length": row.get("avg_length")}
+            if include_length else {}
         )
-        top = self.execute_readonly(top_sql, database=database, limit=None, timeout_seconds=timeout_seconds).rows
         return ColumnProfile(
             table=table, column=column,
             row_count=int(row.get("row_count") or 0),
             null_count=int(row.get("null_count") or 0),
-            distinct_count=int(row.get("distinct_count") or 0),
+            distinct_count=int(row.get("distinct_count") or 0) if heavy_scan else None,
             min_value=row.get("min_value"),
             max_value=row.get("max_value"),
             top_values=top,
+            numeric_stats=numeric_stats,
+            text_stats=text_stats,
         )
 
 

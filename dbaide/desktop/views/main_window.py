@@ -419,17 +419,22 @@ class MainWindow(QMainWindow):
             self.toast("Select a connection first")
             return
 
+        conns = {c["name"]: c for c in self.bootstrap.get("connections") or []}
+        load_profile = str((conns.get(conn) or {}).get("load_profile") or "production")
+        default_mode = {"production": "light", "staging": "auto", "dev": "auto"}.get(load_profile, "light")
+        default_workers = {"production": 1, "staging": 2, "dev": 4}.get(load_profile, 1)
+
         def on_loaded(result: dict[str, Any]) -> None:
             databases = list(result.get("databases") or [])
             if not databases:
                 self.toast("No databases found on this connection")
                 return
-            if len(databases) == 1:
-                self._start_build_assets(conn, [str(databases[0]["name"])])
-                return
             dialog = BuildAssetsDialog(
                 connection_name=conn,
                 databases=databases,
+                load_profile=load_profile,
+                default_profile_mode=default_mode,
+                default_max_workers=default_workers,
                 parent=self,
             )
             if dialog.exec() != QDialog.DialogCode.Accepted:
@@ -438,11 +443,11 @@ class MainWindow(QMainWindow):
             if not selected:
                 self.toast("Select at least one database")
                 return
-            self._start_build_assets(conn, selected)
+            self._start_build_assets(conn, selected, dialog.build_options())
 
         self._run_background("list_databases", {"name": conn}, on_loaded)
 
-    def _start_build_assets(self, conn: str, databases: list[str]) -> None:
+    def _start_build_assets(self, conn: str, databases: list[str], options: dict[str, Any] | None = None) -> None:
         self.topbar.set_asset_status("building")
         self.topbar.set_global_status("Building assets", "building")
         self.right.trace.begin_live()
@@ -450,6 +455,8 @@ class MainWindow(QMainWindow):
         payload: dict[str, Any] = {"name": conn}
         if databases:
             payload["databases"] = databases
+        if options:
+            payload.update(options)
         self.run_action("build_assets", payload)
 
     def add_connection(self, conn_type: str = "sqlite") -> None:
@@ -464,11 +471,16 @@ class MainWindow(QMainWindow):
         self.run_action("test_connection", payload)
 
     def open_settings(self, page: str = "connections") -> None:
+        try:
+            resource_defaults = self.service.dispatch("resource_defaults", {})
+        except Exception:
+            resource_defaults = {}
         dialog = SettingsDialog(
             connections=self.bootstrap.get("connections") or [],
             models=self.bootstrap.get("models") or [],
             default_connection=str(self.bootstrap.get("default_connection") or ""),
             default_model=str(self.bootstrap.get("default_model") or "default"),
+            resource_defaults=resource_defaults,
             parent=self,
             initial_page=page,
         )
@@ -478,7 +490,15 @@ class MainWindow(QMainWindow):
         dialog.model_saved.connect(lambda payload: self._settings_save_model(dialog, payload))
         dialog.model_deleted.connect(self._settings_delete_model)
         dialog.model_test.connect(lambda payload: self._settings_test_model(dialog, payload))
+        dialog.resource_saved.connect(self._settings_save_resources)
         dialog.exec()
+
+    def _settings_save_resources(self, payload: dict[str, Any]) -> None:
+        try:
+            self.service.dispatch("save_resource_defaults", payload)
+            self.toast("Resource limits saved")
+        except Exception as exc:
+            self.fail(exc)
 
     def _model_changed(self, model_name: str) -> None:
         if not model_name:
@@ -696,13 +716,20 @@ class MainWindow(QMainWindow):
         self._restore_status_badge()
         if action == "build_assets":
             self.right.trace.end_live()
+            stats = result.get("stats", {}) or {}
             self.ask_tab.append_note(
                 "Assets built",
-                f"```json\n{json.dumps(result.get('stats', {}), ensure_ascii=False, indent=2)}\n```",
+                f"```json\n{json.dumps(stats, ensure_ascii=False, indent=2)}\n```",
             )
             self.refresh_all()
             self.switch_tab("Ask")
-            self.toast("Assets built")
+            if stats.get("estimated_queries"):
+                self.toast(f"Dry-run: ~{stats.get('estimated_queries')} queries estimated")
+            else:
+                self.toast(
+                    f"Assets built · {stats.get('total_queries', 0)} queries "
+                    f"(peak {stats.get('peak_inflight', 0)} in-flight)"
+                )
             return
         if action == "ask":
             self.right.trace.end_live()

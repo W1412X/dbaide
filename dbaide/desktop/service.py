@@ -54,6 +54,7 @@ def _conn_payload(conn: ConnectionConfig, *, has_assets: bool) -> dict[str, Any]
         "password_env": conn.password_env,
         "path": conn.path,
         "target": target,
+        "load_profile": getattr(conn, "load_profile", "production"),
         "asset_status": "ready" if has_assets else "missing",
     }
 
@@ -100,6 +101,29 @@ class DesktopService:
         self.store = store or AssetStore()
         self.join_catalog = JoinCatalogStore()
         self.history = WorkflowHistoryStore()
+        import threading
+        self._build_lock = threading.Lock()
+        self._active_builds: set[str] = set()
+
+    # ── Mutual exclusion: don't query an instance while it is being built ────
+
+    def _build_active(self, instance: str) -> bool:
+        with self._build_lock:
+            return instance in self._active_builds
+
+    def _begin_build(self, instance: str) -> None:
+        with self._build_lock:
+            self._active_builds.add(instance)
+
+    def _end_build(self, instance: str) -> None:
+        with self._build_lock:
+            self._active_builds.discard(instance)
+
+    def _guard_busy(self, instance: str) -> None:
+        if self._build_active(instance):
+            raise RuntimeError(
+                f"Asset build in progress for '{instance}'. Please wait for it to finish before querying."
+            )
 
     def dispatch(self, action: str, payload: dict[str, Any] | None = None) -> Any:
         payload = payload or {}
@@ -130,6 +154,11 @@ class DesktopService:
             "add_join": self.add_join,
             "update_join": self.update_join,
             "delete_join": self.delete_join,
+            "resource_defaults": self.resource_defaults,
+            "save_resource_defaults": self.save_resource_defaults,
+            "recent_queries": self.recent_queries,
+            "query_summary": self.query_summary,
+            "build_status": self.build_status,
         }
         if action not in handlers:
             raise ValueError(f"Unknown desktop action: {action}")
@@ -157,7 +186,7 @@ class DesktopService:
 
     def test_connection(self, payload: dict[str, Any]) -> dict[str, Any]:
         conn = self._connection_from_payload(payload)
-        build_adapter(conn).test()
+        build_adapter(conn, caller="gui").test()
         return {"ok": True, "message": f"Connection OK: {conn.name}"}
 
     def save_connection(self, payload: dict[str, Any]) -> dict[str, Any]:
@@ -208,7 +237,7 @@ class DesktopService:
 
     def list_databases(self, payload: dict[str, Any]) -> dict[str, Any]:
         conn = self.cfg.get_connection(str(payload.get("name") or payload.get("connection_name") or "") or None)
-        adapter = build_adapter(conn)
+        adapter = build_adapter(conn, policy=self.cfg.policy_for(conn), caller="gui")
         adapter.test()
         live = adapter.list_databases()
         built = {
@@ -228,20 +257,34 @@ class DesktopService:
         conn = self.cfg.get_connection(str(payload.get("name") or payload.get("connection_name") or "") or None)
         progress = payload.get("progress")
         progress_cb = progress if callable(progress) else (lambda _msg: None)
-        stats = AssetBuilder(
-            connection=conn,
-            adapter=build_adapter(conn),
-            store=self.store,
-            llm=self._safe_llm(),
-            progress=progress_cb,
-        ).build(
-            databases=payload.get("databases") or None,
-            profile_mode=str(payload.get("profile_mode") or "auto"),
-            top_k=int(payload.get("top_k") or 30),
-            sample_limit=int(payload.get("sample_limit") or 50),
-            timeout=int(payload.get("timeout") or 0),
-            per_column_timeout=int(payload.get("per_column_timeout") or 30),
-        )
+        load_profile_override = str(payload.get("load_profile") or "").strip()
+        if load_profile_override:
+            from dbaide.db.policy import resolve_policy
+            policy = resolve_policy(load_profile=load_profile_override, overrides=self.cfg.resource_defaults())
+        else:
+            policy = self.cfg.policy_for(conn)
+        adapter = build_adapter(conn, policy=policy, caller="build")
+        max_workers = payload.get("max_workers")
+        self._begin_build(conn.name)
+        try:
+            stats = AssetBuilder(
+                connection=conn,
+                adapter=adapter,
+                store=self.store,
+                llm=self._safe_llm(),
+                progress=progress_cb,
+            ).build(
+                databases=payload.get("databases") or None,
+                profile_mode=payload.get("profile_mode") or None,
+                top_k=int(payload.get("top_k") or 30),
+                sample_limit=int(payload.get("sample_limit") or 50),
+                timeout=int(payload.get("timeout") or 0),
+                per_column_timeout=int(payload.get("per_column_timeout") or 30),
+                max_workers=int(max_workers) if max_workers else None,
+                dry_run=bool(payload.get("dry_run", False)),
+            )
+        finally:
+            self._end_build(conn.name)
         return {"stats": _to_dict(stats)}
 
     def schema_tree(self, payload: dict[str, Any]) -> list[dict[str, Any]]:
@@ -321,6 +364,7 @@ class DesktopService:
     def ask(self, payload: dict[str, Any]) -> dict[str, Any]:
         conn_name = str(payload.get("connection_name") or payload.get("name") or "")
         conn = self.cfg.get_connection(conn_name or None)
+        self._guard_busy(conn.name)
         policy = self._policy(str(payload.get("execution_policy") or payload.get("policy") or "safe_auto"))
         database = str(payload.get("database") or "")
         request = WorkflowRequest(
@@ -369,6 +413,7 @@ class DesktopService:
 
     def execute_sql(self, payload: dict[str, Any]) -> dict[str, Any]:
         conn = self.cfg.get_connection(str(payload.get("connection_name") or "") or None)
+        self._guard_busy(conn.name)
         database = str(payload.get("database") or "")
         sql = str(payload.get("sql") or "")
         limit = int(payload.get("limit") or 100)
@@ -456,9 +501,79 @@ class DesktopService:
         return " ".join(parts)
 
     def _query_tools(self, conn: ConnectionConfig) -> QueryTools:
-        adapter = build_adapter(conn)
+        adapter = build_adapter(conn, policy=self.cfg.policy_for(conn), caller="gui")
         session = Session(conn)
         return QueryTools(adapter, session.disclosure, instance=conn.name)
+
+    # ── Resource defaults (user-configurable numeric limits) ─────────────────
+
+    def resource_defaults(self, _payload: dict[str, Any] | None = None) -> dict[str, Any]:
+        from dbaide.db.policy import LOAD_PROFILES
+        from dataclasses import asdict
+        return {
+            "values": self.cfg.resource_defaults(),
+            "presets": {name: asdict(p) for name, p in LOAD_PROFILES.items()},
+        }
+
+    def save_resource_defaults(self, payload: dict[str, Any]) -> dict[str, Any]:
+        values = payload.get("values") if isinstance(payload.get("values"), dict) else payload
+        # Coerce known numeric keys; ignore unknowns.
+        from dbaide.db.policy import ResourcePolicy
+        from dataclasses import fields
+        numeric_keys = {f.name for f in fields(ResourcePolicy)} - {"build_profile_mode"}
+        clean: dict[str, Any] = {}
+        for key, val in (values or {}).items():
+            if val in (None, ""):
+                continue
+            if key in numeric_keys:
+                try:
+                    clean[key] = int(val)
+                except (TypeError, ValueError):
+                    continue
+            elif key == "build_profile_mode":
+                clean[key] = str(val)
+        self.cfg.set_resource_defaults(clean)
+        return {"values": self.cfg.resource_defaults()}
+
+    # ── Query audit log (full SQL visibility) ────────────────────────────────
+
+    def recent_queries(self, payload: dict[str, Any]) -> dict[str, Any]:
+        from dbaide.observability import query_log
+        name = str(payload.get("connection_name") or payload.get("name") or "")
+        if not name:
+            name = self.cfg.get_connection(None).name
+        limit = int(payload.get("limit") or 200)
+        log = query_log.for_instance(name)
+        entries = [e.to_dict() for e in log.recent(limit)]
+        if not entries:
+            entries = log.tail_file(limit=limit)
+        return {"connection": name, "queries": entries, "summary": log.summary()}
+
+    def query_summary(self, payload: dict[str, Any]) -> dict[str, Any]:
+        from dbaide.observability import query_log
+        name = str(payload.get("connection_name") or payload.get("name") or "")
+        if not name:
+            name = self.cfg.get_connection(None).name
+        return {"connection": name, "summary": query_log.for_instance(name).summary()}
+
+    def build_status(self, payload: dict[str, Any]) -> dict[str, Any]:
+        name = str(payload.get("connection_name") or payload.get("name") or "")
+        if not name:
+            name = self.cfg.get_connection(None).name
+        from dbaide.db import budget as budget_mod
+        policy = self.cfg.policy_for(self.cfg.get_connection(name))
+        budget = budget_mod.for_instance(name, max_inflight=policy.max_inflight_queries)
+        return {
+            "connection": name,
+            "building": self._build_active(name),
+            "inflight": budget.inflight,
+            "max_inflight": budget.max_inflight,
+        }
+
+    def subscribe_queries(self, instance: str, callback) -> Callable[[], None]:
+        """Subscribe a callback to live query-log entries (used by the SQL detail view)."""
+        from dbaide.observability import query_log
+        return query_log.for_instance(instance).subscribe(callback)
 
     def _connection_from_payload(self, payload: dict[str, Any]) -> ConnectionConfig:
         port = payload.get("port")
@@ -476,6 +591,7 @@ class DesktopService:
             password_env=str(payload.get("password_env") or "").strip(),
             password=str(payload.get("password") or ""),
             path=str(payload.get("path") or "").strip(),
+            load_profile=str(payload.get("load_profile") or "production").strip(),
         )
 
     def list_joins(self, payload: dict[str, Any]) -> dict[str, Any]:

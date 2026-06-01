@@ -432,9 +432,73 @@ Adapters are the only layer that knows driver details.
 | Policy | Behavior |
 |--------|----------|
 | `safe_auto` | Validate + risk gate; auto execute when low risk |
-| `expert` | Relaxed auto execute |
+| `expert` | Relaxed auto execute (still bound by the hard gates below) |
 | `sql_only` | Generate and validate; never execute |
 | `inspect_only` | Schema/profile answers; reject execution |
+
+---
+
+## Resource & Safety (DB load control)
+
+DBAide is an *assistant*: its load on a production database must be negligible.
+Every SQL statement — build, agent, or GUI — flows through one resource layer.
+
+```
+AssetBuilder / Agent / GUI        ← caller tag (build|agent|gui|cli)
+        ↓ (single entry)
+DatabaseAdapter.execute_readonly  ← acquire budget → apply timeout → run → audit
+        ↓
+QueryBudget(instance)             ← BoundedSemaphore; caps in-flight queries (= connections)
+        ↓
+ResourcePolicy(connection)        ← load_profile preset + [resource_defaults] overrides
+        ↓
+QueryLog(instance)                ← every SQL → ~/.dbaide/logs/queries/{instance}.jsonl
+```
+
+### Load profiles (`dbaide/db/policy.py`)
+
+A connection's `load_profile` selects a preset; values are overridable per-key via
+`[resource_defaults]` in `~/.dbaide/config.toml` or the GUI **Settings → Resources** page.
+New connections default to **production**.
+
+| Knob | production | staging | dev |
+|------|-----------:|--------:|----:|
+| `max_inflight_queries` | 2 | 4 | 8 |
+| `statement_timeout_seconds` | 8 | 10 | 30 |
+| `build_max_workers` | 1 | 2 | 4 |
+| `build_profile_mode` | light | auto | auto |
+| `default_row_limit` | 100 | 100 | 200 |
+| `max_row_limit` (hard) | 1000 | 5000 | 50000 |
+| `big_table_rows` | 1e6 | 5e6 | 5e7 |
+| `explain_max_rows` | 5e6 | 2e7 | 2e8 |
+| `max_join_tables` | 3 | 4 | 6 |
+
+### Invariants
+
+- **Concurrency is bounded** — one `QueryBudget` semaphore per instance, shared by
+  build/agent/gui. No nested thread pools; the asset builder uses a single pool sized
+  by `build_max_workers`.
+- **Queries are predictable** — every statement has a timeout and a row limit; no
+  `ORDER BY RAND()`; column profiling merges count/null/distinct/min/max/avg/length
+  into one scan; tables above `big_table_rows` drop to metadata-only (`light`) profiling.
+- **Execution is audited** — `QueryLog` records caller, SQL, elapsed, rows, and status
+  for every query. Inspect with `dbaide queries <conn> --tail N`, the GUI trace
+  (agent SQL), or the jsonl file directly.
+- **Agent hard gates** (apply to `expert` too): `LIMIT` above `max_row_limit` is
+  rejected; unfiltered `SELECT *` is force-limited; `EXPLAIN` row estimate above
+  `explain_max_rows` requires confirmation; joins beyond `max_join_tables` require
+  confirmation.
+
+### Recommended production workflow
+
+```bash
+# Lowest-load build (metadata + key columns only):
+dbaide assets build prod --load-profile production --profile-mode light
+# Estimate cost before touching the DB:
+dbaide assets build prod --dry-run
+# Inspect exactly what ran:
+dbaide queries prod --tail 50
+```
 
 ---
 

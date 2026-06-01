@@ -50,6 +50,9 @@ class RiskController:
         table_count: int = 1,
         has_joins: bool = False,
         join_confidence: float = 1.0,
+        estimated_rows: int | None = None,
+        explain_max_rows: int = 0,
+        max_join_tables: int = 2,
     ) -> RiskDecision:
         """Decide whether to execute, confirm, or reject."""
 
@@ -65,6 +68,17 @@ class RiskController:
         if not validation.ok:
             return RiskDecision("reject", "SQL validation failed", "rejected")
 
+        # ── Hard gates below apply to ALL policies, including EXPERT ──────────
+
+        # EXPLAIN cost gate: estimated scan far too large.
+        if explain_max_rows > 0 and estimated_rows is not None and estimated_rows > explain_max_rows:
+            return RiskDecision(
+                "confirm",
+                f"EXPLAIN estimates ~{estimated_rows:,} rows (limit {explain_max_rows:,})",
+                "high",
+                requires_confirmation=True,
+            )
+
         # High risk from validation
         if validation.risk_level == "high":
             return RiskDecision(
@@ -73,6 +87,19 @@ class RiskController:
                 "high",
                 requires_confirmation=True,
             )
+
+        # Complex query: too many joined tables.
+        if table_count > max(1, max_join_tables):
+            return RiskDecision(
+                "confirm",
+                f"Query involves {table_count} tables (max {max_join_tables})",
+                "medium",
+                requires_confirmation=True,
+            )
+
+        # ── Policy: expert - allow more (but only after the hard gates above) ─
+        if policy == ExecutionPolicy.EXPERT:
+            return RiskDecision("auto_execute", "Expert policy, low risk", "low")
 
         # Low confidence plan
         if plan_confidence < 0.65:
@@ -91,19 +118,6 @@ class RiskController:
                 "medium",
                 requires_confirmation=True,
             )
-
-        # Complex query
-        if table_count > 2:
-            return RiskDecision(
-                "confirm",
-                f"Query involves {table_count} tables",
-                "medium",
-                requires_confirmation=True,
-            )
-
-        # Policy: expert - allow more
-        if policy == ExecutionPolicy.EXPERT:
-            return RiskDecision("auto_execute", "Expert policy, low risk", "low")
 
         # Default: safe auto
         if validation.requires_confirmation:

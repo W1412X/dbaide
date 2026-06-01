@@ -20,3 +20,26 @@ def isolated_join_catalog(tmp_path: Path) -> None:
         os.environ.pop("DBAIDE_JOINS", None)
     else:
         os.environ["DBAIDE_JOINS"] = previous
+
+
+@pytest.fixture(autouse=True)
+def isolated_query_log(tmp_path: Path) -> None:
+    """Redirect query-log writes to a temp dir and reset resource registries."""
+    from dbaide.db import budget as budget_mod
+    from dbaide.db import policy as policy_mod
+    from dbaide.observability import query_log
+
+    root = tmp_path / "dbaide_logs"
+    previous = os.environ.get("DBAIDE_LOG_DIR")
+    os.environ["DBAIDE_LOG_DIR"] = str(root)
+    budget_mod.reset_registry()
+    policy_mod.clear_cache()
+    query_log.reset_registry()
+    yield
+    budget_mod.reset_registry()
+    policy_mod.clear_cache()
+    query_log.reset_registry()
+    if previous is None:
+        os.environ.pop("DBAIDE_LOG_DIR", None)
+    else:
+        os.environ["DBAIDE_LOG_DIR"] = previous

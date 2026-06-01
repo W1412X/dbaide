@@ -26,7 +26,16 @@ python -m dbaide.cli profile users --conn local
 python -m dbaide.cli sql "select * from users" --conn local --execute
 ```
 
-`connect add` tests the instance and builds offline schema assets by default. The default profile policy is `auto`: every column gets a document, but only key/link/time/status/measure/index-like columns get heavier statistics.
+`connect add` tests the instance and builds offline schema assets by default. New
+connections default to the **production** load profile (lowest DB load): builds run
+single-threaded with `light` profiling (metadata + key columns), and the agent uses
+conservative row/timeout limits. Pass `--load-profile staging|dev` to relax this.
+
+> **Production safety.** DBAide caps concurrent queries, times out every statement,
+> never uses `ORDER BY RAND()`, drops large tables to metadata-only profiling, and
+> rejects oversized/unfiltered queries. Every SQL it runs is logged — inspect with
+> `dbaide queries <conn> --tail 50`. Estimate a build's cost first with
+> `dbaide assets build <conn> --dry-run`. See **Resource & Safety** in `docs/DESIGN.md`.
 
 ```text
 ~/.dbaide/assets/instances/<instance>/
