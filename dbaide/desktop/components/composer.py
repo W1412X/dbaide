@@ -7,6 +7,7 @@ from dbaide.desktop.components.base import compact_button, Panel
 from dbaide.desktop.components.composer_options import POLICIES, POLICY_TOOLTIPS
 from dbaide.desktop.components.inputs import configure_multiline_text_edit, sync_multiline_height
 from dbaide.desktop.components.menu import PillSelect
+from dbaide.desktop.components.spinner import BusyAnimator
 from dbaide.desktop.theme import Theme
 
 _INPUT_MIN = 88
@@ -71,10 +72,12 @@ class ComposerWidget(Panel):
         self.model_select = PillSelect("Model", max_width=132)
         self.model_select.value_changed.connect(self.model_changed.emit)
         footer.addWidget(self.model_select)
-        self.action_btn = compact_button(t("composer.send"), primary=True, width=72)
+        self.action_btn = compact_button(t("composer.send"), primary=True, width=84)
         self.action_btn.clicked.connect(self._on_action)
         footer.addWidget(self.action_btn)
         outer.addLayout(footer)
+        # While running, the action button spins so it reads as a live "stop".
+        self._busy = BusyAnimator(self._on_spin_frame)
 
     def eventFilter(self, obj, event) -> bool:
         if obj is self.input:
@@ -115,10 +118,18 @@ class ComposerWidget(Panel):
     def set_running(self, running: bool) -> None:
         from dbaide.i18n import t
         self._running = running
-        self.action_btn.setText(t("composer.stop") if running else t("composer.send"))
+        if running:
+            self._busy.start()  # _on_spin_frame paints the spinner + label
+        else:
+            self._busy.stop()
+            self.action_btn.setText(t("composer.send"))
         self.input.setEnabled(not running)
         self.policy_select.setEnabled(not running)
         self.model_select.setEnabled(not running)
+
+    def _on_spin_frame(self, frame: str) -> None:
+        from dbaide.i18n import t
+        self.action_btn.setText(f"{frame} {t('composer.stop')}")
 
     def set_placeholder(self, text: str) -> None:
         self.input.setPlaceholderText(text)

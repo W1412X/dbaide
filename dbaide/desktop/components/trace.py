@@ -18,6 +18,7 @@ from PyQt6.QtWidgets import (
 from dbaide.agent.progress_events import STEP_TYPE_LABELS
 from dbaide.agent.trace_model import TraceModel, TraceNode
 from dbaide.desktop.components.inputs import configure_readonly_text_view
+from dbaide.desktop.components.spinner import BusyAnimator
 from dbaide.desktop.theme import Theme
 
 # Types that get a leading category chip in the tree (plain tool/substep don't —
@@ -77,6 +78,10 @@ class TracePanel(QWidget):
 
         self._model: TraceModel | None = None
         self._selected_id: str = ""
+        # Running rows show a spinning circle (instead of a static ▶) until they
+        # resolve. We update just those rows' glyph on each tick — no full re-render.
+        self._running_items: list[tuple[QTreeWidgetItem, int]] = []
+        self._busy = BusyAnimator(self._on_spin_frame)
 
     # ── Public API (preserved for callers) ───────────────────────────────────
 
@@ -121,6 +126,8 @@ class TracePanel(QWidget):
     def clear_trace(self) -> None:
         self._model = None
         self._selected_id = ""
+        self._running_items = []
+        self._busy.stop()
         self._tree.clear()
         self._detail.clear()
 
@@ -144,8 +151,10 @@ class TracePanel(QWidget):
 
     def _render(self) -> None:
         self._tree.clear()
+        self._running_items = []
         model = self._model
         if model is None:
+            self._busy.stop()
             return
 
         summary = QTreeWidgetItem(["", model.summary_line(), ""])
@@ -165,9 +174,22 @@ class TracePanel(QWidget):
             data = self._find_node_data(self._selected_id)
             if data is not None:
                 self._show_detail(data)
+        # Spin while anything is still running; stop once everything has resolved.
+        if self._running_items:
+            self._busy.start()
+        else:
+            self._busy.stop()
+
+    def _on_spin_frame(self, frame: str) -> None:
+        for item, step in self._running_items:
+            try:
+                item.setText(0, f"{frame} {step}" if step else frame)
+            except RuntimeError:
+                pass  # item deleted by a concurrent re-render
 
     def _add_node(self, parent, node: TraceNode) -> QTreeWidgetItem:
-        glyph = _GLYPH.get(node.status, "·")
+        running = node.status == "running"
+        glyph = self._busy.frame if running else _GLYPH.get(node.status, "·")
         is_tool = node.parent_id == "__root__"
         if is_tool:
             # Step row: bright phase name, status glyph carries colour, duration muted.
@@ -198,6 +220,8 @@ class TracePanel(QWidget):
             "detail": node.detail, "duration_ms": node.duration_ms, "step": node.step,
             "thought": node.thought, "node_type": node.node_type, "raw": node.raw,
         })
+        if running:
+            self._running_items.append((item, node.step if is_tool else 0))
 
         parent_is_tree = isinstance(parent, QTreeWidget)
         if parent_is_tree:
