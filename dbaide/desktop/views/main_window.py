@@ -290,7 +290,7 @@ class MainWindow(QMainWindow):
             "schema_tree",
             {"name": name},
             lambda rows: self._apply_schema_loaded(name, rows),
-            on_error=lambda exc: self._apply_schema_error(str(exc)),
+            on_error=lambda exc: self._apply_schema_error(name, str(exc)),
         )
 
     def _apply_schema_loaded(self, name: str, rows: list[dict[str, Any]]) -> None:
@@ -301,18 +301,21 @@ class MainWindow(QMainWindow):
         self.topbar.set_databases(dbs)
         self.sidebar.load_schema(self.schema_rows)
 
-    def _apply_schema_error(self, message: str) -> None:
+    def _apply_schema_error(self, name: str, message: str) -> None:
+        # Don't wipe the current connection's schema because an old one failed.
+        if name != self.current_connection():
+            return
         self.schema_rows = []
         self.sidebar.load_schema([], error=message)
         self.topbar.set_databases([])
         self.toast(f"Schema load failed: {message}")
 
     def _load_history(self, name: str) -> None:
-        self._run_background(
-            "list_history",
-            {"connection_name": name},
-            lambda entries: self.right.load_history(entries if name == self.current_connection() else entries),
-        )
+        def on_loaded(entries: Any) -> None:
+            # Drop stale responses for a connection the user already switched away from.
+            if name == self.current_connection():
+                self.right.load_history(entries)
+        self._run_background("list_history", {"connection_name": name}, on_loaded)
 
     def refresh_joins(self) -> None:
         conn = self.current_connection()
