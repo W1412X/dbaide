@@ -6,9 +6,13 @@ from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QColor, QFont
 from PyQt6.QtWidgets import (
     QApplication,
+    QDialog,
+    QDialogButtonBox,
     QHBoxLayout,
     QHeaderView,
     QLabel,
+    QPlainTextEdit,
+    QPushButton,
     QTableWidget,
     QTableWidgetItem,
     QVBoxLayout,
@@ -46,6 +50,10 @@ class ResultTableWidget(QWidget):
         self.table.horizontalHeader().setStretchLastSection(True)
         self.table.verticalHeader().setVisible(False)
         self.table.setAlternatingRowColors(True)
+        self.table.setWordWrap(False)
+        # Long values are truncated for layout; double-click (or the tooltip) reveals
+        # the full value.
+        self.table.cellDoubleClicked.connect(self._show_full_cell)
         self.table.setStyleSheet(
             f"""
             QTableWidget {{
@@ -80,19 +88,40 @@ class ResultTableWidget(QWidget):
         self.table.setColumnCount(len(self._columns))
         self.table.setHorizontalHeaderLabels(self._columns)
         self.table.setRowCount(len(self._rows))
+        # Unified alignment: every cell is vertically centred; numbers align right,
+        # everything else left. Headers follow their column so they line up.
+        numeric_cols = {
+            c_idx for c_idx, col in enumerate(self._columns)
+            if any(_is_numeric(row.get(col)) for row in self._rows)
+            and all(row.get(col) is None or _is_numeric(row.get(col)) for row in self._rows)
+        }
+        for c_idx in numeric_cols:
+            header_item = self.table.horizontalHeaderItem(c_idx)
+            if header_item is not None:
+                header_item.setTextAlignment(int(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter))
         for r_idx, row in enumerate(self._rows):
             for c_idx, col in enumerate(self._columns):
-                item = QTableWidgetItem(_format_cell(row.get(col)))
+                value = row.get(col)
+                item = QTableWidgetItem(_format_cell(value))
                 item.setFlags(item.flags() & ~Qt.ItemFlag.ItemIsEditable)
-                if _is_numeric(row.get(col)):
-                    item.setTextAlignment(int(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter))
-                if row.get(col) is None:
+                horizontal = Qt.AlignmentFlag.AlignRight if c_idx in numeric_cols else Qt.AlignmentFlag.AlignLeft
+                item.setTextAlignment(int(horizontal | Qt.AlignmentFlag.AlignVCenter))
+                if value is None:
                     item.setForeground(QColor(Theme.NULL))
+                else:
+                    item.setToolTip(_full_text(value))  # full value on hover
                 self.table.setItem(r_idx, c_idx, item)
         total = row_count or len(self._rows)
         suffix = " · truncated" if truncated else ""
         elapsed = f" · {elapsed_ms:.0f}ms" if elapsed_ms else ""
         self.meta.setText(f"Showing {len(self._rows)} of {total} rows{suffix}{elapsed}")
+
+    def _show_full_cell(self, row: int, col: int) -> None:
+        if not (0 <= row < len(self._rows) and 0 <= col < len(self._columns)):
+            return
+        column = self._columns[col]
+        value = self._rows[row].get(column)
+        CellValueDialog(column, _full_text(value), parent=self).exec()
 
     def copy_csv(self) -> None:
         QApplication.clipboard().setText(export_csv(self._rows, self._columns))
@@ -101,6 +130,40 @@ class ResultTableWidget(QWidget):
         self.table.setRowCount(0)
         self.table.setColumnCount(0)
         self.meta.setText("No results")
+
+
+class CellValueDialog(QDialog):
+    """Shows a single cell's full, untruncated value with a copy action."""
+
+    def __init__(self, column: str, value: str, *, parent=None) -> None:
+        super().__init__(parent)
+        self.setWindowTitle(column or "Value")
+        self.resize(560, 360)
+        self.setStyleSheet(f"QDialog {{ background: {Theme.BG}; }}")
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(14, 14, 14, 14)
+        layout.setSpacing(8)
+        view = QPlainTextEdit()
+        view.setReadOnly(True)
+        view.setFont(QFont("Menlo", 11))
+        view.setPlainText(value)
+        layout.addWidget(view, 1)
+        buttons = QDialogButtonBox()
+        copy_btn = QPushButton("Copy")
+        copy_btn.clicked.connect(lambda: QApplication.clipboard().setText(value))
+        buttons.addButton(copy_btn, QDialogButtonBox.ButtonRole.ActionRole)
+        buttons.addButton(QDialogButtonBox.StandardButton.Close)
+        buttons.rejected.connect(self.reject)
+        buttons.accepted.connect(self.accept)
+        layout.addWidget(buttons)
+
+
+def _full_text(value: Any) -> str:
+    if value is None:
+        return "NULL"
+    if isinstance(value, bool):
+        return "true" if value else "false"
+    return str(value)
 
 
 def _format_cell(value: Any) -> str:
