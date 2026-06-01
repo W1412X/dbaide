@@ -82,6 +82,8 @@ def progress_event(
     agent: str = "",
     step: int = 0,
     phase: str = "",
+    node_id: str = "",
+    parent_id: str = "",
 ) -> dict[str, Any]:
     payload: dict[str, Any] = {
         "stage": stage,
@@ -99,6 +101,10 @@ def progress_event(
         payload["agent"] = agent
     if step > 0:
         payload["step"] = step
+    if node_id:
+        payload["node_id"] = node_id
+    if parent_id:
+        payload["parent_id"] = parent_id
     resolved_phase = phase or phase_for(stage)
     if resolved_phase:
         payload["phase"] = resolved_phase
@@ -113,8 +119,15 @@ def subagent_event(
     detail: str = "",
     status: str = "info",
     stage: str = "",
+    node_id: str = "",
+    parent_id: str = "",
 ) -> dict[str, Any]:
-    """Progress line for a nested sub-agent (schema_link, sql_writer, risk, …)."""
+    """Progress line for a nested sub-agent (schema_link, sql_writer, risk, …).
+
+    ``node_id`` gives the sub-task a stable identity so successive events for the
+    same unit of work (e.g. "checking…" then "done") update one tree node, and
+    parallel units (different ``node_id``) render as sibling nodes at the same level.
+    """
     return progress_event(
         stage=stage or agent,
         title=title,
@@ -123,6 +136,8 @@ def subagent_event(
         detail=detail,
         parent=parent,
         agent=agent,
+        node_id=node_id,
+        parent_id=parent_id,
     )
 
 

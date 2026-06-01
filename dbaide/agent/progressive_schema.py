@@ -205,16 +205,20 @@ class ProgressiveSchemaAgent:
         with ThreadPoolExecutor(max_workers=workers) as pool:
             futures = {pool.submit(_scan_database, idx): idx for idx in db_indices}
             for future in as_completed(futures):
+                idx = futures[future]
+                db_name = db_items[idx]["name"]
                 try:
                     tables, columns, note = future.result()
                     table_hits.extend(tables)
                     column_hits.extend(columns)
                     result.trace.append(note)
-                    self._emit_progress(progress, parent, "schema_link", note)
+                    self._emit_progress(progress, parent, "schema_link", note,
+                                        node_id=f"schema:{db_name}", status="completed")
                 except Exception as exc:
                     logger.warning("database_scan_failed: %s", exc)
                     result.trace.append(f"scan error: {exc}")
-                    self._emit_progress(progress, parent, "schema_link", f"scan error: {exc}", status="failed")
+                    self._emit_progress(progress, parent, "schema_link", f"scan error: {exc}",
+                                        node_id=f"schema:{db_name}", status="failed")
 
         for db_index in db_indices:
             db_name = db_items[db_index]["name"]
@@ -334,16 +338,20 @@ class ProgressiveSchemaAgent:
         with ThreadPoolExecutor(max_workers=1) as pool:
             futures = {pool.submit(_scan_live_database, idx): idx for idx in db_indices}
             for future in as_completed(futures):
+                idx = futures[future]
+                db_name = db_items[idx]["name"]
                 try:
                     tables, columns, note = future.result()
                     table_hits.extend(tables)
                     column_hits.extend(columns)
                     result.trace.append(note)
-                    self._emit_progress(progress, parent, "schema_link", note)
+                    self._emit_progress(progress, parent, "schema_link", note,
+                                        node_id=f"schema:{db_name}", status="completed")
                 except Exception as exc:
                     logger.warning("live_database_scan_failed: %s", exc)
                     result.trace.append(f"scan error: {exc}")
-                    self._emit_progress(progress, parent, "schema_link", f"scan error: {exc}", status="failed")
+                    self._emit_progress(progress, parent, "schema_link", f"scan error: {exc}",
+                                        node_id=f"schema:{db_name}", status="failed")
 
         result.hits.extend(table_hits)
         result.hits.extend(column_hits)
@@ -403,12 +411,16 @@ class ProgressiveSchemaAgent:
         *,
         detail: str = "",
         status: str = "info",
+        node_id: str = "",
     ) -> None:
         if not progress:
             return
         from dbaide.agent.progress_events import subagent_event
 
-        progress(subagent_event(agent=agent, title=title, parent=parent, detail=detail, status=status))
+        progress(subagent_event(
+            agent=agent, title=title, parent=parent, detail=detail,
+            status=status, node_id=node_id,
+        ))
 
     def _filter_indices(
         self,

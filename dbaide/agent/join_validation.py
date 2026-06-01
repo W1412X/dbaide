@@ -180,11 +180,15 @@ class JoinSampleValidator:
 
         llm_conf = float(item.get("confidence") or 0.0)
 
+        # One stable node per relation: the "sample check" and "confidence" events
+        # update the same tree node, and distinct relations render as siblings.
+        rel_node = f"jv:{left_table}.{left_col}->{right_table}.{right_col}"
         self._emit(
             progress,
             parent,
             f"Sample check {left_table}.{left_col} → {right_table}.{right_col}",
             detail=f"type alignment {alignment:.0%}",
+            node_id=rel_node,
         )
 
         db_map = table_db or {}
@@ -228,9 +232,10 @@ class JoinSampleValidator:
         self._emit(
             progress,
             parent,
-            f"confidence {confidence:.0%} · {join_type}",
+            f"{left_table}.{left_col} → {right_table}.{right_col} · {join_type} · {confidence:.0%}",
             detail=str(stats.get("message") or ""),
             status="completed" if item["validated"] else "info",
+            node_id=rel_node,
         )
         return item
 
@@ -325,12 +330,16 @@ SELECT MAX(cnt) AS max_cnt FROM (
         *,
         detail: str = "",
         status: str = "info",
+        node_id: str = "",
     ) -> None:
         if not progress:
             return
         from dbaide.agent.progress_events import subagent_event
 
-        progress(subagent_event(agent="join_validate", title=title, parent=parent, detail=detail, status=status))
+        progress(subagent_event(
+            agent="join_validate", title=title, parent=parent, detail=detail,
+            status=status, node_id=node_id,
+        ))
 
 
 def validate_join_relations(
