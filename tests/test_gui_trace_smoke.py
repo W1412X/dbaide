@@ -32,17 +32,36 @@ def test_trace_panel_live_then_finalize(qapp):
     panel.begin_live()
     panel.append_live_event(progress_event(stage="loop", title="started", status="running", kind="agent"))
     panel.append_live_event(progress_event(stage="discover_schema", title="Calling", status="running", kind="tool", step=1))
-    panel.append_live_event(subagent_event(agent="schema_link", title="scanning", parent="discover_schema"))
+    panel.append_live_event(subagent_event(agent="schema_link", title="db1 kept 3", parent="discover_schema", node_id="schema:db1", status="completed"))
+    panel.append_live_event(subagent_event(agent="schema_link", title="db2 kept 1", parent="discover_schema", node_id="schema:db2", status="completed"))
     panel.append_live_event(progress_event(stage="discover_schema", title="done", status="completed", kind="tool", step=1, duration_ms=12))
     panel.append_live_event(progress_event(stage="execute_sql", title="Calling", status="running", kind="tool", step=2))
-    panel.append_live_event(subagent_event(agent="risk", title="auto_execute", parent="execute_sql", status="completed"))
+    panel.append_live_event(subagent_event(agent="risk", title="auto_execute", parent="execute_sql", node_id="risk:1", status="completed"))
     panel.append_live_event(progress_event(stage="execute_sql", title="done", status="completed", kind="tool", step=2, duration_ms=40))
     panel.end_live()
+    tree = panel._tree
     # Summary row + 2 step rows.
-    assert panel.topLevelItemCount() == 3
+    assert tree.topLevelItemCount() == 3
     assert not panel.is_empty()
-    # Summary row shows a coherent line.
-    assert "step" in panel.topLevelItem(0).text(1).lower() or "done" in panel.topLevelItem(0).text(1).lower()
+    # The first tool step has two parallel sub-agent siblings (the two db scans).
+    step1 = tree.topLevelItem(1)
+    assert step1.childCount() == 2
+
+
+def test_trace_panel_click_shows_detail(qapp):
+    from dbaide.desktop.components.trace import TracePanel
+
+    panel = TracePanel()
+    panel.begin_live()
+    panel.append_live_event(progress_event(stage="execute_sql", title="ran query", detail="SELECT 1",
+                                            status="completed", kind="tool", step=1, duration_ms=7))
+    tree = panel._tree
+    step = tree.topLevelItem(1)
+    panel._on_click(step, 1)
+    text = panel._detail.toPlainText()
+    assert "execute_sql" in text
+    assert "SELECT 1" in text
+    assert "7 ms" in text
 
 
 def test_trace_panel_load_persisted_events(qapp):
@@ -55,7 +74,8 @@ def test_trace_panel_load_persisted_events(qapp):
         {"stage": "workflow_completed", "title": "done", "status": "completed", "kind": "agent", "timestamp": 3.0},
     ])
     # Framing events filtered; one real step + summary.
-    assert panel.topLevelItemCount() == 2
+    assert panel._tree.topLevelItemCount() == 2
+    assert panel.copy_text()  # copy works on the new widget
 
 
 def test_build_dialog_options(qapp):

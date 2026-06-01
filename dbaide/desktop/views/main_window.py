@@ -856,11 +856,7 @@ class MainWindow(QMainWindow):
         self.topbar.set_asset_status(asset_status)
 
     def copy_trace(self) -> None:
-        lines = []
-        for i in range(self.right.trace.topLevelItemCount()):
-            item = self.right.trace.topLevelItem(i)
-            lines.append("\t".join(item.text(c) for c in range(3)))
-        QApplication.clipboard().setText("\n".join(lines))
+        QApplication.clipboard().setText(self.right.trace.copy_text())
 
     def _empty_action(self, action_id: str) -> None:
         if action_id == "settings":

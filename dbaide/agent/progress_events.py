@@ -45,6 +45,7 @@ PHASE_LABELS: dict[str, str] = {
     "profile_table": "Profiling data",
     "synthesize_schema_answer": "Answering",
     "ask_user": "Waiting for you",
+    "build_assets": "Building assets",
 }
 
 # Friendly names for the named sub-agents that report nested progress.

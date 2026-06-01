@@ -143,3 +143,62 @@ def test_finalize_failed_keeps_failure():
     _feed(m, [progress_event(stage="execute_sql", title="x", status="running", kind="tool", step=1)])
     m.finalize(failed=True)
     assert m.overall == "failed"
+
+
+def test_parallel_subtasks_are_siblings_via_node_id():
+    m = TraceModel()
+    _feed(m, [
+        progress_event(stage="discover_schema", title="discover", status="running", kind="tool", step=1),
+        subagent_event(agent="schema_link", title="db1: kept 3", parent="discover_schema", node_id="schema:db1", status="completed"),
+        subagent_event(agent="schema_link", title="db2: kept 1", parent="discover_schema", node_id="schema:db2", status="completed"),
+    ])
+    step = m.steps[0]
+    assert len(step.children) == 2  # two parallel db scans, same level
+    assert {c.id for c in step.children} == {"schema:db1", "schema:db2"}
+
+
+def test_node_id_merges_running_then_done():
+    m = TraceModel()
+    _feed(m, [
+        progress_event(stage="validate_joins", title="validate", status="running", kind="tool", step=1),
+        subagent_event(agent="join_validate", title="Sample check a→b", parent="validate_joins", node_id="jv:a->b", status="info"),
+        subagent_event(agent="join_validate", title="a→b · one_to_many · 80%", parent="validate_joins", node_id="jv:a->b", status="completed"),
+    ])
+    step = m.steps[0]
+    assert len(step.children) == 1            # one relation = one node, updated
+    node = step.children[0]
+    assert node.status == "completed"
+    assert "80%" in node.title
+
+
+def test_arbitrary_depth_via_parent_id():
+    m = TraceModel()
+    _feed(m, [
+        progress_event(stage="discover_schema", title="d", status="running", kind="tool", step=1),
+        subagent_event(agent="schema_link", title="db1", parent="discover_schema", node_id="schema:db1"),
+        subagent_event(agent="schema_link", title="table users", node_id="schema:db1:users", parent_id="schema:db1"),
+    ])
+    db = m.find("schema:db1")
+    assert db is not None
+    assert len(db.children) == 1
+    assert db.children[0].id == "schema:db1:users"
+
+
+def test_find_and_descendant_agents():
+    m = TraceModel()
+    _feed(m, [
+        progress_event(stage="execute_sql", title="x", status="running", kind="tool", step=1),
+        subagent_event(agent="risk", title="ok", parent="execute_sql", node_id="risk:1", status="completed"),
+        subagent_event(agent="explain", title="10 rows", parent="execute_sql", node_id="explain:1", status="completed"),
+    ])
+    assert m.find("step:1") is not None
+    assert set(m.active_agents) == {"Risk gate", "Cost estimate"}
+
+
+def test_raw_event_preserved_for_detail_view():
+    m = TraceModel()
+    m.ingest(progress_event(stage="execute_sql", title="x", detail="SELECT 1", status="completed",
+                            kind="tool", step=1, duration_ms=5), now=1.0)
+    node = m.steps[0]
+    assert node.raw.get("detail") == "SELECT 1"
+    assert node.raw.get("stage") == "execute_sql"
