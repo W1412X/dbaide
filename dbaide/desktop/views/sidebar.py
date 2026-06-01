@@ -21,9 +21,10 @@ class Sidebar(QWidget):
         layout = QVBoxLayout(self)
         layout.setContentsMargins(12, 12, 12, 12)
         layout.setSpacing(10)
+        from dbaide.i18n import t
         layout.addWidget(SectionLabel("SCHEMA"))
         self.search = QLineEdit()
-        self.search.setPlaceholderText("Filter tree · Enter to semantic search")
+        self.search.setPlaceholderText(t("sidebar.filter"))
         self.search.setFixedHeight(34)
         self.search.textChanged.connect(self._filter_tree)
         self.search.returnPressed.connect(self._semantic_search)
@@ -33,7 +34,7 @@ class Sidebar(QWidget):
         self.tree.itemSelectionChanged.connect(self._selection_changed)
         self.tree.itemDoubleClicked.connect(self._double_clicked)
         layout.addWidget(self.tree, 1)
-        self.settings_btn = compact_button("Settings", width=120)
+        self.settings_btn = compact_button(t("topbar.settings"), width=120)
         self.settings_btn.clicked.connect(self.settings_requested.emit)
         layout.addWidget(self.settings_btn, alignment=Qt.AlignmentFlag.AlignHCenter)
         self._rows: list[dict[str, Any]] = []

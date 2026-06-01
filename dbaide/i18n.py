@@ -92,6 +92,57 @@ _STRINGS: dict[str, dict[str, str]] = {
     "toast.model_removed": {"en": "Model removed", "zh": "模型已删除"},
     "toast.resources_saved": {"en": "Resource limits saved", "zh": "资源限制已保存"},
     "toast.language_changed": {"en": "Language updated", "zh": "语言已更新"},
+    "toast.assets_built": {"en": "Assets built", "zh": "资产已构建"},
+    "toast.no_databases": {"en": "No databases found on this connection", "zh": "该连接下未发现数据库"},
+    "toast.select_database": {"en": "Select at least one database", "zh": "请至少选择一个数据库"},
+    "toast.db_scope": {"en": "Database scope: {scope}", "zh": "数据库范围：{scope}"},
+    "toast.model": {"en": "Model: {name}", "zh": "模型：{name}"},
+    "toast.waiting_reply": {"en": "Waiting for your reply", "zh": "等待你的回复"},
+    "toast.connection_ok": {"en": "Connection OK", "zh": "连接正常"},
+    # SQL tab
+    "sql.run": {"en": "Run", "zh": "运行"},
+    "sql.run_tooltip": {"en": "Run read-only query", "zh": "运行只读查询"},
+    "sql.validate": {"en": "Validate SQL", "zh": "校验 SQL"},
+    "sql.explain": {"en": "Explain SQL", "zh": "解释 SQL"},
+    "sql.placeholder": {
+        "en": "Paste SQL here. Only single read-only statements are allowed.",
+        "zh": "在此粘贴 SQL，仅允许单条只读语句。",
+    },
+    # Sidebar
+    "sidebar.filter": {"en": "Filter tree · Enter to semantic search", "zh": "筛选结构树 · 回车进行语义搜索"},
+    # Ask tab empty state
+    "ask.open_settings": {"en": "Open Settings", "zh": "打开设置"},
+    "note.error": {"en": "Error", "zh": "错误"},
+    "note.assets_built": {"en": "Assets built", "zh": "资产已构建"},
+    # Build dialog
+    "build.title": {"en": "Build Assets", "zh": "构建资产"},
+    "build.hint": {
+        "en": "Unchecked databases keep their existing offline assets.",
+        "zh": "未勾选的数据库将保留其现有的离线资产。",
+    },
+    "build.select_for": {"en": "Select databases to build for `{conn}`", "zh": "选择要为 `{conn}` 构建的数据库"},
+    "build.select_all": {"en": "Select all", "zh": "全选"},
+    "build.select_none": {"en": "Select none", "zh": "全不选"},
+    "build.profile_depth": {"en": "Profile depth", "zh": "画像深度"},
+    "build.concurrency": {"en": "Concurrency (workers)", "zh": "并发数（worker）"},
+    "build.time_budget": {"en": "Total time budget", "zh": "总时间预算"},
+    "build.time_suffix": {"en": " s  (0 = unlimited)", "zh": " 秒（0 = 不限）"},
+    "build.profile_note": {
+        "en": "Connection load profile: {profile}. Large tables auto-fall back to metadata-only profiling.",
+        "zh": "连接负载档位：{profile}。大表会自动降级为仅元数据画像。",
+    },
+    # Connection dialog
+    "conn.browse": {"en": "Browse…", "zh": "浏览…"},
+    "conn.add_title": {"en": "Add Connection", "zh": "添加连接"},
+    # Right-panel header menu
+    "toast.join_saved": {"en": "Join saved", "zh": "关联已保存"},
+    "toast.join_updated": {"en": "Join updated", "zh": "关联已更新"},
+    "toast.join_deleted": {"en": "Join deleted", "zh": "关联已删除"},
+    "toast.enter_question": {"en": "Enter a question first", "zh": "请先输入问题"},
+    "toast.enter_reply": {"en": "Enter a reply first", "zh": "请先输入回复"},
+    "panel.copy_trace": {"en": "Copy Trace", "zh": "复制轨迹"},
+    "panel.clear_trace": {"en": "Clear Trace", "zh": "清空轨迹"},
+    "panel.clear_conversation": {"en": "Clear Conversation", "zh": "清空对话"},
 }
 
 _current = DEFAULT_LANGUAGE

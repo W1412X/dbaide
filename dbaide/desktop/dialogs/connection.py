@@ -69,7 +69,8 @@ class ConnectionForm(QWidget):
             "staging: balanced. dev: highest concurrency and limits."
         )
 
-        browse = compact_button("Browse…", width=88)
+        from dbaide.i18n import t
+        browse = compact_button(t("conn.browse"), width=88)
         browse.clicked.connect(self._browse)
         path_row = QWidget()
         path_layout = QHBoxLayout(path_row)
@@ -166,7 +167,8 @@ from PyQt6.QtWidgets import QDialog, QDialogButtonBox  # noqa: E402
 class ConnectionDialog(QDialog):
     def __init__(self, parent=None, *, conn_type: str = "sqlite") -> None:
         super().__init__(parent)
-        self.setWindowTitle("Add Connection")
+        from dbaide.i18n import t
+        self.setWindowTitle(t("conn.add_title"))
         self.setMinimumWidth(480)
         layout = QVBoxLayout(self)
         self.form = ConnectionForm(conn_type=conn_type)

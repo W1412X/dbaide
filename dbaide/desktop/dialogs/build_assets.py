@@ -33,7 +33,8 @@ class BuildAssetsDialog(QDialog):
         parent=None,
     ) -> None:
         super().__init__(parent)
-        self.setWindowTitle("Build Assets")
+        from dbaide.i18n import t
+        self.setWindowTitle(t("build.title"))
         self.setModal(True)
         self.resize(440, 520)
         self.setMinimumSize(360, 360)
@@ -43,12 +44,12 @@ class BuildAssetsDialog(QDialog):
         root.setContentsMargins(20, 20, 20, 20)
         root.setSpacing(12)
 
-        title = QLabel(f"Select databases to build for `{connection_name}`")
+        title = QLabel(t("build.select_for", conn=connection_name))
         title.setWordWrap(True)
         title.setStyleSheet(f"color: {Theme.TEXT}; font-size: 14px; font-weight: 600;")
         root.addWidget(title)
 
-        hint = QLabel("Unchecked databases keep their existing offline assets.")
+        hint = QLabel(t("build.hint"))
         hint.setWordWrap(True)
         hint.setProperty("muted", True)
         root.addWidget(hint)
@@ -82,8 +83,8 @@ class BuildAssetsDialog(QDialog):
 
         select_row = QHBoxLayout()
         select_row.setSpacing(8)
-        select_all = compact_button("Select all", width=96)
-        select_none = compact_button("Select none", width=104)
+        select_all = compact_button(t("build.select_all"), width=96)
+        select_none = compact_button(t("build.select_none"), width=104)
         select_all.clicked.connect(lambda: self._set_all(True))
         select_none.clicked.connect(lambda: self._set_all(False))
         select_row.addWidget(select_all)
@@ -99,23 +100,20 @@ class BuildAssetsDialog(QDialog):
         self._profile.addItems(["none", "light", "auto", "all"])
         idx = max(0, self._profile.findText(str(default_profile_mode or "light")))
         self._profile.setCurrentIndex(idx)
-        options.addRow("Profile depth", self._profile)
+        options.addRow(t("build.profile_depth"), self._profile)
 
         self._workers = QSpinBox()
         self._workers.setRange(1, 32)
         self._workers.setValue(max(1, int(default_max_workers or 1)))
-        options.addRow("Concurrency (workers)", self._workers)
+        options.addRow(t("build.concurrency"), self._workers)
 
         self._timeout = QSpinBox()
         self._timeout.setRange(0, 7200)
         self._timeout.setValue(3600)
-        self._timeout.setSuffix(" s  (0 = unlimited)")
-        options.addRow("Total time budget", self._timeout)
+        self._timeout.setSuffix(t("build.time_suffix"))
+        options.addRow(t("build.time_budget"), self._timeout)
 
-        profile_hint = QLabel(
-            f"Connection load profile: {load_profile}. "
-            "Large tables auto-fall back to metadata-only profiling."
-        )
+        profile_hint = QLabel(t("build.profile_note", profile=load_profile))
         profile_hint.setWordWrap(True)
         profile_hint.setProperty("muted", True)
         options.addRow(profile_hint)
@@ -124,8 +122,8 @@ class BuildAssetsDialog(QDialog):
         actions = QHBoxLayout()
         actions.setSpacing(8)
         actions.addStretch(1)
-        cancel = compact_button("Cancel", width=88)
-        build = compact_button("Build", primary=True, width=88)
+        cancel = compact_button(t("btn.cancel"), width=88)
+        build = compact_button(t("btn.build"), primary=True, width=88)
         cancel.clicked.connect(self.reject)
         build.clicked.connect(self._accept_if_valid)
         self._build_btn = build

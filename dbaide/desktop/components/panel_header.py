@@ -51,10 +51,11 @@ class PanelHeader(QWidget):
         self._btn_joins.clicked.connect(self.joins_clicked.emit)
         action_row.addWidget(self._btn_history)
         action_row.addWidget(self._btn_joins)
+        from dbaide.i18n import t
         self._menu = MenuButton(icon=more_icon(), tooltip="Panel actions", icon_only=True)
-        self._menu.add_action("Copy Trace", self.copy_trace_requested.emit)
-        self._menu.add_action("Clear Trace", self.clear_trace_requested.emit)
-        self._menu.add_action("Clear Conversation", self.clear_conversation_requested.emit)
+        self._menu.add_action(t("panel.copy_trace"), self.copy_trace_requested.emit)
+        self._menu.add_action(t("panel.clear_trace"), self.clear_trace_requested.emit)
+        self._menu.add_action(t("panel.clear_conversation"), self.clear_conversation_requested.emit)
         action_row.addWidget(self._menu)
         row.addWidget(actions, 0, Qt.AlignmentFlag.AlignVCenter)
 

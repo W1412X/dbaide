@@ -267,7 +267,7 @@ class MainWindow(QMainWindow):
 
     def _database_changed(self, _text: str) -> None:
         database = self.current_database()
-        self.toast(f"Database scope: {database or 'auto'}")
+        self.toast(_i18n_t("toast.db_scope", scope=database or "auto"))
 
     def _refresh_connection_context(self, conn_name: str) -> None:
         conns = self.bootstrap.get("connections") or []
@@ -334,7 +334,7 @@ class MainWindow(QMainWindow):
             payload = {**payload, "connection_name": conn, "source": "user"}
             self.service.dispatch("add_join", payload)
             self.bus.emit(JOINS_CHANGED, {"instance": conn})
-            self.toast("Join saved")
+            self.toast(_i18n_t("toast.join_saved"))
         except Exception as exc:
             self.toast(str(exc))
 
@@ -345,7 +345,7 @@ class MainWindow(QMainWindow):
         try:
             self.service.dispatch("update_join", {**payload, "connection_name": conn})
             self.bus.emit(JOINS_CHANGED, {"instance": conn})
-            self.toast("Join updated")
+            self.toast(_i18n_t("toast.join_updated"))
         except Exception as exc:
             self.toast(str(exc))
 
@@ -356,7 +356,7 @@ class MainWindow(QMainWindow):
         try:
             self.service.dispatch("delete_join", {"connection_name": conn, "id": join_id})
             self.bus.emit(JOINS_CHANGED, {"instance": conn})
-            self.toast("Join deleted")
+            self.toast(_i18n_t("toast.join_deleted"))
         except Exception as exc:
             self.toast(str(exc))
 
@@ -369,11 +369,11 @@ class MainWindow(QMainWindow):
             self._submit_clarification(question)
             return
         if not question:
-            self.toast("Enter a question first")
+            self.toast(_i18n_t("toast.enter_question"))
             return
         conn = self.current_connection()
         if not conn:
-            self.toast("Select a connection first")
+            self.toast(_i18n_t("toast.select_connection"))
             return
         self._last_question = question
         database = self.current_database()
@@ -392,14 +392,14 @@ class MainWindow(QMainWindow):
     def _submit_clarification(self, reply: str) -> None:
         reply = str(reply or "").strip()
         if not reply:
-            self.toast("Enter a reply first")
+            self.toast(_i18n_t("toast.enter_reply"))
             return
         if not self._pending_resume:
             self.submit_composer(reply, self.composer.policy())
             return
         conn = self.current_connection()
         if not conn:
-            self.toast("Select a connection first")
+            self.toast(_i18n_t("toast.select_connection"))
             return
         database = self.current_database()
         policy = self.composer.policy()
@@ -439,7 +439,7 @@ class MainWindow(QMainWindow):
     def build_assets(self) -> None:
         conn = self.current_connection()
         if not conn:
-            self.toast("Select a connection first")
+            self.toast(_i18n_t("toast.select_connection"))
             return
 
         conns = {c["name"]: c for c in self.bootstrap.get("connections") or []}
@@ -450,7 +450,7 @@ class MainWindow(QMainWindow):
         def on_loaded(result: dict[str, Any]) -> None:
             databases = list(result.get("databases") or [])
             if not databases:
-                self.toast("No databases found on this connection")
+                self.toast(_i18n_t("toast.no_databases"))
                 return
             dialog = BuildAssetsDialog(
                 connection_name=conn,
@@ -464,7 +464,7 @@ class MainWindow(QMainWindow):
                 return
             selected = dialog.selected_databases()
             if not selected:
-                self.toast("Select at least one database")
+                self.toast(_i18n_t("toast.select_database"))
                 return
             self._start_build_assets(conn, selected, dialog.build_options())
 
@@ -552,7 +552,7 @@ class MainWindow(QMainWindow):
     def _settings_save_resources(self, payload: dict[str, Any]) -> None:
         try:
             self.service.dispatch("save_resource_defaults", payload)
-            self.toast("Resource limits saved")
+            self.toast(_i18n_t("toast.resources_saved"))
         except Exception as exc:
             self.fail(exc)
 
@@ -564,7 +564,7 @@ class MainWindow(QMainWindow):
             self.bus.emit(MODELS_CHANGED, {"model": model_name})
             active = self.bootstrap.get("model") or {}
             label = str(active.get("model") or model_name)
-            self.toast(f"Model: {label}")
+            self.toast(_i18n_t("toast.model", name=label))
         except Exception as exc:
             self.fail(exc)
 
@@ -577,7 +577,7 @@ class MainWindow(QMainWindow):
             if payload.get("make_default"):
                 dialog._default_connection = payload["name"]
             dialog._reload_connection_list()
-            self.toast("Connection saved")
+            self.toast(_i18n_t("toast.conn_saved"))
             self.bus.emit(CONNECTIONS_CHANGED, {"instance": payload.get("name")})
 
         def on_fail(exc: object) -> None:
@@ -590,7 +590,7 @@ class MainWindow(QMainWindow):
         try:
             self.service.dispatch("delete_connection", {"name": name})
             self.bus.emit(CONNECTIONS_CHANGED, {"instance": name})
-            self.toast("Connection removed")
+            self.toast(_i18n_t("toast.conn_removed"))
         except Exception as exc:
             self.fail(exc)
 
@@ -599,7 +599,7 @@ class MainWindow(QMainWindow):
 
         def on_done(result: dict[str, Any]) -> None:
             dialog.set_test_busy(False, target="connection")
-            dialog.show_test_result(True, str(result.get("message") or "Connection OK"), target="connection")
+            dialog.show_test_result(True, str(result.get("message") or _i18n_t("toast.connection_ok")), target="connection")
 
         def on_fail(exc: object) -> None:
             dialog.set_test_busy(False, target="connection")
@@ -616,7 +616,7 @@ class MainWindow(QMainWindow):
             if payload.get("make_default"):
                 dialog._default_model = payload["name"]
             dialog._reload_model_list()
-            self.toast("Model saved")
+            self.toast(_i18n_t("toast.model_saved"))
             self.bus.emit(MODELS_CHANGED, {"model": payload.get("name")})
 
         def on_fail(exc: object) -> None:
@@ -629,7 +629,7 @@ class MainWindow(QMainWindow):
         try:
             self.service.dispatch("delete_model", {"name": name})
             self.bus.emit(MODELS_CHANGED, {"model": name})
-            self.toast("Model removed")
+            self.toast(_i18n_t("toast.model_removed"))
         except Exception as exc:
             self.fail(exc)
 
@@ -693,7 +693,7 @@ class MainWindow(QMainWindow):
     def search_assets(self, query: str) -> None:
         conn = self.current_connection()
         if not conn:
-            self.toast("Select a connection first")
+            self.toast(_i18n_t("toast.select_connection"))
             return
         self._last_question = query
         self.run_action("search_assets", {
@@ -728,7 +728,7 @@ class MainWindow(QMainWindow):
         # Without this, a second worker could run concurrently on the shared
         # DesktopService/adapters and corrupt state when the orphan finishes.
         if self.running or self._current_worker is not None:
-            self.toast("A task is already running")
+            self.toast(_i18n_t("toast.task_running"))
             return
         self._last_action = action
         self.running = True
@@ -745,7 +745,7 @@ class MainWindow(QMainWindow):
     def stop_task(self) -> None:
         if self._current_worker and not self._current_worker.is_cancelled:
             self._current_worker.cancel()
-            self.toast("Cancelling…")
+            self.toast(_i18n_t("toast.cancelling"))
             return
         # Already cancelled / no worker: reset the UI. The run_action guard keeps a
         # new task from starting until the (possibly orphaned) worker truly finishes.
@@ -783,18 +783,18 @@ class MainWindow(QMainWindow):
             self.right.trace.end_live()
             stats = result.get("stats", {}) or {}
             self.ask_tab.append_note(
-                "Assets built",
+                _i18n_t("note.assets_built"),
                 f"```json\n{json.dumps(stats, ensure_ascii=False, indent=2)}\n```",
             )
             if not stats.get("estimated_queries"):  # a dry-run changes no assets
                 self.bus.emit(ASSETS_CHANGED, {"instance": self.current_connection()})
             self.switch_tab("Ask")
             if stats.get("estimated_queries"):
-                self.toast(f"Dry-run: ~{stats.get('estimated_queries')} queries estimated")
+                self.toast(f"≈{stats.get('estimated_queries')} queries (dry-run)")
             else:
                 self.toast(
-                    f"Assets built · {stats.get('total_queries', 0)} queries "
-                    f"(peak {stats.get('peak_inflight', 0)} in-flight)"
+                    _i18n_t("toast.assets_built")
+                    + f" · {stats.get('total_queries', 0)} queries · peak {stats.get('peak_inflight', 0)}"
                 )
             return
         if action == "ask":
@@ -805,13 +805,13 @@ class MainWindow(QMainWindow):
                 self.ask_tab.append_result(result)
                 self.right.show_trace(result.get("trace") or [])
                 self.composer.set_placeholder(_i18n_t("composer.placeholder.reply"))
-                self.toast("Waiting for your reply")
+                self.toast(_i18n_t("toast.waiting_reply"))
                 return
             self._pending_resume = None
             if str(result.get("status") or "") == "cancelled":
                 if getattr(self.ask_tab, "_turn_open", False):
                     self.ask_tab.finish_turn_error("**Cancelled**: Task stopped by user.")
-                self.toast("Cancelled")
+                self.toast(_i18n_t("toast.cancelled"))
                 return
             self.ask_tab.append_result(result)
             # Keep the rich live trace (finalized above); only fall back to the
@@ -857,7 +857,7 @@ class MainWindow(QMainWindow):
             self.switch_tab("Ask")
             return
         if action == "test_connection":
-            self.toast(str(result.get("message") or "Connection OK"))
+            self.toast(str(result.get("message") or _i18n_t("toast.connection_ok")))
 
     def handle_failure(self, exc: object) -> None:
         self._current_worker = None
@@ -868,7 +868,7 @@ class MainWindow(QMainWindow):
         if isinstance(exc, CancelledError):
             if getattr(self.ask_tab, "_turn_open", False):
                 self.ask_tab.finish_turn_error("**Cancelled**: Task stopped by user.")
-            self.toast("Cancelled")
+            self.toast(_i18n_t("toast.cancelled"))
             self._restore_status_badge()
             return
         self.fail(exc, modal=self._last_action not in ("ask", "preview_asset", "search_assets"))
@@ -903,9 +903,9 @@ class MainWindow(QMainWindow):
         if getattr(self.ask_tab, "_turn_open", False):
             self.ask_tab.finish_turn_error(msg)
         elif self._last_action in ("ask", "preview_asset", "search_assets"):
-            self.ask_tab.append_note("Error", msg)
+            self.ask_tab.append_note(_i18n_t("note.error"), msg)
         else:
-            self.ask_tab.append_note("Error", msg)
+            self.ask_tab.append_note(_i18n_t("note.error"), msg)
         if self._last_action in ("validate_sql", "execute_sql", "explain_sql"):
             self.sql_tab.show_error(str(exc))
         if modal:

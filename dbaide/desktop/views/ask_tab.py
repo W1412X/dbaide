@@ -30,7 +30,8 @@ class AskTab(QWidget):
             "Open Settings to add a connection and configure the model.",
             [],
         )
-        self._empty_btn = compact_button("Open Settings", primary=True, width=128)
+        from dbaide.i18n import t
+        self._empty_btn = compact_button(t("ask.open_settings"), primary=True, width=128)
         self._empty_btn.clicked.connect(lambda: self.empty_action.emit("settings"))
         empty_layout.addWidget(self.empty)
         empty_actions = QWidget()
