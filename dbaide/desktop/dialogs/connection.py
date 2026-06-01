@@ -82,21 +82,27 @@ class ConnectionForm(QWidget):
         scroll.setWidget(inner)
         outer.addWidget(scroll)
 
-        self.type_select.currentTextChanged.connect(self._sync_fields)
-        self._sync_fields(self.type_select.currentText())
+        self.type_select.currentTextChanged.connect(self._on_type_changed)
+        self._sync_fields(self.type_select.currentText(), reset_port=True)
+
+    def _on_type_changed(self, conn_type: str) -> None:
+        self._sync_fields(conn_type, reset_port=True)
 
     def load(self, payload: dict | None = None) -> None:
         payload = payload or {}
         self.name.setText(str(payload.get("name") or ""))
+        self.type_select.blockSignals(True)
         self.type_select.setCurrentText(str(payload.get("type") or "sqlite"))
+        self.type_select.blockSignals(False)
         self.path.setText(str(payload.get("path") or ""))
         self.host.setText(str(payload.get("host") or "localhost"))
-        if payload.get("port"):
-            self.port.setValue(int(payload["port"]))
+        port = payload.get("port")
+        if port not in (None, ""):
+            self.port.setValue(int(port))
         self.database.setText(str(payload.get("database") or ""))
         self.user.setText(str(payload.get("user") or ""))
         self.password.clear()
-        self._sync_fields(self.type_select.currentText())
+        self._sync_fields(self.type_select.currentText(), reset_port=port in (None, ""))
 
     def clear(self, *, conn_type: str = "sqlite") -> None:
         self.name.clear()
@@ -106,7 +112,7 @@ class ConnectionForm(QWidget):
         self.database.clear()
         self.user.clear()
         self.password.clear()
-        self._sync_fields(conn_type)
+        self._sync_fields(conn_type, reset_port=True)
 
     def _browse(self) -> None:
         path, _ = QFileDialog.getOpenFileName(self, "Select SQLite database")
@@ -115,15 +121,16 @@ class ConnectionForm(QWidget):
             if not self.name.text().strip():
                 self.name.setText(path.rsplit("/", 1)[-1].split(".")[0])
 
-    def _sync_fields(self, conn_type: str) -> None:
+    def _sync_fields(self, conn_type: str, *, reset_port: bool = False) -> None:
         sqlite = conn_type == "sqlite"
         self.path.setEnabled(sqlite)
         for widget in (self.host, self.port, self.database, self.user, self.password):
             widget.setEnabled(not sqlite)
-        if conn_type in {"mysql", "mariadb"}:
-            self.port.setValue(3306)
-        elif conn_type in {"postgres", "postgresql"}:
-            self.port.setValue(5432)
+        if reset_port:
+            if conn_type in {"mysql", "mariadb"}:
+                self.port.setValue(3306)
+            elif conn_type in {"postgres", "postgresql"}:
+                self.port.setValue(5432)
 
     def payload(self, *, make_default: bool = False) -> dict:
         return {
