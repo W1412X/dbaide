@@ -1,0 +1,5 @@
+# Core runtime dependencies (mirrors pyproject.toml [project.dependencies])
+# Install: pip install -r requirements.txt
+
+pymysql>=1.1.0
+psycopg[binary]>=3.1.0

@@ -7,6 +7,7 @@ from typing import Any, Callable
 from PyQt6.QtCore import Qt, QSettings, QThreadPool
 from PyQt6.QtWidgets import (
     QApplication,
+    QDialog,
     QHBoxLayout,
     QMainWindow,
     QMessageBox,
@@ -19,6 +20,7 @@ from PyQt6.QtWidgets import (
 )
 
 from dbaide.desktop.components.composer import ComposerWidget
+from dbaide.desktop.dialogs.build_assets import BuildAssetsDialog
 from dbaide.desktop.dialogs.settings import SettingsDialog
 from dbaide.agent.progress_events import progress_label
 from dbaide.desktop.theme import APP_STYLE
@@ -416,11 +418,39 @@ class MainWindow(QMainWindow):
         if not conn:
             self.toast("Select a connection first")
             return
+
+        def on_loaded(result: dict[str, Any]) -> None:
+            databases = list(result.get("databases") or [])
+            if not databases:
+                self.toast("No databases found on this connection")
+                return
+            if len(databases) == 1:
+                self._start_build_assets(conn, [str(databases[0]["name"])])
+                return
+            dialog = BuildAssetsDialog(
+                connection_name=conn,
+                databases=databases,
+                parent=self,
+            )
+            if dialog.exec() != QDialog.DialogCode.Accepted:
+                return
+            selected = dialog.selected_databases()
+            if not selected:
+                self.toast("Select at least one database")
+                return
+            self._start_build_assets(conn, selected)
+
+        self._run_background("list_databases", {"name": conn}, on_loaded)
+
+    def _start_build_assets(self, conn: str, databases: list[str]) -> None:
         self.topbar.set_asset_status("building")
         self.topbar.set_global_status("Building assets", "building")
         self.right.trace.begin_live()
         self.right.focus_trace()
-        self.run_action("build_assets", {"name": conn})
+        payload: dict[str, Any] = {"name": conn}
+        if databases:
+            payload["databases"] = databases
+        self.run_action("build_assets", payload)
 
     def add_connection(self, conn_type: str = "sqlite") -> None:
         self.open_settings("connections")

@@ -94,6 +94,24 @@ def test_gui_build_assets_handles_empty_database(tmp_path):
     assert stats["errors"] == []
 
 
+def test_gui_build_assets_accepts_database_subset(tmp_path):
+    db = tmp_path / "app.db"
+    make_db(db)
+    cfg = ConfigManager(tmp_path / "config.toml")
+    store = AssetStore(tmp_path / "assets")
+    service = DesktopService(cfg, store)
+    conn = ConnectionConfig(name="local", type="sqlite", path=str(db))
+    cfg.upsert_connection(conn, make_default=True)
+    payload = service.build_assets({
+        "name": "local",
+        "databases": ["main"],
+        "profile_mode": "auto",
+        "top_k": 10,
+        "sample_limit": 20,
+    })
+    assert payload["stats"]["databases"] == 1
+
+
 def test_save_model_preserves_api_key_when_field_left_blank(tmp_path):
     cfg = ConfigManager(tmp_path / "config.toml")
     service = DesktopService(cfg, AssetStore(tmp_path / "assets"))

@@ -189,14 +189,6 @@ def _disclosed_schemas_for_tables(
     return schemas
 
 
-def collect_relations_declared_only(
-    orchestrator: AskOrchestrator,
-    tables: list[tuple[str, str]],
-) -> list[dict[str, Any]]:
-    """FK-only collection (legacy helper)."""
-    return collect_relations(orchestrator, tables, infer_semantic=False)
-
-
 def disclosed_table_keys(orchestrator: AskOrchestrator) -> list[tuple[str, str]]:
     """(database, table) pairs already described in the tool loop."""
     keys: list[tuple[str, str]] = []

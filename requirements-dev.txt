@@ -1,0 +1,7 @@
+# Development, test, and packaging
+# Install: pip install -r requirements-dev.txt
+
+-r requirements-gui.txt
+pytest>=8.0.0
+pyinstaller>=6.0.0
+build>=1.0.0

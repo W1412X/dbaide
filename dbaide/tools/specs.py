@@ -53,23 +53,12 @@ class ToolSpec:
 # Permission levels
 SAFE_METADATA = "safe_metadata"
 SAFE_PROFILE = "safe_profile"
-COSTLY_SCAN = "costly_scan"
 SQL_VALIDATE = "sql_validate"
 SQL_EXECUTE = "sql_execute"
 CONFIG_WRITE = "config_write"
 
 
-# Pre-defined tool specs
-SEARCH_ASSETS = ToolSpec(
-    name="search_assets",
-    description="Search offline schema assets by keyword",
-    input_schema={"query": "string", "instances": "list[string]", "limit": "integer"},
-    output_schema={"hits": "list[SearchHit]"},
-    permission_level=SAFE_METADATA,
-    timeout_seconds=5,
-    safe_for_auto_call=True,
-)
-
+# Pre-defined tool specs (registered tools only; see agent/toolkit.py)
 LIST_DATABASES = ToolSpec(
     name="list_databases",
     description="List all databases in a connection",
@@ -206,26 +195,6 @@ DELETE_JOIN = ToolSpec(
     safe_for_auto_call=True,
 )
 
-SHOW_TABLE_DOC = ToolSpec(
-    name="show_table_doc",
-    description="Show offline asset documentation for a table",
-    input_schema={"instance": "string", "database": "string", "table": "string"},
-    output_schema={"doc": "dict"},
-    permission_level=SAFE_METADATA,
-    timeout_seconds=5,
-    safe_for_auto_call=True,
-)
-
-SHOW_COLUMN_DOC = ToolSpec(
-    name="show_column_doc",
-    description="Show offline asset documentation for a column",
-    input_schema={"instance": "string", "database": "string", "table": "string", "column": "string"},
-    output_schema={"doc": "dict"},
-    permission_level=SAFE_METADATA,
-    timeout_seconds=5,
-    safe_for_auto_call=True,
-)
-
 VALIDATE_SQL = ToolSpec(
     name="validate_sql",
     description="Validate SQL for safety and correctness",
@@ -278,26 +247,6 @@ PROFILE_TABLE = ToolSpec(
     safe_for_auto_call=True,
 )
 
-PROFILE_COLUMN = ToolSpec(
-    name="profile_column",
-    description="Profile a single column",
-    input_schema={"table": "string", "column": "string", "database": "string", "top_k": "integer"},
-    output_schema={"profile": "ColumnProfile"},
-    permission_level=SAFE_PROFILE,
-    timeout_seconds=30,
-    safe_for_auto_call=True,
-)
-
-BUILD_ASSETS = ToolSpec(
-    name="build_assets",
-    description="Build offline schema assets",
-    input_schema={"connection": "string", "databases": "list[string]", "profile_mode": "string"},
-    output_schema={"stats": "BuildStats"},
-    permission_level=COSTLY_SCAN,
-    timeout_seconds=600,
-    safe_for_auto_call=False,
-)
-
 ASK_USER = ToolSpec(
     name="ask_user",
     description="Ask the user a clarification question",
@@ -335,15 +284,5 @@ SYNTHESIZE_SCHEMA_ANSWER = ToolSpec(
     output_schema={"answer": "string"},
     permission_level=SAFE_METADATA,
     timeout_seconds=30,
-    safe_for_auto_call=True,
-)
-
-REQUEST_CONFIRMATION = ToolSpec(
-    name="request_confirmation",
-    description="Request user confirmation before executing",
-    input_schema={"reason": "string", "sql": "string", "risk_level": "string"},
-    output_schema={"confirmed": "boolean"},
-    permission_level=SAFE_METADATA,
-    timeout_seconds=300,
     safe_for_auto_call=True,
 )

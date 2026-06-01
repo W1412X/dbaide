@@ -138,17 +138,6 @@ def test_asset_builder_foreign_keys_from_adapter(tmp_path):
     assert "semantic_tags" not in user_id_doc
 
 
-def test_asset_builder_discovers_all_databases(tmp_path):
-    conn = ConnectionConfig(name="analysis", type="mysql", database="productdata")
-    adapter = FakeAdapter(conn)
-    store = AssetStore(tmp_path / "assets")
-
-    stats = AssetBuilder(connection=conn, adapter=adapter, store=store).build(profile_mode="none", sample=False)
-
-    assert adapter.list_databases_called is True
-    assert stats.databases >= 1
-
-
 class FakeAdapter(DatabaseAdapter):
     dialect = "mysql"
 
@@ -183,3 +172,74 @@ class FakeAdapter(DatabaseAdapter):
     def profile_column(self, table: str, column: str, *, database: str = "", top_k: int = 10,
                        timeout_seconds: int = 30) -> ColumnProfile:
         return ColumnProfile(table=table, column=column, row_count=0, null_count=0)
+
+
+class MultiDbFakeAdapter(FakeAdapter):
+    def __init__(self, config, *, databases: list[str]) -> None:
+        super().__init__(config)
+        self._databases = databases
+
+    def list_databases(self) -> list[str]:
+        self.list_databases_called = True
+        return list(self._databases)
+
+    def list_tables(self, database: str = "") -> list[TableInfo]:
+        self.requested_databases.append(database)
+        return [TableInfo(name=f"{database}_items")]
+
+
+def test_asset_builder_discovers_all_databases(tmp_path):
+    conn = ConnectionConfig(name="analysis", type="mysql", database="productdata")
+    adapter = FakeAdapter(conn)
+    store = AssetStore(tmp_path / "assets")
+
+    stats = AssetBuilder(connection=conn, adapter=adapter, store=store).build(profile_mode="none", sample=False)
+
+    assert adapter.list_databases_called is True
+    assert stats.databases >= 1
+
+
+def test_asset_builder_partial_build_preserves_other_databases(tmp_path):
+    conn = ConnectionConfig(name="analysis", type="mysql", database="productdata")
+    adapter = MultiDbFakeAdapter(conn, databases=["alpha", "beta"])
+    store = AssetStore(tmp_path / "assets")
+
+    AssetBuilder(connection=conn, adapter=adapter, store=store).build(
+        databases=["alpha"],
+        profile_mode="none",
+        sample=False,
+    )
+    alpha_dir = store.database_dir("analysis", "alpha")
+    assert alpha_dir.exists()
+    assert not store.database_dir("analysis", "beta").exists()
+
+    AssetBuilder(connection=conn, adapter=adapter, store=store).build(
+        databases=["beta"],
+        profile_mode="none",
+        sample=False,
+    )
+    assert store.database_dir("analysis", "beta").exists()
+    instance_doc = store.instance_doc("analysis")
+    assert instance_doc is not None
+    db_names = sorted(db.get("name") for db in instance_doc.get("databases") or [])
+    assert db_names == ["alpha", "beta"]
+    assert instance_doc["stats"]["databases"] == 2
+
+
+def test_desktop_list_databases_marks_existing_assets(tmp_path):
+    from dbaide.config import ConfigManager
+    from dbaide.desktop.service import DesktopService
+    from dbaide.models import ConnectionConfig
+
+    db = tmp_path / "app.db"
+    make_db(db)
+    cfg = ConfigManager(tmp_path / "config.toml")
+    store = AssetStore(tmp_path / "assets")
+    service = DesktopService(cfg, store)
+    conn = ConnectionConfig(name="local", type="sqlite", path=str(db))
+    cfg.upsert_connection(conn, make_default=True)
+    service.build_assets({"name": "local", "profile_mode": "none", "sample_limit": 10})
+
+    payload = service.list_databases({"name": "local"})
+    assert payload["connection"] == "local"
+    assert payload["databases"] == [{"name": "main", "has_assets": True}]

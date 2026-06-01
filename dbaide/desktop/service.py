@@ -106,6 +106,7 @@ class DesktopService:
         handlers: dict[str, Callable[[dict[str, Any]], Any]] = {
             "bootstrap": self.bootstrap,
             "build_assets": self.build_assets,
+            "list_databases": self.list_databases,
             "schema_tree": self.schema_tree,
             "search_assets": self.search_assets,
             "read_asset": self.read_asset,
@@ -204,6 +205,24 @@ class DesktopService:
         name = str(payload.get("name") or "").strip()
         self.cfg.set_default_model(name)
         return {"default_model": name, "model": _model_payload(self.cfg.model(name))}
+
+    def list_databases(self, payload: dict[str, Any]) -> dict[str, Any]:
+        conn = self.cfg.get_connection(str(payload.get("name") or payload.get("connection_name") or "") or None)
+        adapter = build_adapter(conn)
+        adapter.test()
+        live = adapter.list_databases()
+        built = {
+            str(entry.get("name") or "")
+            for entry in self.store.database_docs(conn.name)
+            if str(entry.get("name") or "")
+        }
+        return {
+            "connection": conn.name,
+            "databases": [
+                {"name": name, "has_assets": name in built}
+                for name in live
+            ],
+        }
 
     def build_assets(self, payload: dict[str, Any]) -> dict[str, Any]:
         conn = self.cfg.get_connection(str(payload.get("name") or payload.get("connection_name") or "") or None)

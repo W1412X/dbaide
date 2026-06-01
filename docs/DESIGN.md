@@ -117,8 +117,8 @@ flowchart LR
 
 | Entry | Action |
 |-------|--------|
-| GUI TopBar → Build Assets | `DesktopService.build_assets` |
-| CLI | `dbaide assets build` |
+| GUI TopBar → Build Assets | `DesktopService.build_assets` — multi-DB connections show a picker; partial builds merge with existing assets |
+| CLI | `dbaide assets build --database <name>` (repeatable) |
 | `connect add` (default) | builds assets on save |
 
 ### Asset tree

@@ -91,18 +91,30 @@ class AssetBuilder:
         self.adapter.test()
 
         # Step 2: Discover databases
+        partial = bool(databases)
+        preserved_docs = self._load_existing_database_docs(instance) if partial else []
         db_names = self._resolve_databases(databases)
         self.progress(f"[assets] instance={instance}, discovered {len(db_names)} database(s): {db_names}")
-        self.store.write_json(
-            self.store.instance_dir(instance) / "databases.json",
-            {"instance": instance, "databases": [{"name": db} for db in db_names]},
-        )
+        if not partial:
+            self.store.write_json(
+                self.store.instance_dir(instance) / "databases.json",
+                {"instance": instance, "databases": [{"name": db} for db in db_names]},
+            )
 
         # Step 3: Build databases in parallel
         # Dependency: databases are independent, can be parallel
         database_docs = self._build_databases_parallel(instance, db_names, options, stats, profiler)
+        database_docs = self._merge_database_docs(
+            built_docs=database_docs,
+            partial=partial,
+            preserved_docs=preserved_docs,
+        )
 
         # Step 4: Write instance-level documents (depends on all databases)
+        existing_instance = self.store.instance_doc(instance) if partial else None
+        built_at = float(existing_instance.get("built_at") or started) if existing_instance else started
+        instance_stats = self._instance_stats(instance, database_docs, build_stats=stats, partial=partial)
+
         self.store.write_json(
             self.store.instance_dir(instance) / "databases.json",
             {
@@ -114,25 +126,32 @@ class AssetBuilder:
             },
         )
         instance_doc = self.summarizer.instance_doc(instance=instance, databases=database_docs)
-        instance_doc["built_at"] = started
+        instance_doc["built_at"] = built_at
         instance_doc["completed_at"] = time.time()
         instance_doc["connection_type"] = self.connection.type
         instance_doc["database_count"] = len(database_docs)
         instance_doc["build_options"] = asdict(options)
-        instance_doc["stats"] = asdict(stats)
+        instance_doc["stats"] = instance_stats
         instance_doc["asset_root"] = str(self.store.instance_dir(instance))
+        if partial:
+            instance_doc["last_build"] = {
+                "databases": db_names,
+                "completed_at": instance_doc["completed_at"],
+                "stats": asdict(stats),
+            }
         self.store.write_json(self.store.instance_dir(instance) / "instance.json", instance_doc)
         self.store.write_json(
             self.store.instance_dir(instance) / "manifest.json",
             {
                 "asset_schema_version": ASSET_SCHEMA_VERSION,
                 "instance": instance,
-                "built_at": started,
+                "built_at": built_at,
                 "completed_at": instance_doc["completed_at"],
                 "connection_type": self.connection.type,
                 "databases": [db.get("name") for db in database_docs],
                 "options": asdict(options),
-                "stats": asdict(stats),
+                "stats": instance_stats,
+                "last_build_stats": asdict(stats) if partial else None,
             },
         )
         stats.elapsed_seconds = time.time() - started
@@ -147,6 +166,88 @@ class AssetBuilder:
         if databases:
             return databases
         return self.adapter.list_databases()
+
+    def _load_existing_database_docs(self, instance: str) -> list[dict]:
+        docs: list[dict] = []
+        for entry in self.store.database_docs(instance):
+            name = str(entry.get("name") or "")
+            if not name:
+                continue
+            path = self.store.database_dir(instance, name) / "database.json"
+            doc = self.store._read_optional(path)
+            if isinstance(doc, dict):
+                docs.append(doc)
+        return docs
+
+    def _merge_database_docs(
+        self,
+        *,
+        built_docs: list[dict],
+        partial: bool,
+        preserved_docs: list[dict] | None = None,
+    ) -> list[dict]:
+        if not partial:
+            return built_docs
+        built_names = {str(doc.get("name") or doc.get("database") or "") for doc in built_docs}
+        merged: dict[str, dict] = {}
+        for doc in preserved_docs or []:
+            name = str(doc.get("name") or doc.get("database") or "")
+            if name and name not in built_names:
+                merged[name] = doc
+        for doc in built_docs:
+            name = str(doc.get("name") or doc.get("database") or "")
+            if name:
+                merged[name] = doc
+        return [merged[name] for name in sorted(merged.keys())]
+
+    def _instance_stats(
+        self,
+        instance: str,
+        database_docs: list[dict],
+        *,
+        build_stats: BuildStats,
+        partial: bool,
+    ) -> dict:
+        tables = 0
+        columns = 0
+        for db_doc in database_docs:
+            db_name = str(db_doc.get("name") or db_doc.get("database") or "")
+            if not db_name:
+                continue
+            for table_doc in self.store.table_docs(instance, db_name):
+                tables += 1
+                columns += int(table_doc.get("column_count") or len(table_doc.get("columns") or []))
+        stats = {
+            "instances": 1,
+            "databases": len(database_docs),
+            "tables": tables,
+            "columns": columns,
+            "profiled_columns": self._count_profiled_columns(instance, database_docs),
+            "skipped_profiles": build_stats.skipped_profiles,
+            "timed_out_columns": build_stats.timed_out_columns,
+            "errors": list(build_stats.errors),
+            "elapsed_seconds": build_stats.elapsed_seconds,
+        }
+        if partial:
+            prior_errors = (self.store.instance_doc(instance) or {}).get("stats", {}).get("errors") or []
+            if isinstance(prior_errors, list):
+                stats["errors"] = list(prior_errors) + list(build_stats.errors)
+        return stats
+
+    def _count_profiled_columns(self, instance: str, database_docs: list[dict]) -> int:
+        count = 0
+        for db_doc in database_docs:
+            db_name = str(db_doc.get("name") or db_doc.get("database") or "")
+            if not db_name:
+                continue
+            for table_doc in self.store.table_docs(instance, db_name):
+                table_name = str(table_doc.get("name") or table_doc.get("table") or "")
+                if not table_name:
+                    continue
+                for col_doc in self.store.column_docs(instance, db_name, table_name):
+                    if col_doc.get("profile_status") == "profiled":
+                        count += 1
+        return count
 
     def _build_databases_parallel(self, instance: str, db_names: list[str], options: BuildOptions,
                                   stats: BuildStats, profiler: ColumnProfiler) -> list[dict]:

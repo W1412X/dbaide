@@ -15,6 +15,10 @@ DBAide is a lightweight command-line data assistant. It connects to local or rem
 SQLite works without optional dependencies:
 
 ```bash
+pip install -r requirements-gui.txt   # CLI + desktop GUI
+# or: pip install -r requirements.txt  # CLI only
+# or: pip install -e ".[gui]"          # editable install from pyproject.toml
+
 python -m dbaide.cli connect add local --type sqlite --path ./app.db
 python -m dbaide.cli ask "这个库有哪些表？" --conn local
 python -m dbaide.cli inspect users --conn local
@@ -133,6 +137,20 @@ timeout_seconds = 60
 If no model is configured, DBAide falls back to deterministic local heuristics for schema inspection, profiling, SQL guardrails, simple query generation, and offline asset summaries.
 
 ## Architecture
+
+See [docs/DESIGN.md](docs/DESIGN.md) for the full system design (assets → agent loop → execution).
+
+## Packaging
+
+Build installable packages for macOS, Windows, and Ubuntu:
+
+```bash
+pip install -e ".[gui,dev]"
+./scripts/build_package.sh gui    # desktop bundle → dist/DBAide/
+./scripts/build_package.sh wheel  # Python wheel → dist/
+```
+
+Details: [docs/PACKAGING.md](docs/PACKAGING.md)
 
 ```text
 dbaide/

@@ -1,0 +1,62 @@
+name: Release packages
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: Build (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-14
+            artifact: DBAide-macOS-arm64
+            archive_cmd: tar -czf DBAide-macOS-arm64.tar.gz DBAide
+          - os: macos-13
+            artifact: DBAide-macOS-x86_64
+            archive_cmd: tar -czf DBAide-macOS-x86_64.tar.gz DBAide
+          - os: ubuntu-24.04
+            artifact: DBAide-Linux-x86_64
+            archive_cmd: tar -czf DBAide-Linux-x86_64.tar.gz DBAide
+          - os: windows-latest
+            artifact: DBAide-Windows
+            archive_cmd: powershell Compress-Archive -Path DBAide -DestinationPath DBAide-Windows.zip
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install build deps
+        run: python -m pip install -e ".[gui,dev]"
+
+      - name: PyInstaller (GUI)
+        run: python -m PyInstaller packaging/pyinstaller/dbaide-gui.spec --noconfirm
+
+      - name: Archive (Unix)
+        if: runner.os != 'Windows'
+        working-directory: dist
+        run: ${{ matrix.archive_cmd }}
+
+      - name: Archive (Windows)
+        if: runner.os == 'Windows'
+        working-directory: dist
+        run: powershell Compress-Archive -Path DBAide -DestinationPath DBAide-Windows.zip
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}
+          path: |
+            dist/*.tar.gz
+            dist/*.zip

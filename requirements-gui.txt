@@ -1,0 +1,5 @@
+# Desktop GUI dependencies
+# Install: pip install -r requirements-gui.txt
+
+-r requirements.txt
+PyQt6>=6.5.0
