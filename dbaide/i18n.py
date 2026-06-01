@@ -126,6 +126,11 @@ _STRINGS: dict[str, dict[str, str]] = {
     "sidebar.filter": {"en": "Filter tree · Enter to semantic search", "zh": "筛选结构树 · 回车进行语义搜索"},
     # Ask tab empty state
     "ask.open_settings": {"en": "Open Settings", "zh": "打开设置"},
+    "ask.empty_title": {"en": "Connect your first database", "zh": "连接你的第一个数据库"},
+    "ask.empty_subtitle": {
+        "en": "Open Settings to add a connection and configure the model.",
+        "zh": "打开设置以添加连接并配置模型。",
+    },
     "note.error": {"en": "Error", "zh": "错误"},
     "note.assets_built": {"en": "Assets built", "zh": "资产已构建"},
     # Build dialog

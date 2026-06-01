@@ -25,12 +25,12 @@ class AskTab(QWidget):
         empty_page = QWidget()
         empty_layout = QVBoxLayout(empty_page)
         empty_layout.setContentsMargins(0, 0, 0, 0)
+        from dbaide.i18n import t
         self.empty = EmptyState(
-            "Connect your first database",
-            "Open Settings to add a connection and configure the model.",
+            t("ask.empty_title"),
+            t("ask.empty_subtitle"),
             [],
         )
-        from dbaide.i18n import t
         self._empty_btn = compact_button(t("ask.open_settings"), primary=True, width=128)
         self._empty_btn.clicked.connect(lambda: self.empty_action.emit("settings"))
         empty_layout.addWidget(self.empty)
