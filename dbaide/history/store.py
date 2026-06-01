@@ -53,7 +53,7 @@ class WorkflowHistoryStore:
             return []
 
         entries = []
-        for path in sorted(conn_dir.glob("*.json"), reverse=True):
+        for path in conn_dir.glob("*.json"):
             try:
                 data = json.loads(path.read_text(encoding="utf-8"))
                 entries.append({
@@ -66,10 +66,12 @@ class WorkflowHistoryStore:
                 })
             except Exception:
                 continue
-            if len(entries) >= limit:
-                break
 
-        return entries
+        # "Recent" must mean most-recent by time. Filenames are random uuids, so
+        # sorting by name (the old behaviour) returned an arbitrary subset and could
+        # drop genuinely recent workflows once there were more than `limit` files.
+        entries.sort(key=lambda e: (e.get("created_at") or 0, e.get("completed_at") or 0), reverse=True)
+        return entries[: max(0, limit)]
 
     def delete(self, connection_name: str, workflow_id: str) -> bool:
         """Delete a workflow result from disk."""

@@ -156,3 +156,25 @@ def test_sqlite_estimate_rows_dbstat(tmp_path: Path):
     # estimated_rows should be a non-negative int or None — never raise.
     est = tables["t"].estimated_rows
     assert est is None or est >= 0
+
+
+# 12) history "recent" is sorted by time, not random uuid filename.
+def test_history_recent_sorted_by_time(tmp_path: Path):
+    import json
+    from dbaide.history.store import WorkflowHistoryStore
+    store = WorkflowHistoryStore(base_dir=tmp_path)
+    conn_dir = tmp_path / "c1"
+    conn_dir.mkdir(parents=True)
+    # filenames (uuid-like) deliberately out of time order
+    (conn_dir / "zzz.json").write_text(json.dumps({"workflow_id": "zzz", "created_at": 100}))
+    (conn_dir / "aaa.json").write_text(json.dumps({"workflow_id": "aaa", "created_at": 300}))
+    (conn_dir / "mmm.json").write_text(json.dumps({"workflow_id": "mmm", "created_at": 200}))
+    recent = store.list_workflows("c1", limit=2)
+    assert [e["workflow_id"] for e in recent] == ["aaa", "mmm"]  # newest first, by time
+
+
+# 13) trailing empty statements aren't flagged as multi-statement.
+def test_trailing_empty_statement_not_multi():
+    g = SQLGuard(default_limit=100, max_row_limit=1000)
+    assert g.validate("SELECT 1 ; ;").ok is True
+    assert g.validate("SELECT 1; SELECT 2").ok is False  # genuine multi still rejected

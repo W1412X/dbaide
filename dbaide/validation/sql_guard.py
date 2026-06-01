@@ -223,7 +223,10 @@ class SQLGuard:
 
     def _has_multiple_statements(self, sql: str) -> bool:
         stripped = _strip_strings_and_comments(sql)
-        return ";" in stripped.strip().rstrip(";")
+        # Drop trailing semicolons AND whitespace so harmless trailing empty
+        # statements ("SELECT 1 ; ;") aren't misread as multiple statements.
+        core = re.sub(r"[\s;]+$", "", stripped)
+        return ";" in core
 
     def _extract_tables(self, sql: str) -> set[str]:
         """Extract table names from SQL (heuristic)."""
