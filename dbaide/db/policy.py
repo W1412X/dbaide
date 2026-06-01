@@ -24,10 +24,15 @@ DEFAULT_LOAD_PROFILE = "production"
 
 @dataclass(frozen=True, slots=True)
 class ResourcePolicy:
-    """All tunable resource limits. Every field is a concrete, user-configurable number."""
+    """All tunable resource limits. Every field is a concrete, user-configurable number.
 
-    # Concurrency / connections (enforced by QueryBudget).
-    max_connections_per_instance: int = 2
+    One ``QueryBudget`` semaphore per instance caps concurrent in-flight queries; because
+    a query holds its connection for its whole duration, ``max_inflight_queries`` bounds
+    both concurrency *and* simultaneous connections — there is intentionally no separate
+    connection knob.
+    """
+
+    # Concurrency (enforced by QueryBudget; one slot == one query == one connection).
     max_inflight_queries: int = 2
     statement_timeout_seconds: int = 8
 
@@ -36,7 +41,6 @@ class ResourcePolicy:
     build_profile_mode: str = "light"
 
     # Agent execution.
-    agent_max_inflight: int = 1
     default_row_limit: int = 100
     max_row_limit: int = 1000
 
@@ -45,9 +49,8 @@ class ResourcePolicy:
     explain_max_rows: int = 5_000_000    # EXPLAIN estimate above which execution is blocked
     max_join_tables: int = 3             # joins beyond this require confirmation
 
-    # Join sampling.
-    join_sample_size_small: int = 150
-    join_sample_size_large: int = 50
+    # Join sampling (rows sampled from the left table when probing a join).
+    join_sample_size: int = 150
 
     def merged_with(self, overrides: dict[str, Any]) -> "ResourcePolicy":
         """Return a copy with any recognised numeric/string overrides applied."""
@@ -73,49 +76,40 @@ class ResourcePolicy:
 # Three presets. ``production`` is the conservative default.
 LOAD_PROFILES: dict[str, ResourcePolicy] = {
     "production": ResourcePolicy(
-        max_connections_per_instance=2,
         max_inflight_queries=2,
         statement_timeout_seconds=8,
         build_max_workers=1,
         build_profile_mode="light",
-        agent_max_inflight=1,
         default_row_limit=100,
         max_row_limit=1000,
         big_table_rows=1_000_000,
         explain_max_rows=5_000_000,
         max_join_tables=3,
-        join_sample_size_small=150,
-        join_sample_size_large=50,
+        join_sample_size=150,
     ),
     "staging": ResourcePolicy(
-        max_connections_per_instance=4,
         max_inflight_queries=4,
         statement_timeout_seconds=10,
         build_max_workers=2,
         build_profile_mode="auto",
-        agent_max_inflight=2,
         default_row_limit=100,
         max_row_limit=5000,
         big_table_rows=5_000_000,
         explain_max_rows=20_000_000,
         max_join_tables=4,
-        join_sample_size_small=150,
-        join_sample_size_large=80,
+        join_sample_size=150,
     ),
     "dev": ResourcePolicy(
-        max_connections_per_instance=8,
         max_inflight_queries=8,
         statement_timeout_seconds=30,
         build_max_workers=4,
         build_profile_mode="auto",
-        agent_max_inflight=4,
         default_row_limit=200,
         max_row_limit=50000,
         big_table_rows=50_000_000,
         explain_max_rows=200_000_000,
         max_join_tables=6,
-        join_sample_size_small=200,
-        join_sample_size_large=120,
+        join_sample_size=200,
     ),
 }
 

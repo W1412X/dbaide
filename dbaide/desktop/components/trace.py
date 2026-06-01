@@ -49,8 +49,7 @@ class TracePanel(QTreeWidget):
         model = TraceModel()
         for event in events or []:
             model.ingest(event)
-        if model.overall == "running":
-            model.overall = "done"
+        model.finalize()
         self._model = model
         self._live = False
         self._render()
@@ -80,8 +79,8 @@ class TracePanel(QTreeWidget):
         self._render()
 
     def end_live(self) -> None:
-        if self._model is not None and self._model.overall == "running":
-            self._model.overall = "done"
+        if self._model is not None:
+            self._model.finalize()
         self._live = False
         self._render()
 

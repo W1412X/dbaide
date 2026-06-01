@@ -126,17 +126,14 @@ class SettingsDialog(QDialog):
     # Numeric resource knobs shown on the Resources page: (key, label, min, max).
     _RESOURCE_FIELDS = (
         ("max_inflight_queries", "Max concurrent queries", 1, 64),
-        ("max_connections_per_instance", "Max connections / instance", 1, 64),
         ("statement_timeout_seconds", "Statement timeout (s)", 1, 600),
         ("build_max_workers", "Build workers", 1, 32),
-        ("agent_max_inflight", "Agent concurrent queries", 1, 32),
         ("default_row_limit", "Default row limit", 1, 100000),
         ("max_row_limit", "Max row limit (hard cap)", 1, 1000000),
         ("big_table_rows", "Big-table threshold (rows)", 1000, 1000000000),
         ("explain_max_rows", "EXPLAIN cost gate (rows)", 1000, 1000000000),
         ("max_join_tables", "Max joined tables", 1, 16),
-        ("join_sample_size_small", "Join sample (small tables)", 10, 1000),
-        ("join_sample_size_large", "Join sample (large tables)", 10, 1000),
+        ("join_sample_size", "Join sample size (rows)", 10, 1000),
     )
 
     def __init__(

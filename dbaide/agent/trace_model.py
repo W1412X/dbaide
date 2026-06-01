@@ -82,6 +82,15 @@ class TraceModel:
         title = str(event.get("title") or "").strip()
         detail = str(event.get("detail") or event.get("summary") or "").strip()
 
+        # Framing events are not steps.
+        if stage in {"workflow_started", "planning"}:
+            if self.overall == "idle":
+                self.overall = "running"
+            return
+        if stage == "workflow_completed":
+            self.overall = "failed" if status == "failed" else "done"
+            return
+
         # Lifecycle: the loop start/finish frames the whole turn.
         if stage == "loop":
             if status in _TERMINAL:
@@ -177,6 +186,13 @@ class TraceModel:
         if status == "failed":
             # Keep overall running; the loop frame decides done/failed.
             pass
+
+    def finalize(self, *, failed: bool = False) -> None:
+        """Mark the turn finished: any still-running step becomes completed."""
+        self.overall = "failed" if failed else ("failed" if self.overall == "failed" else "done")
+        for step in self.steps:
+            if step.status == _ACTIVE:
+                step.status = "completed"
 
     # ── Lookups ─────────────────────────────────────────────────────────────
 

@@ -113,3 +113,33 @@ def test_summary_line_lists_active_agents():
     line = m.summary_line(now=1010.0)
     assert "Mapping relations" in line
     assert "2 agents" in line
+
+
+def test_framing_events_are_not_steps():
+    m = TraceModel()
+    _feed(m, [
+        {"stage": "workflow_started", "title": "start", "status": "completed", "kind": "agent"},
+        {"stage": "planning", "title": "plan", "status": "completed", "kind": "agent"},
+        progress_event(stage="execute_sql", title="x", status="completed", kind="tool", step=1),
+        {"stage": "workflow_completed", "title": "done", "status": "completed", "kind": "agent"},
+    ])
+    assert len(m.steps) == 1
+    assert m.overall == "done"
+
+
+def test_finalize_marks_running_steps_completed():
+    m = TraceModel()
+    _feed(m, [
+        progress_event(stage="execute_sql", title="x", status="running", kind="tool", step=1),
+    ])
+    assert m.steps[0].status == "running"
+    m.finalize()
+    assert m.steps[0].status == "completed"
+    assert m.overall == "done"
+
+
+def test_finalize_failed_keeps_failure():
+    m = TraceModel()
+    _feed(m, [progress_event(stage="execute_sql", title="x", status="running", kind="tool", step=1)])
+    m.finalize(failed=True)
+    assert m.overall == "failed"

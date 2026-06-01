@@ -345,7 +345,7 @@ def validate_join_relations(
 ) -> list[dict[str, Any]]:
     if sample_size is None:
         policy = getattr(orchestrator.adapter, "policy", None)
-        sample_size = policy.join_sample_size_small if policy else DEFAULT_SAMPLE_SIZE
+        sample_size = policy.join_sample_size if policy else DEFAULT_SAMPLE_SIZE
     validator = JoinSampleValidator(orchestrator, sample_size=sample_size)
     return validator.validate_relations(
         relations,
