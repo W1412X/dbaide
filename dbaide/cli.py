@@ -724,7 +724,7 @@ def build_any_assistant(cfg: ConfigManager, args: argparse.Namespace):
     llm = build_llm_client(cfg.model())
     if len(targets) == 1:
         conn = targets[0].config
-        adapter = build_adapter(conn)
+        adapter = build_adapter(conn, policy=cfg.policy_for(conn), caller="agent")
         session = Session(connection=conn, default_limit=args.limit, timeout_seconds=args.timeout)
         assistant = DataAssistant(adapter, session, llm)
         return _SingleAssistantWithDatabase(assistant, targets[0].database)

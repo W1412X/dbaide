@@ -4,6 +4,7 @@ from dataclasses import dataclass
 
 from dbaide.adapters import build_adapter
 from dbaide.agent.assistant import DataAssistant
+from dbaide.db.policy import resolve_policy
 from dbaide.llm import LLMClient
 from dbaide.models import AssistantResponse, ConnectionConfig
 from dbaide.session import Session
@@ -39,7 +40,11 @@ class MultiInstanceAssistant:
         first_sql = ""
         first_result = None
         for target in self.targets:
-            adapter = build_adapter(target.config)
+            policy = resolve_policy(
+                load_profile=getattr(target.config, "load_profile", "production"),
+                instance=target.config.name,
+            )
+            adapter = build_adapter(target.config, policy=policy, caller="agent")
             session = Session(
                 connection=target.config,
                 default_limit=self.default_limit,
