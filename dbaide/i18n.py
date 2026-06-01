@@ -118,9 +118,8 @@ _STRINGS: dict[str, dict[str, str]] = {
     "toast.connection_ok": {"en": "Connection OK", "zh": "连接正常"},
     # SQL tab
     "sql.run": {"en": "Run", "zh": "运行"},
+    "sql.running": {"en": "Running", "zh": "运行中"},
     "sql.run_tooltip": {"en": "Run read-only query", "zh": "运行只读查询"},
-    "sql.validate": {"en": "Validate SQL", "zh": "校验 SQL"},
-    "sql.explain": {"en": "Explain SQL", "zh": "解释 SQL"},
     "sql.placeholder": {
         "en": "Paste SQL here. Only single read-only statements are allowed.",
         "zh": "在此粘贴 SQL，仅允许单条只读语句。",

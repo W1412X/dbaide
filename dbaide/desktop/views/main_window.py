@@ -152,8 +152,6 @@ class MainWindow(QMainWindow):
         self.ask_tab.empty_action.connect(self._empty_action)
         self.ask_tab.open_sql.connect(self.open_sql)
         self.ask_tab.clarification_choice.connect(self._submit_clarification)
-        self.sql_tab.validate_requested.connect(self.validate_sql)
-        self.sql_tab.explain_requested.connect(self.explain_sql)
         self.sql_tab.run_requested.connect(lambda sql, _action: self.execute_sql(sql))
         self.stack.addWidget(self.ask_tab)
         self.stack.addWidget(self.sql_tab)
@@ -657,24 +655,6 @@ class MainWindow(QMainWindow):
 
         self._run_background("test_model_profile", payload, on_done, on_error=on_fail)
 
-    def validate_sql(self, sql: str) -> None:
-        if not sql.strip():
-            return
-        self.run_action("validate_sql", {
-            "connection_name": self.current_connection(),
-            "database": self.current_database(),
-            "sql": sql,
-        })
-
-    def explain_sql(self, sql: str) -> None:
-        if not sql.strip():
-            return
-        self.run_action("explain_sql", {
-            "connection_name": self.current_connection(),
-            "database": self.current_database(),
-            "sql": sql,
-        })
-
     def execute_sql(self, sql: str) -> None:
         if not sql.strip():
             return
@@ -856,15 +836,9 @@ class MainWindow(QMainWindow):
                 focus=True,
             )
             return
-        if action == "validate_sql":
-            self.sql_tab.show_validation(result)
-            return
         if action == "execute_sql":
             self.sql_tab.show_result(result)
             self.bus.emit(QUERY_COMPLETED, {"instance": self.current_connection()})
-            return
-        if action == "explain_sql":
-            self.sql_tab.show_explain(result)
             return
         if action == "asset_markdown":
             self.right.show_inspector(
@@ -928,7 +902,7 @@ class MainWindow(QMainWindow):
             self.ask_tab.append_note(_i18n_t("note.error"), msg)
         else:
             self.ask_tab.append_note(_i18n_t("note.error"), msg)
-        if self._last_action in ("validate_sql", "execute_sql", "explain_sql"):
+        if self._last_action == "execute_sql":
             self.sql_tab.show_error(str(exc))
         if modal:
             QMessageBox.warning(self, "DBAide", str(exc))
