@@ -525,7 +525,17 @@ def build_connection_assets(
         llm = build_llm_client(cfg.model())
     except Exception:
         llm = NullLLMClient()
-    builder = AssetBuilder(connection=conn, adapter=adapter, llm=llm, progress=print)
+    def _print_progress(msg) -> None:
+        # The builder now emits structured dict events for the GUI trace; the CLI
+        # just prints their human-readable title.
+        if isinstance(msg, dict):
+            title = str(msg.get("title") or "")
+            if title:
+                print(f"[assets] {title}")
+        else:
+            print(msg)
+
+    builder = AssetBuilder(connection=conn, adapter=adapter, llm=llm, progress=_print_progress)
     effective_mode = "none" if not profile else profile_mode
     stats = builder.build(
         databases=databases, sample=sample, profile_mode=effective_mode,

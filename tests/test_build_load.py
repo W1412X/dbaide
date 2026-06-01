@@ -84,3 +84,31 @@ def test_big_table_drops_to_light(tmp_path, monkeypatch):
     # No COUNT(DISTINCT) / top-K on the big table.
     sqls = " ".join(e.sql.lower() for e in query_log.for_instance("big").recent())
     assert "count(distinct" not in sqls
+
+
+def test_build_emits_structured_trace_events(tmp_path):
+    """Build progress is a tree: a 'build:root' tool node + a per-database node."""
+    db = tmp_path / "shop.db"
+    conn = sqlite3.connect(db)
+    for t in ("customers", "orders", "items"):
+        conn.execute(f"CREATE TABLE {t}(id INTEGER PRIMARY KEY, name TEXT)")
+    conn.commit()
+    conn.close()
+    c = ConnectionConfig(name="shop", type="sqlite", path=str(db))
+    events = []
+    AssetBuilder(connection=c, adapter=build_adapter(c, caller="build"),
+                 store=AssetStore(tmp_path / "assets"),
+                 progress=lambda m: events.append(m)).build(profile_mode="auto")
+
+    dicts = [e for e in events if isinstance(e, dict)]
+    assert dicts and all(d.get("stage") == "build_assets" for d in dicts)
+    # Root node present (tool), and a per-database node parented to it.
+    assert any(d.get("node_id") == "build:root" and d.get("kind") == "tool" for d in dicts)
+    db_nodes = [d for d in dicts if d.get("node_id") == "build:db:main"]
+    assert db_nodes and all(d.get("parent_id") == "build:root" for d in db_nodes)
+    # A live per-table progress line and a completed database line.
+    assert any("describing" in d["title"] or "/3 tables" in d["title"] for d in db_nodes)
+    assert any(d.get("status") == "completed" and "columns" in d["title"] for d in db_nodes)
+    # The final root summary carries the totals.
+    root_done = [d for d in dicts if d.get("node_id") == "build:root" and d.get("status") in ("completed", "failed")]
+    assert root_done and "tables" in root_done[-1]["title"] and "queries" in root_done[-1]["title"]

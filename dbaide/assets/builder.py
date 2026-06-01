@@ -16,6 +16,9 @@ from dbaide.models import ConnectionConfig
 
 logger = logging.getLogger("dbaide.builder")
 
+# Trace node id for the build root (databases hang under it).
+_BUILD_ROOT = "build:root"
+
 
 @dataclass(slots=True)
 class BuildStats:
@@ -75,6 +78,24 @@ class AssetBuilder:
         with self._stats_lock:
             stats.errors.append(message)
 
+    # ── Structured progress for the trace (root → per-database nodes) ─────────
+
+    def _emit(self, title: str, *, node_id: str = _BUILD_ROOT, parent_id: str = "",
+              status: str = "running", kind: str = "tool", duration_ms: float = 0.0) -> None:
+        """Emit a structured build-progress event. The GUI renders these as a tree
+        (Building assets → each database); string consumers (CLI) read ``title``."""
+        event: dict = {"stage": "build_assets", "title": title, "status": status,
+                       "kind": kind, "node_id": node_id}
+        if parent_id:
+            event["parent_id"] = parent_id
+        if duration_ms:
+            event["duration_ms"] = duration_ms
+        self.progress(event)
+
+    def _emit_db(self, database: str, title: str, *, status: str = "running") -> None:
+        self._emit(title, node_id=f"build:db:{database}", parent_id=_BUILD_ROOT,
+                   status=status, kind="substep")
+
     def build(
         self,
         *,
@@ -120,7 +141,8 @@ class AssetBuilder:
             pass
 
         # Step 1: Test connection
-        self.progress(f"[assets] testing connection {instance}")
+        self._emit(f"Building assets · {instance}", status="running")
+        self._emit(f"testing connection {instance}", status="running")
         self.adapter.test()
 
         if options.dry_run:
@@ -130,7 +152,7 @@ class AssetBuilder:
         partial = bool(databases)
         preserved_docs = self._load_existing_database_docs(instance) if partial else []
         db_names = self._resolve_databases(databases)
-        self.progress(f"[assets] instance={instance}, discovered {len(db_names)} database(s): {db_names}")
+        self._emit(f"discovered {len(db_names)} database(s): {', '.join(db_names)}", status="running")
         if not partial:
             self.store.write_json(
                 self.store.instance_dir(instance) / "databases.json",
@@ -199,12 +221,14 @@ class AssetBuilder:
             stats.peak_inflight = budget_stats.peak_inflight
         except Exception:  # pragma: no cover - defensive
             pass
-        self.progress(
-            f"[assets] completed {instance}: db={stats.databases}, tables={stats.tables}, "
-            f"columns={stats.columns}, profiled={stats.profiled_columns}, light_tables={stats.light_tables}, "
-            f"queries={stats.total_queries}, peak_inflight={stats.peak_inflight}, "
-            f"errors={len(stats.errors)}, elapsed={stats.elapsed_seconds:.1f}s"
+        summary = (
+            f"{stats.tables} tables · {stats.columns} columns · {stats.profiled_columns} profiled"
+            + (f" · {stats.light_tables} light" if stats.light_tables else "")
+            + f" · {stats.total_queries} queries · peak {stats.peak_inflight}"
+            + (f" · {len(stats.errors)} errors" if stats.errors else "")
         )
+        self._emit(summary, status="failed" if stats.errors else "completed",
+                   duration_ms=stats.elapsed_seconds * 1000)
         return stats
 
     def _dry_run(self, instance: str, databases: list[str] | None, options: BuildOptions,
@@ -214,7 +238,7 @@ class AssetBuilder:
         Only cheap metadata calls (list/describe/foreign_keys) touch the database;
         profiling and sampling are counted but not executed.
         """
-        self.progress(f"[assets] dry-run estimate for {instance}")
+        self._emit(f"dry-run estimate for {instance}", status="running")
         db_names = self._resolve_databases(databases)
         # SQLite folds count/distinct/top-K/sample into a single guarded query, so a
         # profiled column costs 2 queries (profile + context sample) regardless of tier.
@@ -239,9 +263,10 @@ class AssetBuilder:
                         stats.skipped_profiles += 1
         stats.estimated_queries = estimated
         stats.elapsed_seconds = 0.0
-        self.progress(
-            f"[assets] dry-run: tables={stats.tables}, columns={stats.columns}, "
-            f"would-profile={stats.profiled_columns}, estimated_queries≈{estimated}"
+        self._emit(
+            f"dry-run · {stats.tables} tables · {stats.columns} columns · "
+            f"would profile {stats.profiled_columns} · ≈{estimated} queries",
+            status="completed",
         )
         return stats
 
@@ -345,7 +370,7 @@ class AssetBuilder:
         database_docs = []
         for database in db_names:
             if self._is_expired(options.deadline):
-                self.progress(f"[assets] time budget exhausted, skipping database {database}")
+                self._emit_db(database, f"{database}: skipped (time budget)", status="failed")
                 self._record_error(stats, f"{instance}.{database}: skipped (time budget)")
                 continue
             try:
@@ -358,27 +383,32 @@ class AssetBuilder:
 
     def _build_database(self, instance: str, database: str, *, options: BuildOptions,
                         stats: BuildStats, profiler: ColumnProfiler, executor: ThreadPoolExecutor) -> dict:
-        self.progress(f"[assets] listing tables {instance}.{database}")
+        self._emit_db(database, f"{database} · listing tables…", status="running")
         self._bump(stats, databases=1)
         tables = self.adapter.list_tables(database=database)
-        self.progress(f"[assets] database={database}, found {len(tables)} table(s)")
+        total = len(tables)
+        self._emit_db(database, f"{database} · {total} tables", status="running")
 
         # Tables are independent within a database; fan them out onto the shared pool.
         table_docs: list[dict] = []
         futures = {}
         for table in tables:
             if self._is_expired(options.deadline):
-                self.progress(f"[assets] time budget exhausted, skipping table {table.name}")
                 self._record_error(stats, f"{instance}.{database}.{table.name}: skipped (time budget)")
                 continue
             futures[executor.submit(self._build_table, instance, database, table,
                                     options=options, stats=stats, profiler=profiler)] = table
+        done = 0
         for future in as_completed(futures):
             table = futures[future]
+            done += 1
             try:
                 table_docs.append(future.result())
             except Exception as exc:
                 self._record_error(stats, f"{instance}.{database}.{table.name}: {type(exc).__name__}: {exc}")
+            self._emit_db(database, f"{database} · {done}/{total} tables · {table.name}", status="running")
+        cols = sum(int(td.get("column_count") or 0) for td in table_docs)
+        self._emit_db(database, f"{database} · {len(table_docs)} tables · {cols} columns", status="completed")
 
         # Write database-level document (depends on all tables)
         self.store.write_json(
@@ -393,7 +423,7 @@ class AssetBuilder:
 
     def _build_table(self, instance: str, database: str, table, *, options: BuildOptions,
                      stats: BuildStats, profiler: ColumnProfiler) -> dict:
-        self.progress(f"[assets] describing {instance}.{database}.{table.name}")
+        self._emit_db(database, f"{database} · describing {table.name}…", status="running")
         self._bump(stats, tables=1)
         columns = self.adapter.describe_table(table.name, database=database)
         foreign_keys = self.adapter.foreign_keys(table.name, database=database)
