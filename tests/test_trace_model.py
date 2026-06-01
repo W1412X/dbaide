@@ -202,3 +202,25 @@ def test_raw_event_preserved_for_detail_view():
     node = m.steps[0]
     assert node.raw.get("detail") == "SELECT 1"
     assert node.raw.get("stage") == "execute_sql"
+
+
+def test_execute_step_carries_sql_for_audit():
+    """The execute/explain/generate step node must carry the exact SQL so clicking
+    it in the trace surfaces what the system ran (full SQL auditability)."""
+    from dbaide.agent.loop import _executed_sql, _SQL_TOOLS
+
+    class _Orch:
+        _loop_sql = "SELECT 1 FROM t"
+
+    class _Res:
+        data = {"sql": "SELECT * FROM users LIMIT 100", "row_count": 3}
+
+    # execute pulls the SQL from the tool result
+    assert _executed_sql("execute_sql", _Orch(), _Res()) == "SELECT * FROM users LIMIT 100"
+    # generate/validate fall back to the loop's current SQL
+    class _Empty:
+        data = {}
+    assert _executed_sql("generate_sql", _Orch(), _Empty()) == "SELECT 1 FROM t"
+    # non-SQL tools carry nothing
+    assert _executed_sql("describe_table", _Orch(), _Res()) == ""
+    assert "execute_sql" in _SQL_TOOLS and "explain_sql" in _SQL_TOOLS

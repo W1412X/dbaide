@@ -27,6 +27,19 @@ logger = logging.getLogger("dbaide.agent.loop")
 DECISION_RETRIES = 3
 # Both names bind to the same execute handler; the loop must treat them alike.
 _EXECUTE_TOOLS = frozenset({"execute_sql", "execute_readonly_sql"})
+# Tools whose step should carry the exact SQL the system ran/handled, so the trace
+# is a complete, clickable audit of every auto-executed statement.
+_SQL_TOOLS = frozenset({"execute_sql", "execute_readonly_sql", "explain_sql",
+                        "generate_sql", "validate_sql"})
+
+
+def _executed_sql(tool_name: str, orch, result) -> str:
+    if tool_name not in _SQL_TOOLS:
+        return ""
+    data = getattr(result, "data", None)
+    if isinstance(data, dict) and data.get("sql"):
+        return str(data["sql"]).strip()
+    return str(getattr(orch, "_loop_sql", "") or "").strip()
 RESULT_PREVIEW_LIMIT = 3500
 
 
@@ -162,17 +175,24 @@ class AskAgentLoop:
             brief = brief_tool_summary(tool_name, result)
             state.calls.append(ToolCallRecord(tool=tool_name, args=args, ok=result.ok, summary=summary))
             transcript.append(f"Tool `{tool_name}` → {summary}")
-            self.progress(
-                progress_event(
-                    stage=tool_name,
-                    title=f"{tool_name} done",
-                    status="completed" if result.ok else "failed",
-                    kind="tool",
-                    detail=brief,
-                    duration_ms=float(getattr(result, "duration_ms", 0) or 0),
-                    step=step_no,
-                )
+            # Put the exact SQL on the execute/explain step itself, so clicking the
+            # step in the trace surfaces the SQL the system ran (full auditability).
+            done_detail = brief
+            executed_sql = _executed_sql(tool_name, orch, result)
+            if executed_sql:
+                done_detail = executed_sql
+            done_event = progress_event(
+                stage=tool_name,
+                title=f"{tool_name} done",
+                status="completed" if result.ok else "failed",
+                kind="tool",
+                detail=done_detail,
+                duration_ms=float(getattr(result, "duration_ms", 0) or 0),
+                step=step_no,
             )
+            if executed_sql:
+                done_event["sql"] = executed_sql
+            self.progress(done_event)
 
             if tool_name == "ask_user" and result.ok and isinstance(result.data, dict) and result.data.get("pending"):
                 return self._build_wait_response(orch, state, transcript, disclosures_before or [])
