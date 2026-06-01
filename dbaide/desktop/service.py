@@ -262,8 +262,15 @@ class DesktopService:
             policy = resolve_policy(load_profile=load_profile_override, overrides=self.cfg.resource_defaults())
         else:
             policy = self.cfg.policy_for(conn)
-        adapter = build_adapter(conn, policy=policy, caller="build")
+        # Honour the requested build concurrency: the QueryBudget caps real DB
+        # concurrency at max_inflight_queries, so a higher "workers" setting would
+        # otherwise have no effect. A build is explicit and exclusive, so let it run
+        # as wide as the user asked (never narrower than the policy default).
         max_workers = payload.get("max_workers")
+        workers = int(max_workers) if max_workers else policy.build_max_workers
+        if workers > policy.max_inflight_queries:
+            policy = policy.merged_with({"max_inflight_queries": workers})
+        adapter = build_adapter(conn, policy=policy, caller="build")
         self._begin_build(conn.name)
         try:
             stats = AssetBuilder(
