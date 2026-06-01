@@ -86,11 +86,12 @@ class TopBar(QWidget):
         self.database.blockSignals(False)
 
     def set_asset_status(self, status: str) -> None:
+        # Only "ready"/"missing" come from the service; "building" is set locally
+        # while a build runs. (No "partial" — nothing computes it.)
         mapping = {
             "ready": ("Ready", "ready"),
             "missing": ("No assets", "missing"),
             "building": ("Building", "building"),
-            "partial": ("Partial", "warning"),
         }
         text, state = mapping.get(status, ("Idle", "idle"))
         self.status.set_state(text, state)

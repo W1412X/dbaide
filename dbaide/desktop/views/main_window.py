@@ -581,9 +581,13 @@ class MainWindow(QMainWindow):
         if not model_name:
             return
         try:
-            self.service.dispatch("set_default_model", {"name": model_name})
+            result = self.service.dispatch("set_default_model", {"name": model_name})
             self.bus.emit(MODELS_CHANGED, {"model": model_name})
-            active = self.bootstrap.get("model") or {}
+            # Label and cached bootstrap must reflect the newly-selected model,
+            # not the one that was active at startup.
+            active = result.get("model") or {}
+            self.bootstrap["model"] = active
+            self.bootstrap["default_model"] = model_name
             label = str(active.get("model") or model_name)
             self.toast(_i18n_t("toast.model", name=label))
         except Exception as exc:
