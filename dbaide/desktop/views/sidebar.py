@@ -50,7 +50,13 @@ class Sidebar(QWidget):
     def _render(self, rows: list[dict[str, Any]]) -> None:
         self.tree.clear()
         if not rows:
-            self.tree.addTopLevelItem(QTreeWidgetItem(["No assets yet — build from ⋯ menu"]))
+            from dbaide.desktop.theme import Theme
+            from PyQt6.QtGui import QColor
+            item = QTreeWidgetItem(["No assets yet"])
+            item.setToolTip(0, "Build assets from the ⋯ menu (top-right) for richer answers.")
+            item.setForeground(0, QColor(Theme.MUTED))
+            item.setFlags(Qt.ItemFlag.ItemIsEnabled)
+            self.tree.addTopLevelItem(item)
             return
         for db in rows:
             db_item = QTreeWidgetItem([db["name"]])
