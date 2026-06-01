@@ -6,9 +6,13 @@ from typing import Any
 from PyQt6.QtCore import Qt, QTimer
 from PyQt6.QtGui import QColor, QFont
 from PyQt6.QtWidgets import (
+    QApplication,
+    QHBoxLayout,
     QHeaderView,
+    QLabel,
     QSplitter,
     QTextBrowser,
+    QToolButton,
     QTreeWidget,
     QTreeWidgetItem,
     QVBoxLayout,
@@ -64,14 +68,39 @@ class TracePanel(QWidget):
         self._tree.setFont(QFont("Inter", 11))
         self._tree.itemClicked.connect(self._on_click)
 
+        # Detail pane: a header with a "Copy raw" action over a formatted (HTML) view.
+        detail_box = QWidget()
+        detail_layout = QVBoxLayout(detail_box)
+        detail_layout.setContentsMargins(0, 6, 0, 0)
+        detail_layout.setSpacing(4)
+        header = QHBoxLayout()
+        header.setContentsMargins(2, 0, 2, 0)
+        self._detail_title = QLabel("")
+        self._detail_title.setStyleSheet(f"color:{Theme.TEXT_2}; font-size:11px; font-weight:600;")
+        header.addWidget(self._detail_title)
+        header.addStretch(1)
+        self._copy_raw_btn = QToolButton()
+        self._copy_raw_btn.setText("Copy raw")
+        self._copy_raw_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._copy_raw_btn.setStyleSheet(
+            f"QToolButton {{ color:{Theme.MUTED}; border:1px solid {Theme.BORDER_SOFT};"
+            f" border-radius:6px; padding:2px 8px; font-size:11px; }}"
+            f"QToolButton:hover {{ color:{Theme.TEXT}; }}"
+        )
+        self._copy_raw_btn.clicked.connect(self._copy_raw)
+        self._copy_raw_btn.setVisible(False)
+        header.addWidget(self._copy_raw_btn)
+        detail_layout.addLayout(header)
         self._detail = QTextBrowser()
-        self._detail.setFont(QFont("Menlo", 10))
+        self._detail.setFont(QFont("Inter", 11))
         configure_readonly_text_view(self._detail)
         self._detail.setPlaceholderText("Click a step to inspect it.")
         self._detail.setMinimumHeight(96)
+        detail_layout.addWidget(self._detail, 1)
+        self._raw_text = ""  # original event JSON for the current node (for Copy raw)
 
         split.addWidget(self._tree)
-        split.addWidget(self._detail)
+        split.addWidget(detail_box)
         split.setStretchFactor(0, 3)
         split.setStretchFactor(1, 1)
         layout.addWidget(split)
@@ -277,7 +306,89 @@ class TracePanel(QWidget):
         self._show_detail(data)
 
     def _show_detail(self, data: dict) -> None:
-        self._detail.setPlainText(_format_detail(data))
+        raw = data.get("raw") if isinstance(data.get("raw"), dict) else {}
+        try:
+            self._raw_text = json.dumps(raw, ensure_ascii=False, indent=2, default=str) if raw else ""
+        except (TypeError, ValueError):
+            self._raw_text = str(raw)
+        self._detail_title.setText(str(data.get("title") or data.get("phase") or data.get("stage") or ""))
+        self._copy_raw_btn.setVisible(bool(self._raw_text) and not data.get("__summary__"))
+        self._detail.setHtml(_detail_html(data))
+
+    def _copy_raw(self) -> None:
+        if self._raw_text:
+            QApplication.clipboard().setText(self._raw_text)
+            self._copy_raw_btn.setText("Copied ✓")
+            QTimer.singleShot(1200, lambda: self._copy_raw_btn.setText("Copy raw"))
+
+
+def _esc(text: str) -> str:
+    return (str(text).replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;"))
+
+
+def _detail_html(data: dict) -> str:
+    """Formatted (not raw-JSON) detail for the selected node. The raw event is still
+    available via the Copy raw button."""
+    if data.get("__summary__"):
+        return f"<div style='color:{Theme.TEXT}; font-size:12px;'>{_esc(data.get('title') or '')}</div>"
+    node_type = str(data.get("node_type") or "info")
+    raw = data.get("raw") if isinstance(data.get("raw"), dict) else {}
+    parts: list[str] = []
+    title = str(data.get("title") or data.get("phase") or data.get("stage") or "step")
+    parts.append(f"<div style='color:{Theme.TEXT}; font-size:13px; font-weight:600;'>{_esc(title)}</div>")
+
+    chips = [("type", node_type)]
+    for key in ("phase", "stage", "agent"):
+        if data.get(key):
+            chips.append((key, str(data[key])))
+    if data.get("step"):
+        chips.append(("step", str(data["step"])))
+    chips.append(("status", str(data.get("status") or "?")))
+    if data.get("duration_ms"):
+        chips.append(("", f"{float(data['duration_ms']):.0f} ms"))
+    chip_html = " ".join(
+        f"<span style='color:{Theme.MUTED};'>{(_esc(k) + ': ') if k else ''}{_esc(v)}</span>"
+        for k, v in chips
+    )
+    parts.append(f"<div style='font-size:11px; margin:4px 0 8px;'>{chip_html}</div>")
+
+    if node_type == "sql":
+        facts = []
+        if raw.get("row_count") not in (None, ""):
+            facts.append(f"{_esc(raw['row_count'])} rows")
+        if raw.get("database"):
+            facts.append(f"db={_esc(raw['database'])}")
+        if facts:
+            parts.append(f"<div style='color:{Theme.TEXT_2}; font-size:11px; margin-bottom:6px;'>"
+                         f"{' · '.join(facts)}</div>")
+        sql = str(raw.get("sql") or data.get("detail") or "").strip()
+        if sql:
+            parts.append(_code_block(sql))
+    else:
+        if data.get("thought"):
+            parts.append(f"<div style='color:{Theme.TEXT_2}; font-style:italic; margin-bottom:6px;'>"
+                         f"💭 {_esc(data['thought'])}</div>")
+        detail = str(data.get("detail") or "").strip()
+        if detail:
+            # Render a SQL-ish or multi-line detail as a code block, else as text.
+            if "\n" in detail or detail.upper().startswith(("SELECT", "WITH", "INSERT", "UPDATE")):
+                parts.append(_code_block(detail))
+            else:
+                parts.append(f"<div style='color:{Theme.TEXT}; font-size:12px;'>{_esc(detail)}</div>")
+        args = raw.get("args")
+        if args:
+            parts.append(f"<div style='color:{Theme.MUTED}; font-size:11px; margin-top:6px;'>args</div>")
+            parts.append(_code_block(_esc(args), escaped=True))
+    return "".join(parts)
+
+
+def _code_block(text: str, *, escaped: bool = False) -> str:
+    body = text if escaped else _esc(text)
+    return (
+        f"<pre style='background:{Theme.PANEL_2}; border:1px solid {Theme.BORDER_SOFT};"
+        f" border-radius:6px; padding:8px; font-family:Menlo,monospace; font-size:11px;"
+        f" color:{Theme.TEXT}; white-space:pre-wrap;'>{body}</pre>"
+    )
 
 
 def _head_text(node: TraceNode) -> str:
@@ -287,68 +398,6 @@ def _head_text(node: TraceNode) -> str:
     if chip and node.node_type in _CHIP_TYPES:
         return f"{chip} · {base}"
     return base
-
-
-def _format_detail(data: dict) -> str:
-    if data.get("__summary__"):
-        return str(data.get("title") or "")
-    node_type = str(data.get("node_type") or "info")
-    lines: list[str] = []
-    title = str(data.get("title") or data.get("phase") or data.get("stage") or "step")
-    lines.append(title)
-    meta = [f"type: {node_type}"]
-    if data.get("phase"):
-        meta.append(f"phase: {data['phase']}")
-    if data.get("stage"):
-        meta.append(f"stage: {data['stage']}")
-    if data.get("agent"):
-        meta.append(f"agent: {data['agent']}")
-    if data.get("step"):
-        meta.append(f"step: {data['step']}")
-    meta.append(f"status: {data.get('status') or '?'}")
-    if data.get("duration_ms"):
-        meta.append(f"{float(data['duration_ms']):.0f} ms")
-    lines.append(" · ".join(meta))
-
-    raw = data.get("raw") if isinstance(data.get("raw"), dict) else {}
-
-    # SQL steps lead with the query itself — that is the whole point of the step.
-    if node_type == "sql":
-        sql = str(raw.get("sql") or data.get("detail") or "").strip()
-        facts = []
-        if raw.get("row_count") not in (None, ""):
-            facts.append(f"{raw['row_count']} rows")
-        if raw.get("database"):
-            facts.append(f"db={raw['database']}")
-        if facts:
-            lines.append("")
-            lines.append(" · ".join(facts))
-        if sql:
-            lines.append("")
-            lines.append("─ SQL ─")
-            lines.append(sql)
-    else:
-        if data.get("thought"):
-            lines.append("")
-            lines.append(f"thought: {data['thought']}")
-        if data.get("detail"):
-            lines.append("")
-            lines.append(str(data["detail"]))
-
-    if raw:
-        # For non-SQL steps also surface explicit payload keys, then the full event.
-        if node_type != "sql":
-            for key in ("sql", "args"):
-                if raw.get(key):
-                    lines.append("")
-                    lines.append(f"{key}: {raw[key]}")
-        lines.append("")
-        lines.append("─ raw event ─")
-        try:
-            lines.append(json.dumps(raw, ensure_ascii=False, indent=2, default=str))
-        except (TypeError, ValueError):
-            lines.append(str(raw))
-    return "\n".join(lines)
 
 
 def _secondary_text(node: TraceNode) -> str:
