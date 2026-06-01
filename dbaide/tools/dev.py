@@ -71,7 +71,7 @@ class DeveloperTools:
                             pk="✓" if col.get("primary_key") else "",
                             indexed="✓" if col.get("indexed") else "",
                             profile=col.get("profile_status") or "",
-                            summary=str(col.get("semantic_summary") or "").replace("|", "\\|")[:240],
+                            summary=str(col.get("source_comment") or "").replace("|", "\\|")[:240],
                         )
                     )
                 lines.append("")

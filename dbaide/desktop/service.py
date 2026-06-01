@@ -278,6 +278,7 @@ class DesktopService:
                 adapter=adapter,
                 store=self.store,
                 llm=self._safe_llm(),
+                join_catalog=self.join_catalog,
                 progress=progress_cb,
             ).build(
                 databases=payload.get("databases") or None,

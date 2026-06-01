@@ -3,9 +3,14 @@ from __future__ import annotations
 from typing import Any
 
 from dbaide.llm import LLMClient, LLMMessage, NullLLMClient
-from dbaide.models import ColumnInfo, ColumnProfile, ForeignKeyInfo, TableInfo
+from dbaide.models import ColumnInfo, ColumnProfile, ForeignKeyInfo, IndexInfo, TableInfo
 
-ASSET_SCHEMA_VERSION = 3
+# v4: lean, type-aware docs — column docs carry index detail + minimal type-aware
+# stats (no per-column LLM summaries); table docs carry the raw DDL + index list
+# and drop per-column descriptions (those live in the column docs).
+ASSET_SCHEMA_VERSION = 4
+
+_MAX_DESC = 200  # descriptions stay short — the agent explores details via SQL
 
 
 def _to_dict(obj: Any) -> dict[str, Any]:
@@ -16,8 +21,15 @@ def _to_dict(obj: Any) -> dict[str, Any]:
     return {}
 
 
+def _short(text: str | None) -> str:
+    text = " ".join(str(text or "").split())
+    return text if len(text) <= _MAX_DESC else text[: _MAX_DESC - 1] + "…"
+
+
 class AssetSummarizer:
-    """Build offline asset documents from catalog facts and optional LLM summaries."""
+    """Build lean offline asset documents from catalog facts (DDL, indexes, FKs,
+    type-aware min/max) plus short table/db/instance descriptions. Deliberately
+    minimal: the agent can always explore finer detail by running SQL."""
 
     def __init__(self, llm: LLMClient | None = None) -> None:
         self.llm = llm or NullLLMClient()
@@ -30,8 +42,9 @@ class AssetSummarizer:
         table: str,
         column: ColumnInfo,
         profile: ColumnProfile | None,
+        indexes: list[IndexInfo] | None = None,
     ) -> dict[str, Any]:
-        summary = self._llm_column_summary(database, table, column, profile) or factual_column_summary(column, profile)
+        col_indexes = [ix.to_dict() for ix in (indexes or []) if column.name in ix.columns]
         return {
             "kind": "column",
             "asset_schema_version": ASSET_SCHEMA_VERSION,
@@ -44,13 +57,11 @@ class AssetSummarizer:
             "nullable": column.nullable,
             "default": column.default,
             "primary_key": column.primary_key,
-            "indexed": column.indexed,
-            "source_comment": column.comment,
-            "semantic_summary": summary,
+            "indexed": bool(col_indexes) or column.indexed,
+            "indexes": col_indexes,            # which indexes (incl. composite) cover this column
+            "source_comment": column.comment,  # DB-provided comment, if any — the description
             "profile_status": "profiled" if profile else "not_profiled",
-            "statistics": build_column_statistics(profile),
-            "sample_values": profile.sample_values[:50] if profile else [],
-            "top_values": profile.top_values[:50] if profile else [],
+            "statistics": lean_column_statistics(profile),  # type-aware, minimal
         }
 
     def table_doc(
@@ -61,6 +72,8 @@ class AssetSummarizer:
         table: TableInfo,
         columns: list[dict[str, Any]],
         foreign_keys: list[ForeignKeyInfo],
+        indexes: list[IndexInfo] | None = None,
+        ddl: str = "",
     ) -> dict[str, Any]:
         description = self._llm_table_summary(database, table, columns, foreign_keys) or factual_table_summary(table, columns)
         return {
@@ -73,19 +86,19 @@ class AssetSummarizer:
             "table_type": table.table_type,
             "estimated_rows": table.estimated_rows,
             "source_comment": table.comment,
-            "description": description,
-            "column_index": build_column_index(columns),
+            "description": _short(description),
+            "ddl": ddl,                        # raw CREATE TABLE — the authoritative shape
+            # Lean column list: identity only. Descriptions live in the column docs.
             "columns": [
                 {
                     "name": col.get("name"),
                     "data_type": col.get("data_type"),
                     "primary_key": col.get("primary_key"),
-                    "indexed": col.get("indexed"),
-                    "source_comment": col.get("source_comment"),
-                    "semantic_summary": col.get("semantic_summary"),
+                    "nullable": col.get("nullable"),
                 }
                 for col in columns
             ],
+            "indexes": [ix.to_dict() for ix in (indexes or [])],
             "foreign_keys": [foreign_key_record(fk) for fk in foreign_keys],
         }
 
@@ -97,14 +110,10 @@ class AssetSummarizer:
             "instance": instance,
             "database": database,
             "name": database,
-            "description": description,
+            "description": _short(description),
             "table_count": len(tables),
             "tables": [
-                {
-                    "name": table.get("name"),
-                    "description": table.get("description"),
-                    "estimated_rows": table.get("estimated_rows"),
-                }
+                {"name": table.get("name"), "description": _short(table.get("description"))}
                 for table in tables
             ],
         }
@@ -116,43 +125,16 @@ class AssetSummarizer:
             "asset_schema_version": ASSET_SCHEMA_VERSION,
             "instance": instance,
             "name": instance,
-            "description": description,
+            "description": _short(description),
             "databases": [
                 {
                     "name": db.get("name"),
-                    "description": db.get("description"),
+                    "description": _short(db.get("description")),
                     "table_count": len(db.get("tables") or []),
                 }
                 for db in databases
             ],
         }
-
-    def _llm_column_summary(
-        self,
-        database: str,
-        table: str,
-        column: ColumnInfo,
-        profile: ColumnProfile | None,
-    ) -> str:
-        if isinstance(self.llm, NullLLMClient):
-            return ""
-        try:
-            payload = self.llm.complete_json(
-                [
-                    LLMMessage(
-                        "system",
-                        "Summarize a database column from catalog facts and profile statistics. Return JSON only.",
-                    ),
-                    LLMMessage(
-                        "user",
-                        f"Database: {database}\nTable: {table}\nColumn: {column}\nProfile: {profile}",
-                    ),
-                ],
-                schema_hint='Return {"summary": "one concise summary of meaning and usage"}.',
-            )
-            return str(payload.get("summary") or "").strip()
-        except Exception:
-            return ""
 
     def _llm_table_summary(
         self,
@@ -164,12 +146,13 @@ class AssetSummarizer:
         if isinstance(self.llm, NullLLMClient):
             return ""
         try:
+            col_names = ", ".join(str(c.get("name")) for c in columns[:30])
             payload = self.llm.complete_json(
                 [
-                    LLMMessage("system", "Summarize a database table from column documents. Return JSON only."),
-                    LLMMessage("user", f"Database: {database}\nTable: {table}\nColumns: {columns}\nForeign keys: {foreign_keys}"),
+                    LLMMessage("system", "Summarize what a database table is for. Return JSON only."),
+                    LLMMessage("user", f"Database: {database}\nTable: {table.name}\nComment: {table.comment}\nColumns: {col_names}"),
                 ],
-                schema_hint='Return {"summary": "one concise table description"}.',
+                schema_hint='Return {"summary": "ONE short sentence (<=20 words) on what this table holds"}.',
             )
             return str(payload.get("summary") or "").strip()
         except Exception:
@@ -179,9 +162,11 @@ class AssetSummarizer:
         if isinstance(self.llm, NullLLMClient):
             return ""
         try:
+            names = ", ".join(str(t.get("name")) for t in tables[:40])
             payload = self.llm.complete_json(
-                [LLMMessage("system", "Summarize a database from table documents. Return JSON only."), LLMMessage("user", f"Database: {database}\nTables: {tables}")],
-                schema_hint='Return {"summary": "one concise database description"}.',
+                [LLMMessage("system", "Summarize a database's purpose. Return JSON only."),
+                 LLMMessage("user", f"Database: {database}\nTables: {names}")],
+                schema_hint='Return {"summary": "ONE short sentence on the database\'s domain"}.',
             )
             return str(payload.get("summary") or "").strip()
         except Exception:
@@ -191,65 +176,36 @@ class AssetSummarizer:
         if isinstance(self.llm, NullLLMClient):
             return ""
         try:
+            names = ", ".join(str(db.get("name")) for db in databases)
             payload = self.llm.complete_json(
-                [LLMMessage("system", "Summarize a database instance from database documents. Return JSON only."), LLMMessage("user", f"Instance: {instance}\nDatabases: {databases}")],
-                schema_hint='Return {"summary": "one concise instance description"}.',
+                [LLMMessage("system", "Summarize a database instance. Return JSON only."),
+                 LLMMessage("user", f"Instance: {instance}\nDatabases: {names}")],
+                schema_hint='Return {"summary": "ONE short sentence on this instance"}.',
             )
             return str(payload.get("summary") or "").strip()
         except Exception:
             return ""
 
 
-def factual_column_summary(column: ColumnInfo, profile: ColumnProfile | None) -> str:
-    parts = [f"{column.name}: {column.data_type or 'unknown'}"]
-    if column.comment:
-        parts.append(f"comment={column.comment}")
-    flags = []
-    if column.primary_key:
-        flags.append("primary_key")
-    if column.indexed:
-        flags.append("indexed")
-    if flags:
-        parts.append(", ".join(flags))
-    if profile:
-        null_rate = f"{profile.null_rate:.2%}" if profile.null_rate is not None else "unknown"
-        parts.append(
-            f"rows={profile.row_count}, nulls={profile.null_count} ({null_rate}), "
-            f"distinct={profile.distinct_count}"
-        )
-        if profile.top_values:
-            top = ", ".join(str(x.get("value")) for x in profile.top_values[:5])
-            parts.append(f"top_values={top}")
-        if profile.min_value is not None or profile.max_value is not None:
-            parts.append(f"range={profile.min_value}..{profile.max_value}")
-    return ". ".join(parts)
-
-
-def build_column_statistics(profile: ColumnProfile | None) -> dict[str, Any]:
+def lean_column_statistics(profile: ColumnProfile | None) -> dict[str, Any]:
+    """Minimal, type-aware stats. Ordered types (numeric/temporal) get min/max;
+    low-cardinality types get a distinct count; everything carries a null rate.
+    Anything finer is left for the agent to query on demand."""
     if profile is None:
         return {}
-    return {
-        "data_kind": profile.data_kind,
-        "row_count": profile.row_count,
-        "null_count": profile.null_count,
-        "null_rate": profile.null_rate,
-        "distinct_count": profile.distinct_count,
-        "distinct_ratio": profile.distinct_ratio,
-        "min_value": profile.min_value,
-        "max_value": profile.max_value,
-        "numeric_stats": profile.numeric_stats,
-        "text_stats": profile.text_stats,
-        "temporal_stats": profile.temporal_stats,
-        "distribution": profile.distribution,
-        "sample_rows": profile.sample_rows[:50],
-    }
-
-
-def build_column_index(columns: list[dict[str, Any]]) -> dict[str, list[str]]:
-    return {
-        "primary_key": [str(col.get("name")) for col in columns if col.get("primary_key")],
-        "indexed": [str(col.get("name")) for col in columns if col.get("indexed")],
-    }
+    stats: dict[str, Any] = {"data_kind": profile.data_kind}
+    if profile.null_rate is not None:
+        stats["null_rate"] = round(float(profile.null_rate), 4)
+    kind = profile.data_kind
+    if kind in ("numeric", "temporal"):
+        if profile.min_value is not None:
+            stats["min_value"] = profile.min_value
+        if profile.max_value is not None:
+            stats["max_value"] = profile.max_value
+    elif kind in ("categorical", "boolean"):
+        if profile.distinct_count is not None:
+            stats["distinct_count"] = profile.distinct_count
+    return stats
 
 
 def foreign_key_record(fk: ForeignKeyInfo) -> dict[str, Any]:
@@ -257,168 +213,135 @@ def foreign_key_record(fk: ForeignKeyInfo) -> dict[str, Any]:
 
 
 def factual_table_summary(table: TableInfo, columns: list[dict[str, Any]]) -> str:
-    names = ", ".join(str(col.get("name")) for col in columns[:12])
-    suffix = f" (+{len(columns) - 12} more)" if len(columns) > 12 else ""
-    text = f"Table {table.name}: {len(columns)} columns [{names}{suffix}]"
     if table.comment:
-        text += f". Comment: {table.comment}"
-    return text
+        return _short(table.comment)
+    names = ", ".join(str(col.get("name")) for col in columns[:8])
+    suffix = "…" if len(columns) > 8 else ""
+    return _short(f"{table.name} ({len(columns)} cols: {names}{suffix})")
 
 
 def factual_database_summary(database: str, tables: list[dict[str, Any]]) -> str:
-    names = ", ".join(str(table.get("name")) for table in tables[:12])
-    return f"Database {database}: {len(tables)} tables [{names}]"
+    names = ", ".join(str(table.get("name")) for table in tables[:10])
+    suffix = "…" if len(tables) > 10 else ""
+    return _short(f"{database}: {len(tables)} tables ({names}{suffix})")
 
 
 def factual_instance_summary(instance: str, databases: list[dict[str, Any]]) -> str:
     names = ", ".join(str(db.get("name")) for db in databases)
-    return f"Instance {instance}: {len(databases)} database(s) [{names}]"
+    return _short(f"{instance}: {len(databases)} database(s) ({names})")
+
+
+# ── Markdown rendering (asset preview) ───────────────────────────────────────
+
+def _index_label(idx: dict[str, Any]) -> str:
+    cols = ", ".join(idx.get("columns") or [])
+    flags = []
+    if idx.get("primary"):
+        flags.append("PK")
+    if idx.get("unique"):
+        flags.append("unique")
+    kind = idx.get("type") or ""
+    suffix = f" [{', '.join(flags)}]" if flags else ""
+    type_suffix = f" · {kind}" if kind and not idx.get("primary") else ""
+    return f"{idx.get('name', '')} ({cols}){suffix}{type_suffix}"
 
 
 def render_instance_markdown(doc: dict[str, Any]) -> str:
     lines = [f"# {doc.get('name', 'Instance')}", ""]
     if doc.get("description"):
-        lines.append(doc["description"])
-        lines.append("")
-    lines.append("## Databases")
-    lines.append("")
-    lines.append("| Database | Tables | Description |")
-    lines.append("| --- | --- | --- |")
+        lines += [doc["description"], ""]
+    lines += ["## Databases", "", "| Database | Tables | Description |", "| --- | --- | --- |"]
     for db in doc.get("databases", []):
         lines.append(f"| {db.get('name', '')} | {db.get('table_count', '?')} | {db.get('description', '')} |")
     lines.append("")
-    lines.append(f"*Built at: {doc.get('built_at', 'unknown')}*")
     return "\n".join(lines)
 
 
 def render_database_markdown(doc: dict[str, Any]) -> str:
     lines = [f"# {doc.get('name', 'Database')}", ""]
     if doc.get("description"):
-        lines.append(doc["description"])
-        lines.append("")
-    lines.append("## Tables")
-    lines.append("")
-    lines.append("| Table | Rows | Description |")
-    lines.append("| --- | --- | --- |")
+        lines += [doc["description"], ""]
+    lines += ["## Tables", "", "| Table | Description |", "| --- | --- |"]
     for table in doc.get("tables", []):
-        rows = table.get("estimated_rows", "?")
-        lines.append(f"| {table.get('name', '')} | {rows} | {table.get('description', '')} |")
+        lines.append(f"| {table.get('name', '')} | {table.get('description', '')} |")
     lines.append("")
     return "\n".join(lines)
 
 
 def render_table_markdown(doc: dict[str, Any]) -> str:
     lines = [f"# {doc.get('name', 'Table')}", ""]
-    lines.append("## Summary")
-    lines.append("")
+    lines += ["## Summary", ""]
     lines.append(f"- **Database:** {doc.get('database', '?')}")
     lines.append(f"- **Type:** {doc.get('table_type', 'table')}")
-    lines.append(f"- **Estimated rows:** {doc.get('estimated_rows', '?')}")
+    if doc.get("estimated_rows") is not None:
+        lines.append(f"- **Estimated rows:** {doc.get('estimated_rows', '?')}")
     if doc.get("source_comment"):
         lines.append(f"- **Comment:** {doc['source_comment']}")
     if doc.get("description"):
         lines.append(f"- **Description:** {doc['description']}")
     lines.append("")
 
-    lines.append("## Columns")
-    lines.append("")
-    lines.append("| Column | Type | PK | Indexed | Description |")
-    lines.append("| --- | --- | --- | --- | --- |")
+    # Identity-only column list (descriptions live in the column docs).
+    lines += ["## Columns", "", "| Column | Type | PK | Null |", "| --- | --- | --- | --- |"]
     for col in doc.get("columns", []):
         pk = "✓" if col.get("primary_key") else ""
-        indexed = "✓" if col.get("indexed") else ""
-        desc = col.get("semantic_summary") or col.get("source_comment") or ""
-        if len(desc) > 60:
-            desc = desc[:57] + "..."
-        lines.append(
-            f"| {col.get('name', '')} | {col.get('data_type', '')} | {pk} | {indexed} | {desc} |"
-        )
+        nullable = "" if col.get("nullable") is False else "✓"
+        lines.append(f"| {col.get('name', '')} | {col.get('data_type', '')} | {pk} | {nullable} |")
     lines.append("")
+
+    indexes = doc.get("indexes", [])
+    if indexes:
+        lines += ["## Indexes", ""]
+        for idx in indexes:
+            lines.append(f"- {_index_label(idx)}")
+        lines.append("")
 
     fks = doc.get("foreign_keys", [])
     if fks:
-        lines.append("## Foreign Keys")
-        lines.append("")
-        lines.append("| Column | References |")
-        lines.append("| --- | --- |")
+        lines += ["## Foreign Keys", "", "| Column | References |", "| --- | --- |"]
         for fk in fks:
             lines.append(f"| {fk.get('column', '')} | {fk.get('ref_table', '')}.{fk.get('ref_column', '')} |")
         lines.append("")
 
-    column_index = doc.get("column_index", {})
-    if column_index.get("primary_key") or column_index.get("indexed"):
-        lines.append("## Column Index")
-        lines.append("")
-        if column_index.get("primary_key"):
-            lines.append(f"- **Primary key:** {', '.join(column_index['primary_key'])}")
-        if column_index.get("indexed"):
-            lines.append(f"- **Indexed:** {', '.join(column_index['indexed'])}")
-        lines.append("")
+    if doc.get("ddl"):
+        lines += ["## DDL", "", "```sql", str(doc["ddl"]).strip(), "```", ""]
 
     return "\n".join(lines)
 
 
 def render_column_markdown(doc: dict[str, Any]) -> str:
     lines = [f"# {doc.get('table', '?')}.{doc.get('name', '?')}", ""]
-    lines.append("## Meaning")
-    lines.append("")
-    if doc.get("semantic_summary"):
-        lines.append(doc["semantic_summary"])
-    elif doc.get("source_comment"):
-        lines.append(doc["source_comment"])
-    else:
-        lines.append(f"{doc.get('name', '?')} is a {doc.get('data_type', 'unknown')} column.")
-    lines.append("")
+    if doc.get("source_comment"):
+        lines += ["## Meaning", "", doc["source_comment"], ""]
 
-    lines.append("## Type And Constraints")
-    lines.append("")
+    lines += ["## Type And Constraints", ""]
     lines.append(f"- **Type:** {doc.get('data_type', '?')}")
     lines.append(f"- **Nullable:** {doc.get('nullable', '?')}")
     lines.append(f"- **Primary key:** {doc.get('primary_key', False)}")
-    lines.append(f"- **Indexed:** {doc.get('indexed', False)}")
-    if doc.get("default"):
+    if doc.get("default") is not None:
         lines.append(f"- **Default:** {doc['default']}")
     lines.append("")
 
+    indexes = doc.get("indexes", [])
+    if indexes:
+        lines += ["## Indexes", ""]
+        for idx in indexes:
+            lines.append(f"- {_index_label(idx)}")
+        lines.append("")
+
     stats = doc.get("statistics", {})
     if stats:
-        lines.append("## Profile")
-        lines.append("")
-        lines.append(f"- **Row count:** {stats.get('row_count', '?')}")
-        lines.append(f"- **Null count:** {stats.get('null_count', '?')}")
-        null_rate = stats.get("null_rate")
-        if null_rate is not None:
-            lines.append(f"- **Null rate:** {null_rate:.2%}")
-        lines.append(f"- **Distinct count:** {stats.get('distinct_count', '?')}")
-        distinct_ratio = stats.get("distinct_ratio")
-        if distinct_ratio is not None:
-            lines.append(f"- **Distinct ratio:** {distinct_ratio:.2%}")
+        lines += ["## Stats", ""]
         if stats.get("data_kind"):
-            lines.append(f"- **Data kind:** {stats['data_kind']}")
+            lines.append(f"- **Kind:** {stats['data_kind']}")
+        if stats.get("null_rate") is not None:
+            lines.append(f"- **Null rate:** {stats['null_rate']:.2%}")
+        if stats.get("distinct_count") is not None:
+            lines.append(f"- **Distinct:** {stats['distinct_count']}")
         if stats.get("min_value") is not None:
             lines.append(f"- **Min:** {stats['min_value']}")
         if stats.get("max_value") is not None:
             lines.append(f"- **Max:** {stats['max_value']}")
-        lines.append("")
-
-    samples = doc.get("sample_values", [])
-    if samples:
-        lines.append("## Sample Values")
-        lines.append("")
-        for v in samples[:10]:
-            lines.append(f"- `{v}`")
-        if len(samples) > 10:
-            lines.append(f"- ... ({len(samples)} total)")
-        lines.append("")
-
-    top = doc.get("top_values", [])
-    if top:
-        lines.append("## Top Values")
-        lines.append("")
-        lines.append("| Value | Count |")
-        lines.append("| --- | --- |")
-        for item in top[:10]:
-            lines.append(f"| {item.get('value', '')} | {item.get('count', '')} |")
         lines.append("")
 
     return "\n".join(lines)

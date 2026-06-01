@@ -5,11 +5,14 @@ import threading
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import asdict, dataclass, field
-from typing import Callable
+from typing import TYPE_CHECKING, Callable
 
 from dbaide.adapters.base import DatabaseAdapter
 from dbaide.assets.profiler import ColumnProfiler
 from dbaide.assets.store import AssetStore
+
+if TYPE_CHECKING:
+    from dbaide.joins import JoinCatalogStore
 from dbaide.assets.summarizer import ASSET_SCHEMA_VERSION, AssetSummarizer
 from dbaide.llm import LLMClient
 from dbaide.models import ConnectionConfig
@@ -78,12 +81,18 @@ class AssetBuilder:
         adapter: DatabaseAdapter,
         store: AssetStore | None = None,
         llm: LLMClient | None = None,
+        join_catalog: "JoinCatalogStore | None" = None,
         progress: Callable[[str], None] | None = None,
     ) -> None:
         self.connection = connection
         self.adapter = adapter
         self.store = store or AssetStore()
         self.summarizer = AssetSummarizer(llm)
+        # When provided, declared foreign keys discovered during the build are saved
+        # to the join catalog (collected here under a lock, persisted once at the end
+        # to avoid a read-modify-write race across the parallel table workers).
+        self.join_catalog = join_catalog
+        self._fk_relations: list[dict] = []
         self.progress = progress or (lambda _msg: None)
         # Tables build on a shared thread pool and mutate one BuildStats; guard the
         # counter/error updates so they're correct even under free-threaded Python.
@@ -128,6 +137,22 @@ class AssetBuilder:
     def _emit_db(self, database: str, title: str, *, status: str = "running") -> None:
         self._emit(title, node_id=f"build:db:{database}", parent_id=_BUILD_ROOT,
                    status=status, kind="substep")
+
+    def _persist_fk_joins(self, instance: str) -> None:
+        """Save the declared foreign keys found during the build as join edges, so a
+        relation discovered from the schema is immediately part of the join catalog."""
+        if self.join_catalog is None or not self._fk_relations:
+            return
+        rels, self._fk_relations = self._fk_relations, []
+        saved = 0
+        for rel in rels:
+            try:
+                self.join_catalog.add(instance, rel, source="foreign_key", database=rel.get("database") or "")
+                saved += 1
+            except Exception as exc:  # pragma: no cover - defensive
+                logger.debug("fk join persist failed: %s", exc)
+        if saved:
+            self._emit(f"saved {saved} foreign-key join(s) to the catalog", status="running")
 
     def _emit_table(self, database: str, table: str, *, status: str, note: str = "") -> None:
         """Emit/refresh one table's trace node. Called live from the worker as the
@@ -232,6 +257,7 @@ class AssetBuilder:
                 database_docs = self._build_databases(instance, db_names, options, stats, profiler, executor)
         finally:
             unsubscribe()
+        self._persist_fk_joins(instance)
         database_docs = self._merge_database_docs(
             built_docs=database_docs,
             partial=partial,
@@ -517,6 +543,26 @@ class AssetBuilder:
         self._bump(stats, tables=1)
         columns = self.adapter.describe_table(table.name, database=database)
         foreign_keys = self.adapter.foreign_keys(table.name, database=database)
+        try:
+            indexes = self.adapter.indexes(table.name, database=database)
+        except Exception:
+            indexes = []
+        try:
+            ddl = self.adapter.get_table_ddl(table.name, database=database)
+        except Exception:
+            ddl = ""
+        if self.join_catalog is not None and foreign_keys:
+            fk_rels = [
+                {
+                    "database": database, "table": fk.table or table.name, "column": fk.column,
+                    "ref_table": fk.ref_table, "ref_column": fk.ref_column,
+                    "confidence": 0.97, "join_type": "many_to_one", "validated": True,
+                    "reason": "declared foreign key",
+                }
+                for fk in foreign_keys
+            ]
+            with self._table_sql_lock:
+                self._fk_relations.extend(fk_rels)
 
         # Large tables drop to metadata-only profiling so we never full-scan them.
         heavy = self._is_heavy(table, options)
@@ -543,13 +589,14 @@ class AssetBuilder:
             self._emit_table(database, table.name, status="running",
                              note=f"{idx + 1}/{total_cols} · {column.name}")
             column_docs.append(
-                self._build_column(instance, database, table.name, column, options, stats, profiler, heavy=heavy)
+                self._build_column(instance, database, table.name, column, options, stats, profiler,
+                                   heavy=heavy, indexes=indexes)
             )
 
         # Write table-level document (depends on all columns)
         table_doc = self.summarizer.table_doc(
             instance=instance, database=database, table=table,
-            columns=column_docs, foreign_keys=foreign_keys,
+            columns=column_docs, foreign_keys=foreign_keys, indexes=indexes, ddl=ddl,
         )
         table_doc["sample_rows"] = sample_rows
         table_doc["column_count"] = len(column_docs)
@@ -562,9 +609,9 @@ class AssetBuilder:
 
     def _build_column(self, instance: str, database: str, table_name: str, column,
                       options: BuildOptions, stats: BuildStats, profiler: ColumnProfiler,
-                      *, heavy: bool) -> dict:
+                      *, heavy: bool, indexes: list | None = None) -> dict:
         if self._is_expired(options.deadline):
-            return self._build_column_expired(instance, database, table_name, column, stats)
+            return self._build_column_expired(instance, database, table_name, column, stats, indexes=indexes)
         profile_obj = None
         if should_profile_column(column, mode=options.profile_mode):
             try:
@@ -580,17 +627,19 @@ class AssetBuilder:
         else:
             self._bump(stats, skipped_profiles=1)
         doc = self.summarizer.column_doc(instance=instance, database=database,
-                                          table=table_name, column=column, profile=profile_obj)
+                                          table=table_name, column=column, profile=profile_obj,
+                                          indexes=indexes)
         self.store.write_json(
             self.store.column_dir(instance, database, table_name) / f"{column.name}.json", doc
         )
         self._bump(stats, columns=1, profiled_columns=1 if profile_obj else 0)
         return doc
 
-    def _build_column_expired(self, instance: str, database: str, table_name: str, column, stats: BuildStats) -> dict:
+    def _build_column_expired(self, instance: str, database: str, table_name: str, column, stats: BuildStats,
+                              *, indexes: list | None = None) -> dict:
         self._bump(stats, skipped_profiles=1, timed_out_columns=1)
         doc = self.summarizer.column_doc(instance=instance, database=database,
-                                          table=table_name, column=column, profile=None)
+                                          table=table_name, column=column, profile=None, indexes=indexes)
         self.store.write_json(
             self.store.column_dir(instance, database, table_name) / f"{column.name}.json", doc
         )

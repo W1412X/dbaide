@@ -16,6 +16,7 @@ from dbaide.config import ConfigManager
 from dbaide.core.result import ExecutionPolicy, WorkflowRequest, WorkflowResult, WorkflowStatus
 from dbaide.core.workflow import WorkflowEngine
 from dbaide.history.debug_bundle import create_debug_bundle
+from dbaide.joins import JoinCatalogStore
 from dbaide.llm import NullLLMClient, build_llm_client
 from dbaide.models import ConnectionConfig, QueryResult
 from dbaide.session import Session
@@ -535,7 +536,8 @@ def build_connection_assets(
         else:
             print(msg)
 
-    builder = AssetBuilder(connection=conn, adapter=adapter, llm=llm, progress=_print_progress)
+    builder = AssetBuilder(connection=conn, adapter=adapter, llm=llm,
+                           join_catalog=JoinCatalogStore(), progress=_print_progress)
     effective_mode = "none" if not profile else profile_mode
     stats = builder.build(
         databases=databases, sample=sample, profile_mode=effective_mode,

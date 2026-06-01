@@ -64,7 +64,10 @@ def test_asset_builder_creates_hierarchy(tmp_path):
 
     assert "role_index" not in table_doc
     assert "join_hints" not in table_doc
-    assert "id" in table_doc["column_index"]["primary_key"]
+    # v4: table doc carries raw DDL + lean identity-only columns (no per-col desc).
+    assert table_doc["ddl"] and "orders" in table_doc["ddl"]
+    assert {"name", "data_type", "primary_key", "nullable"} == set(table_doc["columns"][0].keys())
+    assert "indexes" in table_doc
     assert instance_doc["asset_schema_version"] == ASSET_SCHEMA_VERSION
 
 
@@ -243,3 +246,37 @@ def test_desktop_list_databases_marks_existing_assets(tmp_path):
     payload = service.list_databases({"name": "local"})
     assert payload["connection"] == "local"
     assert payload["databases"] == [{"name": "main", "has_assets": True}]
+
+
+def test_build_persists_foreign_keys_as_joins(tmp_path):
+    import sqlite3
+    from dbaide.joins import JoinCatalogStore
+
+    db = tmp_path / "fk.db"
+    conn_sql = sqlite3.connect(db)
+    conn_sql.executescript(
+        "CREATE TABLE users(id INTEGER PRIMARY KEY, name TEXT);"
+        "CREATE TABLE orders(id INTEGER PRIMARY KEY, user_id INT REFERENCES users(id));"
+    )
+    conn_sql.commit(); conn_sql.close()
+    conn = ConnectionConfig(name="shop", type="sqlite", path=str(db))
+    jc = JoinCatalogStore(base_dir=tmp_path / "joins")
+    AssetBuilder(connection=conn, adapter=build_adapter(conn), store=AssetStore(tmp_path / "a"),
+                 join_catalog=jc).build(profile_mode="none", sample=False)
+    recs = jc.list_records("shop")
+    assert any(r["table"] == "orders" and r["column"] == "user_id"
+               and r["ref_table"] == "users" and r["source"] == "foreign_key" for r in recs)
+
+
+def test_indexes_capture_composite_and_unique(tmp_path):
+    import sqlite3
+    db = tmp_path / "idx.db"
+    c = sqlite3.connect(db)
+    c.executescript(
+        "CREATE TABLE t(a INT, b TEXT, c INT);"
+        "CREATE UNIQUE INDEX ix_ab ON t(a, b);"
+    )
+    c.commit(); c.close()
+    adapter = build_adapter(ConnectionConfig(name="x", type="sqlite", path=str(db)))
+    ix = next(i for i in adapter.indexes("t") if i.name == "ix_ab")
+    assert ix.columns == ["a", "b"] and ix.unique is True

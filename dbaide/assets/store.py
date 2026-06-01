@@ -99,7 +99,7 @@ class AssetStore:
             data_type=str(doc.get("data_type") or doc.get("type") or ""),
             nullable=doc.get("nullable"),
             default=doc.get("default"),
-            comment=str(doc.get("semantic_summary") or doc.get("comment") or ""),
+            comment=str(doc.get("source_comment") or doc.get("comment") or ""),
             primary_key=bool(doc.get("primary_key")),
             indexed=bool(doc.get("indexed")),
         )
