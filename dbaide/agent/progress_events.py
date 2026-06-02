@@ -8,6 +8,7 @@ from dbaide.core.events import TraceEvent
 
 TOOL_TRACE_STAGES = frozenset({
     "discover_schema",
+    "resolve_schema",
     "describe_table",
     "generate_sql",
     "validate_sql",
@@ -30,6 +31,7 @@ TOOL_TRACE_STAGES = frozenset({
 # Human-readable phase for each tool stage — what the agent is *doing* right now.
 PHASE_LABELS: dict[str, str] = {
     "discover_schema": "Exploring schema",
+    "resolve_schema": "Linking schema",
     "list_databases": "Exploring schema",
     "list_tables": "Exploring schema",
     "describe_table": "Reading tables",
@@ -268,6 +270,10 @@ def brief_tool_summary(tool: str, result: Any) -> str:
         return f"{data.get('row_count', '?')} rows"
     if tool == "ask_user":
         return str(data.get("question") or "waiting for user")[:160]
+    if tool == "resolve_schema":
+        if data.get("pending"):
+            return str(data.get("question") or "needs clarification")[:160]
+        return str(data.get("summary") or f"{len(data.get('tables') or [])} table(s)")[:200]
     if tool == "synthesize_schema_answer":
         return "schema answer ready"
     if tool == "profile_table":

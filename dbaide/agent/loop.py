@@ -202,7 +202,9 @@ class AskAgentLoop:
                     done_event["database"] = db
             self.progress(done_event)
 
-            if tool_name == "ask_user" and result.ok and isinstance(result.data, dict) and result.data.get("pending"):
+            # Any tool may pause for the user (ask_user, or resolve_schema when the
+            # question is ambiguous) by returning a pending question.
+            if result.ok and isinstance(result.data, dict) and result.data.get("pending"):
                 return self._build_wait_response(orch, state, transcript, disclosures_before or [])
 
             if tool_name == "describe_table" and result.ok:
@@ -302,11 +304,11 @@ class AskAgentLoop:
             '  {"action":"finish","answer":"markdown answer for the user"}\n\n'
             "Guidelines:\n"
             "- Schema / where-is questions: discover_schema → synthesize_schema_answer → finish\n"
-            "- Data queries: discover_schema → describe_table (each relevant table)"
-            " → get_relations (when multiple tables) → generate_sql → validate_sql"
+            "- Data queries: resolve_schema → generate_sql → validate_sql"
             + (" → execute_sql → finish" if state.execute_allowed and policy not in ("sql_only", "inspect_only") else " → finish")
             + "\n"
-            "- Multi-table: describe tables → get_relations (auto after 2+ tables; catalog + FK + LLM hints) → generate_sql.\n"
+            "- resolve_schema returns the MINIMAL tables/columns + joins for the question; generate_sql then uses exactly that. Prefer it over manual discover/describe for data queries.\n"
+            "- Only fall back to manual describe_table/get_relations if resolve_schema is insufficient or validate_sql reports a missing table/column.\n"
             "- get_relations already includes sample evidence; do not call validate_joins unless user explicitly asks to re-check joins.\n"
             "- Saved joins (user catalog) are loaded automatically inside get_relations — no join CRUD during queries.\n"
             "- If schema is ambiguous or multiple valid interpretations exist, call ask_user with optional options before guessing.\n"

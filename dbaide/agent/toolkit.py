@@ -32,6 +32,7 @@ from dbaide.tools.specs import (
     LIST_TABLES,
     COLUMN_STATS,
     PROFILE_TABLE,
+    RESOLVE_SCHEMA,
     SYNTHESIZE_SCHEMA_ANSWER,
     VALIDATE_JOINS,
     VALIDATE_SQL,
@@ -49,6 +50,7 @@ logger = logging.getLogger("dbaide.agent.toolkit")
 # Tools exposed to the Ask loop LLM (catalog CRUD stays on GUI/service only).
 LOOP_DECISION_TOOL_NAMES = frozenset({
     "discover_schema",
+    "resolve_schema",
     "synthesize_schema_answer",
     "list_databases",
     "list_tables",
@@ -88,6 +90,47 @@ def build_tool_registry(orchestrator: AskOrchestrator) -> ToolRegistry:
         except Exception as exc:
             logger.warning("discover_schema_failed: %s", exc)
             return ToolResult(ok=False, error=_err("discover_schema", str(exc), retryable=True))
+
+    def _resolve_schema(args: dict[str, Any], _ctx: ToolContext) -> ToolResult:
+        from dbaide.agent.schema_link import SchemaLinker
+
+        question = str(args.get("question") or orchestrator._loop_question or "").strip()
+        database = str(args.get("database") or orchestrator._loop_database or "")
+        if not question:
+            return ToolResult(ok=False, error=_err("resolve_schema", "question is required"))
+        try:
+            resolved = SchemaLinker(orchestrator).resolve(question, database=database)
+        except Exception as exc:
+            logger.warning("resolve_schema_failed: %s", exc)
+            return ToolResult(ok=False, error=_err("resolve_schema", str(exc), retryable=True))
+        # Ambiguous → surface as a user question (same pause/resume path as ask_user).
+        if resolved.pending_question:
+            orchestrator._loop_pending_question = resolved.pending_question
+            orchestrator._loop_pending_options = list(resolved.pending_options)
+            return ToolResult(ok=True, data={
+                "pending": True, "question": resolved.pending_question,
+                "options": resolved.pending_options,
+            })
+        orchestrator._loop_resolved_schema = resolved
+        orchestrator._loop_relations = list(resolved.joins)
+        # Remember the resolved tables so generate_sql / validation see them.
+        for db, table, columns in resolved.to_disclosed():
+            _remember_table_schema(orchestrator, table, db, columns)
+        tables_payload = [
+            {
+                "database": t["database"], "table": t["table"],
+                "columns": [c.name for c in t["columns"]],
+                "reason": t.get("reason", ""),
+            }
+            for t in resolved.tables
+        ]
+        return ToolResult(ok=True, data={
+            "tables": tables_payload,
+            "joins": resolved.joins,
+            "sufficient": resolved.sufficient,
+            "summary": resolved.summary_line(),
+            "notes": resolved.notes,
+        })
 
     def _synthesize_schema_answer(args: dict[str, Any], _ctx: ToolContext) -> ToolResult:
         from dbaide.agent.progressive_schema import ProgressiveSchemaAgent
@@ -282,9 +325,17 @@ def build_tool_registry(orchestrator: AskOrchestrator) -> ToolRegistry:
 
     def _generate_sql(args: dict[str, Any], _ctx: ToolContext) -> ToolResult:
         question = str(args.get("question") or orchestrator._loop_question or "").strip()
-        disclosed = _collect_disclosed_schemas(orchestrator, args)
+        # Prefer the minimal-necessary schema from resolve_schema: generating SQL on
+        # only the relevant tables/columns is more accurate than the full disclosure
+        # (the irrelevant schema is noise). Fall back to the full disclosure if the
+        # model named specific tables in args, or no resolved schema exists.
+        resolved = getattr(orchestrator, "_loop_resolved_schema", None)
+        if resolved is not None and not resolved.is_empty() and not args.get("table") and not args.get("tables"):
+            disclosed = resolved.to_disclosed()
+        else:
+            disclosed = _collect_disclosed_schemas(orchestrator, args)
         if not disclosed:
-            return ToolResult(ok=False, error=_err("generate_sql", "table is required (describe_table first)"))
+            return ToolResult(ok=False, error=_err("generate_sql", "table is required (resolve_schema or describe_table first)"))
         try:
             targets = [(db, table) for db, table, _ in disclosed]
             relations = list(orchestrator._loop_relations or [])
@@ -545,6 +596,7 @@ def build_tool_registry(orchestrator: AskOrchestrator) -> ToolRegistry:
         )
 
     registry.register(DISCOVER_SCHEMA, _discover_schema)
+    registry.register(RESOLVE_SCHEMA, _resolve_schema)
     registry.register(SYNTHESIZE_SCHEMA_ANSWER, _synthesize_schema_answer)
     registry.register(LIST_DATABASES, _list_databases)
     registry.register(LIST_TABLES, _list_tables)

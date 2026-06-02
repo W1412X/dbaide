@@ -283,6 +283,22 @@ DISCOVER_SCHEMA = ToolSpec(
     safe_for_auto_call=True,
 )
 
+RESOLVE_SCHEMA = ToolSpec(
+    name="resolve_schema",
+    description=(
+        "Resolve the MINIMAL schema needed for a data query: a sub-agent discovers "
+        "candidate tables, picks only the tables/columns that matter, confirms them "
+        "against the catalog, and maps the joins. Prefer this over manual "
+        "discover_schema+describe_table for data queries — it keeps SQL generation "
+        "focused. May pause to ask the user if the question is ambiguous."
+    ),
+    input_schema={"question": "string", "database": "string"},
+    output_schema={"tables": "list[dict]", "joins": "list[dict]", "sufficient": "bool"},
+    permission_level=SAFE_METADATA,
+    timeout_seconds=90,
+    safe_for_auto_call=True,
+)
+
 GENERATE_SQL = ToolSpec(
     name="generate_sql",
     description="Generate read-only SQL using disclosed table column metadata (all describe_table results, or tables arg)",
