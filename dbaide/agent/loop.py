@@ -302,7 +302,9 @@ class AskAgentLoop:
                 detail=", ".join(f"{db}.{t}" for db, t in tables),
             ),
         )
-        result = runtime.call_tool("get_relations", {}, tool_ctx)
+        # Cheap auto-load: declared FKs + catalog only. Semantic inference is a
+        # last-resort, on-demand step (generate_sql runs it for the tables it joins).
+        result = runtime.call_tool("get_relations", {"infer_semantic": False}, tool_ctx)
         brief = brief_tool_summary("get_relations", result)
         self.progress(
             progress_event(

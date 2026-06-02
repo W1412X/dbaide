@@ -119,6 +119,9 @@ class SQLWriter:
             "You generate safe read-only SQL for a CLI database assistant. "
             "Use only disclosed tables and columns. Return one SELECT/WITH statement. "
             "Do not invent columns or tables. Prefer simple SQL. "
+            "Reference tables by their BARE name (e.g. `orders`, never `mydb.orders`) — the "
+            "connection is already pointed at the correct database. Only qualify a table with a "
+            "database prefix when the query genuinely spans MORE THAN ONE database. "
             "Return confidence 0.0-1.0 based on how sure you are about the mapping."
         )
         if multi_table:
@@ -147,13 +150,17 @@ class SQLWriter:
         return "\n".join(blocks)
 
     def _user_prompt_multi(self, question: str, disclosed_schemas: list[DisclosedSchema], context: dict) -> str:
-        blocks: list[str] = [
-            f"Dialect: {self.dialect}",
-            f"Question: {question}",
-            "Disclosed schemas (use ONLY these tables and columns):",
-        ]
+        # Only qualify tables with the database when the query truly spans more than
+        # one — otherwise bare names (the connection is set to that database). A stray
+        # `db.table` prefix is a common cause of "unknown table" at validation.
+        distinct_dbs = {db for db, _, _ in disclosed_schemas if db}
+        cross_db = len(distinct_dbs) > 1
+        blocks: list[str] = [f"Dialect: {self.dialect}", f"Question: {question}"]
+        if len(distinct_dbs) == 1:
+            blocks.append(f"Active database: {next(iter(distinct_dbs))} (reference tables by bare name)")
+        blocks.append("Disclosed schemas (use ONLY these tables and columns):")
         for database, table, columns in disclosed_schemas:
-            label = f"{database}.{table}" if database else table
+            label = f"{database}.{table}" if (cross_db and database) else table
             blocks.append(f"Table: {label}")
             blocks.append("Columns:")
             blocks.append(self._format_columns(columns))

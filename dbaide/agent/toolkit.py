@@ -231,12 +231,18 @@ def build_tool_registry(orchestrator: AskOrchestrator) -> ToolRegistry:
             return ToolResult(ok=False, error=_err("get_relations", "tables required (describe_table first)"))
         schemas = disclosed_schemas_for_tables(orchestrator, targets)
         sample_size = int(args.get("sample_size") or 150)
+        # Eager auto-loading passes infer_semantic=False: declared FKs + catalog are
+        # cheap, but LLM semantic inference is expensive (~tens of seconds) and must
+        # not run just because two tables happen to be disclosed — only on demand for
+        # the tables a query actually joins (generate_sql triggers that itself).
+        infer_semantic = bool(args.get("infer_semantic", True))
         relations = collect_relations(
             orchestrator,
             targets,
             question=orchestrator._loop_question,
             disclosed_schemas=schemas,
             sample_size=sample_size,
+            infer_semantic=infer_semantic,
             parent=orchestrator._loop_trace_node,
         )
         orchestrator._loop_relations = relations
