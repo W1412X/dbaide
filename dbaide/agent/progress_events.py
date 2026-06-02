@@ -9,6 +9,7 @@ from dbaide.core.events import TraceEvent
 TOOL_TRACE_STAGES = frozenset({
     "discover_schema",
     "resolve_schema",
+    "clarify_semantics",
     "describe_table",
     "generate_sql",
     "validate_sql",
@@ -32,6 +33,7 @@ TOOL_TRACE_STAGES = frozenset({
 PHASE_LABELS: dict[str, str] = {
     "discover_schema": "Exploring schema",
     "resolve_schema": "Linking schema",
+    "clarify_semantics": "Confirming criteria",
     "list_databases": "Exploring schema",
     "list_tables": "Exploring schema",
     "describe_table": "Reading tables",

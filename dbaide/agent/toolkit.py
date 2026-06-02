@@ -21,6 +21,7 @@ from dbaide.joins import JoinCatalogStore, USER_JOIN_CONFIDENCE, catalog_record_
 from dbaide.agent.progress_events import progress_event, subagent_event
 from dbaide.tools.specs import (
     ASK_USER,
+    CLARIFY_SEMANTICS,
     DESCRIBE_TABLE,
     DISCOVER_SCHEMA,
     EXECUTE_READONLY_SQL,
@@ -56,6 +57,7 @@ LOOP_DECISION_TOOL_NAMES = frozenset({
     "list_tables",
     "describe_table",
     "get_relations",
+    "clarify_semantics",
     "generate_sql",
     "validate_sql",
     "execute_sql",
@@ -330,6 +332,37 @@ def build_tool_registry(orchestrator: AskOrchestrator) -> ToolRegistry:
             return ToolResult(ok=False, error=_err("delete_join", "join not found"))
         return ToolResult(ok=True, data={"deleted": True, "id": join_id or "endpoint"})
 
+    def _clarify_semantics(args: dict[str, Any], _ctx: ToolContext) -> ToolResult:
+        from dbaide.agent.clarify import SemanticClarifier
+
+        question = str(args.get("question") or orchestrator._loop_question or "").strip()
+        resolved = getattr(orchestrator, "_loop_resolved_schema", None)
+        if resolved is not None and not resolved.is_empty():
+            disclosed = resolved.to_disclosed()
+        else:
+            disclosed = _collect_disclosed_schemas(orchestrator, {})
+        if not disclosed:
+            # Nothing resolved yet — resolve the schema first; don't block.
+            return ToolResult(ok=True, data={"clear": True, "note": "no schema resolved yet"})
+        try:
+            plan = SemanticClarifier(orchestrator.llm).analyze(question, disclosed)
+        except Exception as exc:  # noqa: BLE001 — clarification must never break a query
+            logger.debug("clarify_semantics failed: %s", exc, exc_info=True)
+            return ToolResult(ok=True, data={"clear": True})
+        # Assumptions are applied whether or not we ask, so SQL generation honours them.
+        if plan.assumptions:
+            orchestrator._loop_clarifications.extend(plan.assumptions)
+        if plan.is_empty():
+            return ToolResult(ok=True, data={"clear": True, "assumptions": plan.assumptions})
+        # Material ambiguity → pause and confirm the exact criteria with the user.
+        rendered = plan.render_question()
+        orchestrator._loop_clarify_questions = rendered
+        orchestrator._loop_pending_question = rendered
+        orchestrator._loop_pending_options = plan.first_options()
+        return ToolResult(ok=True, data={
+            "pending": True, "question": rendered, "options": plan.first_options(),
+        })
+
     def _generate_sql(args: dict[str, Any], _ctx: ToolContext) -> ToolResult:
         question = str(args.get("question") or orchestrator._loop_question or "").strip()
         # Prefer the minimal-necessary schema from resolve_schema: generating SQL on
@@ -356,6 +389,8 @@ def build_tool_registry(orchestrator: AskOrchestrator) -> ToolRegistry:
                 )
                 orchestrator._loop_relations = relations
             ctx = merge_sql_context(orchestrator.session.disclosure.summary(), relations)
+            if getattr(orchestrator, "_loop_clarifications", None):
+                ctx["criteria"] = list(orchestrator._loop_clarifications)  # confirmed 口径
             feedback = orchestrator._loop_sql_feedback
             table_names = ", ".join(t for _, t, _ in disclosed)
             orchestrator.progress(
@@ -614,6 +649,7 @@ def build_tool_registry(orchestrator: AskOrchestrator) -> ToolRegistry:
     registry.register(ADD_JOIN, _add_join)
     registry.register(UPDATE_JOIN, _update_join)
     registry.register(DELETE_JOIN, _delete_join)
+    registry.register(CLARIFY_SEMANTICS, _clarify_semantics)
     registry.register(GENERATE_SQL, _generate_sql)
     registry.register(VALIDATE_SQL, _validate_sql)
     registry.register(EXECUTE_READONLY_SQL, _execute_sql)

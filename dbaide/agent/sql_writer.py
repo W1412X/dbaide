@@ -140,6 +140,9 @@ class SQLWriter:
         rel = self._format_relations(context)
         if rel:
             blocks.append(rel)
+        crit = self._format_criteria(context)
+        if crit:
+            blocks.append(crit)
         blocks.append(f"Context: {self._prompt_context(context)}")
         return "\n".join(blocks)
 
@@ -157,12 +160,25 @@ class SQLWriter:
         rel = self._format_relations(context)
         if rel:
             blocks.append(rel)
+        crit = self._format_criteria(context)
+        if crit:
+            blocks.append(crit)
         blocks.append(f"Context: {self._prompt_context(context)}")
         return "\n".join(blocks)
 
     @staticmethod
     def _prompt_context(context: dict) -> dict:
-        return {k: v for k, v in context.items() if k != "foreign_keys"}
+        return {k: v for k, v in context.items() if k not in ("foreign_keys", "criteria")}
+
+    @staticmethod
+    def _format_criteria(context: dict) -> str:
+        """Confirmed business criteria (口径) — authoritative; the SQL MUST honour these."""
+        criteria = [str(c).strip() for c in (context.get("criteria") or []) if str(c).strip()]
+        if not criteria:
+            return ""
+        lines = ["Business criteria — apply these EXACTLY (timezone, definitions, NULL/filter handling):"]
+        lines += [f"- {c}" for c in criteria]
+        return "\n".join(lines)
 
     @staticmethod
     def _format_relation_line(fk: dict[str, Any]) -> str:
