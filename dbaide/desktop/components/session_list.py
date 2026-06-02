@@ -18,6 +18,7 @@ from PyQt6.QtWidgets import (
     QListWidget,
     QListWidgetItem,
     QMenu,
+    QSizePolicy,
     QVBoxLayout,
     QWidget,
 )
@@ -55,15 +56,27 @@ class _SessionRow(QWidget):
         layout = QVBoxLayout(self)
         layout.setContentsMargins(4, 5, 4, 5)
         layout.setSpacing(2)
+        self._full_title = title
         self._title = QLabel(title)
         self._title.setFont(QFont("Inter", 12, QFont.Weight.DemiBold))
         self._title.setStyleSheet(f"color: {Theme.TEXT}; background: transparent;")
         self._title.setTextFormat(Qt.TextFormat.PlainText)
+        # Don't let a long title force the row wide; elide it to the row width.
+        self._title.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Fixed)
         sub = QLabel(subtitle)
         sub.setFont(QFont("Inter", 10))
         sub.setStyleSheet(f"color: {Theme.MUTED}; background: transparent;")
         layout.addWidget(self._title)
         layout.addWidget(sub)
+
+    def title(self) -> str:
+        return self._full_title
+
+    def resizeEvent(self, event) -> None:  # noqa: N802
+        super().resizeEvent(event)
+        fm = self._title.fontMetrics()
+        avail = max(40, self.width() - 12)
+        self._title.setText(fm.elidedText(self._full_title, Qt.TextElideMode.ElideRight, avail))
 
 
 class SessionList(QWidget):
@@ -89,6 +102,7 @@ class SessionList(QWidget):
 
         self.list = QListWidget()
         self.list.setStyleSheet("QListWidget { background: transparent; border: none; }")
+        self.list.setWordWrap(True)  # so the empty-state hint wraps instead of clipping
         self.list.setVerticalScrollMode(QListWidget.ScrollMode.ScrollPerPixel)
         self.list.itemClicked.connect(self._on_click)
         self.list.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
@@ -166,7 +180,7 @@ class SessionList(QWidget):
             it = self.list.item(i)
             if it is not None and it.data(_ID_ROLE) == session_id:
                 w = self.list.itemWidget(it)
-                current = w._title.text() if isinstance(w, _SessionRow) else ""
+                current = w.title() if isinstance(w, _SessionRow) else ""
                 break
         title, ok = QInputDialog.getText(self, t("session.rename_title"), t("session.title_label"), text=current)
         if ok and title.strip():
