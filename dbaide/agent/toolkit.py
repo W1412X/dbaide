@@ -356,6 +356,8 @@ def build_tool_registry(orchestrator: AskOrchestrator) -> ToolRegistry:
                 )
                 orchestrator._loop_relations = relations
             ctx = merge_sql_context(orchestrator.session.disclosure.summary(), relations)
+            if getattr(orchestrator, "_loop_memory", ""):
+                ctx["examples"] = orchestrator._loop_memory  # worked examples from memory
             feedback = orchestrator._loop_sql_feedback
             table_names = ", ".join(t for _, t, _ in disclosed)
             orchestrator.progress(

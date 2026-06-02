@@ -122,6 +122,9 @@ class AskOrchestrator:
         self._loop_pending_question = ""
         self._loop_pending_options = []
         self._loop_fail_reason = ""
+        # Rendered memory (worked examples from effective past questions) injected
+        # into the loop prompt and SQL generation context.
+        self._loop_memory = getattr(self, "_run_memory", "")
 
     def run(
         self,
@@ -131,7 +134,9 @@ class AskOrchestrator:
         execute: bool = True,
         resume_state: dict[str, Any] | None = None,
         user_reply: str = "",
+        memory: str = "",
     ) -> AssistantResponse:
+        self._run_memory = memory
         if isinstance(self.llm, NullLLMClient):
             return AssistantResponse(
                 answer=(
@@ -476,6 +481,8 @@ class AskOrchestrator:
         )
         self._loop_relations = relations
         sql_context = merge_sql_context(self.session.disclosure.summary(), relations)
+        if getattr(self, "_loop_memory", ""):
+            sql_context["examples"] = self._loop_memory  # worked examples from memory
 
         draft = None
         validation = None

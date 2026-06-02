@@ -58,6 +58,7 @@ class DataAssistant:
         execute: bool = True,
         resume_state: dict | None = None,
         user_reply: str = "",
+        memory: str = "",
     ) -> AssistantResponse:
         return self._orchestrator.run(
             question,
@@ -65,4 +66,5 @@ class DataAssistant:
             execute=execute,
             resume_state=resume_state,
             user_reply=user_reply,
+            memory=memory,
         )

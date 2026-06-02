@@ -355,9 +355,12 @@ class AskAgentLoop:
         )
 
         history = "\n\n".join(transcript[-8:]) if transcript else "(no tool calls yet)"
+        memory = str(getattr(self.orchestrator, "_loop_memory", "") or "").strip()
+        memory_block = f"\n\n{memory}\n" if memory else ""
         user = (
             f"User question:\n{state.question}\n\n"
-            f"Database scope: {state.database or '(any)'}\n\n"
+            f"Database scope: {state.database or '(any)'}\n"
+            f"{memory_block}\n"
             f"Tool history:\n{history}"
         )
 

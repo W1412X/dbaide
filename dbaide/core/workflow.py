@@ -124,6 +124,7 @@ class WorkflowEngine:
                 execute=execute,
                 resume_state=request.resume_state,
                 user_reply=request.user_reply,
+                memory=request.memory,
             )
         except Exception as exc:
             if type(exc).__name__ == "CancelledError" or "cancelled" in str(exc).lower():

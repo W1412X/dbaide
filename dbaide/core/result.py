@@ -131,7 +131,7 @@ class WorkflowRequest:
     __slots__ = (
         "question", "connection_name", "database_scope", "mode",
         "execution_policy", "limit", "timeout_seconds", "model_name",
-        "show_trace", "resume_state", "user_reply",
+        "show_trace", "resume_state", "user_reply", "memory",
     )
 
     def __init__(
@@ -148,6 +148,7 @@ class WorkflowRequest:
         show_trace: bool = False,
         resume_state: dict[str, Any] | None = None,
         user_reply: str = "",
+        memory: str = "",
     ) -> None:
         self.question = question
         self.connection_name = connection_name
@@ -160,6 +161,8 @@ class WorkflowRequest:
         self.show_trace = show_trace
         self.resume_state = resume_state
         self.user_reply = user_reply
+        # Rendered "known answers to similar past questions" block (memory mechanism).
+        self.memory = memory
 
 
 class QueryPlan:

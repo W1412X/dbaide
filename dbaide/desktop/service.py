@@ -19,6 +19,7 @@ from dbaide.core import ExecutionPolicy, WorkflowRequest
 from dbaide.core.workflow import WorkflowEngine
 from dbaide.history.store import WorkflowHistoryStore
 from dbaide.history.session_store import ChatSessionStore, make_turn
+from dbaide.history.memory_store import MemoryStore
 from dbaide.llm import LLMMessage, NullLLMClient, build_llm_client
 from dbaide.models import ConnectionConfig, ModelConfig
 from dbaide.session import Session
@@ -105,6 +106,7 @@ class DesktopService:
         self.join_catalog = JoinCatalogStore()
         self.history = WorkflowHistoryStore()
         self.sessions = ChatSessionStore()
+        self.memory = MemoryStore()
         import threading
         self._build_lock = threading.Lock()
         self._active_builds: set[str] = set()
@@ -151,6 +153,9 @@ class DesktopService:
             "list_history": self.list_history,
             "load_history": self.load_history,
             "delete_history": self.delete_history,
+            "list_memory": self.list_memory,
+            "clear_memory": self.clear_memory,
+            "delete_memory": self.delete_memory,
             "list_sessions": self.list_sessions,
             "load_session": self.load_session,
             "create_session": self.create_session,
@@ -388,8 +393,16 @@ class DesktopService:
         in_session_id = str(payload.get("session_id") or "")
         policy = self._policy(str(payload.get("execution_policy") or payload.get("policy") or "safe_auto"))
         database = str(payload.get("database") or "")
+        question = str(payload.get("question") or "")
+        # Memory: surface worked answers to similar past questions (session-boosted
+        # + global) so the agent can reuse them instead of re-exploring.
+        try:
+            mem_items = self.memory.relevant(conn.name, question, session_id=in_session_id)
+            memory_block = self.memory.render(mem_items)
+        except Exception:  # noqa: BLE001 — memory must never break a query
+            memory_block = ""
         request = WorkflowRequest(
-            question=str(payload.get("question") or ""),
+            question=question,
             connection_name=conn.name,
             database_scope=[database] if database else [],
             execution_policy=policy,
@@ -398,6 +411,7 @@ class DesktopService:
             show_trace=bool(payload.get("show_trace", True)),
             resume_state=payload.get("resume_state"),
             user_reply=str(payload.get("user_reply") or ""),
+            memory=memory_block,
         )
         engine = WorkflowEngine(conn, self._safe_llm(), self.store, self.join_catalog)
         progress_cb = payload.get("progress")
@@ -447,6 +461,15 @@ class DesktopService:
             ))
         except Exception:  # noqa: BLE001 — session persistence must never break a query
             logger.debug("failed to record session turn", exc_info=True)
+        # Distil an effective turn (completed with SQL) into reusable memory.
+        if status == "completed" and (result.selected_sql or "").strip():
+            try:
+                self.memory.add(
+                    conn_name, question=request.question, sql=result.selected_sql,
+                    database=database, session_id=session_id,
+                )
+            except Exception:  # noqa: BLE001 — memory must never break a query
+                logger.debug("failed to record memory", exc_info=True)
         return session_id
 
     def validate_sql(self, payload: dict[str, Any]) -> dict[str, Any]:
@@ -511,6 +534,18 @@ class DesktopService:
         workflow_id = str(payload.get("workflow_id") or "")
         deleted = self.history.delete(conn, workflow_id)
         return {"deleted": deleted, "workflow_id": workflow_id}
+
+    # ── Question memory (会话内 + 全局) ──────────────────────────────────────--
+
+    def list_memory(self, payload: dict[str, Any]) -> list[dict[str, Any]]:
+        return self.memory.all(self._session_conn(payload))
+
+    def clear_memory(self, payload: dict[str, Any]) -> dict[str, Any]:
+        return {"removed": self.memory.clear(self._session_conn(payload))}
+
+    def delete_memory(self, payload: dict[str, Any]) -> dict[str, Any]:
+        item_id = str(payload.get("id") or "")
+        return {"deleted": self.memory.delete(self._session_conn(payload), item_id), "id": item_id}
 
     # ── Chat sessions (会话 → 对话) ──────────────────────────────────────────--
 
