@@ -7,7 +7,7 @@ from PyQt6.QtWidgets import QHBoxLayout, QLabel, QSizePolicy, QWidget
 
 from dbaide.desktop.components.base import StatusBadge
 from dbaide.desktop.components.icon_button import IconToolButton
-from dbaide.desktop.components.icons import panel_icon
+from dbaide.desktop.components.icons import more_icon, panel_icon
 from dbaide.desktop.components.inputs import DropdownCombo
 from dbaide.desktop.components.menu import MenuButton
 from dbaide.desktop.theme import Theme
@@ -53,8 +53,8 @@ class TopBar(QWidget):
         row.addWidget(self.panel_toggle)
 
         from dbaide.i18n import t
-        self.menu = MenuButton("⋯")
-        self.menu.setFixedSize(36, 32)
+        # Flat icon button matching the panel toggle (was a bordered text-glyph box).
+        self.menu = MenuButton(icon=more_icon(), tooltip=t("topbar.settings"), icon_only=True)
         self.menu.add_action(t("topbar.build"), self.build_assets.emit)
         self.menu.add_action(t("topbar.refresh"), self.refresh.emit)
         self.menu.add_separator()
