@@ -461,7 +461,8 @@ class MainWindow(QMainWindow):
         self.composer.clear_input()
         self.ask_tab.append_clarification_reply(reply)
         self.ask_tab.append_activity(f"User replied: {reply[:80]}")
-        self.right.trace.begin_live()
+        # Resume continues the SAME trace (don't begin_live, which would reset it) so
+        # the steps from before the clarification stay visible alongside the new ones.
         self.right.focus_trace()
         self.run_action("ask", {
             "connection_name": conn,
@@ -704,19 +705,29 @@ class MainWindow(QMainWindow):
     def inspect_schema(self, data: dict[str, Any]) -> None:
         self.open_schema_asset(data)
 
+    def _show_asset(self, action: str, path: str) -> None:
+        # Asset preview is a read-only file read — run it in the background so it
+        # never flips the global status to "running" and works even while a query
+        # is in flight (you can inspect tables mid-run).
+        def on_loaded(res: dict[str, Any]) -> None:
+            self.right.show_inspector(
+                markdown=res.get("markdown") or "", doc=res.get("doc"), focus=True,
+            )
+        self._run_background(action, {"path": path}, on_loaded)
+
     def preview_schema(self, data: dict[str, Any]) -> None:
         path = str(data.get("path") or "")
         if path:
-            self.run_action("preview_asset", {"path": path})
+            self._show_asset("preview_asset", path)
 
     def open_schema_asset(self, data: dict[str, Any]) -> None:
         path = str(data.get("path") or "")
         if path:
-            self.run_action("asset_markdown", {"path": path})
+            self._show_asset("asset_markdown", path)
 
     def load_asset(self, path: str) -> None:
         if path:
-            self.run_action("asset_markdown", {"path": path})
+            self._show_asset("asset_markdown", path)
 
     def search_assets(self, query: str) -> None:
         conn = self.current_connection()
@@ -917,7 +928,11 @@ class MainWindow(QMainWindow):
                 self._pending_resume = result.get("resume_state")
                 self._last_question = str(result.get("question") or self._last_question)
                 self.ask_tab.append_result(result)
-                self.right.show_trace(result.get("trace") or [])
+                # Keep the rich live trace of the steps that led to the question;
+                # only fall back to the (sparser) persisted trace if nothing was
+                # captured live.
+                if self.right.trace.is_empty():
+                    self.right.show_trace(result.get("trace") or [])
                 self.composer.set_placeholder(_i18n_t("composer.placeholder.reply"))
                 self.toast(_i18n_t("toast.waiting_reply"))
                 return
