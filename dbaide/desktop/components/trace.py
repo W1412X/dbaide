@@ -60,8 +60,16 @@ class TracePanel(QWidget):
         self._tree.header().setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
         self._tree.header().setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
         self._tree.header().setSectionResizeMode(2, QHeaderView.ResizeMode.ResizeToContents)
+        # The title column (1) is the one that should absorb free width; without
+        # this the last column stretches and the title elides at its sizeHint.
+        self._tree.header().setStretchLastSection(False)
         self._tree.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
-        self._tree.setWordWrap(True)
+        # Word-wrap OFF on purpose: with ElideRight, Qt would otherwise elide each
+        # row at its *sizeHint* width (truncating early and wasting horizontal space)
+        # instead of at the real allocated width. Rows stay one line and elide only
+        # at the panel edge; the full text of any step is one click away in the detail
+        # pane below.
+        self._tree.setWordWrap(False)
         self._tree.setUniformRowHeights(False)
         self._tree.setIndentation(14)
         # The tree stays concise and scannable (elide long lines); the full text of
@@ -78,9 +86,8 @@ class TracePanel(QWidget):
         detail_layout.setSpacing(4)
         header = QHBoxLayout()
         header.setContentsMargins(2, 0, 2, 0)
-        self._detail_title = QLabel("")
-        self._detail_title.setStyleSheet(f"color:{Theme.TEXT_2}; font-size:11px; font-weight:600;")
-        header.addWidget(self._detail_title)
+        # The detail body renders its own prominent title; the header carries only
+        # the Copy-raw action, right-aligned.
         header.addStretch(1)
         self._copy_raw_btn = QToolButton()
         self._copy_raw_btn.setText("Copy raw")
@@ -306,7 +313,6 @@ class TracePanel(QWidget):
             self._raw_text = json.dumps(raw, ensure_ascii=False, indent=2, default=str) if raw else ""
         except (TypeError, ValueError):
             self._raw_text = str(raw)
-        self._detail_title.setText(str(data.get("title") or data.get("phase") or data.get("stage") or ""))
         self._copy_raw_btn.setVisible(bool(self._raw_text) and not data.get("__summary__"))
         self._detail.setHtml(_detail_html(data))
 
@@ -332,10 +338,16 @@ def _detail_html(data: dict) -> str:
     title = str(data.get("title") or data.get("phase") or data.get("stage") or "step")
     parts.append(f"<div style='color:{Theme.TEXT}; font-size:13px; font-weight:600;'>{_esc(title)}</div>")
 
-    chips = [("type", node_type)]
-    for key in ("phase", "stage", "agent"):
-        if data.get(key):
-            chips.append((key, str(data[key])))
+    # Keep the chip row lean: skip phase/stage/agent values that just echo the
+    # title (or each other), so it carries information rather than noise.
+    title_l = title.lower()
+    chips: list[tuple[str, str]] = []
+    seen_vals = {title_l}
+    for key in ("agent", "phase", "stage"):
+        val = str(data.get(key) or "").strip()
+        if val and val.lower() not in seen_vals:
+            chips.append((key, val))
+            seen_vals.add(val.lower())
     if data.get("step"):
         chips.append(("step", str(data["step"])))
     chips.append(("status", str(data.get("status") or "?")))

@@ -119,9 +119,16 @@ def populate(win: MainWindow) -> None:
     })
     win.right.show_trace(events)
     win.right.focus_trace()
-    # Select the execute_sql node so the detail pane is populated.
-    win.right.trace.end_live()
     app = QApplication.instance()
+    app.processEvents()
+    # Select a rich node so the detail pane renders populated (execute_sql → SQL).
+    tree = win.right.trace._tree
+    for i in range(tree.topLevelItemCount()):
+        it = tree.topLevelItem(i)
+        data = it.data(0, 0x0100)  # Qt.ItemDataRole.UserRole
+        if isinstance(data, dict) and data.get("node_type") == "sql":
+            win.right.trace._on_click(it, 1)
+            break
     app.processEvents()
     # SQL tab populated too.
     win.sql_tab.set_sql("SELECT u.city, COUNT(*) AS users, SUM(o.amount) AS total\nFROM users u\nJOIN orders o ON o.user_id = u.id\nWHERE o.status = 'paid'\nGROUP BY u.city\nORDER BY total DESC;")
