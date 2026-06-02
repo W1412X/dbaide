@@ -17,6 +17,16 @@ class MarkdownView(QTextBrowser):
         self.setFont(QFont("Inter", 12))
         configure_readonly_text_view(self)
         self.setStyleSheet(f"QTextBrowser {{ background: {Theme.BG}; border: none; }}")
+        # Style markdown tables/code (insertHtml doesn't honour an inline <style>, so
+        # set the document's default stylesheet) — otherwise tables render as plain,
+        # borderless runs of text.
+        self.document().setDefaultStyleSheet(
+            f"table {{ border-collapse: collapse; margin: 8px 0; }}"
+            f"th, td {{ border: 1px solid {Theme.BORDER_SOFT}; padding: 5px 10px; }}"
+            f"th {{ background: {Theme.PANEL_2}; color: {Theme.TEXT_2}; }}"
+            f"pre, code {{ background: {Theme.CODE_BG}; font-family: Menlo, monospace; }}"
+            f"a {{ color: {Theme.BLUE}; }}"
+        )
 
     def append_card(
         self,

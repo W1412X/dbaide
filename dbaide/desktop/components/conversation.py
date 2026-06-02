@@ -73,7 +73,9 @@ class _Bubble(QFrame):
         fm = self._label.fontMetrics()
         longest = max((fm.horizontalAdvance(line) for line in self._text.split("\n")), default=0)
         cap = min(self.MAX_W, max(140, self.width() - 8))
-        self._label.setFixedWidth(max(48, min(cap, longest + 36)))
+        # +44 covers the bubble's 16px horizontal padding each side, the border, and a
+        # little metric jitter — so short text isn't wrapped a word early.
+        self._label.setFixedWidth(max(48, min(cap, longest + 44)))
 
 
 class _ThinkingIndicator(QPushButton):
