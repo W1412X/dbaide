@@ -99,10 +99,15 @@ class ResultTableWidget(QWidget):
             if any(_is_numeric(row.get(col)) for row in self._rows)
             and all(row.get(col) is None or _is_numeric(row.get(col)) for row in self._rows)
         }
-        for c_idx in numeric_cols:
+        for c_idx in range(len(self._columns)):
             header_item = self.table.horizontalHeaderItem(c_idx)
-            if header_item is not None:
-                header_item.setTextAlignment(int(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter))
+            if header_item is None:
+                continue
+            # Header alignment follows the column's data: numbers right, text left
+            # (Qt centres header text by default, which misaligned text columns).
+            horizontal = (Qt.AlignmentFlag.AlignRight if c_idx in numeric_cols
+                          else Qt.AlignmentFlag.AlignLeft)
+            header_item.setTextAlignment(int(horizontal | Qt.AlignmentFlag.AlignVCenter))
         for r_idx, row in enumerate(self._rows):
             for c_idx, col in enumerate(self._columns):
                 value = row.get(col)
