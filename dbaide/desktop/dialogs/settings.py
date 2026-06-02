@@ -182,17 +182,24 @@ class SettingsDialog(QDialog):
         nav_wrap.setFixedWidth(168)
         nav_wrap.setStyleSheet(f"background: {Theme.PANEL}; border-right: 1px solid {Theme.BORDER_SOFT};")
         nav_layout = QVBoxLayout(nav_wrap)
-        nav_layout.setContentsMargins(0, 12, 0, 12)
+        nav_layout.setContentsMargins(8, 12, 8, 12)
         nav_layout.setSpacing(4)
-        back = compact_button(_t("settings.back"), width=120)
+        # Compact, flat back action — a boxed 120px button read as oversized chrome.
+        back = compact_button(_t("settings.back"))
+        back.setStyleSheet(
+            f"QPushButton {{ background: transparent; color: {Theme.MUTED};"
+            f" border: none; border-radius: 8px; text-align: left; padding: 0 10px; }}"
+            f"QPushButton:hover {{ background: {Theme.PANEL_2}; color: {Theme.TEXT}; }}"
+        )
         back.clicked.connect(self.accept)
-        nav_layout.addWidget(back, alignment=Qt.AlignmentFlag.AlignHCenter)
-        nav_layout.addSpacing(8)
+        nav_layout.addWidget(back)
+        nav_layout.addSpacing(6)
         self.nav = QListWidget()
         self.nav.setStyleSheet(
             f"""
             QListWidget {{ background: transparent; border: none; }}
-            QListWidget::item {{ padding: 12px 18px; }}
+            QListWidget::item {{ padding: 9px 12px; margin: 1px 0; }}
+            QListWidget::item:hover {{ background: {Theme.PANEL_2}; border-radius: 8px; }}
             QListWidget::item:selected {{ background: {Theme.PANEL_3}; color: {Theme.TEXT}; border-radius: 8px; }}
             """
         )
