@@ -62,24 +62,23 @@ _KIND_COLOR = {
 
 
 class _Bubble(QFrame):
+    # Cap so very long questions don't stretch edge-to-edge; otherwise the bubble
+    # sizes to its content (bounded by the available row width).
+    MAX_W = 620
+
     def __init__(self, text: str, *, align_right: bool, parent=None) -> None:
         super().__init__(parent)
+        # Fill the row; the bubble right/left-aligns its content-sized label itself.
+        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
+        self._text = text
         layout = QHBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
-        if align_right:
-            layout.addStretch(1)
         label = QLabel(text)
         # User text is shown verbatim as PLAIN text — no markup is interpreted, so it
         # is XSS-safe without HTML-escaping (escaping here would surface entities like
         # &#x27; literally, since the label is not a rich-text view).
         label.setTextFormat(Qt.TextFormat.PlainText)
-        # A chat bubble hugs its content up to a cap, then wraps. configure_wrapped_label
-        # gives an *Ignored* horizontal policy, which would lose all width to the
-        # leading stretch and collapse the bubble to nothing — so set the policy
-        # explicitly here (Preferred + capped max width).
         label.setWordWrap(True)
-        label.setMaximumWidth(560)
-        label.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Preferred)
         label.setAlignment(Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignLeft)
         label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
         label.setFont(QFont("Inter", 13))
@@ -92,9 +91,22 @@ class _Bubble(QFrame):
             padding: 10px 16px;
             """
         )
-        layout.addWidget(label, 0, Qt.AlignmentFlag.AlignTop)
-        if not align_right:
+        self._label = label
+        if align_right:
             layout.addStretch(1)
+            layout.addWidget(label, 0, Qt.AlignmentFlag.AlignTop)
+        else:
+            layout.addWidget(label, 0, Qt.AlignmentFlag.AlignTop)
+            layout.addStretch(1)
+
+    def resizeEvent(self, event) -> None:  # noqa: N802
+        # Size the bubble to the longest line (so it's not a needlessly narrow column),
+        # capped at MAX_W and never wider than the row — long text then wraps inside.
+        super().resizeEvent(event)
+        fm = self._label.fontMetrics()
+        longest = max((fm.horizontalAdvance(line) for line in self._text.split("\n")), default=0)
+        cap = min(self.MAX_W, max(140, self.width() - 8))
+        self._label.setFixedWidth(max(48, min(cap, longest + 36)))
 
 
 class CollapsibleTracePanel(QFrame):
@@ -400,13 +412,7 @@ class TurnBlock(QFrame):
             meta_label.setFont(QFont("Inter", 10))
             meta_label.setStyleSheet(f"color: {Theme.MUTED}; background: transparent;")
             self._header_layout.addWidget(meta_label)
-        bubble_row = QWidget()
-        bubble_row.setStyleSheet("background: transparent;")
-        row = QHBoxLayout(bubble_row)
-        row.setContentsMargins(0, 0, 0, 0)
-        row.addStretch(1)
-        row.addWidget(_Bubble(text, align_right=True))
-        self._header_layout.addWidget(bubble_row)
+        self._header_layout.addWidget(_Bubble(text, align_right=True))
 
     def append_content(self, widget: QWidget) -> None:
         self._content_host.show()
@@ -511,14 +517,8 @@ class ConversationView(QScrollArea):
     def append_clarification_reply(self, text: str) -> None:
         if self._current_turn is None:
             return
-        bubble_row = QWidget()
-        bubble_row.setStyleSheet("background: transparent;")
-        row = QHBoxLayout(bubble_row)
-        row.setContentsMargins(0, 0, 0, 0)
-        row.addStretch(1)
-        row.addWidget(_Bubble(text, align_right=True))
         self._current_turn._header.show()
-        self._current_turn._header_layout.addWidget(bubble_row)
+        self._current_turn._header_layout.addWidget(_Bubble(text, align_right=True))
         self._scroll_bottom()
 
     def complete_turn(
