@@ -87,6 +87,8 @@ def dump_loop_state(
             "_loop_sql_confidence": orchestrator._loop_sql_confidence,
             "_loop_sql_feedback": orchestrator._loop_sql_feedback,
             "_loop_answer": orchestrator._loop_answer,
+            "_loop_clarifications": list(getattr(orchestrator, "_loop_clarifications", [])),
+            "_loop_clarify_questions": getattr(orchestrator, "_loop_clarify_questions", ""),
         },
     }
 
@@ -114,6 +116,8 @@ def restore_loop_state(orchestrator: Any, snapshot: dict[str, Any]) -> tuple[lis
     orchestrator._loop_sql_confidence = float(payload.get("_loop_sql_confidence") or 0.0)
     orchestrator._loop_sql_feedback = str(payload.get("_loop_sql_feedback") or "")
     orchestrator._loop_answer = str(payload.get("_loop_answer") or "")
+    orchestrator._loop_clarifications = list(payload.get("_loop_clarifications") or [])
+    orchestrator._loop_clarify_questions = str(payload.get("_loop_clarify_questions") or "")
     orchestrator._loop_execute_allowed = execute_allowed
     orchestrator._loop_query_result = None
     orchestrator._loop_pending_question = ""

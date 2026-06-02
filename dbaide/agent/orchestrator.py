@@ -122,6 +122,10 @@ class AskOrchestrator:
         self._loop_pending_question = ""
         self._loop_pending_options = []
         self._loop_fail_reason = ""
+        # Business-criteria (口径) clarification: confirmed criteria injected into SQL,
+        # and the questions currently awaiting a user reply (paired with it on resume).
+        self._loop_clarifications: list[str] = []
+        self._loop_clarify_questions = ""
 
     def run(
         self,
@@ -476,6 +480,8 @@ class AskOrchestrator:
         )
         self._loop_relations = relations
         sql_context = merge_sql_context(self.session.disclosure.summary(), relations)
+        if getattr(self, "_loop_clarifications", None):
+            sql_context["criteria"] = list(self._loop_clarifications)  # confirmed 口径
 
         draft = None
         validation = None

@@ -299,6 +299,22 @@ RESOLVE_SCHEMA = ToolSpec(
     safe_for_auto_call=True,
 )
 
+CLARIFY_SEMANTICS = ToolSpec(
+    name="clarify_semantics",
+    description=(
+        "Pin down the business definition (口径) of a data query before generating SQL: "
+        "check the resolved schema for material ambiguities in TIME/timezone, METRIC "
+        "definition, NULL handling, and scope/filters. If any would change the result, "
+        "it PAUSES to confirm the exact criteria with the user; otherwise it records the "
+        "assumptions and returns clear. Run it after resolve_schema, before generate_sql."
+    ),
+    input_schema={"question": "string"},
+    output_schema={"clear": "bool", "pending": "bool", "assumptions": "list[string]"},
+    permission_level=SAFE_METADATA,
+    timeout_seconds=60,
+    safe_for_auto_call=True,
+)
+
 GENERATE_SQL = ToolSpec(
     name="generate_sql",
     description="Generate read-only SQL using disclosed table column metadata (all describe_table results, or tables arg)",

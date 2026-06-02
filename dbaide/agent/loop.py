@@ -106,6 +106,14 @@ class AskAgentLoop:
             reply = str(user_reply or question or "").strip()
             if reply:
                 transcript.append(f"User reply: {reply}")
+                # If the pause was a business-criteria (口径) clarification, fold the
+                # reply into the confirmed criteria so generate_sql honours it exactly.
+                if getattr(orch, "_loop_clarify_questions", ""):
+                    orch._loop_clarifications.append(
+                        f"User confirmed the following criteria — {orch._loop_clarify_questions}\n"
+                        f"User's answer: {reply}"
+                    )
+                    orch._loop_clarify_questions = ""
                 self.progress(
                     progress_event(stage="user", title=f"Reply: {reply[:120]}", status="completed", kind="user"),
                 )
@@ -335,10 +343,11 @@ class AskAgentLoop:
             '  {"action":"finish","answer":"markdown answer for the user"}\n\n'
             "Guidelines:\n"
             "- Schema / where-is questions: discover_schema → synthesize_schema_answer → finish\n"
-            "- Data queries: resolve_schema → generate_sql → validate_sql"
+            "- Data queries: resolve_schema → clarify_semantics → generate_sql → validate_sql"
             + (" → execute_sql → finish" if state.execute_allowed and policy not in ("sql_only", "inspect_only") else " → finish")
             + "\n"
             "- resolve_schema returns the MINIMAL tables/columns + joins in ONE step; generate_sql then uses exactly that. Prefer it over manual discover/describe for data queries — don't re-explore what it already resolved.\n"
+            "- clarify_semantics (run it after resolve_schema, before generate_sql): it pins down the business definition / 口径 — timezone of date columns, what exactly a metric counts, NULL handling, which rows are in scope. If it pauses to ask, wait for the reply; if it returns clear, proceed. Do NOT silently guess timezone/definition/NULL/scope on your own — that is what this step is for. Skip it only for a trivially unambiguous query.\n"
             "- Only fall back to manual describe_table/get_relations if resolve_schema is insufficient or validate_sql reports a missing table/column.\n"
             "- get_relations already includes sample evidence; do not call validate_joins unless user explicitly asks to re-check joins.\n"
             "- Saved joins (user catalog) are loaded automatically inside get_relations — no join CRUD during queries.\n"
