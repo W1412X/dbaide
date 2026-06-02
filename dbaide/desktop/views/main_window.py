@@ -189,6 +189,9 @@ class MainWindow(QMainWindow):
         self.right.joins_add_requested.connect(self._add_join)
         self.right.joins_update_requested.connect(self._update_join)
         self.right.joins_delete_requested.connect(self._delete_join)
+        self.right.memory_open_requested.connect(self._load_memory)
+        self.right.memory_delete_requested.connect(self._delete_memory)
+        self.right.memory_clear_requested.connect(self._clear_memory)
         self.right.reveal_requested.connect(self._show_panel)
 
         body.addWidget(self.sidebar)
@@ -799,6 +802,38 @@ class MainWindow(QMainWindow):
             self.ask_tab.set_has_connection(bool(conn))
             self.right.trace.clear_trace()
         self._load_sessions(conn)
+
+    # ── Question memory (会话内 + 全局) ──────────────────────────────────────
+
+    def _load_memory(self) -> None:
+        conn = self.current_connection()
+        if not conn:
+            self.right.show_memory([])
+            return
+        self._run_background("list_memory", {"connection_name": conn},
+                             lambda items: self.right.show_memory(items or []))
+
+    def _delete_memory(self, item_id: str) -> None:
+        conn = self.current_connection()
+        if not conn or not item_id:
+            return
+        try:
+            self.service.dispatch("delete_memory", {"connection_name": conn, "id": item_id})
+        except Exception as exc:  # noqa: BLE001
+            self.toast(f"Delete failed: {exc}")
+            return
+        self._load_memory()
+
+    def _clear_memory(self) -> None:
+        conn = self.current_connection()
+        if not conn:
+            return
+        try:
+            self.service.dispatch("clear_memory", {"connection_name": conn})
+        except Exception as exc:  # noqa: BLE001
+            self.toast(f"Clear failed: {exc}")
+            return
+        self._load_memory()
 
     def load_history(self, workflow_id: str) -> None:
         conn = self.current_connection()

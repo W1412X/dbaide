@@ -28,6 +28,9 @@ class RightPanel(QWidget):
     joins_add_requested = pyqtSignal(dict)
     joins_update_requested = pyqtSignal(dict)
     joins_delete_requested = pyqtSignal(str)
+    memory_open_requested = pyqtSignal()       # user opened the memory dialog
+    memory_delete_requested = pyqtSignal(str)  # item id
+    memory_clear_requested = pyqtSignal()
     reveal_requested = pyqtSignal()  # the panel wants to be shown (activity / preview)
 
     # Trace is the primary, default view; Inspector is contextual (auto-shown when
@@ -48,6 +51,7 @@ class RightPanel(QWidget):
         self.header.tab_changed.connect(self._switch_tab)
         self.header.history_clicked.connect(self.open_history)
         self.header.joins_clicked.connect(self.open_joins)
+        self.header.memory_clicked.connect(self.open_memory)
         self.header.copy_trace_requested.connect(self.copy_trace_requested.emit)
         self.header.copy_conversation_requested.connect(self.copy_conversation_requested.emit)
         self.header.clear_trace_requested.connect(self.clear_trace_requested.emit)
@@ -75,6 +79,7 @@ class RightPanel(QWidget):
         self.joins = JoinsTab()
         self._history_dialog: HistoryDialog | None = None
         self._joins_dialog: JoinsDialog | None = None
+        self._memory_dialog = None
         # Order matches _TAB_* (Trace, Inspector); Trace is default.
         self.stack.addWidget(self.trace)
         self.stack.addWidget(inspect)
@@ -103,6 +108,25 @@ class RightPanel(QWidget):
             dialog.delete_requested.connect(self.joins_delete_requested.emit)
             self._joins_dialog = dialog
         return self._joins_dialog
+
+    def _memory_popup(self):
+        if self._memory_dialog is None:
+            from dbaide.desktop.dialogs.memory import MemoryDialog
+            dialog = MemoryDialog(parent=self.window())
+            dialog.delete_requested.connect(self.memory_delete_requested.emit)
+            dialog.clear_requested.connect(self.memory_clear_requested.emit)
+            self._memory_dialog = dialog
+        return self._memory_dialog
+
+    def open_memory(self) -> None:
+        self.memory_open_requested.emit()  # main window will load + show
+        dialog = self._memory_popup()
+        dialog.show()
+        dialog.raise_()
+        dialog.activateWindow()
+
+    def show_memory(self, items: list[dict[str, Any]]) -> None:
+        self._memory_popup().load(items)
 
     def open_history(self) -> None:
         dialog = self._history_popup()

@@ -15,6 +15,7 @@ class PanelHeader(QWidget):
     tab_changed = pyqtSignal(int)
     history_clicked = pyqtSignal()
     joins_clicked = pyqtSignal()
+    memory_clicked = pyqtSignal()
     copy_trace_requested = pyqtSignal()
     copy_conversation_requested = pyqtSignal()
     clear_trace_requested = pyqtSignal()
@@ -47,6 +48,7 @@ class PanelHeader(QWidget):
         # Query history is now the Chats list in the sidebar (sessions group turns);
         # the old per-workflow History dialog is superseded, so it's no longer here.
         self._menu.add_action(t("menu.joins"), self.joins_clicked.emit)
+        self._menu.add_action(t("menu.memory"), self.memory_clicked.emit)
         self._menu.add_separator()
         self._menu.add_action(t("panel.copy_trace"), self.copy_trace_requested.emit)
         self._menu.add_action(t("panel.copy_conversation"), self.copy_conversation_requested.emit)

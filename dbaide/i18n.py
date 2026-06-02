@@ -192,6 +192,15 @@ _STRINGS: dict[str, dict[str, str]] = {
     "panel.clear_conversation": {"en": "Clear conversation", "zh": "清空对话"},
     "menu.history": {"en": "History…", "zh": "历史记录…"},
     "menu.joins": {"en": "Saved joins…", "zh": "已保存的关联…"},
+    "menu.memory": {"en": "Memory…", "zh": "记忆…"},
+    # Question memory
+    "memory.title": {"en": "Question memory", "zh": "提问记忆"},
+    "memory.hint": {"en": "Worked answers distilled from effective past questions — reused to answer similar ones faster.",
+                    "zh": "从历史有效提问中沉淀的成功示例 — 用于更快地回答相似问题。"},
+    "memory.empty": {"en": "No memory yet — successful questions are remembered here.",
+                     "zh": "暂无记忆 — 成功回答的问题会沉淀在这里。"},
+    "memory.clear_all": {"en": "Clear all", "zh": "全部清除"},
+    "memory.delete": {"en": "Delete", "zh": "删除"},
     # Chat sessions (会话 → 对话)
     "session.chats": {"en": "CHATS", "zh": "会话"},
     "session.new": {"en": "New chat", "zh": "新建会话"},
