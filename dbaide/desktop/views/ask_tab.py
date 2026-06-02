@@ -16,6 +16,7 @@ class AskTab(QWidget):
     open_sql = pyqtSignal(str)
     empty_action = pyqtSignal(str)
     clarification_choice = pyqtSignal(str)
+    trace_requested = pyqtSignal(object)  # show a turn's trace in the right panel
 
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
@@ -48,6 +49,7 @@ class AskTab(QWidget):
 
         self.conversation = ConversationView()
         self.conversation.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+        self.conversation.trace_requested.connect(self.trace_requested)
         self.stack.addWidget(empty_page)
         self.stack.addWidget(self.conversation)
         layout.addWidget(self.stack, 1)

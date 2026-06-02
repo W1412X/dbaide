@@ -1,12 +1,13 @@
-"""Codex-style conversation: unified turn blocks with collapsible agent trace."""
+"""Codex-style conversation: question bubbles + answers, with a lightweight
+"thinking" indicator per turn. The detailed agent trace lives in the right panel,
+not inline — clicking a turn's indicator reveals it there."""
 
 from __future__ import annotations
 
-from dataclasses import dataclass
 from typing import Any
 
-from PyQt6.QtCore import Qt, QTimer
-from PyQt6.QtGui import QFont
+from PyQt6.QtCore import Qt, QTimer, pyqtSignal
+from PyQt6.QtGui import QFont, QIcon
 from PyQt6.QtWidgets import (
     QFrame,
     QHBoxLayout,
@@ -19,46 +20,12 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 
-from dbaide.agent.progress_events import conversation_trace_step, trace_dedupe_keys
-from dbaide.agent.trace_model import TraceModel
+from dbaide.agent.progress_events import conversation_trace_step, phase_for
 from dbaide.desktop.components.base import compact_button
 from dbaide.desktop.components.inputs import configure_readonly_text_view, configure_wrapped_label
+from dbaide.desktop.components.spinner import BusyAnimator, spinner_icon
 from dbaide.desktop.theme import Theme
 from dbaide.rendering.markdown import render_markdown_safe
-
-
-@dataclass(slots=True)
-class TraceStep:
-    kind: str
-    message: str
-    detail: str = ""
-
-
-def classify_trace_message(message: str) -> str:
-    text = message.strip()
-    lowered = text.lower()
-    if lowered.startswith("calling ") or "call_tool" in lowered:
-        return "tool"
-    if any(k in lowered for k in ("rows", "completed", "executed", "returned", "validated")):
-        return "result"
-    if any(k in lowered for k in ("discover", "generate", "route", "classif", "synthes", "risk", "retry")):
-        return "decision"
-    return "info"
-
-
-_KIND_LABEL = {
-    "decision": "Decision",
-    "tool": "Action",
-    "result": "Result",
-    "info": "Info",
-}
-
-_KIND_COLOR = {
-    "decision": Theme.YELLOW,
-    "tool": Theme.BLUE,
-    "result": Theme.GREEN,
-    "info": Theme.MUTED,
-}
 
 
 class _Bubble(QFrame):
@@ -109,170 +76,109 @@ class _Bubble(QFrame):
         self._label.setFixedWidth(max(48, min(cap, longest + 36)))
 
 
-class CollapsibleTracePanel(QFrame):
-    """Collapsible agent trace — decisions, tool calls, results."""
+class _ThinkingIndicator(QPushButton):
+    """Per-turn status chip. While the agent runs it shows a spinner + the current
+    phase ("Thinking…", then phase labels); when done it collapses to a muted
+    "View agent trace · N steps" link. Clicking it reveals the full trace in the
+    right panel (it carries no trace detail itself). Emits ``opened`` with the
+    turn's events (or None while still running → just reveal the live trace)."""
+
+    opened = pyqtSignal(object)
 
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
-        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
-        self.setObjectName("tracePanel")
-        self.setStyleSheet(
-            f"""
-            QFrame#tracePanel {{
-                background: {Theme.PANEL};
-                border: 1px solid {Theme.BORDER_SOFT};
-                border-radius: 10px;
-            }}
-            """
-        )
-        outer = QVBoxLayout(self)
-        outer.setContentsMargins(0, 0, 0, 0)
-        outer.setSpacing(0)
-
-        self._toggle = QPushButton("  Agent trace")
-        self._toggle.setCheckable(True)
-        self._toggle.setChecked(True)
-        self._toggle.setCursor(Qt.CursorShape.PointingHandCursor)
-        self._toggle.setFlat(True)
-        self._toggle.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
-        self._toggle.setFont(QFont("Inter", 11, QFont.Weight.DemiBold))
-        self._toggle.toggled.connect(self._on_toggle)
-        outer.addWidget(self._toggle)
-
-        self._body = QWidget()
-        self._body.setStyleSheet("background: transparent;")
-        self._body.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
-        body_layout = QVBoxLayout(self._body)
-        body_layout.setContentsMargins(12, 0, 12, 12)
-        body_layout.setSpacing(6)
-        self._steps_layout = QVBoxLayout()
-        self._steps_layout.setSpacing(8)
-        body_layout.addLayout(self._steps_layout)
-        outer.addWidget(self._body)
-
-        self._steps: list[TraceStep] = []
-        self._running = True
-        self._model = TraceModel()
-        self._refresh_header()
-
-    def append(self, message: str, *, kind: str = "", detail: str = "") -> None:
-        text = message.strip()
-        if not text:
-            return
-        if self._steps and self._steps[-1].message == text and self._steps[-1].detail == detail:
-            return
-        step_kind = kind or classify_trace_message(text)
-        self._steps.append(TraceStep(kind=step_kind, message=text, detail=detail))
-        self._render_step(self._steps[-1])
-        self._refresh_header()
-
-    def append_from_event(self, event: dict[str, Any]) -> None:
-        self._model.ingest(event)
-        step = conversation_trace_step(event)
-        if step is None:
-            self._refresh_header()
-            return
-        message, kind, detail = step
-        self.append(message, kind=kind, detail=detail)
-
-    def extend_from_events(self, events: list[dict[str, Any]]) -> None:
-        seen: set[str] = set()
-        for existing in self._steps:
-            seen |= set(trace_dedupe_keys({"title": existing.message, "detail": existing.detail}))
-        for event in events:
-            self._model.ingest(event)
-            step = conversation_trace_step(event)
-            if step is None:
-                continue
-            message, kind, detail = step
-            keys = set(trace_dedupe_keys(event)) | set(
-                trace_dedupe_keys({"title": message, "detail": detail})
-            )
-            if keys & seen:
-                continue
-            seen |= keys
-            self.append(message, kind=kind, detail=detail)
-
-    def finish(self, *, ok: bool = True) -> None:
+        self.setFlat(True)
+        self.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Fixed)
+        self.setFont(QFont("Inter", 11, QFont.Weight.DemiBold))
         self._running = False
-        self._refresh_header(ok=ok)
-        self.set_collapsed(True)
-        # A restored turn with no saved trace has nothing to show — hide the panel
-        # rather than render a hollow "Agent trace · 0 steps · done" bar.
-        if not self._steps:
-            self.setVisible(False)
+        self._waiting = False
+        self._phase = "Thinking…"
+        self._events: list[dict[str, Any]] = []
+        self._ok = True
+        self._step_count = 0
+        self._busy = BusyAnimator(self._tick)
+        self.clicked.connect(self._on_click)
+        self._sync()
 
-    def set_collapsed(self, collapsed: bool) -> None:
-        self._toggle.setChecked(not collapsed)
-        self._body.setVisible(not collapsed)
+    # ── state transitions ──────────────────────────────────────────────────--
 
-    def _on_toggle(self, expanded: bool) -> None:
-        self._body.setVisible(expanded)
+    def start(self, phase: str = "Thinking…") -> None:
+        self._running, self._waiting = True, False
+        if phase:
+            self._phase = phase
+        if not self._busy.active:
+            self._busy.start()
+        self._sync()
 
-    def _refresh_header(self, *, ok: bool = True) -> None:
-        chevron = "▾" if self._toggle.isChecked() else "▸"
-        count = len(self._steps)
-        steps_text = f"{count} step" if count == 1 else f"{count} steps"
+    def set_phase(self, phase: str) -> None:
+        if not phase:
+            return
+        # A live event arrived — (re)enter the running state and show the phase.
+        self._running, self._waiting = True, False
+        self._phase = phase if len(phase) <= 60 else phase[:59] + "…"
+        if not self._busy.active:
+            self._busy.start()
+        self._sync()
+
+    def set_waiting(self, text: str = "Waiting for your reply…") -> None:
+        self._running, self._waiting = False, True
+        self._busy.stop()
+        self._phase = text
+        self._sync()
+
+    def set_done(self, *, ok: bool, step_count: int, events: list[dict[str, Any]]) -> None:
+        self._running, self._waiting = False, False
+        self._busy.stop()
+        self._ok = ok
+        self._step_count = max(0, int(step_count))
+        self._events = list(events or [])
+        self._sync()
+
+    # ── internals ──────────────────────────────────────────────────────────--
+
+    def _on_click(self) -> None:
+        # While running the live trace is already in the right panel — just reveal
+        # it (None). When done, hand over this turn's events to show.
+        self.opened.emit(None if self._running else self._events)
+
+    def _tick(self) -> None:
+        self.setIcon(spinner_icon(self._busy.angle, color=Theme.BLUE))
+
+    def _sync(self) -> None:
         if self._running:
             color = Theme.BLUE
-            # Show what the agent is doing right now, plus how many sub-agents.
-            phase = self._model.current_phase
-            agents = self._model.active_agents
-            bits = [steps_text]
-            if phase:
-                bits.append(phase)
-            if agents:
-                bits.append(f"{len(agents)} agent{'s' if len(agents) != 1 else ''}")
-            label = "Agent trace · " + " · ".join(bits) + " …"
+            phase = self._phase if self._phase.endswith("…") else f"{self._phase}…"
+            self.setIcon(spinner_icon(self._busy.angle, color=Theme.BLUE))
+            self.setText(f"  {phase}")
+            self.show()
+        elif self._waiting:
+            color = Theme.YELLOW
+            self.setIcon(QIcon())
+            self.setText(self._phase)
+            self.show()
         else:
-            color = Theme.GREEN if ok else Theme.RED
-            status = "done" if ok else "failed"
-            label = f"Agent trace · {steps_text} · {status}"
-        self._toggle.setText(f"{chevron}  {label}")
-        self._toggle.setStyleSheet(
+            self.setIcon(QIcon())
+            if self._step_count <= 0:
+                self.hide()  # nothing to reveal — don't show a hollow chip
+                return
+            color = Theme.MUTED if self._ok else Theme.RED
+            # No step count here — the right panel is the source of truth for that
+            # (and its filtered count differs from the raw event count).
+            self.setText(("View agent trace ›" if self._ok else "View agent trace · failed ›"))
+            self.show()
+        self.setStyleSheet(
             f"""
             QPushButton {{
                 color: {color};
                 background: transparent;
                 border: none;
                 text-align: left;
-                padding: 7px 12px;
+                padding: 6px 12px;
             }}
             QPushButton:hover {{ color: {Theme.TEXT}; }}
             """
         )
-
-    def _render_step(self, step: TraceStep) -> None:
-        row = QWidget()
-        row.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
-        row.setStyleSheet("background: transparent;")
-        layout = QVBoxLayout(row)
-        layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(2)
-        head = QHBoxLayout()
-        badge = QLabel(_KIND_LABEL.get(step.kind, "Info"))
-        badge.setFont(QFont("Inter", 9, QFont.Weight.DemiBold))
-        badge.setStyleSheet(
-            f"color: {_KIND_COLOR.get(step.kind, Theme.MUTED)};"
-            f"background: {Theme.PANEL_2}; border-radius: 4px; padding: 2px 6px;"
-        )
-        head.addWidget(badge, 0, Qt.AlignmentFlag.AlignTop)
-        msg = QLabel(step.message)
-        configure_wrapped_label(msg)
-        msg.setFont(QFont("Inter", 11))
-        msg.setStyleSheet(f"color: {Theme.TEXT}; background: transparent;")
-        head.addWidget(msg, 1)
-        layout.addLayout(head)
-        if step.detail:
-            detail = QLabel(step.detail[:400] + ("…" if len(step.detail) > 400 else ""))
-            configure_wrapped_label(detail)
-            detail.setFont(QFont("Menlo", 10))
-            detail.setStyleSheet(
-                f"color: {Theme.MUTED}; background: {Theme.CODE_BG};"
-                f"border-radius: 6px; padding: 6px 8px; margin-left: 4px;"
-            )
-            layout.addWidget(detail)
-        self._steps_layout.addWidget(row)
 
 
 class _MarkdownBlock(QFrame):
@@ -392,8 +298,10 @@ class TurnBlock(QFrame):
         self._header.hide()
         self._layout.addWidget(self._header)
 
-        self.trace = CollapsibleTracePanel()
-        self._layout.addWidget(self.trace)
+        # Lightweight per-turn status (spinner while thinking, then a "view trace"
+        # link). The detailed trace lives in the right panel — not inline.
+        self.status = _ThinkingIndicator()
+        self._layout.addWidget(self.status, 0, Qt.AlignmentFlag.AlignLeft)
 
         self._content_host = QWidget()
         self._content_host.setStyleSheet("background: transparent;")
@@ -421,6 +329,10 @@ class TurnBlock(QFrame):
 
 class ConversationView(QScrollArea):
     _H_MARGIN = 20
+
+    # Emitted when a turn's status chip is clicked: the turn's trace events to show
+    # in the right panel, or None (still running → just reveal the live trace).
+    trace_requested = pyqtSignal(object)
 
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
@@ -474,24 +386,33 @@ class ConversationView(QScrollArea):
         self._current_turn = turn
         self._current_record = {"question": user_text, "events": [], "answer": ""}
         self._turns.append(self._current_record)
-        # The "Starting agent…" line is a live-run placeholder; a restored history
-        # turn (placeholder=False) shows only its real, saved trace steps.
+        turn.status.opened.connect(self.trace_requested)
+        # placeholder=True: a live run → spin immediately. placeholder=False: a
+        # restored turn → stays idle until complete_turn sets its "view trace" link.
         if placeholder:
-            turn.trace.append("Starting agent…", kind="info")
+            turn.status.start("Thinking…")
         self._scroll_bottom()
 
     def append_trace(self, message: str, *, kind: str = "", detail: str = "") -> None:
         if self._current_turn is None:
             self.begin_turn("")
         assert self._current_turn is not None
-        self._current_turn.trace.append(message, kind=kind, detail=detail)
+        if message.strip():
+            self._current_turn.status.set_phase(message.strip())
         self._scroll_bottom()
 
     def append_trace_event(self, event: dict[str, Any]) -> None:
         if self._current_turn is None:
             self.begin_turn("")
         assert self._current_turn is not None
-        self._current_turn.trace.append_from_event(event)
+        # Surface the current phase on the thinking chip (a friendly label like
+        # "Linking schema"); the full detail goes to the right panel.
+        phase = phase_for(str(event.get("stage") or ""))
+        if not phase:
+            step = conversation_trace_step(event)
+            phase = step[0] if step else ""
+        if phase:
+            self._current_turn.status.set_phase(phase)
         if self._current_record is not None:
             self._current_record["events"].append(event)
         self._scroll_bottom()
@@ -501,9 +422,7 @@ class ConversationView(QScrollArea):
             self.begin_turn("")
         turn = self._current_turn
         assert turn is not None
-        turn.trace.append("Waiting for your reply…", kind="info")
-        turn.trace.finish(ok=True)
-        turn.trace.set_collapsed(True)
+        turn.status.set_waiting()
         body = f"**Clarification needed**\n\n{question}"
         if options:
             body += "\n\n" + "\n".join(f"- {item}" for item in options)
@@ -537,13 +456,16 @@ class ConversationView(QScrollArea):
             self.begin_turn("")
         turn = self._current_turn
         assert turn is not None
-        if trace_events:
-            turn.trace.extend_from_events(trace_events)
+        # The persisted trace is the authoritative one; fall back to whatever streamed
+        # in live. These events feed the right panel when the chip is clicked.
+        events = list(trace_events) if trace_events else list(
+            (self._current_record or {}).get("events") or []
+        )
         if self._current_record is not None:
-            if trace_events:  # the persisted trace is the authoritative, complete one
+            if trace_events:
                 self._current_record["events"] = list(trace_events)
             self._current_record["answer"] = answer
-        turn.trace.finish(ok=ok)
+        turn.status.set_done(ok=ok, step_count=len(events), events=events)
 
         subtitle = f"DBAide · {workflow_id}" if workflow_id else "DBAide"
         if answer.strip():
@@ -596,7 +518,8 @@ class ConversationView(QScrollArea):
 
     def finish_turn_error(self, message: str) -> None:
         if self._current_turn:
-            self._current_turn.trace.finish(ok=False)
+            events = list((self._current_record or {}).get("events") or [])
+            self._current_turn.status.set_done(ok=False, step_count=len(events), events=events)
             self._current_turn.append_content(_MarkdownBlock(message, title="Error"))
             if self._current_record is not None:
                 self._current_record["answer"] = message

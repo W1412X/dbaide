@@ -163,6 +163,7 @@ class MainWindow(QMainWindow):
         self.ask_tab.empty_action.connect(self._empty_action)
         self.ask_tab.open_sql.connect(self.open_sql)
         self.ask_tab.clarification_choice.connect(self._submit_clarification)
+        self.ask_tab.trace_requested.connect(self._reveal_turn_trace)
         self.sql_tab.run_requested.connect(lambda sql, _action: self.execute_sql(sql))
         self.stack.addWidget(self.ask_tab)
         self.stack.addWidget(self.sql_tab)
@@ -743,6 +744,14 @@ class MainWindow(QMainWindow):
         self.right.trace.clear_trace()
         self.sidebar.chats.set_current("")
         self.composer.input.setFocus()
+
+    def _reveal_turn_trace(self, events: object) -> None:
+        """A turn's status chip was clicked — reveal the agent trace in the right
+        panel. ``events`` is that turn's trace (show it) or None (still running →
+        the live trace is already there, just surface the panel)."""
+        if isinstance(events, list) and events and not self.running:
+            self.right.show_trace(events)
+        self.right.focus_trace()
 
     def open_session(self, session_id: str) -> None:
         """Load a saved session into the conversation and show its latest trace."""
