@@ -194,6 +194,9 @@ class MainWindow(QMainWindow):
         self.statusbar = QStatusBar()
         self.setStatusBar(self.statusbar)
         self.statusbar.showMessage("Ready")
+        # Land focus in the composer so the cursor is ready to type on launch
+        # (and the topbar selectors don't show a stray focus ring at rest).
+        self.composer.input.setFocus()
 
     def refresh_all(self) -> None:
         self.statusbar.showMessage("Loading…")

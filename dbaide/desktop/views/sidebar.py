@@ -3,9 +3,18 @@ from __future__ import annotations
 from typing import Any
 
 from PyQt6.QtCore import Qt, pyqtSignal
-from PyQt6.QtWidgets import QLineEdit, QTreeWidget, QTreeWidgetItem, QVBoxLayout, QWidget
+from PyQt6.QtWidgets import (
+    QFrame,
+    QLineEdit,
+    QSizePolicy,
+    QTreeWidget,
+    QTreeWidgetItem,
+    QVBoxLayout,
+    QWidget,
+)
 
 from dbaide.desktop.components.base import SectionLabel, compact_button
+from dbaide.desktop.theme import Theme
 
 
 class Sidebar(QWidget):
@@ -31,12 +40,31 @@ class Sidebar(QWidget):
         layout.addWidget(self.search)
         self.tree = QTreeWidget()
         self.tree.setHeaderHidden(True)
+        self.tree.setIndentation(16)
+        self.tree.setAnimated(True)
+        # Borderless tree that blends into the sidebar — interactivity comes from the
+        # row hover/selection (global style), not a boxed frame.
+        self.tree.setStyleSheet("QTreeWidget { background: transparent; border: none; }")
         self.tree.itemSelectionChanged.connect(self._selection_changed)
         self.tree.itemDoubleClicked.connect(self._double_clicked)
         layout.addWidget(self.tree, 1)
-        self.settings_btn = compact_button(t("topbar.settings"), width=120)
+
+        divider = QFrame()
+        divider.setFixedHeight(1)
+        divider.setStyleSheet(f"background: {Theme.BORDER_SOFT};")
+        layout.addWidget(divider)
+
+        # Full-width ghost footer action (settings entry point).
+        self.settings_btn = compact_button(t("topbar.settings"))
+        self.settings_btn.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        self.settings_btn.setMaximumWidth(16777215)
+        self.settings_btn.setStyleSheet(
+            f"QPushButton {{ background: transparent; color: {Theme.MUTED};"
+            f" border: none; border-radius: 8px; text-align: left; padding: 0 8px; }}"
+            f"QPushButton:hover {{ background: {Theme.PANEL_2}; color: {Theme.TEXT}; }}"
+        )
         self.settings_btn.clicked.connect(self.settings_requested.emit)
-        layout.addWidget(self.settings_btn, alignment=Qt.AlignmentFlag.AlignHCenter)
+        layout.addWidget(self.settings_btn)
         self._rows: list[dict[str, Any]] = []
 
     def load_schema(self, rows: list[dict[str, Any]], *, error: str = "") -> None:

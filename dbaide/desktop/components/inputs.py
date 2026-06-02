@@ -139,10 +139,13 @@ class DropdownCombo(QComboBox):
     def __init__(self, parent=None, *, max_visible: int = 8) -> None:
         super().__init__(parent)
         self.setMaxVisibleItems(max_visible)
-        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        # Size to the current item's text (capped) so labels show in full without
+        # forcing every selector to the same wide box.
+        self.setSizeAdjustPolicy(QComboBox.SizeAdjustPolicy.AdjustToContents)
+        self.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Fixed)
         self.setFixedHeight(34)
         self.setMinimumWidth(120)
-        self.setMaximumWidth(240)
+        self.setMaximumWidth(260)
 
     def current_value(self) -> str:
         return str(self.currentData() or "")

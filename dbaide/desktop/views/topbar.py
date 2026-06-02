@@ -39,8 +39,10 @@ class TopBar(QWidget):
         self.connection.currentIndexChanged.connect(self._emit_connection)
         self.database = DropdownCombo(max_visible=10)
         self.database.currentIndexChanged.connect(self._emit_database)
-        row.addWidget(self.connection, 1)
-        row.addWidget(self.database, 1)
+        # Size the selectors to their content (not a 50/50 stretch) so the bar reads
+        # as compact controls with breathing room, rather than two wide boxes.
+        row.addWidget(self.connection)
+        row.addWidget(self.database)
         row.addStretch(1)
 
         self.status = StatusBadge("Idle", "idle")
