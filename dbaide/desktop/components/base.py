@@ -23,8 +23,8 @@ def compact_button(
     if width is not None:
         btn.setFixedWidth(width)
     else:
-        btn.setMinimumWidth(72)
-        btn.setMaximumWidth(128)
+        btn.setMinimumWidth(60)
+        btn.setMaximumWidth(120)
     return btn
 
 

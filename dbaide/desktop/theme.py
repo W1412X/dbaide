@@ -114,7 +114,7 @@ QPushButton {{
     color: {Theme.TEXT_2};
     border: 1px solid {Theme.BORDER};
     border-radius: 9px;
-    padding: 0px 16px;
+    padding: 0px 13px;
     min-height: 30px;
     max-height: 30px;
 }}
@@ -131,7 +131,7 @@ QPushButton[primary="true"] {{
     color: {Theme.ACCENT_TEXT};
     border: 1px solid {Theme.ACCENT};
     font-weight: 600;
-    padding: 0px 16px;
+    padding: 0px 13px;
     min-height: 30px;
     max-height: 30px;
 }}
