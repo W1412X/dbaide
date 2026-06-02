@@ -151,6 +151,31 @@ class AskTab(QWidget):
         self.conversation.clear()
         self._turn_open = False
 
+    def load_session(self, turns: list[dict[str, Any]], *, connection: str = "") -> None:
+        """Render a saved chat session's turns (question → trace → answer) into the
+        conversation, replacing whatever is currently shown."""
+        self.conversation.clear()
+        self._hint_shown = True  # don't show the intro hint over a restored thread
+        self.stack.setCurrentIndex(1)
+        for turn in turns:
+            meta = turn.get("meta") or {}
+            self.begin_turn(
+                str(turn.get("question") or ""),
+                connection=connection,
+                database=str(meta.get("database") or ""),
+                policy=str(meta.get("policy") or "safe_auto"),
+            )
+            sql = str(turn.get("selected_sql") or "")
+            status = str(turn.get("status") or "completed")
+            self.conversation.complete_turn(
+                answer=str(turn.get("answer_markdown") or ""),
+                sql=sql,
+                trace_events=turn.get("trace") or [],
+                ok=status not in ("failed", "cancelled"),
+                actions_widget=self._build_actions(sql, None),
+            )
+        self._turn_open = False
+
     def append_search_hits(self, query: str, hits: list[dict[str, Any]]) -> None:
         if not hits:
             body = f"No matches for `{query}`. Try building assets or asking in natural language."

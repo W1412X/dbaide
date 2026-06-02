@@ -59,6 +59,9 @@ class MainWindow(QMainWindow):
         self._last_action = ""
         self._pending_resume: dict[str, Any] | None = None
         self._current_worker: ServiceWorker | None = None
+        # The active chat session (会话). Empty until the first ask creates one (or a
+        # session is opened from the Chats list); each turn is appended to it.
+        self.current_session_id = ""
         self._settings = QSettings("DBAide", "DBAide")
         self._tab_names = ("Ask", "SQL")
         self.setWindowTitle("DBAide")
@@ -281,6 +284,9 @@ class MainWindow(QMainWindow):
             self.tabbar.setCurrentIndex(self._tab_names.index(name))
 
     def _connection_changed(self, _text: str) -> None:
+        # Sessions are per-connection — drop the active session id so the next ask
+        # starts a fresh thread under the newly selected connection.
+        self.current_session_id = ""
         conn = self.current_connection()
         if conn:
             self._refresh_connection_context(conn)
@@ -407,6 +413,7 @@ class MainWindow(QMainWindow):
             "database": database,
             "execution_policy": policy,
             "show_trace": True,
+            "session_id": self.current_session_id,
         })
 
     def _submit_clarification(self, reply: str) -> None:
@@ -439,6 +446,7 @@ class MainWindow(QMainWindow):
             "database": database,
             "execution_policy": policy,
             "show_trace": True,
+            "session_id": self.current_session_id,
         })
         self._restore_composer_placeholder()
 
@@ -696,6 +704,37 @@ class MainWindow(QMainWindow):
             "query": query,
         })
 
+    # ── Chat sessions (会话) ──────────────────────────────────────────────────
+
+    def new_session(self) -> None:
+        """Start a fresh chat thread: clear the conversation and trace; the next ask
+        creates the session server-side."""
+        if self.running:
+            self.toast("Finish or stop the current task first.")
+            return
+        self.current_session_id = ""
+        self._pending_resume = None
+        self.ask_tab.clear_conversation()
+        self.ask_tab.set_has_connection(bool(self.current_connection()))
+        self.right.trace.clear_trace()
+        self.composer.input.setFocus()
+
+    def open_session(self, session_id: str) -> None:
+        """Load a saved session into the conversation and show its latest trace."""
+        conn = self.current_connection()
+        if not conn or not session_id or self.running:
+            return
+
+        def on_loaded(data: dict[str, Any]) -> None:
+            turns = data.get("turns") or []
+            self.current_session_id = str(data.get("session_id") or session_id)
+            self._pending_resume = None
+            self.ask_tab.load_session(turns, connection=conn)
+            self.right.show_trace((turns[-1].get("trace") if turns else []) or [])
+            self.switch_tab("Ask")
+
+        self._run_background("load_session", {"connection_name": conn, "session_id": session_id}, on_loaded)
+
     def load_history(self, workflow_id: str) -> None:
         conn = self.current_connection()
         self.run_action("load_history", {"connection_name": conn, "workflow_id": workflow_id})
@@ -807,6 +846,8 @@ class MainWindow(QMainWindow):
             return
         if action == "ask":
             self.right.trace.end_live()
+            # Track the chat session this turn belongs to (created lazily server-side).
+            self.current_session_id = str(result.get("session_id") or self.current_session_id)
             if str(result.get("status") or "") == "wait_user":
                 self._pending_resume = result.get("resume_state")
                 self._last_question = str(result.get("question") or self._last_question)
