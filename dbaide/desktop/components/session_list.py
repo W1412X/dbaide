@@ -26,6 +26,7 @@ from dbaide.desktop.components.base import SectionLabel
 from dbaide.desktop.components.icon_button import IconToolButton
 from dbaide.desktop.components.icons import plus_icon
 from dbaide.desktop.theme import Theme
+from dbaide.i18n import t
 
 _ID_ROLE = Qt.ItemDataRole.UserRole
 
@@ -35,13 +36,13 @@ def _relative_time(ts: float) -> str:
         return ""
     delta = max(0.0, time.time() - float(ts))
     if delta < 60:
-        return "just now"
+        return t("session.just_now")
     if delta < 3600:
-        return f"{int(delta // 60)}m ago"
+        return t("session.minutes_ago", n=int(delta // 60))
     if delta < 86400:
-        return f"{int(delta // 3600)}h ago"
+        return t("session.hours_ago", n=int(delta // 3600))
     if delta < 7 * 86400:
-        return f"{int(delta // 86400)}d ago"
+        return t("session.days_ago", n=int(delta // 86400))
     return time.strftime("%b %d", time.localtime(ts))
 
 
@@ -79,9 +80,9 @@ class SessionList(QWidget):
 
         header = QHBoxLayout()
         header.setContentsMargins(0, 0, 0, 0)
-        header.addWidget(SectionLabel("CHATS"))
+        header.addWidget(SectionLabel(t("session.chats")))
         header.addStretch(1)
-        self._new_btn = IconToolButton(plus_icon(), "New chat")
+        self._new_btn = IconToolButton(plus_icon(), t("session.new"))
         self._new_btn.clicked.connect(self.new_requested.emit)
         header.addWidget(self._new_btn)
         layout.addLayout(header)
@@ -100,19 +101,22 @@ class SessionList(QWidget):
     def load(self, sessions: list[dict[str, Any]]) -> None:
         self.list.clear()
         if not sessions:
-            item = QListWidgetItem("No chats yet — ask a question to start one.")
+            item = QListWidgetItem(t("session.empty"))
             item.setFlags(Qt.ItemFlag.NoItemFlags)
             item.setForeground(self.palette().color(self.foregroundRole()))
             from PyQt6.QtGui import QColor
             item.setForeground(QColor(Theme.MUTED))
             self.list.addItem(item)
             return
+        from dbaide.history.session_store import DEFAULT_TITLE
         for s in sessions:
             sid = str(s.get("session_id") or "")
-            title = str(s.get("title") or "New chat")
+            title = str(s.get("title") or "")
+            if not title or title == DEFAULT_TITLE:
+                title = t("session.new")
             n = int(s.get("turn_count") or 0)
             when = _relative_time(float(s.get("updated_at") or s.get("created_at") or 0))
-            bits = [f"{n} turn{'s' if n != 1 else ''}"]
+            bits = [t("session.turns_one") if n == 1 else t("session.turns_many", n=n)]
             if when:
                 bits.append(when)
             row = _SessionRow(title, " · ".join(bits))
@@ -148,9 +152,9 @@ class SessionList(QWidget):
         menu = QMenu(self)
         from dbaide.desktop.components.menu import _style_menu
         _style_menu(menu)
-        rename = QAction("Rename…", menu)
+        rename = QAction(t("session.rename"), menu)
         rename.triggered.connect(lambda: self._rename(sid))
-        delete = QAction("Delete", menu)
+        delete = QAction(t("session.delete"), menu)
         delete.triggered.connect(lambda: self.delete_requested.emit(sid))
         menu.addAction(rename)
         menu.addAction(delete)
@@ -164,6 +168,6 @@ class SessionList(QWidget):
                 w = self.list.itemWidget(it)
                 current = w._title.text() if isinstance(w, _SessionRow) else ""
                 break
-        title, ok = QInputDialog.getText(self, "Rename chat", "Title:", text=current)
+        title, ok = QInputDialog.getText(self, t("session.rename_title"), t("session.title_label"), text=current)
         if ok and title.strip():
             self.rename_requested.emit(session_id, title.strip())

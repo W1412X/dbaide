@@ -192,6 +192,20 @@ _STRINGS: dict[str, dict[str, str]] = {
     "panel.clear_conversation": {"en": "Clear conversation", "zh": "清空对话"},
     "menu.history": {"en": "History…", "zh": "历史记录…"},
     "menu.joins": {"en": "Saved joins…", "zh": "已保存的关联…"},
+    # Chat sessions (会话 → 对话)
+    "session.chats": {"en": "CHATS", "zh": "会话"},
+    "session.new": {"en": "New chat", "zh": "新建会话"},
+    "session.empty": {"en": "No chats yet — ask a question to start one.", "zh": "暂无会话 — 提问即可开启"},
+    "session.rename": {"en": "Rename…", "zh": "重命名…"},
+    "session.delete": {"en": "Delete", "zh": "删除"},
+    "session.rename_title": {"en": "Rename chat", "zh": "重命名会话"},
+    "session.title_label": {"en": "Title:", "zh": "标题："},
+    "session.turns_one": {"en": "1 turn", "zh": "1 轮对话"},
+    "session.turns_many": {"en": "{n} turns", "zh": "{n} 轮对话"},
+    "session.just_now": {"en": "just now", "zh": "刚刚"},
+    "session.minutes_ago": {"en": "{n}m ago", "zh": "{n} 分钟前"},
+    "session.hours_ago": {"en": "{n}h ago", "zh": "{n} 小时前"},
+    "session.days_ago": {"en": "{n}d ago", "zh": "{n} 天前"},
 }
 
 _current = DEFAULT_LANGUAGE
