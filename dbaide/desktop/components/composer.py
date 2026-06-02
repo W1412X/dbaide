@@ -33,9 +33,14 @@ class ComposerWidget(Panel):
 
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
+        # One unified rounded container (input + toolbar share a single border that
+        # lights up on focus) instead of a bordered input nested inside a panel.
+        self.setObjectName("composer")
+        self._focused = False
+        self._apply_container_style()
         outer = QVBoxLayout(self)
-        outer.setContentsMargins(14, 12, 14, 12)
-        outer.setSpacing(10)
+        outer.setContentsMargins(14, 10, 14, 10)
+        outer.setSpacing(8)
 
         from dbaide.i18n import t
         self._running = False
@@ -50,10 +55,9 @@ class ComposerWidget(Panel):
         self.input.setStyleSheet(
             f"""
             QTextEdit {{
-                background: {Theme.PANEL};
-                border: 1px solid {Theme.BORDER};
-                border-radius: 12px;
-                padding: 10px 12px;
+                background: transparent;
+                border: none;
+                padding: 2px 2px;
                 font-size: 14px;
             }}
             """
@@ -81,10 +85,26 @@ class ComposerWidget(Panel):
         # live "stop" (icon, so the label never clips).
         self._busy = BusyAnimator(self._on_spin)
 
+    def _apply_container_style(self) -> None:
+        border = Theme.FOCUS if self._focused else Theme.BORDER
+        self.setStyleSheet(
+            f"QFrame#composer {{ background: {Theme.PANEL}; border: 1px solid {border};"
+            f" border-radius: 12px; }}"
+        )
+
+    def _set_focused(self, focused: bool) -> None:
+        if focused != self._focused:
+            self._focused = focused
+            self._apply_container_style()
+
     def eventFilter(self, obj, event) -> bool:
         if obj is self.input:
             if event.type() == QEvent.Type.Resize:
                 self._sync_input_height()
+            elif event.type() == QEvent.Type.FocusIn:
+                self._set_focused(True)
+            elif event.type() == QEvent.Type.FocusOut:
+                self._set_focused(False)
             elif event.type() == QEvent.Type.KeyPress:
                 mod = event.modifiers() & (
                     Qt.KeyboardModifier.ControlModifier | Qt.KeyboardModifier.MetaModifier
