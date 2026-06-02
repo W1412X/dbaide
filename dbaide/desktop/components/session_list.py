@@ -9,8 +9,8 @@ from __future__ import annotations
 import time
 from typing import Any
 
-from PyQt6.QtCore import Qt, pyqtSignal
-from PyQt6.QtGui import QAction, QFont
+from PyQt6.QtCore import QSize, Qt, pyqtSignal
+from PyQt6.QtGui import QAction, QFont, QFontMetrics
 from PyQt6.QtWidgets import (
     QHBoxLayout,
     QInputDialog,
@@ -47,24 +47,33 @@ def _relative_time(ts: float) -> str:
     return time.strftime("%b %d", time.localtime(ts))
 
 
+_TITLE_FONT = QFont("Inter", 12, QFont.Weight.DemiBold)
+_SUB_FONT = QFont("Inter", 10)
+_TITLE_MAX_LINES = 2
+
+
 class _SessionRow(QWidget):
-    """Two-line row: title over a muted 'N turns · time' subtitle."""
+    """Title (wraps to up to two lines so similar questions stay distinguishable)
+    over a muted 'N turns · time' subtitle."""
 
     def __init__(self, title: str, subtitle: str, parent=None) -> None:
         super().__init__(parent)
         self.setStyleSheet("background: transparent;")
+        self.setToolTip(title)  # full title on hover, even when it wraps/clips
         layout = QVBoxLayout(self)
         layout.setContentsMargins(4, 5, 4, 5)
         layout.setSpacing(2)
         self._full_title = title
         self._title = QLabel(title)
-        self._title.setFont(QFont("Inter", 12, QFont.Weight.DemiBold))
+        self._title.setFont(_TITLE_FONT)
         self._title.setStyleSheet(f"color: {Theme.TEXT}; background: transparent;")
         self._title.setTextFormat(Qt.TextFormat.PlainText)
-        # Don't let a long title force the row wide; elide it to the row width.
-        self._title.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Fixed)
+        self._title.setWordWrap(True)
+        self._title.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
+        # Cap the visible title at two lines (a 3rd would just clip — rare for a title).
+        self._title.setMaximumHeight(_TITLE_MAX_LINES * QFontMetrics(_TITLE_FONT).lineSpacing())
         sub = QLabel(subtitle)
-        sub.setFont(QFont("Inter", 10))
+        sub.setFont(_SUB_FONT)
         sub.setStyleSheet(f"color: {Theme.MUTED}; background: transparent;")
         layout.addWidget(self._title)
         layout.addWidget(sub)
@@ -73,10 +82,21 @@ class _SessionRow(QWidget):
         return self._full_title
 
     def resizeEvent(self, event) -> None:  # noqa: N802
+        # Constrain the title to the row width so word-wrap actually wraps (an
+        # unconstrained wrapping label clips to one line instead).
         super().resizeEvent(event)
-        fm = self._title.fontMetrics()
-        avail = max(40, self.width() - 12)
-        self._title.setText(fm.elidedText(self._full_title, Qt.TextElideMode.ElideRight, avail))
+        self._title.setFixedWidth(max(40, self.width() - 8))
+
+    @staticmethod
+    def height_for(title: str, *, content_width: int) -> int:
+        """Row height that fits the title (1 or 2 lines, the true wrapped height)
+        plus the subtitle."""
+        tfm = QFontMetrics(_TITLE_FONT)
+        w = max(60, content_width)
+        wrapped = tfm.boundingRect(0, 0, w, 10000, int(Qt.TextFlag.TextWordWrap), title).height()
+        title_h = min(wrapped, _TITLE_MAX_LINES * tfm.lineSpacing())
+        sub_h = QFontMetrics(_SUB_FONT).lineSpacing()
+        return title_h + sub_h + 16  # margins (5+5) + spacing (2) + a hair
 
 
 class SessionList(QWidget):
@@ -136,11 +156,28 @@ class SessionList(QWidget):
             row = _SessionRow(title, " · ".join(bits))
             item = QListWidgetItem()
             item.setData(_ID_ROLE, sid)
-            hint = row.sizeHint()
-            hint.setHeight(hint.height() + 4)  # a little breathing room so titles never clip
-            item.setSizeHint(hint)
+            # Width available to the title inside the row: list viewport minus the
+            # item padding (8+8) and the row margins (4+4). Fall back to a typical
+            # sidebar width before the list has been laid out.
+            vw = self.list.viewport().width()
+            content_w = (vw if vw > 40 else 232) - 24
+            item.setSizeHint(QSize(0, _SessionRow.height_for(title, content_width=content_w)))
             self.list.addItem(item)
             self.list.setItemWidget(item, row)
+
+    def resizeEvent(self, event) -> None:  # noqa: N802
+        # Recompute row heights for the current width (load may run before layout,
+        # and the sidebar splitter can change the width).
+        super().resizeEvent(event)
+        vw = self.list.viewport().width()
+        if vw <= 40:
+            return
+        content_w = vw - 24
+        for i in range(self.list.count()):
+            it = self.list.item(i)
+            w = self.list.itemWidget(it)
+            if isinstance(w, _SessionRow):
+                it.setSizeHint(QSize(0, _SessionRow.height_for(w.title(), content_width=content_w)))
         self.set_current(self._current)
 
     def set_current(self, session_id: str) -> None:
