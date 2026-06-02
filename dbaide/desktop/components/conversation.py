@@ -426,10 +426,9 @@ class ConversationView(QScrollArea):
         turn = self._current_turn
         assert turn is not None
         turn.status.set_waiting()
-        body = f"**Clarification needed**\n\n{question}"
-        if options:
-            body += "\n\n" + "\n".join(f"- {item}" for item in options)
-        turn.append_content(_MarkdownBlock(body, title="DBAide"))
+        # Options are presented as the chip bar below — don't also bullet them in the
+        # body (the question text already conveys the choices).
+        turn.append_content(_MarkdownBlock(f"**Clarification needed**\n\n{question}", title="DBAide"))
         bar = _ClarificationBar(options) if options else None
         if bar is not None:
             turn.append_content(bar)
