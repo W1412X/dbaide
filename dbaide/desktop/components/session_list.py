@@ -52,8 +52,8 @@ class _SessionRow(QWidget):
         super().__init__(parent)
         self.setStyleSheet("background: transparent;")
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(2, 2, 2, 2)
-        layout.setSpacing(1)
+        layout.setContentsMargins(4, 5, 4, 5)
+        layout.setSpacing(2)
         self._title = QLabel(title)
         self._title.setFont(QFont("Inter", 12, QFont.Weight.DemiBold))
         self._title.setStyleSheet(f"color: {Theme.TEXT}; background: transparent;")
@@ -115,11 +115,14 @@ class SessionList(QWidget):
             bits = [f"{n} turn{'s' if n != 1 else ''}"]
             if when:
                 bits.append(when)
+            row = _SessionRow(title, " · ".join(bits))
             item = QListWidgetItem()
             item.setData(_ID_ROLE, sid)
-            item.setSizeHint(_SessionRow(title, " · ".join(bits)).sizeHint())
+            hint = row.sizeHint()
+            hint.setHeight(hint.height() + 4)  # a little breathing room so titles never clip
+            item.setSizeHint(hint)
             self.list.addItem(item)
-            self.list.setItemWidget(item, _SessionRow(title, " · ".join(bits)))
+            self.list.setItemWidget(item, row)
         self.set_current(self._current)
 
     def set_current(self, session_id: str) -> None:
