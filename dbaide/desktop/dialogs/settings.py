@@ -295,8 +295,12 @@ class SettingsDialog(QDialog):
         scroll.setWidgetResizable(True)
         scroll.setFrameShape(QFrame.Shape.NoFrame)
         inner = QWidget()
+        inner.setObjectName("resourceFormInner")
+        inner.setStyleSheet(
+            f"QWidget#resourceFormInner {{ background: {Theme.PANEL}; }}{FORM_INNER_LABEL_RULES}"
+        )
         form = QFormLayout(inner)
-        form.setSpacing(10)
+        configure_form(form)
 
         prod = self._resource_presets.get("production", {})
         self._resource_spins: dict[str, QSpinBox] = {}
@@ -304,7 +308,11 @@ class SettingsDialog(QDialog):
         for key, lo, hi in self._RESOURCE_FIELDS:
             spin = QSpinBox()
             spin.setRange(lo, hi)
-            spin.setMinimumWidth(160)
+            spin.setFixedHeight(34)
+            # A number input doesn't need to span the dialog — keep it compact and
+            # left-aligned next to its label.
+            spin.setMinimumWidth(120)
+            spin.setMaximumWidth(150)
             # Show a concrete number: the user's override if set, else the load-profile
             # default. Saving only persists fields the user changed away from the default.
             baseline = int(prod.get(key, lo))
@@ -312,7 +320,7 @@ class SettingsDialog(QDialog):
             current = self._resource_values.get(key)
             spin.setValue(int(current) if current not in (None, "") else baseline)
             self._resource_spins[key] = spin
-            form.addRow(_t(f"res.{key}"), spin)
+            form.addRow(form_label(_t(f"res.{key}")), spin)
 
         scroll.setWidget(inner)
         card_layout.addWidget(scroll, 1)

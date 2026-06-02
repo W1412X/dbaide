@@ -2,6 +2,34 @@
 
 from __future__ import annotations
 
+import tempfile
+from pathlib import Path
+
+# Checkmark glyph for checked checkboxes/radios. Materialised from this embedded
+# string to a temp file at import (rather than a shipped asset) so the QSS url()
+# resolves identically in dev, installed wheels, and frozen PyInstaller builds —
+# no package-data wiring needed. POSIX path so url() works on every platform.
+_CHECK_SVG = (
+    '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 16 16">'
+    '<path d="M3.5 8.5 L6.5 11.5 L12.5 5" fill="none" stroke="#ffffff" stroke-width="2"'
+    ' stroke-linecap="round" stroke-linejoin="round"/></svg>'
+)
+
+
+def _materialize_check_icon() -> str:
+    icon_dir = Path(tempfile.gettempdir()) / "dbaide-icons"
+    try:
+        icon_dir.mkdir(exist_ok=True)
+        path = icon_dir / "check.svg"
+        if not path.exists() or path.read_text() != _CHECK_SVG:
+            path.write_text(_CHECK_SVG)
+        return path.as_posix()
+    except OSError:
+        return ""  # no writable temp → checked state falls back to a filled box
+
+
+_CHECK_ICON = _materialize_check_icon()
+
 
 class Theme:
     BG = "#07080a"
@@ -323,5 +351,36 @@ QStatusBar {{
     background: {Theme.BG};
     color: {Theme.MUTED};
     border-top: 1px solid {Theme.BORDER_SOFT};
+}}
+/* Themed checkboxes / radios — without this they fall back to the native platform
+   control, which clashes with the dark chrome. Checked = filled accent. */
+QCheckBox, QRadioButton {{
+    spacing: 8px;
+    color: {Theme.TEXT_2};
+    background: transparent;
+}}
+QCheckBox::indicator, QRadioButton::indicator {{
+    width: 16px;
+    height: 16px;
+    background: {Theme.PANEL};
+    border: 1px solid {Theme.BORDER};
+}}
+QCheckBox::indicator {{
+    border-radius: 4px;
+}}
+QRadioButton::indicator {{
+    border-radius: 9px;
+}}
+QCheckBox::indicator:hover, QRadioButton::indicator:hover {{
+    border-color: {Theme.MUTED};
+}}
+QCheckBox::indicator:checked, QRadioButton::indicator:checked {{
+    background: {Theme.ACCENT};
+    border-color: {Theme.ACCENT};
+    image: url({_CHECK_ICON});
+}}
+QCheckBox::indicator:disabled, QRadioButton::indicator:disabled {{
+    background: {Theme.PANEL_2};
+    border-color: {Theme.BORDER_SOFT};
 }}
 """
