@@ -79,7 +79,11 @@ class BuildAssetsDialog(QDialog):
             inner_layout.addWidget(box)
         inner_layout.addStretch(1)
         scroll.setWidget(inner)
-        root.addWidget(scroll, 1)
+        # Size to the checkbox list (capped, scrolls when there are many DBs) rather
+        # than greedily filling the dialog — otherwise a couple of DBs leave a large
+        # gap between the list and the controls below.
+        scroll.setMaximumHeight(180)
+        root.addWidget(scroll)
 
         select_row = QHBoxLayout()
         select_row.setSpacing(8)
@@ -118,6 +122,9 @@ class BuildAssetsDialog(QDialog):
         profile_hint.setProperty("muted", True)
         options.addRow(profile_hint)
         root.addLayout(options)
+
+        # Pool any extra height here so the action row stays pinned to the bottom.
+        root.addStretch(1)
 
         actions = QHBoxLayout()
         actions.setSpacing(8)
