@@ -16,6 +16,7 @@ class PanelHeader(QWidget):
     history_clicked = pyqtSignal()
     joins_clicked = pyqtSignal()
     copy_trace_requested = pyqtSignal()
+    copy_conversation_requested = pyqtSignal()
     clear_trace_requested = pyqtSignal()
     clear_conversation_requested = pyqtSignal()
 
@@ -47,6 +48,7 @@ class PanelHeader(QWidget):
         self._menu.add_action(t("menu.joins"), self.joins_clicked.emit)
         self._menu.add_separator()
         self._menu.add_action(t("panel.copy_trace"), self.copy_trace_requested.emit)
+        self._menu.add_action(t("panel.copy_conversation"), self.copy_conversation_requested.emit)
         self._menu.add_action(t("panel.clear_trace"), self.clear_trace_requested.emit)
         self._menu.add_action(t("panel.clear_conversation"), self.clear_conversation_requested.emit)
         row.addWidget(self._menu, 0, Qt.AlignmentFlag.AlignVCenter)

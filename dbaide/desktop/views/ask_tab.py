@@ -140,6 +140,10 @@ class AskTab(QWidget):
         self.conversation.begin_turn("")
         self.conversation.complete_turn(answer=f"**{title}**\n\n{body}", ok=True)
 
+    def copy_text(self) -> str:
+        """Full conversation export (all turns: question, trace, answer)."""
+        return self.conversation.copy_text()
+
     def clear_conversation(self) -> None:
         self.conversation.clear()
         self._turn_open = False

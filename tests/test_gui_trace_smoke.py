@@ -177,3 +177,34 @@ def test_copy_text_exports_structured_trace_with_sql(qapp):
     assert "SELECT COUNT(*)" in text and "WHERE status='paid'" in text  # full SQL, multi-line
     # empty trace → empty export
     assert TracePanel().copy_text() == ""
+
+
+def test_conversation_copy_exports_all_turns(qapp):
+    from dbaide.desktop.components.conversation import ConversationView
+    conv = ConversationView()
+    # turn 1: a data query with a SQL trace
+    conv.begin_turn("count paid orders")
+    conv.complete_turn(
+        answer="3 paid orders.",
+        trace_events=[
+            {"stage": "execute_sql", "title": "execute_sql done", "status": "completed",
+             "kind": "tool", "step": 1, "sql": "SELECT COUNT(*) FROM orders WHERE status='paid'",
+             "row_count": 3, "duration_ms": 5},
+        ],
+        ok=True,
+    )
+    # turn 2: a schema question
+    conv.begin_turn("what columns does orders have")
+    conv.complete_turn(
+        answer="id, amount, status.",
+        trace_events=[{"stage": "discover_schema", "title": "discover_schema done",
+                       "status": "completed", "kind": "tool", "step": 1, "detail": "1 hit"}],
+        ok=True,
+    )
+    text = conv.copy_text()
+    assert "### Turn 1" in text and "### Turn 2" in text
+    assert "count paid orders" in text and "what columns does orders have" in text
+    assert "SELECT COUNT(*) FROM orders" in text     # turn-1 SQL in trace
+    assert "3 paid orders." in text and "id, amount, status." in text  # both answers
+    conv.clear()
+    assert conv.copy_text() == ""

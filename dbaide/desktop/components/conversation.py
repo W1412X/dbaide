@@ -419,6 +419,10 @@ class ConversationView(QScrollArea):
         self.setWidget(self._root)
         self._current_turn: TurnBlock | None = None
         self._hint_label: QLabel | None = None
+        # Retained per-turn records (question, trace events, answer) for "copy the
+        # whole conversation's trace".
+        self._turns: list[dict[str, Any]] = []
+        self._current_record: dict[str, Any] | None = None
 
     def showEvent(self, event) -> None:  # noqa: N802
         super().showEvent(event)
@@ -447,6 +451,8 @@ class ConversationView(QScrollArea):
             turn.set_user(user_text, meta=meta)
         self._insert_turn(turn)
         self._current_turn = turn
+        self._current_record = {"question": user_text, "events": [], "answer": ""}
+        self._turns.append(self._current_record)
         turn.trace.append("Starting agent…", kind="info")
         self._scroll_bottom()
 
@@ -462,6 +468,8 @@ class ConversationView(QScrollArea):
             self.begin_turn("")
         assert self._current_turn is not None
         self._current_turn.trace.append_from_event(event)
+        if self._current_record is not None:
+            self._current_record["events"].append(event)
         self._scroll_bottom()
 
     def append_clarification(self, *, question: str, options: list[str]) -> _ClarificationBar | None:
@@ -513,6 +521,10 @@ class ConversationView(QScrollArea):
         assert turn is not None
         if trace_events:
             turn.trace.extend_from_events(trace_events)
+        if self._current_record is not None:
+            if trace_events:  # the persisted trace is the authoritative, complete one
+                self._current_record["events"] = list(trace_events)
+            self._current_record["answer"] = answer
         turn.trace.finish(ok=ok)
 
         subtitle = f"DBAide · {workflow_id}" if workflow_id else "DBAide"
@@ -537,13 +549,41 @@ class ConversationView(QScrollArea):
             turn.append_content(_MarkdownBlock("\n\n".join(notes)))
 
         self._current_turn = None
+        self._current_record = None
         self._scroll_bottom()
+
+    def copy_text(self) -> str:
+        """Export the whole conversation: each turn's question, structured trace and
+        answer, separated. Used by 'Copy conversation'."""
+        from dbaide.agent.trace_model import render_events_text
+
+        blocks: list[str] = []
+        n = 0
+        for rec in self._turns:
+            q = str(rec.get("question") or "").strip()
+            ans = str(rec.get("answer") or "").strip()
+            trace = render_events_text(rec.get("events") or [])
+            if not (q or ans or trace):
+                continue
+            n += 1
+            parts = [f"### Turn {n}"]
+            if q:
+                parts.append(f"Q: {q}")
+            if trace:
+                parts += ["", "Trace:", trace]
+            if ans:
+                parts += ["", "Answer:", ans]
+            blocks.append("\n".join(parts))
+        return ("\n\n" + "─" * 60 + "\n\n").join(blocks)
 
     def finish_turn_error(self, message: str) -> None:
         if self._current_turn:
             self._current_turn.trace.finish(ok=False)
             self._current_turn.append_content(_MarkdownBlock(message, title="Error"))
+            if self._current_record is not None:
+                self._current_record["answer"] = message
             self._current_turn = None
+            self._current_record = None
         else:
             self.begin_turn("")
             self.complete_turn(answer=message, ok=False)
@@ -583,4 +623,6 @@ class ConversationView(QScrollArea):
                 widget.deleteLater()
         self._hint_label = None
         self._current_turn = None
+        self._turns = []
+        self._current_record = None
         self._sync_viewport_width()

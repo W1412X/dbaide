@@ -172,37 +172,10 @@ class TracePanel(QWidget):
         return self._model is None or not self._model.steps
 
     def copy_text(self) -> str:
-        """A readable, structured export of the whole run — every step indented by
-        depth with its status, duration, detail and the exact SQL it ran. Built from
-        the model (not the visible rows) so nothing is elided."""
-        model = self._model
-        if model is None or not model.steps:
-            return ""
-        lines: list[str] = [model.summary_line(), ""]
-        glyphs = {"completed": "✓", "failed": "✗", "running": "▶", "waiting": "⏸"}
-
-        def walk(node: TraceNode, depth: int) -> None:
-            indent = "  " * depth
-            glyph = glyphs.get(node.status, "·")
-            dur = f"  [{_fmt_ms(node.duration_ms)}]" if node.duration_ms else ""
-            lines.append(f"{indent}{glyph} {_node_head(node)}{dur}")
-            if node.thought:
-                lines.append(f"{indent}    thought: {node.thought}")
-            raw = node.raw if isinstance(node.raw, dict) else {}
-            sql = str(raw.get("sql") or "").strip()
-            if sql:
-                for ln in sql.splitlines():
-                    lines.append(f"{indent}    {ln}")
-            else:
-                detail = (node.detail or "").strip()
-                if detail and detail not in _node_head(node):
-                    lines.append(f"{indent}    {detail}")
-            for child in node.children:
-                walk(child, depth + 1)
-
-        for node in model.steps:
-            walk(node, 0)
-        return "\n".join(lines)
+        """Readable, structured export of the current run (steps + SQL, nothing
+        elided). Shared with the whole-conversation copy."""
+        from dbaide.agent.trace_model import render_trace_text
+        return render_trace_text(self._model) if self._model is not None else ""
 
     # ── Rendering ─────────────────────────────────────────────────────────────
 

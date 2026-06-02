@@ -165,6 +165,7 @@ class MainWindow(QMainWindow):
 
         self.right = RightPanel()
         self.right.copy_trace_requested.connect(self.copy_trace)
+        self.right.copy_conversation_requested.connect(self.copy_conversation)
         self.right.clear_trace_requested.connect(self.right.clear_all)
         self.right.clear_conversation_requested.connect(self.ask_tab.clear_conversation)
         self.right.history_selected.connect(self.load_history)
@@ -889,6 +890,14 @@ class MainWindow(QMainWindow):
             return
         QApplication.clipboard().setText(text)
         self.toast(_i18n_t("toast.trace_copied"))
+
+    def copy_conversation(self) -> None:
+        text = self.ask_tab.copy_text()
+        if not text.strip():
+            self.toast(_i18n_t("toast.trace_empty"))
+            return
+        QApplication.clipboard().setText(text)
+        self.toast(_i18n_t("toast.conversation_copied"))
 
     def _empty_action(self, action_id: str) -> None:
         if action_id == "settings":

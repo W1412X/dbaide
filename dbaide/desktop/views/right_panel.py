@@ -18,6 +18,7 @@ from dbaide.desktop.views.joins_tab import JoinsTab
 
 class RightPanel(QWidget):
     copy_trace_requested = pyqtSignal()
+    copy_conversation_requested = pyqtSignal()
     clear_trace_requested = pyqtSignal()
     clear_conversation_requested = pyqtSignal()
     history_selected = pyqtSignal(str)
@@ -48,6 +49,7 @@ class RightPanel(QWidget):
         self.header.history_clicked.connect(self.open_history)
         self.header.joins_clicked.connect(self.open_joins)
         self.header.copy_trace_requested.connect(self.copy_trace_requested.emit)
+        self.header.copy_conversation_requested.connect(self.copy_conversation_requested.emit)
         self.header.clear_trace_requested.connect(self.clear_trace_requested.emit)
         self.header.clear_conversation_requested.connect(self.clear_conversation_requested.emit)
         layout.addWidget(self.header)

@@ -252,3 +252,66 @@ class TraceModel:
         if agents:
             parts.append(f"{len(agents)} agent{'s' if len(agents) != 1 else ''}: " + ", ".join(agents))
         return " · ".join(parts) + f" · {elapsed:.1f}s"
+
+
+# ── Plain-text export (shared by the trace panel and conversation copy) ───────
+
+from dbaide.agent.progress_events import STEP_TYPE_LABELS  # noqa: E402
+
+_CHIP_TYPES = {"sql", "phase", "llm", "decision", "io"}
+_GLYPHS = {"completed": "✓", "failed": "✗", "running": "▶", "waiting": "⏸"}
+
+
+def _node_head(node: "TraceNode") -> str:
+    if node.agent_name:
+        return f"{node.agent_name} · {node.title or node.phase or node.stage or 'step'}"
+    base = node.phase or node.stage or node.title or "step"
+    chip = STEP_TYPE_LABELS.get(node.node_type, "")
+    return f"{chip} · {base}" if chip and node.node_type in _CHIP_TYPES else base
+
+
+def _fmt_ms(ms: float) -> str:
+    return f"{ms / 1000:.1f}s" if ms >= 1000 else f"{ms:.0f}ms"
+
+
+def render_trace_text(model: "TraceModel") -> str:
+    """Readable, structured plain-text export of a run: every step indented by depth
+    with status, duration, thought, detail and the exact (multi-line) SQL. Pure (no
+    Qt) so it's reusable for single-run copy and whole-conversation copy."""
+    if model is None or not model.steps:
+        return ""
+    lines: list[str] = [model.summary_line(), ""]
+
+    def walk(node: "TraceNode", depth: int) -> None:
+        indent = "  " * depth
+        glyph = _GLYPHS.get(node.status, "·")
+        dur = f"  [{_fmt_ms(node.duration_ms)}]" if node.duration_ms else ""
+        head = _node_head(node)
+        lines.append(f"{indent}{glyph} {head}{dur}")
+        if node.thought:
+            lines.append(f"{indent}    thought: {node.thought}")
+        raw = node.raw if isinstance(node.raw, dict) else {}
+        sql = str(raw.get("sql") or "").strip()
+        if sql:
+            for ln in sql.splitlines():
+                lines.append(f"{indent}    {ln}")
+        else:
+            detail = (node.detail or "").strip()
+            if detail and detail not in head:
+                lines.append(f"{indent}    {detail}")
+        for child in node.children:
+            walk(child, depth + 1)
+
+    for node in model.steps:
+        walk(node, 0)
+    return "\n".join(lines)
+
+
+def render_events_text(events: list[dict]) -> str:
+    """Build a model from a flat event list and export it as text."""
+    model = TraceModel()
+    for event in events or []:
+        if isinstance(event, dict):
+            model.ingest(event)
+    model.finalize()
+    return render_trace_text(model)
