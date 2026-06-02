@@ -70,6 +70,16 @@ class AskAgentLoop:
         self.orchestrator = orchestrator
         self.progress = progress or orchestrator.progress
         self.registry = build_tool_registry(orchestrator)
+        self._trace_parent = ""
+
+    def _ns_step(self, event: dict) -> dict:
+        """Namespace a step event under the current intent's trace node (when this
+        run is one of several sub-intents), so step ids don't collide and the steps
+        nest under their intent."""
+        if self._trace_parent and event.get("step"):
+            event["node_id"] = f"{self._trace_parent}:step:{event['step']}"
+            event["parent_id"] = self._trace_parent
+        return event
 
     def run(
         self,
@@ -80,9 +90,15 @@ class AskAgentLoop:
         disclosures_before: list[str] | None = None,
         resume_state: dict[str, Any] | None = None,
         user_reply: str = "",
+        trace_parent: str = "",
     ) -> AssistantResponse | None:
-        """Run the tool loop. Returns None to signal fallback to staged pipeline."""
+        """Run the tool loop. Returns None to signal fallback to staged pipeline.
+
+        ``trace_parent`` nests this run's step nodes under a parent trace node (used
+        when several sub-intents run in one turn, so each intent's steps group under
+        it and step ids don't collide across intents)."""
         orch = self.orchestrator
+        self._trace_parent = trace_parent
         transcript: list[str] = []
 
         if resume_state:
@@ -162,14 +178,14 @@ class AskAgentLoop:
 
             step_no += 1
             self.progress(
-                progress_event(
+                self._ns_step(progress_event(
                     stage=tool_name,
                     title=f"Calling {tool_name}",
                     status="running",
                     kind="tool",
                     detail=str(args)[:200] if args else "",
                     step=step_no,
-                )
+                ))
             )
             result = runtime.call_tool(tool_name, args, tool_ctx)
             summary = _summarize_tool_result(tool_name, result)
@@ -191,6 +207,7 @@ class AskAgentLoop:
                 duration_ms=float(getattr(result, "duration_ms", 0) or 0),
                 step=step_no,
             )
+            done_event = self._ns_step(done_event)
             if executed_sql:
                 done_event["sql"] = executed_sql
                 # Carry the SQL facts so the typed SQL step can show rows/db on click.

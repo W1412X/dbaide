@@ -141,6 +141,31 @@ class AskOrchestrator:
                 warnings=["No LLM configured"],
             )
 
+        # Resuming a paused run continues that single in-flight intent — never re-decompose.
+        if resume_state or user_reply:
+            return self._run_single(question, database=database, execute=execute,
+                                    resume_state=resume_state, user_reply=user_reply)
+
+        from dbaide.agent.intent import IntentDecomposer
+        try:
+            intents = IntentDecomposer(self.llm).decompose(question)
+        except Exception as exc:
+            logger.warning("intent_decompose_failed: %s", exc)
+            intents = []
+        if len(intents) > 1:
+            return self._run_multi(question, intents, database=database, execute=execute)
+        return self._run_single(question, database=database, execute=execute)
+
+    def _run_single(
+        self,
+        question: str,
+        *,
+        database: str = "",
+        execute: bool = True,
+        resume_state: dict[str, Any] | None = None,
+        user_reply: str = "",
+        trace_parent: str = "",
+    ) -> AssistantResponse:
         self.error_router.reset()
         disclosures = list(self.session.disclosure.events)
 
@@ -154,6 +179,7 @@ class AskOrchestrator:
                 disclosures_before=disclosures,
                 resume_state=resume_state,
                 user_reply=user_reply,
+                trace_parent=trace_parent,
             )
             if loop_response is not None:
                 return loop_response
@@ -166,6 +192,53 @@ class AskOrchestrator:
         reason = (self._loop_fail_reason or "unknown").strip()
         staged.warnings.append(f"Tool loop unavailable ({reason}); using staged pipeline.")
         return staged
+
+    def _run_multi(self, question: str, intents, *, database: str, execute: bool) -> AssistantResponse:
+        """Run independent sub-intents in turn and aggregate. Each sub-intent keeps a
+        self-contained answer + result, and its steps nest under an intent node in
+        the trace so the user sees every sub-intent's execution."""
+        from dbaide.agent.progress_events import progress_event
+
+        self.progress(progress_event(
+            stage="decompose", title=f"Decomposed into {len(intents)} sub-intents",
+            status="completed", kind="phase", node_id="intent:plan",
+        ))
+        results: list[tuple[Any, AssistantResponse]] = []
+        for idx, intent in enumerate(intents, start=1):
+            node_id = f"intent:{intent.id}"
+            self.progress(progress_event(
+                stage="intent", title=f"{idx}. {intent.label}: {intent.text}",
+                status="running", kind="phase", node_id=node_id,
+            ))
+            resp = self._run_single(intent.text, database=database, execute=execute, trace_parent=node_id)
+            self.progress(progress_event(
+                stage="intent", title=f"{idx}. {intent.label}: {intent.text}",
+                status="failed" if (resp.warnings and not resp.answer) else "completed",
+                kind="phase", node_id=node_id,
+            ))
+            results.append((intent, resp))
+            # If a sub-intent pauses for the user, surface that immediately.
+            if getattr(resp, "status", "completed") == "wait_user":
+                return resp
+        return self._aggregate(question, results)
+
+    def _aggregate(self, question: str, results: list[tuple[Any, AssistantResponse]]) -> AssistantResponse:
+        sections: list[str] = []
+        warnings: list[str] = []
+        primary: AssistantResponse | None = None
+        for idx, (intent, resp) in enumerate(results, start=1):
+            sections.append(f"## {idx}. {intent.label} — {intent.text}\n\n{resp.answer or '(no answer)'}")
+            warnings.extend(resp.warnings or [])
+            if primary is None and resp.result is not None:
+                primary = resp  # keep the first concrete result for the SQL tab
+        answer = "\n\n".join(sections)
+        return AssistantResponse(
+            answer=answer,
+            sql=(primary.sql if primary else ""),
+            result=(primary.result if primary else None),
+            disclosures=self._new_disclosures(list(self.session.disclosure.events)),
+            warnings=warnings,
+        )
 
     def _run_staged(self, question: str, *, database: str = "", execute: bool, disclosures: list[str]) -> AssistantResponse:
 
