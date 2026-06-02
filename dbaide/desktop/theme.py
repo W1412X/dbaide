@@ -5,30 +5,49 @@ from __future__ import annotations
 import tempfile
 from pathlib import Path
 
-# Checkmark glyph for checked checkboxes/radios. Materialised from this embedded
-# string to a temp file at import (rather than a shipped asset) so the QSS url()
-# resolves identically in dev, installed wheels, and frozen PyInstaller builds —
-# no package-data wiring needed. POSIX path so url() works on every platform.
-_CHECK_SVG = (
-    '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 16 16">'
-    '<path d="M3.5 8.5 L6.5 11.5 L12.5 5" fill="none" stroke="#ffffff" stroke-width="2"'
-    ' stroke-linecap="round" stroke-linejoin="round"/></svg>'
-)
+# Glyphs for native controls (checkbox tick, combo/spinbox chevrons). Each is
+# materialised from this embedded SVG to a temp file at import (rather than a
+# shipped asset) so the QSS url() resolves identically in dev, installed wheels,
+# and frozen PyInstaller builds — no package-data wiring needed. POSIX paths so
+# url() works on every platform.
+_ICON_SVGS = {
+    "check": (
+        '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 16 16">'
+        '<path d="M3.5 8.5 L6.5 11.5 L12.5 5" fill="none" stroke="#ffffff" stroke-width="2"'
+        ' stroke-linecap="round" stroke-linejoin="round"/></svg>'
+    ),
+    "chevron-down": (
+        '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 16 16">'
+        '<path d="M4 6.5 L8 10.5 L12 6.5" fill="none" stroke="#b7bec9" stroke-width="1.6"'
+        ' stroke-linecap="round" stroke-linejoin="round"/></svg>'
+    ),
+    "chevron-up": (
+        '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 16 16">'
+        '<path d="M4 9.5 L8 5.5 L12 9.5" fill="none" stroke="#b7bec9" stroke-width="1.6"'
+        ' stroke-linecap="round" stroke-linejoin="round"/></svg>'
+    ),
+}
 
 
-def _materialize_check_icon() -> str:
-    icon_dir = Path(tempfile.gettempdir()) / "dbaide-icons"
+def _materialize_icons() -> dict[str, str]:
+    paths: dict[str, str] = {}
     try:
+        icon_dir = Path(tempfile.gettempdir()) / "dbaide-icons"
         icon_dir.mkdir(exist_ok=True)
-        path = icon_dir / "check.svg"
-        if not path.exists() or path.read_text() != _CHECK_SVG:
-            path.write_text(_CHECK_SVG)
-        return path.as_posix()
+        for name, svg in _ICON_SVGS.items():
+            path = icon_dir / f"{name}.svg"
+            if not path.exists() or path.read_text() != svg:
+                path.write_text(svg)
+            paths[name] = path.as_posix()
     except OSError:
-        return ""  # no writable temp → checked state falls back to a filled box
+        pass  # no writable temp → controls fall back to no-glyph states
+    return paths
 
 
-_CHECK_ICON = _materialize_check_icon()
+_ICONS = _materialize_icons()
+_CHECK_ICON = _ICONS.get("check", "")
+_CHEVRON_DOWN = _ICONS.get("chevron-down", "")
+_CHEVRON_UP = _ICONS.get("chevron-up", "")
 
 
 class Theme:
@@ -147,6 +166,18 @@ QComboBox {{
     {_INPUT}
     padding: 0px 28px 0px 12px;
 }}
+QComboBox::drop-down {{
+    subcontrol-origin: padding;
+    subcontrol-position: center right;
+    width: 26px;
+    border: none;
+    background: transparent;
+}}
+QComboBox::down-arrow {{
+    image: url({_CHEVRON_DOWN});
+    width: 14px;
+    height: 14px;
+}}
 QComboBox QAbstractItemView {{
     background: {Theme.PANEL};
     color: {Theme.TEXT};
@@ -166,10 +197,34 @@ QSpinBox {{
     padding: 0px 12px;
     padding-right: 24px;
 }}
-QSpinBox::up-button, QSpinBox::down-button {{
-    width: 18px;
+QSpinBox::up-button {{
+    subcontrol-origin: border;
+    subcontrol-position: top right;
+    width: 20px;
     border: none;
+    border-top-right-radius: 9px;
     background: transparent;
+}}
+QSpinBox::down-button {{
+    subcontrol-origin: border;
+    subcontrol-position: bottom right;
+    width: 20px;
+    border: none;
+    border-bottom-right-radius: 9px;
+    background: transparent;
+}}
+QSpinBox::up-button:hover, QSpinBox::down-button:hover {{
+    background: {Theme.PANEL_3};
+}}
+QSpinBox::up-arrow {{
+    image: url({_CHEVRON_UP});
+    width: 12px;
+    height: 12px;
+}}
+QSpinBox::down-arrow {{
+    image: url({_CHEVRON_DOWN});
+    width: 12px;
+    height: 12px;
 }}
 QTextEdit, QTextBrowser, QPlainTextEdit, QListWidget, QTreeWidget, QTableWidget {{
     background: {Theme.SURFACE};
