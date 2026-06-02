@@ -44,7 +44,8 @@ class PanelHeader(QWidget):
         # contextual trace actions — keeps the header to "[views] · [⋯]".
         from dbaide.i18n import t
         self._menu = MenuButton(icon=more_icon(), tooltip="More", icon_only=True)
-        self._menu.add_action(t("menu.history"), self.history_clicked.emit)
+        # Query history is now the Chats list in the sidebar (sessions group turns);
+        # the old per-workflow History dialog is superseded, so it's no longer here.
         self._menu.add_action(t("menu.joins"), self.joins_clicked.emit)
         self._menu.add_separator()
         self._menu.add_action(t("panel.copy_trace"), self.copy_trace_requested.emit)

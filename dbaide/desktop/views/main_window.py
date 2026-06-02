@@ -99,9 +99,8 @@ class MainWindow(QMainWindow):
         self.bus.subscribe(QUERY_COMPLETED, lambda _p: self._on_query_completed())
 
     def _on_query_completed(self) -> None:
-        conn = self.current_connection()
-        self._load_history(conn)
-        self._load_sessions(conn)
+        # Chats (sessions) are the surfaced history now; refresh that list.
+        self._load_sessions(self.current_connection())
 
     def _refresh_models_only(self) -> None:
         def on_loaded(bootstrap: dict[str, Any]) -> None:
@@ -307,7 +306,6 @@ class MainWindow(QMainWindow):
     def _refresh_connection_context(self, conn_name: str) -> None:
         conns = self.bootstrap.get("connections") or []
         self._load_schema(conn_name)
-        self._load_history(conn_name)
         self._load_sessions(conn_name)
         self.refresh_joins()
         asset_status = "missing"
