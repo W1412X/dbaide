@@ -20,6 +20,7 @@ TOOL_TRACE_STAGES = frozenset({
     "delete_join",
     "ask_user",
     "profile_table",
+    "column_stats",
     "synthesize_schema_answer",
     "explain_sql",
     "list_databases",
@@ -43,6 +44,7 @@ PHASE_LABELS: dict[str, str] = {
     "explain_sql": "Checking query cost",
     "execute_sql": "Running query",
     "profile_table": "Profiling data",
+    "column_stats": "Profiling data",
     "synthesize_schema_answer": "Answering",
     "ask_user": "Waiting for you",
     "build_assets": "Building assets",
@@ -270,6 +272,10 @@ def brief_tool_summary(tool: str, result: Any) -> str:
         return "schema answer ready"
     if tool == "profile_table":
         return f"{data.get('column_count', '?')} column profile(s)"
+    if tool == "column_stats":
+        cols = data.get("columns") or []
+        names = ", ".join(str(c.get("column")) for c in cols[:6])
+        return f"stats: {names}" + (" …" if len(cols) > 6 else "")
     raw = str(data)
     return raw[:200] + ("…" if len(raw) > 200 else "")
 

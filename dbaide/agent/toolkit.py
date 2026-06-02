@@ -30,6 +30,7 @@ from dbaide.tools.specs import (
     GET_RELATIONS,
     LIST_DATABASES,
     LIST_TABLES,
+    COLUMN_STATS,
     PROFILE_TABLE,
     SYNTHESIZE_SCHEMA_ANSWER,
     VALIDATE_JOINS,
@@ -59,6 +60,7 @@ LOOP_DECISION_TOOL_NAMES = frozenset({
     "execute_readonly_sql",
     "explain_sql",
     "profile_table",
+    "column_stats",
     "ask_user",
 })
 
@@ -500,6 +502,21 @@ def build_tool_registry(orchestrator: AskOrchestrator) -> ToolRegistry:
         orchestrator._loop_answer = answer
         return ToolResult(ok=True, data={"answer": answer, "column_count": len(profiles)})
 
+    def _column_stats(args: dict[str, Any], _ctx: ToolContext) -> ToolResult:
+        table = str(args.get("table") or orchestrator._loop_table or "").strip()
+        database = str(args.get("database") or orchestrator._loop_table_database or "")
+        if not table:
+            return ToolResult(ok=False, error=_err("column_stats", "table is required"))
+        columns = args.get("columns") if isinstance(args.get("columns"), list) else None
+        metrics = args.get("metrics") if isinstance(args.get("metrics"), list) else None
+        try:
+            stats = orchestrator.profile.column_stats(
+                table, columns, metrics=metrics, database=database,
+            )
+        except Exception as exc:
+            return ToolResult(ok=False, error=_err("column_stats", str(exc), retryable=True))
+        return ToolResult(ok=True, data={"table": table, "columns": stats})
+
     def _ask_user(args: dict[str, Any], _ctx: ToolContext) -> ToolResult:
         question = str(args.get("question") or "").strip()
         if not question:
@@ -532,6 +549,7 @@ def build_tool_registry(orchestrator: AskOrchestrator) -> ToolRegistry:
     registry.register(EXECUTE_SQL, _execute_sql)
     registry.register(EXPLAIN_SQL, _explain_sql)
     registry.register(PROFILE_TABLE, _profile_table)
+    registry.register(COLUMN_STATS, _column_stats)
     registry.register(ASK_USER, _ask_user)
     return registry
 

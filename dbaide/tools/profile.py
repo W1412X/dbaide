@@ -1,9 +1,35 @@
 from __future__ import annotations
 
-from dbaide.adapters.base import DatabaseAdapter
+from typing import Any
+
+from dbaide.adapters.base import DatabaseAdapter, quote_identifier
 from dbaide.assets import AssetStore
+from dbaide.assets.profiler import kind_from_type
+from dbaide.assets.summarizer import truncate_cell
 from dbaide.context.disclosure import DisclosureContext
-from dbaide.models import ColumnProfile, QueryResult
+from dbaide.models import ColumnInfo, ColumnProfile, QueryResult
+
+# Type-aware candidate metrics. The first list is the default set (always fetched
+# when the caller doesn't pick); the second is optional metrics the LLM opts into.
+_METRICS: dict[str, tuple[list[str], list[str]]] = {
+    "numeric": (["min", "max", "null_rate"], ["distinct_count"]),
+    "temporal": (["min", "max", "null_rate"], ["distinct_count"]),
+    "text": (["min_len", "max_len", "null_rate", "empty_rate"], ["distinct_count"]),
+    "boolean": (["distinct_count", "null_rate"], []),
+    "categorical": (["distinct_count", "null_rate"], ["top_values"]),
+    "unknown": (["null_rate"], ["distinct_count"]),
+}
+
+# SQL aggregate expression per metric (portable across sqlite/mysql/postgres).
+_AGG = {
+    "min": "MIN({c})",
+    "max": "MAX({c})",
+    "null_rate": "AVG(CASE WHEN {c} IS NULL THEN 1.0 ELSE 0.0 END)",
+    "distinct_count": "COUNT(DISTINCT {c})",
+    "min_len": "MIN(LENGTH({c}))",
+    "max_len": "MAX(LENGTH({c}))",
+    "empty_rate": "AVG(CASE WHEN {c} = '' THEN 1.0 ELSE 0.0 END)",
+}
 
 
 class ProfileTools:
@@ -60,6 +86,57 @@ class ProfileTools:
             distribution=stats.get("distribution") or {},
             sample_rows=stats.get("sample_rows") or [],
         )
+
+    def column_stats(self, table: str, columns: list[str] | None = None, *,
+                     metrics: list[str] | None = None, database: str = "",
+                     top_k: int = 10) -> list[dict[str, Any]]:
+        """On-demand, type-aware statistics. One bounded aggregate scan per column;
+        the caller (LLM) chooses metrics, else type defaults apply. Values truncated."""
+        database = database or self._asset_database_for_table(table) or self._default_asset_database()
+        all_cols = {c.name: c for c in self.adapter.describe_table(table, database=database)}
+        wanted = [all_cols[c] for c in (columns or list(all_cols)) if c in all_cols]
+        picked = [str(m).strip().lower() for m in (metrics or []) if str(m).strip()]
+        out: list[dict[str, Any]] = []
+        for col in wanted:
+            kind = kind_from_type(col)
+            defaults, optional = _METRICS.get(kind, _METRICS["unknown"])
+            chosen = [m for m in picked if m in defaults or m in optional] if picked else list(defaults)
+            stats = self._compute_stats(table, col, chosen, database=database, top_k=top_k)
+            out.append({"column": col.name, "data_type": col.data_type, "kind": kind, "stats": stats})
+        return out
+
+    def _compute_stats(self, table: str, col: ColumnInfo, metrics: list[str], *,
+                       database: str, top_k: int) -> dict[str, Any]:
+        cq = quote_identifier(col.name, self.adapter.dialect)
+        tq = quote_identifier(table, self.adapter.dialect)
+        selects, names = [], []
+        for m in metrics:
+            if m in _AGG:
+                selects.append(f"{_AGG[m].format(c=cq)} AS m{len(names)}")
+                names.append(m)
+        stats: dict[str, Any] = {}
+        if selects:
+            try:
+                res = self.adapter.execute_readonly(
+                    f"SELECT {', '.join(selects)} FROM {tq}", database=database, limit=1,
+                )
+                row = res.rows[0] if res.rows else {}
+                vals = list(row.values())
+                for i, name in enumerate(names):
+                    v = vals[i] if i < len(vals) else None
+                    stats[name] = round(float(v), 4) if name.endswith("_rate") and v is not None else truncate_cell(v)
+            except Exception as exc:  # surface as a note rather than failing the tool
+                stats["error"] = str(exc)
+        if "top_values" in metrics:
+            try:
+                res = self.adapter.execute_readonly(
+                    f"SELECT {cq} AS value, COUNT(*) AS n FROM {tq} WHERE {cq} IS NOT NULL "
+                    f"GROUP BY {cq} ORDER BY n DESC", database=database, limit=top_k,
+                )
+                stats["top_values"] = [{"value": truncate_cell(r.get("value")), "count": r.get("n")} for r in res.rows]
+            except Exception:
+                pass
+        return stats
 
     def profile_table(self, table: str, columns: list[str] | None = None, *, database: str = "", top_k: int = 10) -> list[ColumnProfile]:
         if columns is None:

@@ -247,6 +247,22 @@ PROFILE_TABLE = ToolSpec(
     safe_for_auto_call=True,
 )
 
+COLUMN_STATS = ToolSpec(
+    name="column_stats",
+    description=(
+        "On-demand, type-aware statistics overview for one or more columns. Pick the "
+        "metrics that matter for the question; omit `metrics` to get sensible defaults "
+        "per type. Candidates: numeric/temporal → min,max,null_rate(,distinct_count); "
+        "string → min_len,max_len,null_rate,empty_rate(,distinct_count); "
+        "categorical/boolean → distinct_count,null_rate(,top_values)."
+    ),
+    input_schema={"table": "string", "columns": "list[string]", "metrics": "list[string]", "database": "string"},
+    output_schema={"columns": "list[dict]"},
+    permission_level=SAFE_PROFILE,
+    timeout_seconds=60,
+    safe_for_auto_call=True,
+)
+
 ASK_USER = ToolSpec(
     name="ask_user",
     description="Ask the user a clarification question",
