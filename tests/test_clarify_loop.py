@@ -29,9 +29,9 @@ class ClarifyLoopMock(LLMClient):
         if "schema linker" in system:
             return {"tables": [{"database": "main", "table": "orders", "columns": ["id", "amount", "status", "created_at"]}],
                     "sufficient": True}
-        if "meticulous data analyst" in system:  # the clarifier
-            return {"questions": [{"dimension": "time", "ask": "created_at is UTC — which timezone for the window?",
-                                   "options": ["UTC", "America/New_York"], "default": "UTC"}],
+        if "rigorous data analyst" in system:  # the clarifier
+            return {"questions": [{"ask": "created_at is a timestamp — which timezone defines the window?",
+                                   "options": ["UTC", "America/New_York"]}],
                     "assumptions": ["Excluding refunded orders"]}
         if "generate safe read-only SQL" in system:
             return {"sql": "SELECT SUM(amount) FROM orders", "rationale": "ok", "confidence": 0.9}

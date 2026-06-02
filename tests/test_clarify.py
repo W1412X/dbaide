@@ -59,12 +59,36 @@ def test_parses_questions_and_assumptions():
 
 def test_render_question_lists_each_ambiguity():
     plan = ClarificationPlan(questions=[
-        {"dimension": "time", "ask": "Which timezone?", "options": ["UTC", "NY"], "default": "UTC"},
-        {"dimension": "metric", "ask": "Which refunds count?", "options": ["all", "post-delivery"], "default": "all"},
+        {"ask": "Which timezone?", "options": ["UTC", "NY"]},
+        {"ask": "Which refunds count?", "options": ["all", "post-delivery"]},
     ])
     text = plan.render_question()
     assert "Which timezone?" in text and "Which refunds count?" in text
-    assert "`UTC` (default)" in text  # default marked
+    assert "`UTC`" in text and "(default)" not in text  # options shown, no presumed default
+
+
+def test_open_question_without_options():
+    plan = ClarificationPlan(questions=[{"ask": "Which value of delivery_status means 妥投?", "options": []}])
+    text = plan.render_question()
+    assert "妥投" in text and "Options:" not in text  # open question, no invented candidates
+
+
+def test_observed_values_reach_the_model():
+    mock = _Mock({"questions": [], "assumptions": []})
+    SemanticClarifier(mock).analyze(
+        "yesterday's delivered count", _disclosed(),
+        observed_values={"orders.status": ["delivered", "in_transit", "returned"]},
+    )
+    assert "delivered" in mock.seen["user"] and "in_transit" in mock.seen["user"]
+
+
+def test_already_confirmed_is_passed_so_it_is_not_reasked():
+    mock = _Mock({"questions": [], "assumptions": []})
+    SemanticClarifier(mock).analyze(
+        "q", _disclosed(), already_confirmed=["Timezone: America/New_York"],
+    )
+    assert "do NOT ask these again" in mock.seen["user"]
+    assert "America/New_York" in mock.seen["user"]
 
 
 def test_dropped_when_no_ask_text():

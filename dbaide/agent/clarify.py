@@ -1,18 +1,22 @@
-"""Semantic clarifier — pins down the *business 口径* (exact criteria) of a question
-before any SQL is written.
+"""Semantic clarifier — refuse to guess; confirm every uncertain business meaning.
 
-Text-to-SQL goes quietly wrong not on syntax but on *meaning*: a time window the
-user thinks of in their local zone but the column stores in UTC; a "refund rate"
-that may or may not require successful delivery first; whether NULLs are excluded
-or counted as zero; whether test/soft-deleted rows are in scope. These are not
-schema questions — the columns exist — they are *definition* questions, and
-guessing them produces a confidently wrong number.
+A query runs against the user's real database, and a wrong *interpretation* yields
+a confidently wrong answer. The ambiguities are open-ended and impossible to
+enumerate up front — which table or column to use when several could fit, what a
+status/flag/category value actually means, how a timestamp is stored and which
+timezone a window refers to, what a metric counts, which rows are in scope, units,
+and countless others specific to each business.
 
-Borrowing the Codex/Claude-Code stance: be rigorous, don't guess on anything that
-materially changes the result — surface it and ask. This module inspects the
-question against the resolved schema and returns the *material* ambiguities as
-targeted questions (each with concrete options + a sensible default), so the agent
-can confirm the criteria with the user before generating SQL.
+The iron rule (Codex/Claude-Code style): **never guess anything you are not certain
+of.** If the correct interpretation is not unambiguous from the user's question
+plus the schema/values in hand, surface it and let the user confirm — do not invent
+a "sensible default" that presumes a business fact (a timezone, a status value, a
+region, which table). This is not a fixed checklist; it is a stance applied to
+every point of doubt, at any stage, as many times as doubt arises.
+
+This module inspects a question against the resolved schema (and, when available,
+the real observed values of its columns) and returns the genuinely-uncertain points
+as questions — grounded in real candidates where possible.
 """
 
 from __future__ import annotations
@@ -26,19 +30,15 @@ from dbaide.models import ColumnInfo
 if TYPE_CHECKING:
     from dbaide.llm import LLMClient
 
-# Dimensions we explicitly reason about (the prompt enumerates these so the model
-# checks each rather than only the obvious one).
-DIMENSIONS = ("time", "metric", "null", "scope")
-
-_MAX_QUESTIONS = 4
+_MAX_QUESTIONS = 6
 
 
 @dataclass(slots=True)
 class ClarificationPlan:
-    """Material business-criteria ambiguities found in a question."""
+    """Genuinely-uncertain points that must be confirmed before SQL is written."""
 
-    questions: list[dict[str, Any]] = field(default_factory=list)  # {dimension, ask, options, default}
-    assumptions: list[str] = field(default_factory=list)
+    questions: list[dict[str, Any]] = field(default_factory=list)  # {ask, options}
+    assumptions: list[str] = field(default_factory=list)           # facts CERTAIN from schema/values
 
     def is_empty(self) -> bool:
         return not self.questions
@@ -49,40 +49,33 @@ class ClarificationPlan:
         return []
 
     def render_question(self) -> str:
-        """A single markdown prompt enumerating every ambiguity for the user."""
+        """A single prompt enumerating every point that needs the user's confirmation."""
         lines = [
-            "Before I run this, I need to pin down a couple of business definitions so "
-            "the numbers mean exactly what you expect:",
+            "Before I run this I need you to confirm a few definitions — I won't guess "
+            "these, because a wrong interpretation would give a wrong number:",
         ]
         for i, q in enumerate(self.questions, 1):
             ask = str(q.get("ask") or "").strip()
             opts = [str(o) for o in (q.get("options") or []) if str(o).strip()]
-            default = str(q.get("default") or "").strip()
             line = f"\n**{i}. {ask}**"
             if opts:
-                shown = []
-                for o in opts:
-                    shown.append(f"`{o}` (default)" if default and o == default else f"`{o}`")
-                line += "\n   Options: " + " · ".join(shown)
+                line += "\n   Options: " + " · ".join(f"`{o}`" for o in opts)
             lines.append(line)
-        lines.append(
-            "\nReply with your choices (or just say “use the defaults”), and I'll apply them precisely."
-        )
+        lines.append("\nTell me your choice for each (anything you leave open, I'll ask again rather than assume).")
         return "\n".join(lines)
 
     def render_assumptions(self) -> str:
         if not self.assumptions:
             return ""
-        return "Assumptions applied: " + "; ".join(self.assumptions)
+        return "Confirmed from the schema: " + "; ".join(self.assumptions)
 
 
 def _schema_digest(disclosed: list[tuple[str, str, list[ColumnInfo]]]) -> str:
-    """Compact schema view (name : type, nullable, comment) the model reasons over."""
     blocks: list[str] = []
     for db, table, columns in disclosed:
         label = f"{db}.{table}" if db else table
         cols = []
-        for c in columns[:40]:
+        for c in columns[:60]:
             tags = []
             if getattr(c, "nullable", None):
                 tags.append("nullable")
@@ -96,51 +89,78 @@ def _schema_digest(disclosed: list[tuple[str, str, list[ColumnInfo]]]) -> str:
     return "\n".join(blocks)
 
 
+def _values_digest(observed_values: dict[str, list[str]] | None) -> str:
+    if not observed_values:
+        return ""
+    lines = ["Observed values (a sample) for some columns — use these as the real candidates:"]
+    for key, vals in observed_values.items():
+        shown = ", ".join(str(v) for v in vals[:25])
+        suffix = " …" if len(vals) > 25 else ""
+        lines.append(f"  {key}: {shown}{suffix}")
+    return "\n".join(lines)
+
+
 class SemanticClarifier:
-    """Detects material business-criteria ambiguities for a question + schema."""
+    """Surfaces every genuinely-uncertain interpretation for a question + schema."""
 
     def __init__(self, llm: "LLMClient") -> None:
         self.llm = llm
 
     def analyze(
-        self, question: str, disclosed: list[tuple[str, str, list[ColumnInfo]]]
+        self,
+        question: str,
+        disclosed: list[tuple[str, str, list[ColumnInfo]]],
+        observed_values: dict[str, list[str]] | None = None,
+        already_confirmed: list[str] | None = None,
     ) -> ClarificationPlan:
         if isinstance(self.llm, NullLLMClient) or not question.strip() or not disclosed:
             return ClarificationPlan()
         system = (
-            "You are a meticulous data analyst. Before any SQL is written, your job is to "
-            "make the BUSINESS DEFINITION (口径) of the question unambiguous. Text-to-SQL "
-            "fails on meaning, not syntax — a wrong definition yields a confidently wrong "
-            "number. Be rigorous: do NOT guess on anything that would materially change the "
-            "result; surface it as a question instead.\n\n"
-            "Check these dimensions against the schema and the question:\n"
-            "• TIME — if a date/time column is involved: is it stored in UTC or local time, and "
-            "which timezone should the window use? Are window bounds inclusive/exclusive? Which "
-            "timestamp column defines the event?\n"
-            "• METRIC DEFINITION — for any rate/ratio/count/aggregate: what exactly qualifies? "
-            "(e.g. a refund rate — only refunds AFTER successful delivery, or any refund? "
-            "numerator/denominator? de-duplication? which status values count?)\n"
-            "• NULL / MISSING — for nullable columns that affect the result: exclude NULLs, treat "
-            "as zero, or count them?\n"
-            "• SCOPE / FILTERS — should test rows, soft-deleted (del_flag), cancelled, or "
-            "non-active rows be excluded?\n\n"
-            "Only raise a question when (a) it is genuinely ambiguous from the question text, and "
-            "(b) different reasonable answers give different results. Skip anything already clear. "
-            "Give each question 2–4 concrete options and a sensible default. Return at most "
-            f"{_MAX_QUESTIONS} questions. Anything you decide WITHOUT asking, record as an "
-            "assumption. Return JSON only."
+            "You are a rigorous data analyst. The SQL you help write will run against the "
+            "user's REAL database, and a wrong INTERPRETATION of the question produces a "
+            "confidently wrong number that misleads them.\n\n"
+            "IRON RULE: never guess anything you are not certain of. If the correct "
+            "interpretation is not unambiguous from the question plus the schema/values you "
+            "are given, you MUST ask the user to confirm it — do not assume.\n\n"
+            "What counts as 'uncertain' is OPEN-ENDED and specific to this question and schema "
+            "— it is NOT a fixed checklist. Examine everything that a reasonable person could "
+            "read more than one way and that would change the result, for example (illustrative, "
+            "not exhaustive): which table or column to use when several plausibly fit; the exact "
+            "meaning/encoding of a value (which status/flag/type values qualify for the concept "
+            "in the question); how a timestamp is stored and which timezone a date window means; "
+            "what a metric counts (numerator/denominator, de-duplication, what qualifies); which "
+            "rows are in scope (test, soft-deleted, cancelled, non-active); units; granularity.\n\n"
+            "HARD CONSTRAINTS:\n"
+            "- Do NOT invent a default that presumes a business fact (never assume a timezone, a "
+            "status value, a region, or which table — ask instead).\n"
+            "- Provide concrete options ONLY when you genuinely know the real candidates (the "
+            "observed values you were given, or the tables/columns in the schema). When you "
+            "don't know the candidates, ask an open question with no options.\n"
+            "- Only raise points that are genuinely uncertain AND would change the result; skip "
+            "what is already unambiguous. If everything is clear, return no questions.\n"
+            "- 'assumptions' may contain ONLY facts that are CERTAIN from the schema/values "
+            "(e.g. 'amount is a numeric column'), never a guess about meaning.\n"
+            f"Return at most {_MAX_QUESTIONS} questions. JSON only."
         )
+        confirmed = [str(c).strip() for c in (already_confirmed or []) if str(c).strip()]
+        confirmed_block = ""
+        if confirmed:
+            confirmed_block = (
+                "\nAlready confirmed with the user — do NOT ask these again:\n"
+                + "\n".join(f"  - {c}" for c in confirmed) + "\n"
+            )
         user = (
             f"Question:\n{question}\n\n"
-            f"Resolved schema (only these tables/columns are in play):\n{_schema_digest(disclosed)}\n\n"
-            'Return {"questions":[{"dimension":"time|metric|null|scope","ask":"...",'
-            '"options":["..."],"default":"..."}], "assumptions":["..."]}. '
-            "Empty questions means the 口径 is already unambiguous."
+            f"Resolved schema (only these tables/columns are in play):\n{_schema_digest(disclosed)}\n"
+            + (f"\n{_values_digest(observed_values)}\n" if observed_values else "")
+            + confirmed_block
+            + '\nReturn {"questions":[{"ask":"...","options":["..."]}], "assumptions":["..."]}. '
+            "Empty questions means every interpretation is already unambiguous."
         )
         try:
             payload = self.llm.complete_json(
                 [LLMMessage("system", system), LLMMessage("user", user)],
-                schema_hint='{"questions":[{"dimension","ask","options","default"}],"assumptions":[]}',
+                schema_hint='{"questions":[{"ask","options"}],"assumptions":[]}',
             )
         except Exception:
             return ClarificationPlan()
@@ -154,10 +174,8 @@ class SemanticClarifier:
             if not ask:
                 continue
             questions.append({
-                "dimension": str(q.get("dimension") or "").strip(),
                 "ask": ask,
                 "options": [str(o) for o in (q.get("options") or []) if str(o).strip()],
-                "default": str(q.get("default") or "").strip(),
             })
         assumptions = [str(a).strip() for a in (payload.get("assumptions") or []) if str(a).strip()]
         return ClarificationPlan(questions=questions, assumptions=assumptions)
