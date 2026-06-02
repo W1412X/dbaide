@@ -321,6 +321,20 @@ def trace_dedupe_keys(event: dict[str, Any]) -> frozenset[str]:
     return frozenset(keys)
 
 
+def _stage_title(stage: str, title: str) -> str:
+    """Combine a stage id and a human title without doubling — when the title
+    already echoes the stage (e.g. stage='resolve_schema', title='resolve_schema'
+    or 'resolve_schema done') the stage prefix is dropped."""
+    if not title:
+        return stage
+    if not stage:
+        return title
+    t, s = title.lower(), stage.lower()
+    if t == s or t.startswith(s) or s in t:
+        return title
+    return f"{stage}: {title}"
+
+
 def conversation_trace_step(event: dict[str, Any]) -> tuple[str, str, str] | None:
     """Map a progress or persisted trace dict to (message, kind, detail)."""
     stage = str(event.get("stage") or "").strip()
@@ -346,7 +360,7 @@ def conversation_trace_step(event: dict[str, Any]) -> tuple[str, str, str] | Non
         return (line, "info", detail if detail != line else "") if line else None
 
     if stage in TOOL_TRACE_STAGES or actor == "tool":
-        message = f"{stage}: {title}" if stage and title else (title or summary or stage)
+        message = _stage_title(stage, title) if (stage or title) else (summary or stage)
         step_detail = output or detail
         if summary and summary not in message and summary != title:
             step_detail = summary if not step_detail else step_detail
@@ -366,7 +380,7 @@ def conversation_trace_step(event: dict[str, Any]) -> tuple[str, str, str] | Non
         return (line, kind or "info", detail) if line else None
 
     if title or summary:
-        message = f"{stage}: {title}" if stage and title else (title or summary or stage)
+        message = _stage_title(stage, title) if (stage or title) else (summary or stage)
         step_kind = kind or ("tool" if stage in TOOL_TRACE_STAGES else "info")
         step_detail = output or detail or (summary if summary != message else "")
         return message, step_kind, step_detail
