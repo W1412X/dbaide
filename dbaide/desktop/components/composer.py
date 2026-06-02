@@ -79,7 +79,7 @@ class ComposerWidget(Panel):
         self.model_select = PillSelect("Model", max_width=132)
         self.model_select.value_changed.connect(self.model_changed.emit)
         footer.addWidget(self.model_select)
-        self.action_btn = compact_button(t("composer.send"), primary=True, width=96)
+        self.action_btn = compact_button(t("composer.send"), primary=True, width=84)
         self.action_btn.clicked.connect(self._on_action)
         footer.addWidget(self.action_btn)
         outer.addLayout(footer)
