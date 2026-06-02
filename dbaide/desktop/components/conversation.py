@@ -185,6 +185,10 @@ class CollapsibleTracePanel(QFrame):
         self._running = False
         self._refresh_header(ok=ok)
         self.set_collapsed(True)
+        # A restored turn with no saved trace has nothing to show — hide the panel
+        # rather than render a hollow "Agent trace · 0 steps · done" bar.
+        if not self._steps:
+            self.setVisible(False)
 
     def set_collapsed(self, collapsed: bool) -> None:
         self._toggle.setChecked(not collapsed)
@@ -196,12 +200,13 @@ class CollapsibleTracePanel(QFrame):
     def _refresh_header(self, *, ok: bool = True) -> None:
         chevron = "▾" if self._toggle.isChecked() else "▸"
         count = len(self._steps)
+        steps_text = f"{count} step" if count == 1 else f"{count} steps"
         if self._running:
             color = Theme.BLUE
             # Show what the agent is doing right now, plus how many sub-agents.
             phase = self._model.current_phase
             agents = self._model.active_agents
-            bits = [f"{count} steps"]
+            bits = [steps_text]
             if phase:
                 bits.append(phase)
             if agents:
@@ -210,7 +215,7 @@ class CollapsibleTracePanel(QFrame):
         else:
             color = Theme.GREEN if ok else Theme.RED
             status = "done" if ok else "failed"
-            label = f"Agent trace · {count} steps · {status}"
+            label = f"Agent trace · {steps_text} · {status}"
         self._toggle.setText(f"{chevron}  {label}")
         self._toggle.setStyleSheet(
             f"""
@@ -455,7 +460,7 @@ class ConversationView(QScrollArea):
             if widget is not None:
                 widget.setMinimumWidth(content_w)
 
-    def begin_turn(self, user_text: str, *, meta: str = "") -> None:
+    def begin_turn(self, user_text: str, *, meta: str = "", placeholder: bool = True) -> None:
         turn = TurnBlock()
         if user_text.strip():
             turn.set_user(user_text, meta=meta)
@@ -463,7 +468,10 @@ class ConversationView(QScrollArea):
         self._current_turn = turn
         self._current_record = {"question": user_text, "events": [], "answer": ""}
         self._turns.append(self._current_record)
-        turn.trace.append("Starting agent…", kind="info")
+        # The "Starting agent…" line is a live-run placeholder; a restored history
+        # turn (placeholder=False) shows only its real, saved trace steps.
+        if placeholder:
+            turn.trace.append("Starting agent…", kind="info")
         self._scroll_bottom()
 
     def append_trace(self, message: str, *, kind: str = "", detail: str = "") -> None:

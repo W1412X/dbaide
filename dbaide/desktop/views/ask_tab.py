@@ -157,13 +157,18 @@ class AskTab(QWidget):
         self.conversation.clear()
         self._hint_shown = True  # don't show the intro hint over a restored thread
         self.stack.setCurrentIndex(1)
+        from dbaide.desktop.components.composer_options import POLICY_LABELS
         for turn in turns:
             meta = turn.get("meta") or {}
-            self.begin_turn(
-                str(turn.get("question") or ""),
-                connection=connection,
-                database=str(meta.get("database") or ""),
-                policy=str(meta.get("policy") or "safe_auto"),
+            database = str(meta.get("database") or "")
+            policy = str(meta.get("policy") or "safe_auto")
+            meta_line = " · ".join(
+                x for x in (connection, database or "auto", POLICY_LABELS.get(policy, policy)) if x
+            )
+            # placeholder=False: restored turns show only their saved trace, not the
+            # live "Starting agent…" line.
+            self.conversation.begin_turn(
+                str(turn.get("question") or ""), meta=meta_line, placeholder=False,
             )
             sql = str(turn.get("selected_sql") or "")
             status = str(turn.get("status") or "completed")
