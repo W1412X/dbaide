@@ -73,6 +73,12 @@ def build_window(app: QApplication) -> MainWindow:
     jc = JoinCatalogStore(base_dir=tmp / "joins")
     AssetBuilder(connection=conn, adapter=build_adapter(conn), store=store, join_catalog=jc).build(profile_mode="none", sample=False)
     service = DesktopService(cfg, store)
+    # Seed a few chat sessions so the Chats sidebar renders populated.
+    from dbaide.history.session_store import ChatSessionStore, make_turn
+    service.sessions = ChatSessionStore(base_dir=tmp / "sessions")
+    for q in ["Top cities by paid order value", "Refund rate last quarter", "Products never ordered"]:
+        s = service.sessions.create("shop")
+        service.sessions.append_turn("shop", s["session_id"], make_turn(question=q, answer_markdown="…"))
     win = MainWindow(service)
     win.resize(1480, 920)
     win.show()

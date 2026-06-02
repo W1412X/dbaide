@@ -7,6 +7,7 @@ from PyQt6.QtWidgets import (
     QFrame,
     QLineEdit,
     QSizePolicy,
+    QSplitter,
     QTreeWidget,
     QTreeWidgetItem,
     QVBoxLayout,
@@ -14,6 +15,7 @@ from PyQt6.QtWidgets import (
 )
 
 from dbaide.desktop.components.base import SectionLabel, compact_button
+from dbaide.desktop.components.session_list import SessionList
 from dbaide.desktop.theme import Theme
 
 
@@ -31,13 +33,26 @@ class Sidebar(QWidget):
         layout.setContentsMargins(12, 12, 12, 12)
         layout.setSpacing(10)
         from dbaide.i18n import t
-        layout.addWidget(SectionLabel("SCHEMA"))
+
+        # Chats (会话) over Schema, split so each can be resized; both stay visible.
+        split = QSplitter(Qt.Orientation.Vertical)
+        split.setHandleWidth(1)
+        split.setChildrenCollapsible(False)
+
+        self.chats = SessionList()
+        split.addWidget(self.chats)
+
+        schema_panel = QWidget()
+        schema_layout = QVBoxLayout(schema_panel)
+        schema_layout.setContentsMargins(0, 0, 0, 0)
+        schema_layout.setSpacing(8)
+        schema_layout.addWidget(SectionLabel("SCHEMA"))
         self.search = QLineEdit()
         self.search.setPlaceholderText(t("sidebar.filter"))
         self.search.setFixedHeight(30)
         self.search.textChanged.connect(self._filter_tree)
         self.search.returnPressed.connect(self._semantic_search)
-        layout.addWidget(self.search)
+        schema_layout.addWidget(self.search)
         self.tree = QTreeWidget()
         self.tree.setHeaderHidden(True)
         self.tree.setIndentation(16)
@@ -47,7 +62,12 @@ class Sidebar(QWidget):
         self.tree.setStyleSheet("QTreeWidget { background: transparent; border: none; }")
         self.tree.itemSelectionChanged.connect(self._selection_changed)
         self.tree.itemDoubleClicked.connect(self._double_clicked)
-        layout.addWidget(self.tree, 1)
+        schema_layout.addWidget(self.tree, 1)
+        split.addWidget(schema_panel)
+
+        split.setStretchFactor(0, 4)
+        split.setStretchFactor(1, 6)
+        layout.addWidget(split, 1)
 
         divider = QFrame()
         divider.setFixedHeight(1)

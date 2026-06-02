@@ -96,7 +96,12 @@ class MainWindow(QMainWindow):
         # tree / history / joins for the current connection.
         self.bus.subscribe(MODELS_CHANGED, lambda _p: self._refresh_models_only())
         self.bus.subscribe(JOINS_CHANGED, lambda _p: self.refresh_joins())
-        self.bus.subscribe(QUERY_COMPLETED, lambda _p: self._load_history(self.current_connection()))
+        self.bus.subscribe(QUERY_COMPLETED, lambda _p: self._on_query_completed())
+
+    def _on_query_completed(self) -> None:
+        conn = self.current_connection()
+        self._load_history(conn)
+        self._load_sessions(conn)
 
     def _refresh_models_only(self) -> None:
         def on_loaded(bootstrap: dict[str, Any]) -> None:
@@ -131,6 +136,10 @@ class MainWindow(QMainWindow):
         self.sidebar.schema_selected.connect(self.open_schema_asset)
         self.sidebar.semantic_search_requested.connect(self.search_assets)
         self.sidebar.settings_requested.connect(lambda: self.open_settings("connections"))
+        self.sidebar.chats.new_requested.connect(self.new_session)
+        self.sidebar.chats.selected.connect(self.open_session)
+        self.sidebar.chats.rename_requested.connect(self.rename_session)
+        self.sidebar.chats.delete_requested.connect(self.delete_session)
 
         center = QWidget()
         center_layout = QVBoxLayout(center)
@@ -299,6 +308,7 @@ class MainWindow(QMainWindow):
         conns = self.bootstrap.get("connections") or []
         self._load_schema(conn_name)
         self._load_history(conn_name)
+        self._load_sessions(conn_name)
         self.refresh_joins()
         asset_status = "missing"
         for c in conns:
@@ -308,6 +318,16 @@ class MainWindow(QMainWindow):
         self.topbar.set_asset_status(asset_status)
         key = "composer.placeholder.ready" if asset_status == "ready" else "composer.placeholder.build"
         self.composer.set_placeholder(_i18n_t(key) + _i18n_t("composer.hint"))
+
+    def _load_sessions(self, name: str) -> None:
+        if not name:
+            self.sidebar.chats.load([])
+            return
+
+        def on_loaded(entries: list[dict[str, Any]]) -> None:
+            self.sidebar.chats.load(entries or [])
+            self.sidebar.chats.set_current(self.current_session_id)
+        self._run_background("list_sessions", {"connection_name": name}, on_loaded)
 
     def _load_schema(self, name: str) -> None:
         self._run_background(
@@ -717,6 +737,7 @@ class MainWindow(QMainWindow):
         self.ask_tab.clear_conversation()
         self.ask_tab.set_has_connection(bool(self.current_connection()))
         self.right.trace.clear_trace()
+        self.sidebar.chats.set_current("")
         self.composer.input.setFocus()
 
     def open_session(self, session_id: str) -> None:
@@ -731,9 +752,40 @@ class MainWindow(QMainWindow):
             self._pending_resume = None
             self.ask_tab.load_session(turns, connection=conn)
             self.right.show_trace((turns[-1].get("trace") if turns else []) or [])
+            self.sidebar.chats.set_current(self.current_session_id)
             self.switch_tab("Ask")
 
         self._run_background("load_session", {"connection_name": conn, "session_id": session_id}, on_loaded)
+
+    def rename_session(self, session_id: str, title: str) -> None:
+        conn = self.current_connection()
+        if not conn or not session_id:
+            return
+        try:
+            self.service.dispatch("rename_session", {
+                "connection_name": conn, "session_id": session_id, "title": title,
+            })
+        except Exception as exc:  # noqa: BLE001
+            self.toast(f"Rename failed: {exc}")
+            return
+        self._load_sessions(conn)
+
+    def delete_session(self, session_id: str) -> None:
+        conn = self.current_connection()
+        if not conn or not session_id:
+            return
+        try:
+            self.service.dispatch("delete_session", {"connection_name": conn, "session_id": session_id})
+        except Exception as exc:  # noqa: BLE001
+            self.toast(f"Delete failed: {exc}")
+            return
+        # If the open session was deleted, fall back to an empty new thread.
+        if session_id == self.current_session_id:
+            self.current_session_id = ""
+            self.ask_tab.clear_conversation()
+            self.ask_tab.set_has_connection(bool(conn))
+            self.right.trace.clear_trace()
+        self._load_sessions(conn)
 
     def load_history(self, workflow_id: str) -> None:
         conn = self.current_connection()

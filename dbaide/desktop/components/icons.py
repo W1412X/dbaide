@@ -65,4 +65,15 @@ def panel_icon(*, color: str = Theme.MUTED, size: int = 18) -> QIcon:
     return _line_icon(size, draw, color)
 
 
+def plus_icon(*, color: str = Theme.MUTED, size: int = 18) -> QIcon:
+    """A plus sign for create/new actions."""
+    def draw(p: QPainter, s: int) -> None:
+        c = s / 2
+        r = s * 0.28
+        p.drawLine(int(c - r), int(c), int(c + r), int(c))
+        p.drawLine(int(c), int(c - r), int(c), int(c + r))
+
+    return _line_icon(size, draw, color)
+
+
 ICON_SIZE = QSize(16, 16)
