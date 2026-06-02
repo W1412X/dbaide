@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from PyQt6.QtCore import Qt, pyqtSignal
+from PyQt6.QtCore import QSize, Qt, pyqtSignal
 from PyQt6.QtWidgets import (
     QFrame,
     QLineEdit,
@@ -15,6 +15,7 @@ from PyQt6.QtWidgets import (
 )
 
 from dbaide.desktop.components.base import SectionLabel, compact_button
+from dbaide.desktop.components.icons import svg_icon
 from dbaide.desktop.components.session_list import SessionList
 from dbaide.desktop.theme import Theme
 
@@ -50,6 +51,9 @@ class Sidebar(QWidget):
         self.search = QLineEdit()
         self.search.setPlaceholderText(t("sidebar.filter"))
         self.search.setFixedHeight(30)
+        self.search.addAction(
+            svg_icon("search", color=Theme.MUTED, size=15), QLineEdit.ActionPosition.LeadingPosition
+        )
         self.search.textChanged.connect(self._filter_tree)
         self.search.returnPressed.connect(self._semantic_search)
         schema_layout.addWidget(self.search)
@@ -78,6 +82,8 @@ class Sidebar(QWidget):
         self.settings_btn = compact_button(t("topbar.settings"))
         self.settings_btn.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         self.settings_btn.setMaximumWidth(16777215)
+        self.settings_btn.setIcon(svg_icon("settings", color=Theme.MUTED, size=15))
+        self.settings_btn.setIconSize(QSize(15, 15))
         self.settings_btn.setStyleSheet(
             f"QPushButton {{ background: transparent; color: {Theme.MUTED};"
             f" border: none; border-radius: 8px; text-align: left; padding: 0 8px; }}"
