@@ -11,7 +11,9 @@ from dbaide.desktop.components.menu import PillSelect
 from dbaide.desktop.components.spinner import BusyAnimator, spinner_icon
 from dbaide.desktop.theme import Theme
 
-_INPUT_MIN = 88
+# Start compact (~2 lines) and grow with content up to the max, rather than
+# reserving 3 empty lines at rest.
+_INPUT_MIN = 60
 _INPUT_MAX = 200
 _INPUT_PAD = 24
 
