@@ -7,7 +7,6 @@ from dbaide.adapters import build_adapter
 from dbaide.assets import AssetBuilder, AssetSearch, AssetStore
 from dbaide.joins import JoinCatalogStore
 from dbaide.assets.summarizer import (
-    render_column_markdown,
     render_database_markdown,
     render_instance_markdown,
     render_table_markdown,
@@ -365,7 +364,11 @@ class DesktopService:
                 raise FileNotFoundError(f"Asset path not found: {path}")
             return doc
         if len(parts) == 4:
-            return self.store.read_json(self.store.column_dir(parts[0], parts[1], parts[2]) / f"{parts[3]}.json")
+            # No per-column docs — a column previews its parent table (the leaf).
+            doc = self.store.table_doc(parts[0], parts[1], parts[2])
+            if doc is None:
+                raise FileNotFoundError(f"Asset path not found: {path}")
+            return doc
         raise ValueError("Asset path must be instance, instance.database, instance.database.table, or instance.database.table.column")
 
     def ask(self, payload: dict[str, Any]) -> dict[str, Any]:
@@ -473,9 +476,7 @@ class DesktopService:
         path = str(payload.get("path") or "")
         doc = self.read_asset({"path": path})
         kind = str(doc.get("kind") or "")
-        if kind == "column":
-            markdown = render_column_markdown(doc)
-        elif kind == "table":
+        if kind == "table":
             markdown = render_table_markdown(doc)
         elif kind == "database":
             markdown = render_database_markdown(doc)

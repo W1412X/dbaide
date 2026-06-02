@@ -35,18 +35,6 @@ def test_profiler_emits_no_random_order(tmp_path):
     assert "order by" not in sqls or "group by" in sqls  # only top-K group-by may order
 
 
-def test_light_mode_only_profiles_key_columns(tmp_path):
-    db = tmp_path / "b.db"
-    _make_db(db)
-    conn = ConnectionConfig(name="lightc", type="sqlite", path=str(db))
-    adapter = build_adapter(conn)
-    store = AssetStore(tmp_path / "assets")
-    stats = AssetBuilder(connection=conn, adapter=adapter, store=store).build(profile_mode="light")
-    # Only the PK (id) qualifies; name/score are skipped.
-    assert stats.profiled_columns == 1
-    assert stats.skipped_profiles == 2
-
-
 def test_dry_run_estimates_without_profiling(tmp_path):
     db = tmp_path / "c.db"
     _make_db(db)

@@ -41,68 +41,41 @@ def test_asset_builder_creates_hierarchy(tmp_path):
     assert (store.database_dir("local", "main") / "database.json").exists()
     assert (store.table_dir("local", "main", "orders") / "table.json").exists()
 
-    id_doc = store.read_json(store.column_dir("local", "main", "orders") / "id.json")
-    total_doc = store.read_json(store.column_dir("local", "main", "orders") / "total_amount.json")
-    status_doc = store.read_json(store.column_dir("local", "main", "orders") / "status.json")
-    note_doc = store.read_json(store.column_dir("local", "main", "orders") / "note.json")
     table_doc = store.read_json(store.table_dir("local", "main", "orders") / "table.json")
     instance_doc = store.read_json(store.instance_dir("local") / "instance.json")
 
-    assert id_doc["asset_schema_version"] == ASSET_SCHEMA_VERSION
-    assert id_doc["profile_status"] == "profiled"
-    assert id_doc["primary_key"] is True
-    assert "likely_role" not in id_doc
-    assert "semantic_tags" not in id_doc
-
-    assert total_doc["profile_status"] == "profiled"
-    assert total_doc["statistics"]["data_kind"] == "categorical"
-    assert total_doc["statistics"]["distinct_count"] == 2
-
-    assert status_doc["profile_status"] == "not_profiled"
-    assert note_doc["profile_status"] == "not_profiled"
-    assert "likely_role" not in note_doc
-
+    # v5: the table is the disclosure leaf — no per-column files.
+    assert not (store.table_dir("local", "main", "orders") / "columns").exists()
+    assert table_doc["asset_schema_version"] == ASSET_SCHEMA_VERSION
     assert "role_index" not in table_doc
     assert "join_hints" not in table_doc
-    # v4: table doc carries raw DDL + lean identity-only columns (no per-col desc).
     assert table_doc["ddl"] and "orders" in table_doc["ddl"]
-    assert {"name", "data_type", "primary_key", "nullable"} == set(table_doc["columns"][0].keys())
+    # Full structured columns (DDL-as-JSON) incl. type/null/pk/comment.
+    cols = {c["name"]: c for c in table_doc["columns"]}
+    assert cols["id"]["primary_key"] is True
+    assert {"name", "data_type", "primary_key", "nullable", "default", "comment"} == set(cols["id"].keys())
     assert "indexes" in table_doc
+    # row count + truncated sample.
+    assert table_doc["row_count"] == 2
+    assert table_doc["sample_rows"] and len(table_doc["sample_rows"]) <= 5
     assert instance_doc["asset_schema_version"] == ASSET_SCHEMA_VERSION
 
 
 def test_table_doc_stores_only_declared_foreign_keys():
     from dbaide.assets.summarizer import AssetSummarizer
-    from dbaide.models import ForeignKeyInfo
+    from dbaide.models import ColumnInfo, ForeignKeyInfo
 
     summarizer = AssetSummarizer()
     table = TableInfo(name="orders")
-    columns = [
-        {
-            "name": "user_id",
-            "table": "orders",
-            "data_type": "INTEGER",
-            "primary_key": False,
-            "indexed": False,
-            "source_comment": "",
-            "semantic_summary": "user_id: INTEGER",
-        }
-    ]
+    columns = [ColumnInfo(name="user_id", data_type="INTEGER")]
     doc = summarizer.table_doc(
-        instance="local",
-        database="main",
-        table=table,
-        columns=columns,
-        foreign_keys=[],
+        instance="local", database="main", table=table, columns=columns, foreign_keys=[],
     )
     assert doc["foreign_keys"] == []
     assert "join_hints" not in doc
 
     doc_with_fk = summarizer.table_doc(
-        instance="local",
-        database="main",
-        table=table,
-        columns=columns,
+        instance="local", database="main", table=table, columns=columns,
         foreign_keys=[ForeignKeyInfo("orders", "user_id", "users", "id")],
     )
     assert len(doc_with_fk["foreign_keys"]) == 1
@@ -137,8 +110,9 @@ def test_asset_builder_foreign_keys_from_adapter(tmp_path):
     assert table_doc["foreign_keys"][0]["column"] == "user_id"
     assert table_doc["foreign_keys"][0]["ref_table"] == "users"
 
-    user_id_doc = store.read_json(store.column_dir("local", "main", "orders") / "user_id.json")
-    assert "semantic_tags" not in user_id_doc
+    # column views derive from the table doc (no per-column files)
+    col_views = {c["name"]: c for c in store.column_docs("local", "main", "orders")}
+    assert col_views["user_id"]["data_type"].upper().startswith("INT")
 
 
 class FakeAdapter(DatabaseAdapter):

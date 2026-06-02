@@ -8,7 +8,6 @@ from dataclasses import asdict, dataclass, field
 from typing import TYPE_CHECKING, Callable
 
 from dbaide.adapters.base import DatabaseAdapter
-from dbaide.assets.profiler import ColumnProfiler
 from dbaide.assets.store import AssetStore
 
 if TYPE_CHECKING:
@@ -219,7 +218,6 @@ class AssetBuilder:
             big_table_rows=policy.big_table_rows,
             dry_run=dry_run,
         )
-        profiler = ColumnProfiler(self.adapter, timeout_seconds=per_column_timeout)
         stats = BuildStats(instances=1)
         instance = self.connection.name
         # Reset the shared budget stats so total_queries / peak reflect this build.
@@ -254,7 +252,7 @@ class AssetBuilder:
         unsubscribe = self.adapter.query_log.subscribe(self._on_query_logged)
         try:
             with ThreadPoolExecutor(max_workers=options.max_workers) as executor:
-                database_docs = self._build_databases(instance, db_names, options, stats, profiler, executor)
+                database_docs = self._build_databases(instance, db_names, options, stats, executor)
         finally:
             unsubscribe()
         self._persist_fk_joins(instance)
@@ -334,10 +332,8 @@ class AssetBuilder:
         """
         self._emit(f"dry-run estimate for {instance}", status="running")
         db_names = self._resolve_databases(databases)
-        # SQLite folds count/distinct/top-K/sample into a single guarded query, so a
-        # profiled column costs 2 queries (profile + context sample) regardless of tier.
-        # MySQL/Postgres issue the top-K as a separate query, so heavy = 3, light = 2.
-        sqlite = self.adapter.dialect == "sqlite"
+        # The table is the leaf now: each table costs at most a COUNT(*) (skipped for
+        # heavy tables) + a sample query. No per-column profiling.
         estimated = 0
         for database in db_names:
             stats.databases += 1
@@ -347,19 +343,14 @@ class AssetBuilder:
                 columns = self.adapter.describe_table(table.name, database=database)
                 stats.columns += len(columns)
                 heavy = self._is_heavy(table, options)
+                if not heavy:
+                    estimated += 1  # COUNT(*)
                 if options.sample:
                     estimated += 1  # sample_rows
-                for column in columns:
-                    if should_profile_column(column, mode=options.profile_mode):
-                        estimated += 2 if (sqlite or not heavy) else 3
-                        stats.profiled_columns += 1
-                    else:
-                        stats.skipped_profiles += 1
         stats.estimated_queries = estimated
         stats.elapsed_seconds = 0.0
         self._emit(
-            f"dry-run · {stats.tables} tables · {stats.columns} columns · "
-            f"would profile {stats.profiled_columns} · ≈{estimated} queries",
+            f"dry-run · {stats.tables} tables · {stats.columns} columns · ≈{estimated} queries",
             status="completed",
         )
         return stats
@@ -444,22 +435,11 @@ class AssetBuilder:
         return stats
 
     def _count_profiled_columns(self, instance: str, database_docs: list[dict]) -> int:
-        count = 0
-        for db_doc in database_docs:
-            db_name = str(db_doc.get("name") or db_doc.get("database") or "")
-            if not db_name:
-                continue
-            for table_doc in self.store.table_docs(instance, db_name):
-                table_name = str(table_doc.get("name") or table_doc.get("table") or "")
-                if not table_name:
-                    continue
-                for col_doc in self.store.column_docs(instance, db_name, table_name):
-                    if col_doc.get("profile_status") == "profiled":
-                        count += 1
-        return count
+        # No offline per-column profiling anymore — column stats are fetched on demand.
+        return 0
 
     def _build_databases(self, instance: str, db_names: list[str], options: BuildOptions,
-                         stats: BuildStats, profiler: ColumnProfiler, executor: ThreadPoolExecutor) -> list[dict]:
+                         stats: BuildStats, executor: ThreadPoolExecutor) -> list[dict]:
         """Build databases serially; tables within each database run on the shared pool."""
         database_docs = []
         for database in db_names:
@@ -469,14 +449,14 @@ class AssetBuilder:
                 continue
             try:
                 doc = self._build_database(instance, database, options=options, stats=stats,
-                                           profiler=profiler, executor=executor)
+                                           executor=executor)
                 database_docs.append(doc)
             except Exception as exc:
                 self._record_error(stats, f"{instance}.{database}: {type(exc).__name__}: {exc}")
         return database_docs
 
     def _build_database(self, instance: str, database: str, *, options: BuildOptions,
-                        stats: BuildStats, profiler: ColumnProfiler, executor: ThreadPoolExecutor) -> dict:
+                        stats: BuildStats, executor: ThreadPoolExecutor) -> dict:
         self._emit_db(database, f"{database} · listing tables…", status="running")
         self._bump(stats, databases=1)
         tables = self.adapter.list_tables(database=database)
@@ -491,7 +471,7 @@ class AssetBuilder:
                 self._record_error(stats, f"{instance}.{database}.{table.name}: skipped (time budget)")
                 continue
             futures[executor.submit(self._build_table, instance, database, table,
-                                    options=options, stats=stats, profiler=profiler)] = table
+                                    options=options, stats=stats)] = table
         done = 0
         for future in as_completed(futures):
             table = futures[future]
@@ -518,7 +498,7 @@ class AssetBuilder:
         return database_doc
 
     def _build_table(self, instance: str, database: str, table, *, options: BuildOptions,
-                     stats: BuildStats, profiler: ColumnProfiler) -> dict:
+                     stats: BuildStats) -> dict:
         # Capture every query this table runs (this worker owns the table end-to-end)
         # and emit the table node live so the trace shows it the moment it starts.
         self._tls.bucket = []
@@ -526,7 +506,7 @@ class AssetBuilder:
         self._emit_table(database, table.name, status="running", note="starting…")
         try:
             return self._build_table_inner(instance, database, table, options=options,
-                                           stats=stats, profiler=profiler)
+                                           stats=stats)
         except Exception:
             failed = True
             raise
@@ -538,7 +518,7 @@ class AssetBuilder:
                 self._table_sql[f"{database}.{table.name}"] = captured or []
 
     def _build_table_inner(self, instance: str, database: str, table, *, options: BuildOptions,
-                           stats: BuildStats, profiler: ColumnProfiler) -> dict:
+                           stats: BuildStats) -> dict:
         self._emit_table(database, table.name, status="running", note="describing…")
         self._bump(stats, tables=1)
         columns = self.adapter.describe_table(table.name, database=database)
@@ -564,13 +544,14 @@ class AssetBuilder:
             with self._table_sql_lock:
                 self._fk_relations.extend(fk_rels)
 
-        # Large tables drop to metadata-only profiling so we never full-scan them.
+        # Large tables keep an estimated row-count (no full scan); smaller ones get
+        # an exact COUNT(*).
         heavy = self._is_heavy(table, options)
         if not heavy:
             self._bump(stats, light_tables=1)
-
-        # Get sample rows (bounded by LIMIT — cheap even on big tables)
-        sample_rows = []
+        self._emit_table(database, table.name, status="running", note="sampling…")
+        row_count = self._table_row_count(table, database=database, heavy=heavy)
+        sample_rows: list[dict] = []
         if options.sample:
             try:
                 sample_rows = self.adapter.sample_rows(
@@ -580,71 +561,36 @@ class AssetBuilder:
             except Exception as exc:
                 self._record_error(stats, f"{instance}.{database}.{table.name}.sample: {type(exc).__name__}: {exc}")
 
-        # Columns are profiled serially within the table; the shared pool already
-        # gives table-level parallelism and the QueryBudget caps real DB concurrency.
-        column_docs: list[dict] = []
-        total_cols = len(columns)
-        for idx, column in enumerate(columns):
-            # Live: show which column is being profiled right now (and queries so far).
-            self._emit_table(database, table.name, status="running",
-                             note=f"{idx + 1}/{total_cols} · {column.name}")
-            column_docs.append(
-                self._build_column(instance, database, table.name, column, options, stats, profiler,
-                                   heavy=heavy, indexes=indexes)
-            )
-
-        # Write table-level document (depends on all columns)
+        # The table is the disclosure leaf: one structured document with the full
+        # DDL-as-JSON, indexes, FKs, row-count and a truncated sample. No per-column
+        # documents or profiling — the agent fetches column stats on demand.
         table_doc = self.summarizer.table_doc(
             instance=instance, database=database, table=table,
-            columns=column_docs, foreign_keys=foreign_keys, indexes=indexes, ddl=ddl,
+            columns=columns, foreign_keys=foreign_keys, indexes=indexes, ddl=ddl,
+            row_count=row_count, sample_rows=sample_rows,
         )
-        table_doc["sample_rows"] = sample_rows
-        table_doc["column_count"] = len(column_docs)
+        table_doc["column_count"] = len(columns)
+        self._bump(stats, columns=len(columns))
         self.store.write_json(self.store.table_dir(instance, database, table.name) / "table.json", table_doc)
-        self.store.write_json(
-            self.store.table_dir(instance, database, table.name) / "columns.json",
-            {"instance": instance, "database": database, "table": table.name, "columns": column_docs},
-        )
         return table_doc
 
-    def _build_column(self, instance: str, database: str, table_name: str, column,
-                      options: BuildOptions, stats: BuildStats, profiler: ColumnProfiler,
-                      *, heavy: bool, indexes: list | None = None) -> dict:
-        if self._is_expired(options.deadline):
-            return self._build_column_expired(instance, database, table_name, column, stats, indexes=indexes)
-        profile_obj = None
-        if should_profile_column(column, mode=options.profile_mode):
-            try:
-                profile_obj = profiler.profile(
-                    table_name, column, database=database,
-                    top_k=options.top_k, sample_limit=options.sample_limit,
-                    heavy_scan=heavy,
-                )
-            except Exception as exc:
-                self._record_error(
-                    stats, f"{instance}.{database}.{table_name}.{column.name}: {type(exc).__name__}: {exc}"
-                )
-        else:
-            self._bump(stats, skipped_profiles=1)
-        doc = self.summarizer.column_doc(instance=instance, database=database,
-                                          table=table_name, column=column, profile=profile_obj,
-                                          indexes=indexes)
-        self.store.write_json(
-            self.store.column_dir(instance, database, table_name) / f"{column.name}.json", doc
-        )
-        self._bump(stats, columns=1, profiled_columns=1 if profile_obj else 0)
-        return doc
-
-    def _build_column_expired(self, instance: str, database: str, table_name: str, column, stats: BuildStats,
-                              *, indexes: list | None = None) -> dict:
-        self._bump(stats, skipped_profiles=1, timed_out_columns=1)
-        doc = self.summarizer.column_doc(instance=instance, database=database,
-                                          table=table_name, column=column, profile=None, indexes=indexes)
-        self.store.write_json(
-            self.store.column_dir(instance, database, table_name) / f"{column.name}.json", doc
-        )
-        self._bump(stats, columns=1)
-        return doc
+    def _table_row_count(self, table, *, database: str, heavy: bool) -> int | None:
+        """Exact COUNT(*) for smaller tables; the catalog estimate for big ones
+        (so we never full-scan a large table just to count it). Note: ``heavy`` is
+        True for small/scannable tables and False for big ones (see _is_heavy)."""
+        if not heavy:  # big table — avoid the full scan
+            return table.estimated_rows
+        try:
+            from dbaide.adapters.base import quote_identifier
+            tq = quote_identifier(table.name, self.adapter.dialect)
+            result = self.adapter.execute_readonly(
+                f"SELECT COUNT(*) AS n FROM {tq}", database=database, limit=1,
+            )
+            if result.rows:
+                return int(list(result.rows[0].values())[0])
+        except Exception:
+            pass
+        return table.estimated_rows
 
     @staticmethod
     def _is_expired(deadline: float) -> bool:

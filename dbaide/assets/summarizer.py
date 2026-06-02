@@ -3,14 +3,17 @@ from __future__ import annotations
 from typing import Any
 
 from dbaide.llm import LLMClient, LLMMessage, NullLLMClient
-from dbaide.models import ColumnInfo, ColumnProfile, ForeignKeyInfo, IndexInfo, TableInfo
+from dbaide.models import ColumnInfo, ForeignKeyInfo, IndexInfo, TableInfo
 
-# v4: lean, type-aware docs — column docs carry index detail + minimal type-aware
-# stats (no per-column LLM summaries); table docs carry the raw DDL + index list
-# and drop per-column descriptions (those live in the column docs).
-ASSET_SCHEMA_VERSION = 4
+# v5: the TABLE is the leaf of disclosure (instance → database → table). There are
+# no per-column documents anymore — the table doc carries the full DDL-as-JSON
+# (columns + indexes + FKs), a row-count, and a truncated, type-safe sample. Any
+# per-column statistics are fetched on demand via the column_stats agent tool.
+ASSET_SCHEMA_VERSION = 5
 
-_MAX_DESC = 200  # descriptions stay short — the agent explores details via SQL
+_MAX_DESC = 200       # descriptions stay short — the agent explores details via SQL
+_SAMPLE_ROWS = 5      # rows kept in the table sample
+_SAMPLE_CELL_MAX = 120  # truncate long varchar/json/text cells in the sample
 
 
 def _to_dict(obj: Any) -> dict[str, Any]:
@@ -34,48 +37,31 @@ class AssetSummarizer:
     def __init__(self, llm: LLMClient | None = None) -> None:
         self.llm = llm or NullLLMClient()
 
-    def column_doc(
-        self,
-        *,
-        instance: str,
-        database: str,
-        table: str,
-        column: ColumnInfo,
-        profile: ColumnProfile | None,
-        indexes: list[IndexInfo] | None = None,
-    ) -> dict[str, Any]:
-        col_indexes = [ix.to_dict() for ix in (indexes or []) if column.name in ix.columns]
-        return {
-            "kind": "column",
-            "asset_schema_version": ASSET_SCHEMA_VERSION,
-            "instance": instance,
-            "database": database,
-            "table": table,
-            "column": column.name,
-            "name": column.name,
-            "data_type": column.data_type,
-            "nullable": column.nullable,
-            "default": column.default,
-            "primary_key": column.primary_key,
-            "indexed": bool(col_indexes) or column.indexed,
-            "indexes": col_indexes,            # which indexes (incl. composite) cover this column
-            "source_comment": column.comment,  # DB-provided comment, if any — the description
-            "profile_status": "profiled" if profile else "not_profiled",
-            "statistics": lean_column_statistics(profile),  # type-aware, minimal
-        }
-
     def table_doc(
         self,
         *,
         instance: str,
         database: str,
         table: TableInfo,
-        columns: list[dict[str, Any]],
+        columns: list[ColumnInfo],
         foreign_keys: list[ForeignKeyInfo],
         indexes: list[IndexInfo] | None = None,
         ddl: str = "",
+        row_count: int | None = None,
+        sample_rows: list[dict[str, Any]] | None = None,
     ) -> dict[str, Any]:
-        description = self._llm_table_summary(database, table, columns, foreign_keys) or factual_table_summary(table, columns)
+        col_dicts = [
+            {
+                "name": col.name,
+                "data_type": col.data_type,
+                "nullable": col.nullable,
+                "primary_key": col.primary_key,
+                "default": col.default,
+                "comment": col.comment,        # DB-provided comment, if any
+            }
+            for col in columns
+        ]
+        description = self._llm_table_summary(database, table, col_dicts, foreign_keys) or factual_table_summary(table, col_dicts)
         return {
             "kind": "table",
             "asset_schema_version": ASSET_SCHEMA_VERSION,
@@ -84,22 +70,17 @@ class AssetSummarizer:
             "table": table.name,
             "name": table.name,
             "table_type": table.table_type,
-            "estimated_rows": table.estimated_rows,
+            "row_count": row_count if row_count is not None else table.estimated_rows,
+            "row_count_exact": row_count is not None,
             "source_comment": table.comment,
             "description": _short(description),
             "ddl": ddl,                        # raw CREATE TABLE — the authoritative shape
-            # Lean column list: identity only. Descriptions live in the column docs.
-            "columns": [
-                {
-                    "name": col.get("name"),
-                    "data_type": col.get("data_type"),
-                    "primary_key": col.get("primary_key"),
-                    "nullable": col.get("nullable"),
-                }
-                for col in columns
-            ],
+            # Full structured shape (DDL-as-JSON). The table is the leaf of disclosure;
+            # the agent fetches per-column stats on demand via the column_stats tool.
+            "columns": col_dicts,
             "indexes": [ix.to_dict() for ix in (indexes or [])],
             "foreign_keys": [foreign_key_record(fk) for fk in foreign_keys],
+            "sample_rows": truncate_sample_rows(sample_rows or []),
         }
 
     def database_doc(self, *, instance: str, database: str, tables: list[dict[str, Any]]) -> dict[str, Any]:
@@ -187,25 +168,24 @@ class AssetSummarizer:
             return ""
 
 
-def lean_column_statistics(profile: ColumnProfile | None) -> dict[str, Any]:
-    """Minimal, type-aware stats. Ordered types (numeric/temporal) get min/max;
-    low-cardinality types get a distinct count; everything carries a null rate.
-    Anything finer is left for the agent to query on demand."""
-    if profile is None:
-        return {}
-    stats: dict[str, Any] = {"data_kind": profile.data_kind}
-    if profile.null_rate is not None:
-        stats["null_rate"] = round(float(profile.null_rate), 4)
-    kind = profile.data_kind
-    if kind in ("numeric", "temporal"):
-        if profile.min_value is not None:
-            stats["min_value"] = profile.min_value
-        if profile.max_value is not None:
-            stats["max_value"] = profile.max_value
-    elif kind in ("categorical", "boolean"):
-        if profile.distinct_count is not None:
-            stats["distinct_count"] = profile.distinct_count
-    return stats
+def truncate_cell(value: Any) -> Any:
+    """Make a sampled cell safe to store/render: long varchar/json/text are clipped,
+    binary becomes a marker. Works on the Python value so it's DB-type agnostic."""
+    if value is None:
+        return None
+    if isinstance(value, (bytes, bytearray, memoryview)):
+        return f"<binary {len(bytes(value))} bytes>"
+    if isinstance(value, (bool, int, float)):
+        return value
+    text = str(value)
+    return text if len(text) <= _SAMPLE_CELL_MAX else text[: _SAMPLE_CELL_MAX - 1] + "…"
+
+
+def truncate_sample_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    return [
+        {key: truncate_cell(val) for key, val in row.items()}
+        for row in (rows or [])[:_SAMPLE_ROWS]
+    ]
 
 
 def foreign_key_record(fk: ForeignKeyInfo) -> dict[str, Any]:
@@ -273,20 +253,22 @@ def render_table_markdown(doc: dict[str, Any]) -> str:
     lines += ["## Summary", ""]
     lines.append(f"- **Database:** {doc.get('database', '?')}")
     lines.append(f"- **Type:** {doc.get('table_type', 'table')}")
-    if doc.get("estimated_rows") is not None:
-        lines.append(f"- **Estimated rows:** {doc.get('estimated_rows', '?')}")
+    if doc.get("row_count") is not None:
+        label = "Rows" if doc.get("row_count_exact") else "Rows (est.)"
+        lines.append(f"- **{label}:** {doc.get('row_count')}")
     if doc.get("source_comment"):
         lines.append(f"- **Comment:** {doc['source_comment']}")
     if doc.get("description"):
         lines.append(f"- **Description:** {doc['description']}")
     lines.append("")
 
-    # Identity-only column list (descriptions live in the column docs).
-    lines += ["## Columns", "", "| Column | Type | PK | Null |", "| --- | --- | --- | --- |"]
+    # Full structured column shape (the table is the disclosure leaf).
+    lines += ["## Columns", "", "| Column | Type | PK | Null | Comment |", "| --- | --- | --- | --- | --- |"]
     for col in doc.get("columns", []):
         pk = "✓" if col.get("primary_key") else ""
         nullable = "" if col.get("nullable") is False else "✓"
-        lines.append(f"| {col.get('name', '')} | {col.get('data_type', '')} | {pk} | {nullable} |")
+        comment = str(col.get("comment") or "").replace("|", "\\|")[:60]
+        lines.append(f"| {col.get('name', '')} | {col.get('data_type', '')} | {pk} | {nullable} | {comment} |")
     lines.append("")
 
     indexes = doc.get("indexes", [])
@@ -303,45 +285,17 @@ def render_table_markdown(doc: dict[str, Any]) -> str:
             lines.append(f"| {fk.get('column', '')} | {fk.get('ref_table', '')}.{fk.get('ref_column', '')} |")
         lines.append("")
 
+    sample = doc.get("sample_rows") or []
+    cols = [c.get("name") for c in doc.get("columns", [])]
+    if sample and cols:
+        lines += ["## Sample", "", "| " + " | ".join(str(c) for c in cols) + " |",
+                  "| " + " | ".join("---" for _ in cols) + " |"]
+        for row in sample:
+            cells = [str(row.get(c, "")).replace("|", "\\|") for c in cols]
+            lines.append("| " + " | ".join(cells) + " |")
+        lines.append("")
+
     if doc.get("ddl"):
         lines += ["## DDL", "", "```sql", str(doc["ddl"]).strip(), "```", ""]
-
-    return "\n".join(lines)
-
-
-def render_column_markdown(doc: dict[str, Any]) -> str:
-    lines = [f"# {doc.get('table', '?')}.{doc.get('name', '?')}", ""]
-    if doc.get("source_comment"):
-        lines += ["## Meaning", "", doc["source_comment"], ""]
-
-    lines += ["## Type And Constraints", ""]
-    lines.append(f"- **Type:** {doc.get('data_type', '?')}")
-    lines.append(f"- **Nullable:** {doc.get('nullable', '?')}")
-    lines.append(f"- **Primary key:** {doc.get('primary_key', False)}")
-    if doc.get("default") is not None:
-        lines.append(f"- **Default:** {doc['default']}")
-    lines.append("")
-
-    indexes = doc.get("indexes", [])
-    if indexes:
-        lines += ["## Indexes", ""]
-        for idx in indexes:
-            lines.append(f"- {_index_label(idx)}")
-        lines.append("")
-
-    stats = doc.get("statistics", {})
-    if stats:
-        lines += ["## Stats", ""]
-        if stats.get("data_kind"):
-            lines.append(f"- **Kind:** {stats['data_kind']}")
-        if stats.get("null_rate") is not None:
-            lines.append(f"- **Null rate:** {stats['null_rate']:.2%}")
-        if stats.get("distinct_count") is not None:
-            lines.append(f"- **Distinct:** {stats['distinct_count']}")
-        if stats.get("min_value") is not None:
-            lines.append(f"- **Min:** {stats['min_value']}")
-        if stats.get("max_value") is not None:
-            lines.append(f"- **Max:** {stats['max_value']}")
-        lines.append("")
 
     return "\n".join(lines)

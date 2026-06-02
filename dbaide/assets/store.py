@@ -71,15 +71,34 @@ class AssetStore:
         return []
 
     def column_docs(self, instance: str, database: str, table: str) -> list[dict[str, Any]]:
-        col_dir = self.column_dir(instance, database, table)
-        if not col_dir.exists():
+        """Derive per-column views from the table doc (the disclosure leaf). There
+        are no per-column files anymore; this keeps a stable shape for callers that
+        iterate columns (schema tree, describe_table, search, dev tools)."""
+        tdoc = self.table_doc(instance, database, table)
+        if not tdoc:
             return []
-        docs = []
-        for path in sorted(col_dir.glob("*.json")):
-            data = self._read_optional(path)
-            if isinstance(data, dict):
-                docs.append(data)
-        return docs
+        indexed: set[str] = set()
+        index_map: dict[str, list[dict[str, Any]]] = {}
+        for ix in tdoc.get("indexes") or []:
+            for cn in ix.get("columns") or []:
+                indexed.add(cn)
+                index_map.setdefault(cn, []).append(ix)
+        out: list[dict[str, Any]] = []
+        for col in tdoc.get("columns") or []:
+            name = col.get("name")
+            out.append({
+                "kind": "column",
+                "instance": instance, "database": database, "table": table,
+                "column": name, "name": name,
+                "data_type": col.get("data_type"),
+                "nullable": col.get("nullable"),
+                "default": col.get("default"),
+                "primary_key": col.get("primary_key"),
+                "source_comment": col.get("comment"),
+                "indexed": name in indexed,
+                "indexes": index_map.get(name, []),
+            })
+        return out
 
     def table_doc(self, instance: str, database: str, table: str) -> dict[str, Any] | None:
         return self._read_optional(self.table_dir(instance, database, table) / "table.json")
@@ -89,7 +108,7 @@ class AssetStore:
             name=str(doc.get("name") or doc.get("table") or ""),
             schema=str(doc.get("database") or doc.get("schema") or ""),
             comment=str(doc.get("description") or doc.get("comment") or ""),
-            estimated_rows=doc.get("estimated_rows"),
+            estimated_rows=doc.get("row_count") if doc.get("row_count") is not None else doc.get("estimated_rows"),
             table_type=str(doc.get("table_type") or "table"),
         )
 
