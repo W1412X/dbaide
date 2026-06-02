@@ -236,10 +236,23 @@ QSplitter::handle:pressed {{
 QTreeWidget::item, QListWidget::item {{
     padding: 5px 8px;
 }}
-QTreeWidget::item:hover, QListWidget::item:hover {{
+QTreeWidget::item:hover {{
     background: {Theme.PANEL_2};
 }}
-QTreeWidget::item:selected, QListWidget::item:selected {{
+QTreeWidget::item:selected {{
+    background: {Theme.PANEL_3};
+    color: {Theme.TEXT};
+}}
+/* Lists are always single-column, so a rounded hover/selection reads cleanly
+   (unlike the multi-column trace tree, which keeps square full-row highlights). */
+QListWidget::item {{
+    border-radius: 6px;
+    margin: 1px 0;
+}}
+QListWidget::item:hover {{
+    background: {Theme.PANEL_2};
+}}
+QListWidget::item:selected {{
     background: {Theme.PANEL_3};
     color: {Theme.TEXT};
 }}
@@ -351,6 +364,14 @@ QStatusBar {{
     background: {Theme.BG};
     color: {Theme.MUTED};
     border-top: 1px solid {Theme.BORDER_SOFT};
+}}
+/* Dark tooltip — the native one is a light box that clashes with the chrome. */
+QToolTip {{
+    background: {Theme.PANEL_3};
+    color: {Theme.TEXT};
+    border: 1px solid {Theme.BORDER};
+    border-radius: 6px;
+    padding: 4px 8px;
 }}
 /* Themed checkboxes / radios — without this they fall back to the native platform
    control, which clashes with the dark chrome. Checked = filled accent. */

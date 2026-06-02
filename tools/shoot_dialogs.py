@@ -67,3 +67,33 @@ def main() -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
+
+
+def main_extra() -> int:
+    app = QApplication.instance() or QApplication([])
+    app.setStyleSheet(APP_STYLE)
+    from dbaide.desktop.views.history_tab import HistoryTab
+    from dbaide.desktop.views.joins_tab import JoinsTab
+    h = HistoryTab(); h.resize(560, 460)
+    h.load([
+        {"workflow_id": "wf_8a21", "question": "Which cities have the most paying users?",
+         "status": "completed", "created_at": "2026-06-02 10:01", "row_count": 4},
+        {"workflow_id": "wf_7c10", "question": "Total refunds last month",
+         "status": "completed", "created_at": "2026-06-01 17:22", "row_count": 1},
+        {"workflow_id": "wf_5f9b", "question": "List products with no orders",
+         "status": "failed", "created_at": "2026-05-30 09:14", "row_count": 0},
+    ])
+    grab(h, "history")
+    j = JoinsTab(); j.resize(560, 460)
+    j.load([
+        {"left_table": "orders", "left_column": "user_id", "right_table": "users",
+         "right_column": "id", "relationship": "many_to_one", "confidence": 0.92, "source": "fk"},
+        {"left_table": "order_items", "left_column": "order_id", "right_table": "orders",
+         "right_column": "id", "relationship": "many_to_one", "confidence": 0.88, "source": "inferred"},
+    ])
+    grab(j, "joins")
+    print("extra dialog shots done")
+    return 0
+
+if __name__ == "__main__" and len(sys.argv) > 2 and sys.argv[2] == "extra":
+    raise SystemExit(main_extra())
