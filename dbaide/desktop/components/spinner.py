@@ -1,18 +1,19 @@
-"""A shared "busy" spinner.
+"""A shared "busy" spinner — a crisp, smoothly rotating loader ring.
 
-Paints a smoothly rotating arc (a real loading circle) as a QIcon/QPixmap, driven
-off a single QTimer. Used for the trace's running rows and for action buttons —
-an icon never clips the button label the way an inline glyph did, and rotating by
-a small angle each tick looks smooth instead of stepping through 4 glyphs.
+The ring is the Lucide "loader" arc rendered as a vector (via the SVG icon system)
+at the screen's device-pixel-ratio, so it stays sharp on HiDPI instead of the soft
+pixels a small hand-painted arc produced. Driven off a single QTimer; rotating a
+few degrees per tick looks smooth rather than stepping through glyphs.
 """
 
 from __future__ import annotations
 
 from collections.abc import Callable
 
-from PyQt6.QtCore import QObject, QRectF, Qt, QTimer
-from PyQt6.QtGui import QColor, QIcon, QPainter, QPen, QPixmap
+from PyQt6.QtCore import QObject, QTimer
+from PyQt6.QtGui import QIcon, QPixmap
 
+from dbaide.desktop.components.icons import svg_pixmap
 from dbaide.desktop.theme import Theme
 
 # Degrees advanced per tick — 30° × ~70ms ≈ a smooth ~0.8s revolution.
@@ -22,21 +23,8 @@ SPINNER_FRAMES = ("◐", "◓", "◑", "◒")
 
 
 def spinner_pixmap(angle: float, *, size: int = 14, color: str = Theme.BLUE, width: float = 2.0) -> QPixmap:
-    """A 270° arc rotated to ``angle`` — the classic spinning ring."""
-    pix = QPixmap(size, size)
-    pix.fill(Qt.GlobalColor.transparent)
-    painter = QPainter(pix)
-    painter.setRenderHint(QPainter.RenderHint.Antialiasing)
-    pen = QPen(QColor(color))
-    pen.setWidthF(width)
-    pen.setCapStyle(Qt.PenCapStyle.RoundCap)
-    painter.setPen(pen)
-    margin = width
-    rect = QRectF(margin, margin, size - 2 * margin, size - 2 * margin)
-    # Qt angles are in 1/16°, counter-clockwise; negate for a clockwise spin.
-    painter.drawArc(rect, int(-angle * 16), int(270 * 16))
-    painter.end()
-    return pix
+    """The loader arc rotated to ``angle`` — crisp vector, HiDPI-aware."""
+    return svg_pixmap("loader", color=color, size=size, width=width, angle=angle)
 
 
 def spinner_icon(angle: float, *, size: int = 14, color: str = Theme.BLUE, width: float = 2.0) -> QIcon:
