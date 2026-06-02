@@ -25,7 +25,6 @@ from dbaide.desktop.components.base import compact_button
 from dbaide.desktop.components.inputs import configure_readonly_text_view, configure_wrapped_label
 from dbaide.desktop.theme import Theme
 from dbaide.rendering.markdown import render_markdown_safe
-from dbaide.rendering.sanitize import escape_user_text
 
 
 @dataclass(slots=True)
@@ -69,8 +68,19 @@ class _Bubble(QFrame):
         layout.setContentsMargins(0, 0, 0, 0)
         if align_right:
             layout.addStretch(1)
-        label = QLabel(escape_user_text(text))
-        configure_wrapped_label(label, max_width=760)
+        label = QLabel(text)
+        # User text is shown verbatim as PLAIN text — no markup is interpreted, so it
+        # is XSS-safe without HTML-escaping (escaping here would surface entities like
+        # &#x27; literally, since the label is not a rich-text view).
+        label.setTextFormat(Qt.TextFormat.PlainText)
+        # A chat bubble hugs its content up to a cap, then wraps. configure_wrapped_label
+        # gives an *Ignored* horizontal policy, which would lose all width to the
+        # leading stretch and collapse the bubble to nothing — so set the policy
+        # explicitly here (Preferred + capped max width).
+        label.setWordWrap(True)
+        label.setMaximumWidth(560)
+        label.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Preferred)
+        label.setAlignment(Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignLeft)
         label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
         label.setFont(QFont("Inter", 13))
         label.setStyleSheet(
