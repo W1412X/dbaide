@@ -178,6 +178,8 @@ _STRINGS: dict[str, dict[str, str]] = {
     "model.model_id": {"en": "Model ID", "zh": "模型 ID"},
     "model.timeout": {"en": "Timeout (s)", "zh": "超时（秒）"},
     # Right-panel header menu
+    "toast.trace_copied": {"en": "Trace copied to clipboard", "zh": "轨迹已复制到剪贴板"},
+    "toast.trace_empty": {"en": "No trace to copy yet", "zh": "暂无可复制的轨迹"},
     "toast.join_saved": {"en": "Join saved", "zh": "关联已保存"},
     "toast.join_updated": {"en": "Join updated", "zh": "关联已更新"},
     "toast.join_deleted": {"en": "Join deleted", "zh": "关联已删除"},
