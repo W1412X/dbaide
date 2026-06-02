@@ -63,9 +63,12 @@ class TracePanel(QWidget):
         self._tree.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self._tree.setWordWrap(True)
         self._tree.setUniformRowHeights(False)
-        self._tree.setIndentation(16)
+        self._tree.setIndentation(14)
+        # The tree stays concise and scannable (elide long lines); the full text of
+        # any step — result, SQL, args — is one click away in the detail pane below.
         self._tree.setTextElideMode(Qt.TextElideMode.ElideRight)
         self._tree.setFont(QFont("Inter", 11))
+        self._tree.setExpandsOnDoubleClick(False)
         self._tree.itemClicked.connect(self._on_click)
 
         # Detail pane: a header with a "Copy raw" action over a formatted (HTML) view.
@@ -255,12 +258,15 @@ class TracePanel(QWidget):
         else:
             parent.addChild(item)
 
-        if node.thought:
-            self._add_leaf(item, f"💭 {node.thought}", muted=True)
-        # Surface the useful result/summary unless it's already in the head.
-        secondary = _secondary_text(node)
-        if secondary and secondary not in head:
-            self._add_leaf(item, secondary, muted=True)
+        # Top-level steps carry their headline (thought + one-line result) inline;
+        # deeper sub-steps stay single-line and reveal their detail on click — keeps
+        # the tree scannable without losing anything (it's all in the detail pane).
+        if depth == 0:
+            if node.thought:
+                self._add_leaf(item, f"“{node.thought}”", muted=True)
+            secondary = _secondary_text(node)
+            if secondary and secondary not in head and head not in secondary:
+                self._add_leaf(item, secondary, muted=True)
 
         for child in node.children:
             self._add_node(item, child, depth=depth + 1)
@@ -269,7 +275,8 @@ class TracePanel(QWidget):
         return item
 
     def _add_leaf(self, parent: QTreeWidgetItem, text: str, *, muted: bool = True) -> None:
-        leaf = QTreeWidgetItem(["", text[:160], ""])
+        # Generous budget — the leaf wraps (ElideNone), so detail is shown, not cut.
+        leaf = QTreeWidgetItem(["", text[:600], ""])
         leaf.setForeground(1, _muted() if muted else _bright())
         leaf.setFirstColumnSpanned(True)
         parent.addChild(leaf)
@@ -334,8 +341,10 @@ def _detail_html(data: dict) -> str:
     chips.append(("status", str(data.get("status") or "?")))
     if data.get("duration_ms"):
         chips.append(("", f"{float(data['duration_ms']):.0f} ms"))
-    chip_html = " ".join(
-        f"<span style='color:{Theme.MUTED};'>{(_esc(k) + ': ') if k else ''}{_esc(v)}</span>"
+    sep = f"<span style='color:{Theme.MUTED_2};'> · </span>"
+    chip_html = sep.join(
+        f"<span style='color:{Theme.MUTED};'>{(_esc(k) + ' ') if k else ''}"
+        f"<span style='color:{Theme.TEXT_2};'>{_esc(v)}</span></span>"
         for k, v in chips
     )
     parts.append(f"<div style='font-size:11px; margin:4px 0 8px;'>{chip_html}</div>")
