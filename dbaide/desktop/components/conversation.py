@@ -12,6 +12,7 @@ from PyQt6.QtWidgets import (
     QFrame,
     QHBoxLayout,
     QLabel,
+    QLineEdit,
     QPushButton,
     QScrollArea,
     QSizePolicy,
@@ -21,7 +22,7 @@ from PyQt6.QtWidgets import (
 )
 
 from dbaide.agent.progress_events import conversation_trace_step, phase_for
-from dbaide.desktop.components.base import compact_button
+from dbaide.desktop.components.base import AgentButton, compact_button
 from dbaide.desktop.components.inputs import configure_readonly_text_view, configure_wrapped_label
 from dbaide.desktop.components.spinner import BusyAnimator, spinner_icon
 from dbaide.desktop.theme import Theme
@@ -244,9 +245,15 @@ class _MarkdownBlock(QFrame):
 
 
 class _ClarificationBar(QFrame):
-    """Option chips for ask_user clarification."""
+    """Reply controls for a clarification: full-text option chips (they wrap, never
+    truncate) plus an inline free-text input + Send. When there are several
+    questions a chip only answers one, so it fills the input (the user completes the
+    rest and sends) instead of submitting immediately — which would discard the
+    other answers."""
 
-    def __init__(self, options: list[str], parent=None) -> None:
+    submitted = pyqtSignal(str)
+
+    def __init__(self, options: list[str], *, allow_direct_submit: bool = True, parent=None) -> None:
         super().__init__(parent)
         self.setObjectName("clarificationBar")
         self.setStyleSheet(
@@ -258,25 +265,58 @@ class _ClarificationBar(QFrame):
             }}
             """
         )
-        layout = QHBoxLayout(self)
-        layout.setContentsMargins(10, 8, 10, 8)
-        layout.setSpacing(8)
-        hint = QLabel("Choose an option or type a reply below:")
-        hint.setFont(QFont("Inter", 11))
-        hint.setStyleSheet(f"color: {Theme.MUTED}; background: transparent;")
-        layout.addWidget(hint)
-        layout.addStretch(1)
-        self._buttons: list[QPushButton] = []
-        for option in options:
-            btn = compact_button(option, width=min(160, max(72, len(option) * 9)))
-            btn.setCursor(Qt.CursorShape.PointingHandCursor)
-            layout.addWidget(btn)
-            self._buttons.append(btn)
+        self._direct = allow_direct_submit
+        outer = QVBoxLayout(self)
+        outer.setContentsMargins(10, 8, 10, 10)
+        outer.setSpacing(8)
+
+        if options:
+            from dbaide.desktop.components.flow_layout import FlowLayout
+            chips_host = QWidget()
+            chips_host.setStyleSheet("background: transparent;")
+            chips = FlowLayout(chips_host, spacing=6)
+            for option in options:
+                btn = AgentButton(option)            # sizes to its full text — no truncation
+                btn.setFixedHeight(30)
+                btn.setMaximumWidth(360)             # very long → clips with a tooltip (full text)
+                btn.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Fixed)
+                btn.setToolTip(option)
+                btn.clicked.connect(lambda _c=False, v=option: self._on_chip(v))
+                chips.addWidget(btn)
+            outer.addWidget(chips_host)
+
+        row = QHBoxLayout()
+        row.setContentsMargins(0, 0, 0, 0)
+        row.setSpacing(8)
+        self._input = QLineEdit()
+        self._input.setPlaceholderText(
+            "Type your answer…" if allow_direct_submit else "Type your answers (one line covers all the questions)…"
+        )
+        self._input.setFixedHeight(30)
+        self._input.returnPressed.connect(self._on_send)
+        row.addWidget(self._input, 1)
+        self._send = compact_button("Send", primary=True, width=72)
+        self._send.clicked.connect(self._on_send)
+        row.addWidget(self._send)
+        outer.addLayout(row)
+
+    def _on_chip(self, value: str) -> None:
+        if self._direct:
+            self.submitted.emit(value)
+            return
+        # Multiple questions: assemble the answer in the input rather than submit one.
+        existing = self._input.text().strip()
+        self._input.setText(f"{existing}; {value}" if existing else value)
+        self._input.setFocus()
+
+    def _on_send(self) -> None:
+        text = self._input.text().strip()
+        if text:
+            self.submitted.emit(text)
 
     def connect_option(self, callback) -> None:
-        for btn in self._buttons:
-            label = btn.text()
-            btn.clicked.connect(lambda _checked=False, value=label: callback(value))
+        """Back-compat shim: route the unified submission to the callback."""
+        self.submitted.connect(callback)
 
 
 class TurnBlock(QFrame):
@@ -429,9 +469,12 @@ class ConversationView(QScrollArea):
         # Options are presented as the chip bar below — don't also bullet them in the
         # body (the question text already conveys the choices).
         turn.append_content(_MarkdownBlock(f"**Clarification needed**\n\n{question}", title="DBAide"))
-        bar = _ClarificationBar(options) if options else None
-        if bar is not None:
-            turn.append_content(bar)
+        # If the prompt poses several numbered questions, a single chip only answers
+        # one — so chips fill the input (assemble all answers) rather than submit.
+        multi = sum(1 for i in range(1, 10) if f"**{i}." in question) >= 2
+        # Always offer the bar (its input box handles open questions with no options).
+        bar = _ClarificationBar(options, allow_direct_submit=not multi)
+        turn.append_content(bar)
         self._clarification_bar = bar
         self._scroll_bottom()
         return bar
