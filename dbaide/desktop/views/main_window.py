@@ -767,7 +767,13 @@ class MainWindow(QMainWindow):
     def open_session(self, session_id: str) -> None:
         """Load a saved session into the conversation and show its latest trace."""
         conn = self.current_connection()
-        if not conn or not session_id or self.running:
+        if not conn or not session_id:
+            return
+        if self.running:
+            # Don't swap the conversation out from under an in-flight run; tell the
+            # user why nothing happened instead of silently ignoring the click.
+            self.toast("Finish or stop the current task first.")
+            self.sidebar.chats.set_current(self.current_session_id)  # keep selection on the active thread
             return
 
         def on_loaded(data: dict[str, Any]) -> None:
