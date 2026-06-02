@@ -1,11 +1,11 @@
 from __future__ import annotations
 
-from PyQt6.QtCore import QEvent, Qt, pyqtSignal
-from PyQt6.QtGui import QIcon
+from PyQt6.QtCore import QEvent, QSize, Qt, pyqtSignal
 from PyQt6.QtWidgets import QHBoxLayout, QTextEdit, QVBoxLayout
 
 from dbaide.desktop.components.base import compact_button, Panel
 from dbaide.desktop.components.composer_options import POLICIES, POLICY_TOOLTIPS
+from dbaide.desktop.components.icons import svg_icon
 from dbaide.desktop.components.inputs import configure_multiline_text_edit, sync_multiline_height
 from dbaide.desktop.components.menu import PillSelect
 from dbaide.desktop.components.spinner import BusyAnimator, spinner_icon
@@ -79,7 +79,12 @@ class ComposerWidget(Panel):
         self.model_select = PillSelect("Model", max_width=132)
         self.model_select.value_changed.connect(self.model_changed.emit)
         footer.addWidget(self.model_select)
-        self.action_btn = compact_button(t("composer.send"), primary=True, width=84)
+        # Compact icon button (arrow-up to send; spinner while running) — smaller and
+        # cleaner than a text button, matching the modern composer style.
+        self.action_btn = compact_button("", primary=True, width=38)
+        self.action_btn.setIcon(svg_icon("arrow-up", color="#ffffff", size=18))
+        self.action_btn.setIconSize(QSize(18, 18))
+        self.action_btn.setToolTip(t("composer.send"))
         self.action_btn.clicked.connect(self._on_action)
         footer.addWidget(self.action_btn)
         outer.addLayout(footer)
@@ -143,12 +148,12 @@ class ComposerWidget(Panel):
         from dbaide.i18n import t
         self._running = running
         if running:
-            self.action_btn.setText(t("composer.stop"))
+            self.action_btn.setToolTip(t("composer.stop"))
             self._busy.start()  # _on_spin paints the rotating ring icon
         else:
             self._busy.stop()
-            self.action_btn.setIcon(QIcon())
-            self.action_btn.setText(t("composer.send"))
+            self.action_btn.setIcon(svg_icon("arrow-up", color="#ffffff", size=18))
+            self.action_btn.setToolTip(t("composer.send"))
         self.input.setEnabled(not running)
         self.policy_select.setEnabled(not running)
         self.model_select.setEnabled(not running)

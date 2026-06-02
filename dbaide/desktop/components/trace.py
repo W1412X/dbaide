@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 from typing import Any
 
-from PyQt6.QtCore import Qt, QTimer
+from PyQt6.QtCore import Qt, QSize, QTimer
 from PyQt6.QtGui import QColor, QFont
 from PyQt6.QtWidgets import (
     QApplication,
@@ -21,6 +21,7 @@ from PyQt6.QtWidgets import (
 
 from dbaide.agent.progress_events import STEP_TYPE_LABELS
 from dbaide.agent.trace_model import TraceModel, TraceNode
+from dbaide.desktop.components.icons import svg_icon
 from dbaide.desktop.components.inputs import configure_readonly_text_view
 from dbaide.desktop.components.spinner import BusyAnimator, spinner_icon
 from dbaide.desktop.theme import Theme
@@ -90,12 +91,14 @@ class TracePanel(QWidget):
         # the Copy-raw action, right-aligned.
         header.addStretch(1)
         self._copy_raw_btn = QToolButton()
-        self._copy_raw_btn.setText("Copy raw")
+        self._copy_raw_btn.setIcon(svg_icon("copy", color=Theme.MUTED, size=15))
+        self._copy_raw_btn.setIconSize(QSize(15, 15))
+        self._copy_raw_btn.setToolTip("Copy raw event JSON")
         self._copy_raw_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._copy_raw_btn.setFixedSize(26, 24)
         self._copy_raw_btn.setStyleSheet(
-            f"QToolButton {{ color:{Theme.MUTED}; border:1px solid {Theme.BORDER_SOFT};"
-            f" border-radius:6px; padding:2px 8px; font-size:11px; }}"
-            f"QToolButton:hover {{ color:{Theme.TEXT}; }}"
+            f"QToolButton {{ border:1px solid {Theme.BORDER_SOFT}; border-radius:6px; }}"
+            f"QToolButton:hover {{ background:{Theme.PANEL_2}; }}"
         )
         self._copy_raw_btn.clicked.connect(self._copy_raw)
         self._copy_raw_btn.setVisible(False)
@@ -319,8 +322,8 @@ class TracePanel(QWidget):
     def _copy_raw(self) -> None:
         if self._raw_text:
             QApplication.clipboard().setText(self._raw_text)
-            self._copy_raw_btn.setText("Copied ✓")
-            QTimer.singleShot(1200, lambda: self._copy_raw_btn.setText("Copy raw"))
+            self._copy_raw_btn.setIcon(svg_icon("check", color=Theme.GREEN, size=15))
+            QTimer.singleShot(1200, lambda: self._copy_raw_btn.setIcon(svg_icon("copy", color=Theme.MUTED, size=15)))
 
 
 def _esc(text: str) -> str:
