@@ -25,6 +25,9 @@ class AskTab(QWidget):
         empty_page = QWidget()
         empty_layout = QVBoxLayout(empty_page)
         empty_layout.setContentsMargins(0, 0, 0, 0)
+        # Balance the trailing stretch with a leading one so the empty-state column
+        # is vertically centred in the tab (was top-aligned, clipping the title).
+        empty_layout.addStretch(1)
         from dbaide.i18n import t
         self.empty = EmptyState(
             t("ask.empty_title"),
