@@ -219,7 +219,7 @@ class CollapsibleTracePanel(QFrame):
                 background: transparent;
                 border: none;
                 text-align: left;
-                padding: 10px 12px;
+                padding: 7px 12px;
             }}
             QPushButton:hover {{ color: {Theme.TEXT}; }}
             """
