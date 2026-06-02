@@ -356,6 +356,7 @@ class ConversationView(QScrollArea):
         # whole conversation's trace".
         self._turns: list[dict[str, Any]] = []
         self._current_record: dict[str, Any] | None = None
+        self._clarification_bar: _ClarificationBar | None = None
 
     def showEvent(self, event) -> None:  # noqa: N802
         super().showEvent(event)
@@ -430,12 +431,18 @@ class ConversationView(QScrollArea):
         bar = _ClarificationBar(options) if options else None
         if bar is not None:
             turn.append_content(bar)
+        self._clarification_bar = bar
         self._scroll_bottom()
         return bar
 
     def append_clarification_reply(self, text: str) -> None:
         if self._current_turn is None:
             return
+        # The choice is made — retract the (now stale) option chips so the prompt
+        # doesn't keep hanging there as if it still wants an answer.
+        if self._clarification_bar is not None:
+            self._clarification_bar.hide()
+            self._clarification_bar = None
         self._current_turn._header.show()
         self._current_turn._header_layout.addWidget(_Bubble(text, align_right=True))
         self._scroll_bottom()
