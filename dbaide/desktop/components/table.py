@@ -47,7 +47,11 @@ class ResultTableWidget(QWidget):
         self.table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Interactive)
         self.table.horizontalHeader().setMinimumSectionSize(72)
         self.table.horizontalHeader().setDefaultSectionSize(120)
-        self.table.horizontalHeader().setStretchLastSection(True)
+        # Columns size to their content (capped) rather than letting the last column
+        # balloon to fill the width — a numeric column stretched across half the grid
+        # with its value pinned to the far right reads as broken. Trailing space on
+        # the right is normal for a result grid.
+        self.table.horizontalHeader().setStretchLastSection(False)
         self.table.verticalHeader().setVisible(False)
         self.table.setAlternatingRowColors(True)
         self.table.setWordWrap(False)
@@ -111,10 +115,32 @@ class ResultTableWidget(QWidget):
                 else:
                     item.setToolTip(_full_text(value))  # full value on hover
                 self.table.setItem(r_idx, c_idx, item)
+        self._fit_columns()
         total = row_count or len(self._rows)
         suffix = " · truncated" if truncated else ""
         elapsed = f" · {elapsed_ms:.0f}ms" if elapsed_ms else ""
         self.meta.setText(f"Showing {len(self._rows)} of {total} rows{suffix}{elapsed}")
+
+    def _fit_columns(self) -> None:
+        """Snug, content-sized columns. The first text column gets a Stretch resize
+        mode so it absorbs any slack (and re-absorbs it on resize), keeping numeric
+        columns snug instead of ballooning one to fill the grid."""
+        if not self._columns:
+            return
+        header = self.table.horizontalHeader()
+        self.table.resizeColumnsToContents()
+        # First column whose values are not numeric — the natural one to widen.
+        text_col = next(
+            (i for i, c in enumerate(self._columns)
+             if not any(_is_numeric(r.get(c)) for r in self._rows)),
+            0,
+        )
+        for i in range(self.table.columnCount()):
+            if i == text_col:
+                header.setSectionResizeMode(i, QHeaderView.ResizeMode.Stretch)
+            else:
+                header.setSectionResizeMode(i, QHeaderView.ResizeMode.Interactive)
+                header.resizeSection(i, min(420, max(72, header.sectionSize(i))))
 
     def _show_full_cell(self, row: int, col: int) -> None:
         if not (0 <= row < len(self._rows) and 0 <= col < len(self._columns)):
