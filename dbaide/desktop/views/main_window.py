@@ -178,7 +178,9 @@ class MainWindow(QMainWindow):
         self.right.copy_trace_requested.connect(self.copy_trace)
         self.right.copy_conversation_requested.connect(self.copy_conversation)
         self.right.clear_trace_requested.connect(self.right.clear_all)
-        self.right.clear_conversation_requested.connect(self.ask_tab.clear_conversation)
+        # "Clear conversation" starts a fresh thread (resets the active session) so
+        # the cleared view and the persisted session stay in sync.
+        self.right.clear_conversation_requested.connect(self.new_session)
         self.right.history_selected.connect(self.load_history)
         self.right.history_preview.connect(self.preview_history)
         self.right.history_delete.connect(self.delete_history)
@@ -292,9 +294,13 @@ class MainWindow(QMainWindow):
             self.tabbar.setCurrentIndex(self._tab_names.index(name))
 
     def _connection_changed(self, _text: str) -> None:
-        # Sessions are per-connection — drop the active session id so the next ask
-        # starts a fresh thread under the newly selected connection.
+        # Sessions are per-connection — drop the active session and clear the view so
+        # one connection's conversation never bleeds into another. (Not fired during
+        # bootstrap: set_connections blocks signals.)
         self.current_session_id = ""
+        self._pending_resume = None
+        self.ask_tab.clear_conversation()
+        self.right.trace.clear_trace()
         conn = self.current_connection()
         if conn:
             self._refresh_connection_context(conn)
