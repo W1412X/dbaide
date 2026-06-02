@@ -80,7 +80,7 @@ def build_tool_registry(orchestrator: AskOrchestrator) -> ToolRegistry:
         if not question:
             return ToolResult(ok=False, error=_err("discover_schema", "question is required"))
         try:
-            discovery = orchestrator._discover(question, parent="discover_schema")
+            discovery = orchestrator._discover(question, parent=orchestrator._loop_trace_node)
             orchestrator._loop_discovery = discovery
             hits = [
                 {"kind": h.kind, "path": h.path, "name": h.name, "database": h.database, "summary": h.summary[:240]}
@@ -139,13 +139,13 @@ def build_tool_registry(orchestrator: AskOrchestrator) -> ToolRegistry:
         if not question:
             return ToolResult(ok=False, error=_err("synthesize_schema_answer", "question is required"))
         try:
-            discovery = orchestrator._loop_discovery or orchestrator._discover(question, parent="synthesize_schema_answer")
+            discovery = orchestrator._loop_discovery or orchestrator._discover(question, parent=orchestrator._loop_trace_node)
             agent = ProgressiveSchemaAgent(orchestrator.llm, orchestrator.asset_store, orchestrator.instance)
             answer = agent.synthesize_answer(
                 question,
                 discovery,
                 progress=orchestrator.progress,
-                parent="synthesize_schema_answer",
+                parent=orchestrator._loop_trace_node,
             )
             orchestrator._loop_answer = answer
             return ToolResult(ok=True, data={"answer": answer})
@@ -228,7 +228,7 @@ def build_tool_registry(orchestrator: AskOrchestrator) -> ToolRegistry:
             question=orchestrator._loop_question,
             disclosed_schemas=schemas,
             sample_size=sample_size,
-            parent="get_relations",
+            parent=orchestrator._loop_trace_node,
         )
         orchestrator._loop_relations = relations
         _persist_agent_joins(orchestrator, relations, database=targets[0][0] if targets else "")
@@ -345,7 +345,7 @@ def build_tool_registry(orchestrator: AskOrchestrator) -> ToolRegistry:
                     targets,
                     question=question,
                     disclosed_schemas=disclosed,
-                    parent="generate_sql",
+                    parent=orchestrator._loop_trace_node,
                 )
                 orchestrator._loop_relations = relations
             ctx = merge_sql_context(orchestrator.session.disclosure.summary(), relations)

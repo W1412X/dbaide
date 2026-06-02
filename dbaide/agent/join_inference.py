@@ -226,7 +226,7 @@ class SemanticJoinInferencer:
             return
         from dbaide.agent.progress_events import subagent_event
 
-        progress(subagent_event(agent="join_infer", title=title, parent=parent, detail=detail, status=status))
+        progress(subagent_event(agent="join_infer", title=title, parent_id=parent, detail=detail, status=status))
 
 
 def _system_prompt() -> str:

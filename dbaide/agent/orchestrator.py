@@ -112,6 +112,7 @@ class AskOrchestrator:
         self._loop_schema_db: dict[str, str] = {}
         self._loop_relations: list[dict[str, Any]] = []
         self._loop_resolved_schema = None  # ResolvedSchema from the schema linker (minimal-necessary)
+        self._loop_trace_node = ""  # node id of the tool step currently running (for nested traces)
         self._loop_sql = ""
         self._loop_sql_rationale = ""
         self._loop_sql_confidence = 0.0

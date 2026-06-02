@@ -393,12 +393,16 @@ def _node_head(node: TraceNode) -> str:
     show a category chip in front of their phase/stage."""
     if node.agent_name:
         title = node.title or node.phase or node.stage or "step"
+        # Avoid "Agent · Agent …" when the title already starts with the agent label.
+        if title.lower().startswith(node.agent_name.lower()):
+            return title
         return f"{node.agent_name} · {title}"
-    base = node.phase or node.stage or node.title or "step"
     chip = STEP_TYPE_LABELS.get(node.node_type, "")
     if chip and node.node_type in _CHIP_TYPES:
+        base = node.phase or node.stage or node.title or "step"
         return f"{chip} · {base}"
-    return base
+    # Sub-steps (no agent, not a typed chip): the title is the most informative.
+    return node.title or node.phase or node.stage or "step"
 
 
 def _depth_color(depth: int) -> QColor:

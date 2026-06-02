@@ -26,7 +26,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
-from dbaide.agent.progress_events import progress_event, subagent_event
+from dbaide.agent.progress_events import child_node, subagent_event
 from dbaide.agent.schema_context import collect_relations
 from dbaide.llm import LLMMessage, NullLLMClient
 from dbaide.models import ColumnInfo
@@ -76,6 +76,10 @@ class SchemaLinker:
             # No model: fall back to "all discovered tables" (the old behaviour).
             return self._deterministic(question, database)
 
+        # Base trace node = the resolve_schema tool step; the linker's activities
+        # (discovery, selection, relations) nest under it as a true call tree.
+        base = getattr(orch, "_loop_trace_node", "") or self.PARENT
+        self._base = base
         confirmed: dict[tuple[str, str], dict[str, Any]] = {}  # (db,table) → {columns, reason}
         joins: list[dict[str, Any]] = []
         dropped: list[str] = []
@@ -85,14 +89,20 @@ class SchemaLinker:
             # Big direction first: discover the RELEVANT tables (assets-first,
             # progressive) — tables only, no per-column LLM pass. The single _select
             # call below confirms tables + columns in one shot (the "detail" step).
-            discovery = orch._discover(question + refine, parent=self.PARENT, column_detail=False)
+            discover_node = child_node(base, f"discover {round_index + 1}")
+            self.orch.progress(subagent_event(
+                agent="", parent_id=base, node_id=discover_node,
+                title=f"Schema discovery (round {round_index + 1})", status="running",
+            ))
+            discovery = orch._discover(question + refine, parent=discover_node, column_detail=False)
             candidates = self._candidate_view(discovery, database)
+            self.orch.progress(subagent_event(
+                agent="", parent_id=base, node_id=discover_node, status="completed",
+                title=f"Schema discovery (round {round_index + 1})",
+                detail=f"{len(candidates)} candidate table(s)",
+            ))
             if not candidates:
                 break
-            self.orch.progress(subagent_event(
-                agent="schema_link", parent=self.PARENT,
-                title=f"round {round_index + 1}: {len(candidates)} candidate table(s)",
-            ))
             decision = self._select(question, candidates, confirmed)
             ask = decision.get("ask")
             if isinstance(ask, dict) and str(ask.get("question") or "").strip():
@@ -106,12 +116,17 @@ class SchemaLinker:
                 self._confirm(sel, database, confirmed, dropped)
             targets = list(confirmed.keys())
             if len(targets) >= 2:
-                joins = collect_relations(orch, targets, question=question, parent=self.PARENT)
+                rel_node = child_node(base, "relations")
+                self.orch.progress(subagent_event(
+                    agent="", parent_id=base, node_id=rel_node,
+                    title="Map relations", status="running",
+                ))
+                joins = collect_relations(orch, targets, question=question, parent=rel_node)
+                self.orch.progress(subagent_event(
+                    agent="", parent_id=base, node_id=rel_node, status="completed",
+                    title="Map relations", detail=f"{len(joins)} join(s)",
+                ))
             sufficient = bool(decision.get("sufficient", True))
-            self.orch.progress(subagent_event(
-                agent="schema_link", parent=self.PARENT, status="completed",
-                title=f"confirmed {len(confirmed)} table(s)" + ("" if sufficient else " · need more"),
-            ))
             if sufficient or not confirmed:
                 break
             refine = f"\n(still missing: {str(decision.get('missing') or '').strip()})"
@@ -202,8 +217,10 @@ class SchemaLinker:
         else:
             confirmed[key] = {"columns": list(chosen), "reason": str(sel.get("reason") or "")}
         self.orch.progress(subagent_event(
-            agent="schema_link", parent=self.PARENT, status="completed",
-            title=f"{table}: {len(confirmed[key]['columns'])} col(s)",
+            agent="", parent_id=getattr(self, "_base", self.PARENT),
+            node_id=child_node(getattr(self, "_base", self.PARENT), f"confirm {table}"),
+            status="completed",
+            title=f"confirmed {table}: {len(confirmed[key]['columns'])} col(s)",
             detail=str(sel.get("reason") or "")[:120],
         ))
 
@@ -215,7 +232,8 @@ class SchemaLinker:
 
     def _deterministic(self, question: str, database: str) -> ResolvedSchema:
         """No-LLM fallback: take the discovered tables as-is (full columns)."""
-        discovery = self.orch._discover(question, parent=self.PARENT)
+        base = getattr(self.orch, "_loop_trace_node", "") or self.PARENT
+        discovery = self.orch._discover(question, parent=child_node(base, "discover"))
         confirmed: dict[tuple[str, str], dict[str, Any]] = {}
         for h in discovery.hits:
             if h.kind != "table" or not h.table:
@@ -227,6 +245,6 @@ class SchemaLinker:
                 continue
             confirmed[(db, h.table)] = {"columns": cols, "reason": ""}
         joins = collect_relations(self.orch, list(confirmed.keys()), question=question,
-                                  parent=self.PARENT) if len(confirmed) >= 2 else []
+                                  parent=child_node(base, "relations")) if len(confirmed) >= 2 else []
         return ResolvedSchema(tables=self._as_tables(confirmed), joins=joins,
                               sufficient=bool(confirmed))

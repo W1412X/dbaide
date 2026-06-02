@@ -100,7 +100,7 @@ class ProgressiveSchemaAgent:
         self._emit_progress(
             progress,
             parent,
-            "schema_link",
+            "",
             f"Screening {len(databases)} database(s)",
             detail=f"connection={self.instance}",
         )
@@ -125,7 +125,7 @@ class ProgressiveSchemaAgent:
         self._emit_progress(
             progress,
             parent,
-            "schema_link",
+            "",
             f"Kept {len(db_indices)} database(s)",
             detail=", ".join(db_items[i]["name"] for i in db_indices[:6]),
         )
@@ -219,13 +219,13 @@ class ProgressiveSchemaAgent:
                     table_hits.extend(tables)
                     column_hits.extend(columns)
                     result.trace.append(note)
-                    self._emit_progress(progress, parent, "schema_link", note,
-                                        node_id=f"schema:{db_name}", status="completed")
+                    self._emit_progress(progress, parent, "", note,
+                                        node_id=f"{parent}/db:{db_name}", status="completed")
                 except Exception as exc:
                     logger.warning("database_scan_failed: %s", exc)
                     result.trace.append(f"scan error: {exc}")
-                    self._emit_progress(progress, parent, "schema_link", f"scan error: {exc}",
-                                        node_id=f"schema:{db_name}", status="failed")
+                    self._emit_progress(progress, parent, "", f"scan error: {exc}",
+                                        node_id=f"{parent}/db:{db_name}", status="failed")
 
         for db_index in db_indices:
             db_name = db_items[db_index]["name"]
@@ -352,12 +352,12 @@ class ProgressiveSchemaAgent:
                     table_hits.extend(tables)
                     column_hits.extend(columns)
                     result.trace.append(note)
-                    self._emit_progress(progress, parent, "schema_link", note,
+                    self._emit_progress(progress, parent, "", note,
                                         node_id=f"schema:{db_name}", status="completed")
                 except Exception as exc:
                     logger.warning("live_database_scan_failed: %s", exc)
                     result.trace.append(f"scan error: {exc}")
-                    self._emit_progress(progress, parent, "schema_link", f"scan error: {exc}",
+                    self._emit_progress(progress, parent, "", f"scan error: {exc}",
                                         node_id=f"schema:{db_name}", status="failed")
 
         result.hits.extend(table_hits)
@@ -424,8 +424,11 @@ class ProgressiveSchemaAgent:
             return
         from dbaide.agent.progress_events import subagent_event
 
+        # `parent` is the caller's trace node id — nest under it explicitly so the
+        # discovery's internal work shows as children of the discovery activity.
+        # An empty node_id lets the model derive a stable child id under parent_id.
         progress(subagent_event(
-            agent=agent, title=title, parent=parent, detail=detail,
+            agent=agent, title=title, parent_id=parent, detail=detail,
             status=status, node_id=node_id,
         ))
 
@@ -443,16 +446,16 @@ class ProgressiveSchemaAgent:
             return []
         kept: list[int] = []
         last_error: Exception | None = None
+        multi_batch = len(items) > BATCH_SIZE  # only narrate batches when there are several
         for start in range(0, len(items), BATCH_SIZE):
             batch = items[start : start + BATCH_SIZE]
             batch_no = start // BATCH_SIZE + 1
-            self._emit_progress(
-                progress,
-                parent,
-                "schema_link",
-                f"LLM filter {level} · batch {batch_no}",
-                detail=f"{len(batch)} object(s) · {context}",
-            )
+            if multi_batch:
+                self._emit_progress(
+                    progress, parent, "",
+                    f"LLM filter {level} · batch {batch_no}",
+                    detail=f"{len(batch)} object(s) · {context}",
+                )
             payload: dict | None = None
             for attempt in range(FILTER_RETRIES):
                 try:
@@ -483,14 +486,13 @@ class ProgressiveSchemaAgent:
                 if 0 <= idx < len(batch):
                     global_idx = int(batch[idx]["index"])
                     kept.append(global_idx)
-            reason = str(payload.get("reason") or "").strip()
-            self._emit_progress(
-                progress,
-                parent,
-                "schema_link",
-                f"Batch {batch_no}: kept {len(indices)}",
-                detail=reason[:160] if reason else context,
-            )
+            if multi_batch:
+                reason = str(payload.get("reason") or "").strip()
+                self._emit_progress(
+                    progress, parent, "",
+                    f"Batch {batch_no}: kept {len(indices)}",
+                    detail=reason[:160] if reason else context,
+                )
         return sorted(set(kept))
 
     def top_table(self, discovery: DiscoveryResult) -> tuple[str, str]:

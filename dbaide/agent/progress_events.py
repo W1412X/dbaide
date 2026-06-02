@@ -113,6 +113,13 @@ def step_type(event: dict[str, Any], *, is_tool: bool = False) -> str:
     return "info"
 
 
+def child_node(parent_id: str, label: str) -> str:
+    """A stable hierarchical node id for a child activity, so a sub-agent/sub-tool
+    nests under its caller in the trace (true call tree). Empty parent → top level."""
+    slug = normalize_trace_key(label).replace(" ", "_")[:40] or "node"
+    return f"{parent_id}/{slug}" if parent_id else slug
+
+
 def phase_for(stage: str) -> str:
     """Map a tool/stage name to the human phase it belongs to."""
     return PHASE_LABELS.get(str(stage or "").strip(), "")

@@ -185,3 +185,49 @@ def test_linker_discovers_tables_only_not_full_cascade(tmp_path):
     orch._discover = spy
     SchemaLinker(orch).resolve("order ids")
     assert captured["column_detail"] is False  # tables-only discovery
+
+
+class _FilterSelectMock(LLMClient):
+    """Drives discovery's relevance filter (keep all) + the linker's selection."""
+    def complete_json(self, messages, *, schema_hint=""):
+        import re
+        sysmsg = messages[0].content if messages else ""
+        if "You filter" in sysmsg:
+            return {"relevant_indices": [int(m) for m in re.findall(r"\[(\d+)\]", messages[-1].content)]}
+        if "schema linker" in sysmsg:
+            return {"tables": [
+                {"database": "main", "table": "orders", "columns": ["id", "user_id", "amount"]},
+                {"database": "main", "table": "users", "columns": ["id", "name"]},
+            ], "sufficient": True}
+        return {}
+    def complete_text(self, messages):
+        return "OK"
+
+
+def test_trace_is_a_true_call_tree(tmp_path):
+    """resolve_schema → Schema discovery → (its filters); resolve_schema → Map
+    relations → join validation. Each callee nests under its caller."""
+    from dbaide.agent.trace_model import TraceModel
+    orch = _orch(tmp_path, _FilterSelectMock(), hits=["orders", "users"])
+    del orch._discover  # use the REAL progressive discovery (so its internals emit)
+    events: list = []
+    orch.progress = events.append
+    orch._loop_trace_node = "step:1"  # simulate the loop assigning the tool node
+    SchemaLinker(orch).resolve("total amount per user")
+
+    m = TraceModel()
+    m.ingest({"stage": "resolve_schema", "title": "resolve_schema", "status": "running", "kind": "tool", "step": 1})
+    for e in events:
+        if isinstance(e, dict):
+            m.ingest(e)
+    m.finalize()
+
+    discover = m.find("step:1/discover_1")
+    relations = m.find("step:1/relations")
+    assert discover is not None and discover.parent_id == "step:1"      # discovery under resolve
+    assert relations is not None and relations.parent_id == "step:1"    # relations under resolve
+    # discovery's own steps nest under the discovery node (not under resolve)
+    assert discover.children and all(ch.parent_id == discover.id for ch in discover.children)
+    assert any("database" in ch.title for ch in discover.children)
+    # the join validation nests under "Map relations"
+    assert relations.children and any(ch.agent == "join_validate" for ch in relations.children)

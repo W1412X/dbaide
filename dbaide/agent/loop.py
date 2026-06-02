@@ -187,6 +187,10 @@ class AskAgentLoop:
                     step=step_no,
                 ))
             )
+            # Expose this step's trace node id so the tool's sub-agents/sub-tools nest
+            # under it (true call hierarchy), not flattened by stage-name resolution.
+            orch._loop_trace_node = (f"{self._trace_parent}:step:{step_no}"
+                                     if self._trace_parent else f"step:{step_no}")
             result = runtime.call_tool(tool_name, args, tool_ctx)
             summary = _summarize_tool_result(tool_name, result)
             brief = brief_tool_summary(tool_name, result)

@@ -133,7 +133,7 @@ def collect_relations(
                 schemas,
                 declared=combined_for_connectivity,
                 progress=orchestrator.progress,
-                parent=parent or "get_relations",
+                parent=parent,
             )
             semantic = merge_relation_lists([], semantic)
         except Exception as exc:
@@ -150,7 +150,7 @@ def collect_relations(
             schemas,
             sample_size=sample_size,
             progress=orchestrator.progress,
-            parent=parent or "get_relations",
+            parent=parent,
             drop_invalid_semantic=True,
         )
         # Re-apply catalog user joins at full confidence after validation reorder.

@@ -338,7 +338,7 @@ SELECT MAX(cnt) AS max_cnt FROM (
         from dbaide.agent.progress_events import subagent_event
 
         progress(subagent_event(
-            agent="join_validate", title=title, parent=parent, detail=detail,
+            agent="join_validate", title=title, parent_id=parent, detail=detail,
             status=status, node_id=node_id,
         ))
 
@@ -361,7 +361,7 @@ def validate_join_relations(
         relations,
         disclosed,
         progress=progress or orchestrator.progress,
-        parent=parent or "validate_joins",
+        parent=parent,
         drop_invalid_semantic=drop_invalid_semantic,
     )
 
