@@ -100,7 +100,7 @@ def test_run_multi_aggregates_and_nests_trace(tmp_path):
     orch = AskOrchestrator(build_adapter(conn), Session(connection=conn), MultiMock(),
                            asset_store=store, join_catalog=JoinCatalogStore(base_dir=tmp_path / "joins"),
                            progress=events.append)
-    orch._discover = lambda q, *, parent="": DiscoveryResult(
+    orch._discover = lambda q, *, parent="", column_detail=True: DiscoveryResult(
         question=q, hits=[SchemaHit(kind="table", path="shop.main.orders", name="orders",
                                     database="main", table="orders", summary="orders")])
 
@@ -141,6 +141,6 @@ def test_single_intent_skips_intent_nodes(tmp_path):
     events: list = []
     orch = AskOrchestrator(build_adapter(conn), Session(connection=conn), OneMock(),
                            asset_store=AssetStore(tmp_path / "a"), progress=events.append)
-    orch._discover = lambda q, *, parent="": DiscoveryResult(question=q, hits=[])
+    orch._discover = lambda q, *, parent="", column_detail=True: DiscoveryResult(question=q, hits=[])
     orch.run("list tables")
     assert not any(isinstance(e, dict) and str(e.get("node_id", "")).startswith("intent:") for e in events)

@@ -82,7 +82,10 @@ class SchemaLinker:
         refine = ""
         sufficient = True
         for round_index in range(max_rounds):
-            discovery = orch._discover(question + refine, parent=self.PARENT)
+            # Big direction first: discover the RELEVANT tables (assets-first,
+            # progressive) — tables only, no per-column LLM pass. The single _select
+            # call below confirms tables + columns in one shot (the "detail" step).
+            discovery = orch._discover(question + refine, parent=self.PARENT, column_detail=False)
             candidates = self._candidate_view(discovery, database)
             if not candidates:
                 break
@@ -146,11 +149,13 @@ class SchemaLinker:
             lines.append(f"- {c['database']}.{c['table']} [{cols}]{note}")
         already = ", ".join(f"{db}.{t}" for (db, t) in confirmed) or "(none)"
         system = (
-            "You are a schema linker for Text-to-SQL. Pick the MINIMAL set of tables and the "
-            "specific columns needed to answer the question — do NOT include tables/columns that "
-            "are merely related. Fewer is better: irrelevant schema hurts SQL accuracy. If the "
-            "question is genuinely ambiguous about which table/field is meant, return an ask. "
-            "Return JSON only."
+            "You are a schema linker for Text-to-SQL. From the candidate tables (each shown with "
+            "its columns), pick the MINIMAL set of tables and the specific columns needed to answer "
+            "the question — fewer is better, irrelevant schema hurts SQL accuracy. Decide in ONE "
+            "shot: you already have the candidates and their columns, so confirm everything you need "
+            "now and set sufficient=true. Only set sufficient=false (with `missing`) if a needed "
+            "table is clearly absent from the candidates. If the question is genuinely ambiguous "
+            "about which table/field is meant, return an ask. Return JSON only."
         )
         user = (
             f"Question:\n{question}\n\nAlready confirmed: {already}\n\n"

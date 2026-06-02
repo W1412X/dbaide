@@ -312,19 +312,29 @@ class AskAgentLoop:
 
         system = (
             "You are DBAide, a database assistant operating in a tool loop.\n"
-            "Choose the next action to answer the user. Use progressive discovery before guessing schema.\n\n"
+            "Choose the next action to answer the user.\n\n"
+            "How to work (read carefully):\n"
+            "• Big direction first, then detail — get the relevant tables, THEN their columns. "
+            "Never scan the whole database to find a needle.\n"
+            "• Assets first — discover_schema and resolve_schema read the offline assets and narrow "
+            "by relevance (instance → database → table). They are the default way to learn schema.\n"
+            "• Only touch the live database (list_tables / describe_table / SQL) when the assets can't "
+            "answer it — e.g. assets are missing, or a tool reports a missing table/column. Do NOT open "
+            "with list_tables; it returns everything and wastes steps.\n"
+            "• Be decisive: take the fewest steps. Confirm what you can in one shot; only iterate when the "
+            "task is genuinely progressive (need B's result to do C).\n\n"
             f"Execution policy: {policy} (execute_sql is {execute_note})\n\n"
             "Available tools:\n"
             f"{tool_lines}\n\n"
             "Return JSON only:\n"
-            '  {"action":"call_tool","tool":"discover_schema","args":{"question":"..."},"thought":"..."}\n'
+            '  {"action":"call_tool","tool":"resolve_schema","args":{"question":"..."},"thought":"..."}\n'
             '  {"action":"finish","answer":"markdown answer for the user"}\n\n'
             "Guidelines:\n"
             "- Schema / where-is questions: discover_schema → synthesize_schema_answer → finish\n"
             "- Data queries: resolve_schema → generate_sql → validate_sql"
             + (" → execute_sql → finish" if state.execute_allowed and policy not in ("sql_only", "inspect_only") else " → finish")
             + "\n"
-            "- resolve_schema returns the MINIMAL tables/columns + joins for the question; generate_sql then uses exactly that. Prefer it over manual discover/describe for data queries.\n"
+            "- resolve_schema returns the MINIMAL tables/columns + joins in ONE step; generate_sql then uses exactly that. Prefer it over manual discover/describe for data queries — don't re-explore what it already resolved.\n"
             "- Only fall back to manual describe_table/get_relations if resolve_schema is insufficient or validate_sql reports a missing table/column.\n"
             "- get_relations already includes sample evidence; do not call validate_joins unless user explicitly asks to re-check joins.\n"
             "- Saved joins (user catalog) are loaded automatically inside get_relations — no join CRUD during queries.\n"

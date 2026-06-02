@@ -53,7 +53,7 @@ def _orch(tmp_path, llm, *, hits):
     jc = JoinCatalogStore(base_dir=tmp_path / "joins")
     AssetBuilder(connection=conn, adapter=build_adapter(conn), store=store, join_catalog=jc).build(profile_mode="none", sample=False)
     orch = AskOrchestrator(build_adapter(conn), Session(connection=conn), llm, asset_store=store, join_catalog=jc)
-    orch._discover = lambda q, *, parent="": DiscoveryResult(  # stub discovery
+    orch._discover = lambda q, *, parent="", column_detail=True: DiscoveryResult(  # stub discovery
         question=q,
         hits=[SchemaHit(kind="table", path=f"shop.main.{t}", name=t, database="main", table=t, summary=f"{t} table") for t in hits],
     )
@@ -167,3 +167,21 @@ def test_end_to_end_loop_uses_minimal_resolved_schema(tmp_path):
     assert captured["tables"] == ["orders"]
     assert set(captured["columns"]) == {"id", "amount", "status"}
     assert resp.result is not None and resp.result.row_count >= 1
+
+
+def test_linker_discovers_tables_only_not_full_cascade(tmp_path):
+    """Efficiency: the linker gets the big direction (relevant tables) without the
+    per-column LLM cascade — that detail is confirmed in its single _select call."""
+    captured = {}
+    orch = _orch(tmp_path, SelectMock({
+        "tables": [{"database": "main", "table": "orders", "columns": ["id"]}], "sufficient": True,
+    }), hits=["orders"])
+    base = orch._discover
+
+    def spy(q, *, parent="", column_detail=True):
+        captured["column_detail"] = column_detail
+        return base(q, parent=parent, column_detail=column_detail)
+
+    orch._discover = spy
+    SchemaLinker(orch).resolve("order ids")
+    assert captured["column_detail"] is False  # tables-only discovery

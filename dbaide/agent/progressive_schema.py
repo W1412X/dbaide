@@ -63,9 +63,15 @@ class ProgressiveSchemaAgent:
         schema_tools: SchemaTools | None = None,
         progress: ProgressFn | None = None,
         parent: str = "",
+        column_detail: bool = True,
     ) -> DiscoveryResult:
+        # Assets first: navigate the offline docs by relevance (instance → database →
+        # table). Only fall back to the live catalog when there are no assets — never
+        # blind-list the whole database. ``column_detail=False`` returns just the
+        # relevant tables (the "big direction") and skips the per-column LLM pass,
+        # which the schema linker does in a single shot instead.
         if self.store.has_instance(self.instance):
-            return self._discover_from_assets(question, progress=progress, parent=parent)
+            return self._discover_from_assets(question, progress=progress, parent=parent, column_detail=column_detail)
         if schema_tools is not None:
             return self._discover_from_live(schema_tools, question, progress=progress, parent=parent)
         result = DiscoveryResult(question=question)
@@ -78,6 +84,7 @@ class ProgressiveSchemaAgent:
         *,
         progress: ProgressFn | None = None,
         parent: str = "",
+        column_detail: bool = True,
     ) -> DiscoveryResult:
         result = DiscoveryResult(question=question)
         if not self.store.has_instance(self.instance):
@@ -164,7 +171,7 @@ class ProgressiveSchemaAgent:
                         summary=summary,
                     )
                 )
-                if len(local_tables) <= MAX_COLUMN_TABLES:
+                if column_detail and len(local_tables) <= MAX_COLUMN_TABLES:
                     cols = self.store.column_docs(self.instance, db_name, table_name)
                     if not cols:
                         continue

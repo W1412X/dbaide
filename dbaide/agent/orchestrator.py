@@ -301,7 +301,7 @@ class AskOrchestrator:
                 warnings=self._collect_warnings(ctx),
             )
 
-    def _discover(self, question: str, *, parent: str = ""):
+    def _discover(self, question: str, *, parent: str = "", column_detail: bool = True):
         agent = ProgressiveSchemaAgent(self.llm, self.asset_store, self.instance)
         progress_cb = self.progress if parent else None
         return agent.discover(
@@ -309,6 +309,7 @@ class AskOrchestrator:
             schema_tools=self.schema,
             progress=progress_cb,
             parent=parent,
+            column_detail=column_detail,
         )
 
     def _pick_table(self, question: str, active_database: str) -> tuple[str, str]:
