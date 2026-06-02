@@ -130,20 +130,32 @@ def build_tool_registry(orchestrator: AskOrchestrator) -> ToolRegistry:
             {
                 "name": c.name,
                 "data_type": c.data_type,
+                "nullable": c.nullable,
                 "primary_key": c.primary_key,
+                "indexed": c.indexed,
                 "comment": (c.comment or "")[:120],
             }
             for c in columns
         ]
-        return ToolResult(
-            ok=True,
-            data={
-                "table": table,
-                "database": database,
-                "columns": payload,
-                "disclosed_tables": _disclosed_table_names(orchestrator),
-            },
-        )
+        data: dict[str, Any] = {
+            "table": table,
+            "database": database,
+            "columns": payload,
+            "disclosed_tables": _disclosed_table_names(orchestrator),
+        }
+        # The table is the disclosure leaf: surface its indexes, FKs, row-count and
+        # a small sample from the offline doc in this one call, when assets exist.
+        tdoc = orchestrator.asset_store.table_doc(orchestrator.instance, database, table)
+        if tdoc:
+            if tdoc.get("indexes"):
+                data["indexes"] = tdoc["indexes"]
+            if tdoc.get("foreign_keys"):
+                data["foreign_keys"] = tdoc["foreign_keys"]
+            if tdoc.get("row_count") is not None:
+                data["row_count"] = tdoc["row_count"]
+            if tdoc.get("sample_rows"):
+                data["sample_rows"] = tdoc["sample_rows"]
+        return ToolResult(ok=True, data=data)
 
     def _get_relations(args: dict[str, Any], _ctx: ToolContext) -> ToolResult:
         database_default = str(args.get("database") or orchestrator._loop_table_database or orchestrator._loop_database or "")
