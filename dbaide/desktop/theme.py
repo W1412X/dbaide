@@ -199,32 +199,64 @@ QSplitter::handle {{
     background: {Theme.BORDER_SOFT};
     width: 1px;
 }}
+QSplitter::handle:hover {{
+    background: {Theme.BORDER};
+}}
+QSplitter::handle:pressed {{
+    background: {Theme.ACCENT};
+}}
 QTreeWidget::item, QListWidget::item {{
     padding: 5px 8px;
+}}
+QTreeWidget::item:hover, QListWidget::item:hover {{
+    background: {Theme.PANEL_2};
 }}
 QTreeWidget::item:selected, QListWidget::item:selected {{
     background: {Theme.PANEL_3};
     color: {Theme.TEXT};
 }}
+/* Slim, floating scrollbars: transparent track, rounded handle that brightens on
+   hover, no arrow buttons — matches the rest of the dark chrome. */
 QScrollBar:vertical {{
-    background: {Theme.SURFACE};
-    width: 8px;
-    margin: 0;
+    background: transparent;
+    width: 10px;
+    margin: 2px;
 }}
 QScrollBar::handle:vertical {{
     background: {Theme.PANEL_3};
-    border-radius: 4px;
-    min-height: 24px;
+    border-radius: 3px;
+    min-height: 28px;
+}}
+QScrollBar::handle:vertical:hover {{
+    background: {Theme.MUTED_2};
+}}
+QScrollBar::handle:vertical:pressed {{
+    background: {Theme.MUTED};
 }}
 QScrollBar:horizontal {{
-    background: {Theme.SURFACE};
-    height: 8px;
-    margin: 0;
+    background: transparent;
+    height: 10px;
+    margin: 2px;
 }}
 QScrollBar::handle:horizontal {{
     background: {Theme.PANEL_3};
-    border-radius: 4px;
-    min-width: 24px;
+    border-radius: 3px;
+    min-width: 28px;
+}}
+QScrollBar::handle:horizontal:hover {{
+    background: {Theme.MUTED_2};
+}}
+QScrollBar::handle:horizontal:pressed {{
+    background: {Theme.MUTED};
+}}
+QScrollBar::add-line, QScrollBar::sub-line {{
+    width: 0; height: 0; background: none; border: none;
+}}
+QScrollBar::add-page, QScrollBar::sub-page {{
+    background: none;
+}}
+QAbstractScrollArea::corner {{
+    background: transparent;
 }}
 QToolButton {{
     background: {Theme.PANEL_2};
