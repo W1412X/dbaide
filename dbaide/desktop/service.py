@@ -1,7 +1,10 @@
 from __future__ import annotations
 
 import json
+import logging
 from typing import Any, Callable
+
+logger = logging.getLogger("dbaide.desktop.service")
 
 from dbaide.adapters import build_adapter
 from dbaide.assets import AssetBuilder, AssetSearch, AssetStore
@@ -15,6 +18,7 @@ from dbaide.config import ConfigManager
 from dbaide.core import ExecutionPolicy, WorkflowRequest
 from dbaide.core.workflow import WorkflowEngine
 from dbaide.history.store import WorkflowHistoryStore
+from dbaide.history.session_store import ChatSessionStore, make_turn
 from dbaide.llm import LLMMessage, NullLLMClient, build_llm_client
 from dbaide.models import ConnectionConfig, ModelConfig
 from dbaide.session import Session
@@ -100,6 +104,7 @@ class DesktopService:
         self.store = store or AssetStore()
         self.join_catalog = JoinCatalogStore()
         self.history = WorkflowHistoryStore()
+        self.sessions = ChatSessionStore()
         import threading
         self._build_lock = threading.Lock()
         self._active_builds: set[str] = set()
@@ -146,6 +151,11 @@ class DesktopService:
             "list_history": self.list_history,
             "load_history": self.load_history,
             "delete_history": self.delete_history,
+            "list_sessions": self.list_sessions,
+            "load_session": self.load_session,
+            "create_session": self.create_session,
+            "rename_session": self.rename_session,
+            "delete_session": self.delete_session,
             "asset_markdown": self.asset_markdown,
             "preview_asset": self.asset_markdown,
             "test_model": self.test_model,
@@ -375,6 +385,7 @@ class DesktopService:
         conn_name = str(payload.get("connection_name") or payload.get("name") or "")
         conn = self.cfg.get_connection(conn_name or None)
         self._guard_busy(conn.name)
+        in_session_id = str(payload.get("session_id") or "")
         policy = self._policy(str(payload.get("execution_policy") or payload.get("policy") or "safe_auto"))
         database = str(payload.get("database") or "")
         request = WorkflowRequest(
@@ -407,7 +418,36 @@ class DesktopService:
             database=database,
             policy=policy.value,
         )
+        # Group the turn into a chat session (会话). A session is created lazily on
+        # the first completed turn; clarification pauses (wait_user) don't persist a
+        # turn — the turn is appended once the question actually resolves.
+        payload["session_id"] = self._record_session_turn(conn.name, in_session_id, request, result, database)
         return payload
+
+    def _record_session_turn(self, conn_name, session_id, request, result, database) -> str:
+        session_id = str(session_id or "")
+        status = result.status.value
+        if status in ("wait_user",) or result.pending_question:
+            # Not a completed turn yet — just ensure a session exists to anchor it.
+            if not session_id or self.sessions.load(conn_name, session_id) is None:
+                session_id = self.sessions.create(conn_name)["session_id"]
+            return session_id
+        try:
+            if not session_id or self.sessions.load(conn_name, session_id) is None:
+                session_id = self.sessions.create(conn_name)["session_id"]
+            self.sessions.append_turn(conn_name, session_id, make_turn(
+                question=request.question,
+                answer_markdown=result.answer_markdown or result.answer_plaintext or "",
+                selected_sql=result.selected_sql or "",
+                status=status,
+                workflow_id=result.workflow_id,
+                trace=[e.to_dict() for e in result.trace],
+                meta={"database": database, "policy": request.execution_policy.value},
+                created_at=result.created_at or None,
+            ))
+        except Exception:  # noqa: BLE001 — session persistence must never break a query
+            logger.debug("failed to record session turn", exc_info=True)
+        return session_id
 
     def validate_sql(self, payload: dict[str, Any]) -> dict[str, Any]:
         conn = self.cfg.get_connection(str(payload.get("connection_name") or "") or None)
@@ -471,6 +511,39 @@ class DesktopService:
         workflow_id = str(payload.get("workflow_id") or "")
         deleted = self.history.delete(conn, workflow_id)
         return {"deleted": deleted, "workflow_id": workflow_id}
+
+    # ── Chat sessions (会话 → 对话) ──────────────────────────────────────────--
+
+    def _session_conn(self, payload: dict[str, Any]) -> str:
+        name = str(payload.get("connection_name") or payload.get("name") or "")
+        return name or self.cfg.get_connection(None).name
+
+    def list_sessions(self, payload: dict[str, Any]) -> list[dict[str, Any]]:
+        return self.sessions.list_sessions(
+            self._session_conn(payload), limit=int(payload.get("limit") or 100)
+        )
+
+    def load_session(self, payload: dict[str, Any]) -> dict[str, Any]:
+        conn = self._session_conn(payload)
+        session_id = str(payload.get("session_id") or "")
+        data = self.sessions.load(conn, session_id)
+        if data is None:
+            raise FileNotFoundError(f"Session not found: {conn}/{session_id}")
+        return data
+
+    def create_session(self, payload: dict[str, Any]) -> dict[str, Any]:
+        return self.sessions.create(self._session_conn(payload), str(payload.get("title") or ""))
+
+    def rename_session(self, payload: dict[str, Any]) -> dict[str, Any]:
+        conn = self._session_conn(payload)
+        session_id = str(payload.get("session_id") or "")
+        ok = self.sessions.rename(conn, session_id, str(payload.get("title") or ""))
+        return {"renamed": ok, "session_id": session_id}
+
+    def delete_session(self, payload: dict[str, Any]) -> dict[str, Any]:
+        conn = self._session_conn(payload)
+        session_id = str(payload.get("session_id") or "")
+        return {"deleted": self.sessions.delete(conn, session_id), "session_id": session_id}
 
     def asset_markdown(self, payload: dict[str, Any]) -> dict[str, Any]:
         path = str(payload.get("path") or "")

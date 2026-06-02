@@ -1,0 +1,170 @@
+"""Chat session store — groups conversation turns into named, persistent sessions.
+
+A *session* (会话) is a chat thread; it holds an ordered list of *turns* (对话),
+each turn being one question → answer with its SQL and agent trace. This is the
+higher-level grouping the desktop UI navigates; the per-workflow
+``WorkflowHistoryStore`` still keeps the raw workflow JSON for debug bundles.
+
+Storage layout:
+    ~/.dbaide/sessions/
+        {connection}/
+            {session_id}.json
+"""
+from __future__ import annotations
+
+import json
+import logging
+import time
+import uuid
+from pathlib import Path
+from typing import Any
+
+logger = logging.getLogger("dbaide.sessions")
+
+SCHEMA_VERSION = 1
+DEFAULT_TITLE = "New chat"
+_TITLE_MAX = 60
+
+
+def _now() -> float:
+    return time.time()
+
+
+def _new_id() -> str:
+    return uuid.uuid4().hex[:12]
+
+
+def _title_from_question(question: str) -> str:
+    q = " ".join(str(question or "").split()).strip()
+    if not q:
+        return DEFAULT_TITLE
+    return q if len(q) <= _TITLE_MAX else q[: _TITLE_MAX - 1] + "…"
+
+
+def make_turn(
+    *,
+    question: str,
+    answer_markdown: str = "",
+    selected_sql: str = "",
+    status: str = "completed",
+    workflow_id: str = "",
+    trace: list[dict[str, Any]] | None = None,
+    meta: dict[str, Any] | None = None,
+    created_at: float | None = None,
+) -> dict[str, Any]:
+    """Build a turn dict from a workflow result's salient fields."""
+    return {
+        "workflow_id": workflow_id,
+        "question": question,
+        "answer_markdown": answer_markdown,
+        "selected_sql": selected_sql,
+        "status": status,
+        "trace": trace or [],
+        "meta": meta or {},
+        "created_at": created_at if created_at is not None else _now(),
+    }
+
+
+class ChatSessionStore:
+    """Persists chat sessions (a session = an ordered list of conversation turns)."""
+
+    def __init__(self, base_dir: Path | None = None) -> None:
+        self.base_dir = base_dir or Path.home() / ".dbaide" / "sessions"
+
+    # ── paths ────────────────────────────────────────────────────────────────
+
+    def _conn_dir(self, connection_name: str) -> Path:
+        return self.base_dir / (connection_name or "_default")
+
+    def _path(self, connection_name: str, session_id: str) -> Path:
+        return self._conn_dir(connection_name) / f"{session_id}.json"
+
+    # ── read ───────────────────────────────────────────────────────────────--
+
+    def load(self, connection_name: str, session_id: str) -> dict[str, Any] | None:
+        path = self._path(connection_name, session_id)
+        if not path.exists():
+            return None
+        try:
+            return json.loads(path.read_text(encoding="utf-8"))
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("failed to load session %s: %s", path, exc)
+            return None
+
+    def list_sessions(self, connection_name: str, limit: int = 100) -> list[dict[str, Any]]:
+        """Session summaries (no turn bodies), most-recently-updated first."""
+        conn_dir = self._conn_dir(connection_name)
+        if not conn_dir.exists():
+            return []
+        out: list[dict[str, Any]] = []
+        for path in conn_dir.glob("*.json"):
+            try:
+                data = json.loads(path.read_text(encoding="utf-8"))
+            except Exception:  # noqa: BLE001
+                continue
+            turns = data.get("turns") or []
+            last_q = turns[-1].get("question") if turns else ""
+            out.append({
+                "session_id": data.get("session_id", path.stem),
+                "title": data.get("title") or DEFAULT_TITLE,
+                "connection_name": data.get("connection_name", connection_name),
+                "created_at": data.get("created_at", 0),
+                "updated_at": data.get("updated_at", data.get("created_at", 0)),
+                "turn_count": len(turns),
+                "last_question": last_q or "",
+            })
+        out.sort(key=lambda e: (e.get("updated_at") or 0, e.get("created_at") or 0), reverse=True)
+        return out[: max(0, limit)]
+
+    # ── write ──────────────────────────────────────────────────────────────--
+
+    def _write(self, session: dict[str, Any]) -> Path:
+        conn_dir = self._conn_dir(session["connection_name"])
+        conn_dir.mkdir(parents=True, exist_ok=True)
+        path = conn_dir / f"{session['session_id']}.json"
+        path.write_text(json.dumps(session, ensure_ascii=False, indent=2, default=str), encoding="utf-8")
+        return path
+
+    def create(self, connection_name: str, title: str = "") -> dict[str, Any]:
+        now = _now()
+        session = {
+            "schema_version": SCHEMA_VERSION,
+            "session_id": _new_id(),
+            "title": (title or DEFAULT_TITLE).strip() or DEFAULT_TITLE,
+            "connection_name": connection_name,
+            "created_at": now,
+            "updated_at": now,
+            "turns": [],
+        }
+        self._write(session)
+        return session
+
+    def append_turn(
+        self, connection_name: str, session_id: str, turn: dict[str, Any]
+    ) -> dict[str, Any] | None:
+        """Append a turn; auto-titles an untitled session from the first question."""
+        session = self.load(connection_name, session_id)
+        if session is None:
+            return None
+        session.setdefault("turns", []).append(turn)
+        session["updated_at"] = _now()
+        if not session.get("title") or session["title"] == DEFAULT_TITLE:
+            session["title"] = _title_from_question(str(turn.get("question") or ""))
+        self._write(session)
+        return session
+
+    def rename(self, connection_name: str, session_id: str, title: str) -> bool:
+        session = self.load(connection_name, session_id)
+        if session is None:
+            return False
+        session["title"] = (title or "").strip() or DEFAULT_TITLE
+        session["updated_at"] = _now()
+        self._write(session)
+        return True
+
+    def delete(self, connection_name: str, session_id: str) -> bool:
+        path = self._path(connection_name, session_id)
+        if path.exists():
+            path.unlink()
+            return True
+        return False
