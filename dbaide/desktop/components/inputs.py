@@ -43,7 +43,7 @@ class FormLabel(QLabel):
         self.setAutoFillBackground(False)
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
         self.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
-        self.setFixedHeight(34)
+        self.setFixedHeight(30)
         self.setMinimumWidth(96)
         self.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
         self.setStyleSheet(
@@ -143,7 +143,7 @@ class DropdownCombo(QComboBox):
         # forcing every selector to the same wide box.
         self.setSizeAdjustPolicy(QComboBox.SizeAdjustPolicy.AdjustToContents)
         self.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Fixed)
-        self.setFixedHeight(34)
+        self.setFixedHeight(30)
         self.setMinimumWidth(120)
         self.setMaximumWidth(260)
 

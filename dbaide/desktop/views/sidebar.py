@@ -34,7 +34,7 @@ class Sidebar(QWidget):
         layout.addWidget(SectionLabel("SCHEMA"))
         self.search = QLineEdit()
         self.search.setPlaceholderText(t("sidebar.filter"))
-        self.search.setFixedHeight(34)
+        self.search.setFixedHeight(30)
         self.search.textChanged.connect(self._filter_tree)
         self.search.returnPressed.connect(self._semantic_search)
         layout.addWidget(self.search)

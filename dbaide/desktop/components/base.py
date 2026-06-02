@@ -18,7 +18,7 @@ def compact_button(
     btn = AgentButton(text, primary=primary, parent=parent)
     btn.setAutoDefault(False)
     btn.setDefault(False)
-    btn.setFixedHeight(32)
+    btn.setFixedHeight(30)
     btn.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
     if width is not None:
         btn.setFixedWidth(width)

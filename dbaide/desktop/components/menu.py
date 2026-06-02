@@ -67,7 +67,7 @@ class MenuButton(QToolButton):
         else:
             self.setText(text)
             self.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextOnly)
-            self.setFixedHeight(32)
+            self.setFixedHeight(30)
         self.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
         self._menu = QMenu(self)
         _style_menu(self._menu)
@@ -169,7 +169,7 @@ class PillSelect(QToolButton):
         self.setMenu(self._menu)
         self.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextOnly)
         self.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.setFixedHeight(32)
+        self.setFixedHeight(30)
         self.setMaximumWidth(max_width)
         self.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Fixed)
         self.setStyleSheet(

@@ -79,8 +79,8 @@ _INPUT = f"""
     color: {Theme.TEXT};
     border: 1px solid {Theme.BORDER};
     border-radius: 9px;
-    min-height: 34px;
-    max-height: 34px;
+    min-height: 30px;
+    max-height: 30px;
     selection-background-color: {Theme.PANEL_3};
 """
 
@@ -115,8 +115,8 @@ QPushButton {{
     border: 1px solid {Theme.BORDER};
     border-radius: 9px;
     padding: 0px 16px;
-    min-height: 34px;
-    max-height: 34px;
+    min-height: 30px;
+    max-height: 30px;
 }}
 QPushButton:hover {{
     background: {Theme.PANEL_3};
@@ -132,8 +132,8 @@ QPushButton[primary="true"] {{
     border: 1px solid {Theme.ACCENT};
     font-weight: 600;
     padding: 0px 16px;
-    min-height: 34px;
-    max-height: 34px;
+    min-height: 30px;
+    max-height: 30px;
 }}
 QPushButton[primary="true"]:hover {{
     background: {Theme.ACCENT_HOVER};
@@ -360,8 +360,8 @@ QToolButton {{
     border: 1px solid {Theme.BORDER};
     border-radius: 9px;
     padding: 0px 10px;
-    min-height: 34px;
-    max-height: 34px;
+    min-height: 30px;
+    max-height: 30px;
 }}
 QToolButton:hover {{
     background: {Theme.PANEL_3};
@@ -374,7 +374,7 @@ QTabBar[segmented="true"]::tab {{
     border: 1px solid {Theme.BORDER_SOFT};
     margin-right: 0;
     min-width: 68px;
-    max-height: 34px;
+    max-height: 30px;
 }}
 QTabBar[segmented="true"]::tab:selected {{
     background: {Theme.PANEL_3};
