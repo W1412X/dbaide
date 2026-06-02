@@ -82,6 +82,11 @@ def build_tool_registry(orchestrator: AskOrchestrator) -> ToolRegistry:
         try:
             discovery = orchestrator._discover(question, parent=orchestrator._loop_trace_node)
             orchestrator._loop_discovery = discovery
+            # If discovery points at exactly one database, narrow the working scope to
+            # it so SQL generation/execution target it (not the connection default).
+            hit_dbs = {h.database for h in discovery.hits if h.database}
+            if len(hit_dbs) == 1:
+                _note_working_db(orchestrator, next(iter(hit_dbs)))
             hits = [
                 {"kind": h.kind, "path": h.path, "name": h.name, "database": h.database, "summary": h.summary[:240]}
                 for h in discovery.hits
@@ -157,14 +162,16 @@ def build_tool_registry(orchestrator: AskOrchestrator) -> ToolRegistry:
         return ToolResult(ok=True, data={"databases": dbs})
 
     def _list_tables(args: dict[str, Any], _ctx: ToolContext) -> ToolResult:
-        database = str(args.get("database") or orchestrator._loop_database or "")
+        database = str(args.get("database") or orchestrator._loop_table_database or orchestrator._loop_database or "")
+        # Listing a specific database narrows the agent's working scope to it.
+        _note_working_db(orchestrator, database)
         tables = orchestrator.schema.list_tables(database=database)
         payload = [{"name": t.name, "comment": (t.comment or "")[:120]} for t in tables[:50]]
         return ToolResult(ok=True, data={"database": database, "tables": payload})
 
     def _describe_table(args: dict[str, Any], _ctx: ToolContext) -> ToolResult:
         table = str(args.get("table") or "").strip()
-        database = str(args.get("database") or orchestrator._loop_database or "")
+        database = str(args.get("database") or orchestrator._loop_table_database or orchestrator._loop_database or "")
         if not table:
             return ToolResult(ok=False, error=_err("describe_table", "table is required"))
         columns = orchestrator.schema.describe_table(table, database=database)
@@ -391,7 +398,7 @@ def build_tool_registry(orchestrator: AskOrchestrator) -> ToolRegistry:
             tables_used = [t for _, t, _ in disclosed]
             if tables_used:
                 orchestrator._loop_table = tables_used[0]
-                orchestrator._loop_table_database = disclosed[0][0]
+                _note_working_db(orchestrator, disclosed[0][0])
             return ToolResult(
                 ok=True,
                 data={
@@ -685,12 +692,22 @@ def _schema_key(database: str, table: str) -> str:
     return f"{db}.{table}" if db else table
 
 
+def _note_working_db(orchestrator: AskOrchestrator, database: str) -> None:
+    """Record the database the agent has narrowed into, so subsequent tools default
+    to *where the tables were found* — not the connection's default database — when
+    the model omits the ``database`` argument. Never overwrite a known working db
+    with an empty one."""
+    db = (database or "").strip()
+    if db:
+        orchestrator._loop_table_database = db
+
+
 def _remember_table_schema(orchestrator: AskOrchestrator, table: str, database: str, columns: list[ColumnInfo]) -> None:
     key = _schema_key(database, table)
     orchestrator._loop_schemas[key] = columns
     orchestrator._loop_schema_db[key] = database
     orchestrator._loop_table = table
-    orchestrator._loop_table_database = database
+    _note_working_db(orchestrator, database)
     orchestrator._loop_columns = columns
 
 
