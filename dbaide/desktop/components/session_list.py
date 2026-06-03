@@ -47,8 +47,24 @@ def _relative_time(ts: float) -> str:
     return time.strftime("%b %d", time.localtime(ts))
 
 
-_TITLE_FONT = QFont("Inter", 12, QFont.Weight.DemiBold)
-_SUB_FONT = QFont("Inter", 6)
+# NOTE: sizes are in PIXELS and are ALSO set in each label's stylesheet below.
+# The app's global `* { font-size: 13px }` rule overrides QFont point sizes, so the
+# stylesheet font-size is what actually renders; the QFont (matching pixel size) is
+# only used for the height/elision metrics so they line up.
+_TITLE_PX = 13
+_SUB_PX = 8
+
+
+def _font(px: int, *, demibold: bool = False) -> QFont:
+    f = QFont("Inter")
+    f.setPixelSize(px)
+    if demibold:
+        f.setWeight(QFont.Weight.DemiBold)
+    return f
+
+
+_TITLE_FONT = _font(_TITLE_PX, demibold=True)
+_SUB_FONT = _font(_SUB_PX)
 # Width the spinner + its gap reserve at the right of the title (so the elided
 # title clears it whether or not the spinner is currently shown).
 _SPINNER_RESERVE = 20
@@ -70,7 +86,10 @@ class _SessionRow(QWidget):
         title_row.setSpacing(6)
         self._title = QLabel(title)
         self._title.setFont(_TITLE_FONT)
-        self._title.setStyleSheet(f"color: {Theme.TEXT}; background: transparent;")
+        self._title.setStyleSheet(
+            f"color: {Theme.TEXT}; background: transparent;"
+            f" font-size: {_TITLE_PX}px; font-weight: 600;"
+        )
         self._title.setTextFormat(Qt.TextFormat.PlainText)
         self._title.setWordWrap(False)  # single line — long titles elide (below)
         self._title.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
@@ -85,7 +104,9 @@ class _SessionRow(QWidget):
         layout.addLayout(title_row)
         sub = QLabel(subtitle)
         sub.setFont(_SUB_FONT)
-        sub.setStyleSheet(f"color: {Theme.MUTED}; background: transparent;")
+        sub.setStyleSheet(
+            f"color: {Theme.MUTED}; background: transparent; font-size: {_SUB_PX}px;"
+        )
         layout.addWidget(sub)
 
     def set_running(self, running: bool, *, angle: float = 0.0) -> None:
