@@ -120,3 +120,37 @@ def test_open_table_threads_relations(qapp):
     wb.navigate_table.connect(got.append)
     doc.structure._on_link("users")
     assert got == ["users"]
+
+
+def test_table_document_opens_structure_without_query(qapp):
+    from dbaide.desktop.views.table_document import TableDocument
+    fired = []
+    doc = TableDocument("c", "db", "orders")
+    doc.query_requested.connect(lambda p: fired.append(p))
+    doc.open([{"name": "id", "data_type": "INTEGER", "primary_key": True}])
+    assert doc.tabs.currentIndex() == doc._structure_index
+    assert doc._data_loaded is False
+    assert fired == []  # opening a table must NOT auto-query
+
+
+def test_table_document_lazy_loads_data_on_tab_switch(qapp):
+    from dbaide.desktop.views.table_document import TableDocument
+    fired = []
+    doc = TableDocument("c", "db", "orders")
+    doc.query_requested.connect(lambda p: fired.append(p))
+    doc.open([{"name": "id", "data_type": "INTEGER"}])
+    doc.focus_data()  # user opens the Data tab → first query now
+    assert doc._data_loaded is True
+    assert len(fired) == 1 and fired[0]["table"] == "orders"
+    doc.focus_structure()
+    doc.focus_data()  # returning to Data must not re-query
+    assert len(fired) == 1
+
+
+def test_reopen_table_keeps_subtab(qapp):
+    wb = _wb(qapp)
+    doc = wb.open_table("c", "db", "orders", [])
+    doc.focus_data()
+    assert doc.tabs.currentIndex() == doc._data_index
+    wb.open_table("c", "db", "orders", [])  # re-open → bring forward, keep sub-tab
+    assert doc.tabs.currentIndex() == doc._data_index

@@ -138,8 +138,8 @@ class WorkbenchView(QWidget):
         for i in range(self.tabs.count()):
             w = self.tabs.widget(i)
             if isinstance(w, TableDocument) and w.doc_key == target_key:
+                # Already open — just bring it forward, keeping the user's sub-tab.
                 self.tabs.setCurrentIndex(i)
-                w.focus_data()
                 return w
         doc = TableDocument(connection, database, table)
         doc.query_requested.connect(lambda payload, d=doc: self.browse_requested.emit(d, payload))

@@ -36,8 +36,12 @@ class TableDocument(QWidget):
         self.data.query_requested.connect(self.query_requested.emit)
         self.structure = StructurePanel()
         self.structure.navigate_table.connect(self.navigate_table.emit)
-        self._data_index = self.tabs.addTab(self.data, t("tab.data"))
+        # Structure first — opening a table shows its (offline, instant) structure;
+        # the Data tab issues its query lazily, only when the user actually opens it.
         self._structure_index = self.tabs.addTab(self.structure, t("tab.structure"))
+        self._data_index = self.tabs.addTab(self.data, t("tab.data"))
+        self._data_loaded = False
+        self.tabs.currentChanged.connect(self._on_subtab)
         layout.addWidget(self.tabs)
 
     @staticmethod
@@ -50,12 +54,24 @@ class TableDocument(QWidget):
 
     def open(self, columns: list[dict[str, Any]],
              relations: dict[str, list[dict[str, Any]]] | None = None) -> None:
-        """Render structure from columns and kick off the first data page."""
+        """Render the offline structure and show it. No query runs until the user
+        opens the Data tab (see ``_ensure_data``)."""
         self.structure.show_table(self.table, columns or [], relations or {})
-        self.data.open_table(self.connection, self.database, self.table)
+        self.tabs.setCurrentIndex(self._structure_index)
+
+    def _on_subtab(self, index: int) -> None:
+        if index == self._data_index:
+            self._ensure_data()
+
+    def _ensure_data(self) -> None:
+        """Issue the first data query the first time the Data tab is opened."""
+        if not self._data_loaded:
+            self._data_loaded = True
+            self.data.open_table(self.connection, self.database, self.table)
 
     def focus_data(self) -> None:
         self.tabs.setCurrentIndex(self._data_index)
+        self._ensure_data()
 
     def focus_structure(self) -> None:
         self.tabs.setCurrentIndex(self._structure_index)

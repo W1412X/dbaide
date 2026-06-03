@@ -88,23 +88,39 @@ class MainWindow(QMainWindow):
         self.setMinimumSize(1000, 720)
         self.setStyleSheet(APP_STYLE)
         self._build()
-        # Restore whether the activity panel was collapsed last session.
-        if str(self._settings.value("panel_visible", "true")).lower() == "false":
-            self.right.setVisible(False)
+        # The activity panel (Trace/Inspector) belongs to Assistant mode only; the
+        # Workbench gets the full width. Remember the user's show/hide preference for
+        # Assistant and force-hide the panel (and its toggle) in Workbench.
+        self._panel_pref = str(self._settings.value("panel_visible", "true")).lower() != "false"
+        self._apply_panel_visibility()
         self._wire_bus()
         self.refresh_all()
 
+    def _current_mode(self) -> str:
+        idx = self.tabbar.currentIndex()
+        return self._tab_names[idx] if 0 <= idx < len(self._tab_names) else "Assistant"
+
     def _toggle_panel(self) -> None:
-        self._set_panel_visible(not self.right.isVisible())
+        # Only meaningful in Assistant mode (Workbench has no activity panel).
+        if self._current_mode() != "Assistant":
+            return
+        self._panel_pref = not self._panel_pref
+        self._settings.setValue("panel_visible", "true" if self._panel_pref else "false")
+        self._apply_panel_visibility()
 
     def _show_panel(self) -> None:
-        self._set_panel_visible(True)
+        # A panel surface (history/preview/joins) asked to be shown — those are
+        # Assistant-mode concerns, so switch there and reveal it.
+        if self._current_mode() != "Assistant":
+            self.tabbar.setCurrentIndex(0)
+        self._panel_pref = True
+        self._settings.setValue("panel_visible", "true")
+        self._apply_panel_visibility()
 
-    def _set_panel_visible(self, visible: bool) -> None:
-        if visible == self.right.isVisible():
-            return
-        self.right.setVisible(visible)
-        self._settings.setValue("panel_visible", "true" if visible else "false")
+    def _apply_panel_visibility(self) -> None:
+        assistant = self._current_mode() == "Assistant"
+        self.right.setVisible(assistant and self._panel_pref)
+        self.topbar.panel_toggle.setVisible(assistant)
 
     def _wire_bus(self) -> None:
         """Central map of data-change events → who re-fetches. Components react to
@@ -324,9 +340,11 @@ class MainWindow(QMainWindow):
     def _on_tab_changed(self, index: int) -> None:
         if 0 <= index < self.stack.count():
             self.stack.setCurrentIndex(index)
-            # The chat composer belongs to the Assistant mode only; the Workbench
-            # has its own Run action and uses the full height.
+            # The chat composer and the activity panel both belong to Assistant mode
+            # only; the Workbench has its own Run action + panels and uses the full
+            # width.
             self.composer.setVisible(self._tab_names[index] == "Assistant")
+            self._apply_panel_visibility()
 
     def switch_tab(self, name: str) -> None:
         """Route the old per-tab names to the new Assistant/Workbench modes."""
