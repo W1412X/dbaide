@@ -54,7 +54,7 @@ class _ActionButton(QWidget):
 
         layout.addWidget(self._icon_lbl)
         layout.addWidget(self._text_lbl)
-        self.setFixedHeight(34)
+        self.setFixedHeight(28)
         self._update_style(False)
 
     def _update_style(self, hovered: bool) -> None:
@@ -91,7 +91,7 @@ class TopBar(QWidget):
 
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
-        self.setFixedHeight(48)
+        self.setFixedHeight(42)
         self.setStyleSheet(
             f"background:{Theme.BG}; border-bottom:1px solid {Theme.BORDER_SOFT};"
         )

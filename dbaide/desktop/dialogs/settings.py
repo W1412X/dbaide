@@ -23,7 +23,7 @@ from dbaide.desktop.components.base import compact_button
 from dbaide.desktop.components.inputs import FORM_INNER_LABEL_RULES, configure_form, form_label
 from dbaide.desktop.components.menu import MenuButton
 from dbaide.desktop.dialogs.connection import ConnectionForm
-from dbaide.desktop.theme import APP_STYLE, Theme
+from dbaide.desktop.theme import app_style, Theme
 from dbaide.i18n import t as _pt
 
 
@@ -61,20 +61,20 @@ class ModelForm(QWidget):
         form = QFormLayout(inner)
         configure_form(form)
         self.profile_name = QLineEdit()
-        self.profile_name.setFixedHeight(30)
+        self.profile_name.setFixedHeight(26)
         self.provider = QComboBox()
-        self.provider.setFixedHeight(30)
+        self.provider.setFixedHeight(26)
         self.provider.addItems(["none", "openai_compatible"])
         self.base_url = QLineEdit()
-        self.base_url.setFixedHeight(30)
+        self.base_url.setFixedHeight(26)
         self.api_key = QLineEdit()
-        self.api_key.setFixedHeight(30)
+        self.api_key.setFixedHeight(26)
         self.api_key.setPlaceholderText("Leave blank to keep existing key")
         self.api_key.setEchoMode(QLineEdit.EchoMode.Password)
         self.model_id = QLineEdit()
-        self.model_id.setFixedHeight(30)
+        self.model_id.setFixedHeight(26)
         self.timeout = QSpinBox()
-        self.timeout.setFixedHeight(30)
+        self.timeout.setFixedHeight(26)
         self.timeout.setMaximumWidth(120)
         self.timeout.setRange(5, 600)
         self.timeout.setValue(60)
@@ -163,7 +163,7 @@ class SettingsDialog(QDialog):
         self.setWindowTitle(_t("settings.title"))
         self.setMinimumSize(760, 540)
         self.resize(800, 580)
-        self.setStyleSheet(APP_STYLE)
+        self.setStyleSheet(app_style())
         self._connections = {c["name"]: dict(c) for c in connections}
         self._models = {m["name"]: dict(m) for m in models}
         self._default_connection = default_connection
@@ -318,7 +318,7 @@ class SettingsDialog(QDialog):
         from dbaide.config import DEFAULT_MAX_CONCURRENT_RUNS
         conc_spin = QSpinBox()
         conc_spin.setRange(1, 16)
-        conc_spin.setFixedHeight(30)
+        conc_spin.setFixedHeight(26)
         conc_spin.setMinimumWidth(120)
         conc_spin.setMaximumWidth(150)
         conc_cur = self._resource_values.get("max_concurrent_runs")
@@ -334,7 +334,7 @@ class SettingsDialog(QDialog):
         for key, lo, hi in self._RESOURCE_FIELDS:
             spin = QSpinBox()
             spin.setRange(lo, hi)
-            spin.setFixedHeight(30)
+            spin.setFixedHeight(26)
             # A number input doesn't need to span the dialog — keep it compact and
             # left-aligned next to its label.
             spin.setMinimumWidth(120)

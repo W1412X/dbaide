@@ -209,6 +209,23 @@ class ConfigManager:
             ui["language"] = normalize(lang)
         self.save()
 
+    # ── UI theme ────────────────────────────────────────────────────────────
+
+    def ui_theme(self) -> str:
+        """Return the saved theme name (``"dark"`` or ``"light"``)."""
+        ui = self._data.get("ui") or {}
+        name = str(ui.get("theme") or "dark").strip().lower() if isinstance(ui, dict) else "dark"
+        return name if name in ("dark", "light") else "dark"
+
+    def set_ui_theme(self, name: str) -> None:
+        name = str(name or "dark").strip().lower()
+        if name not in ("dark", "light"):
+            name = "dark"
+        ui = self._data.setdefault("ui", {})
+        if isinstance(ui, dict):
+            ui["theme"] = name
+        self.save()
+
     def policy_for(self, connection: "ConnectionConfig"):
         """Resolve the effective ResourcePolicy for a connection.
 

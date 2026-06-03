@@ -21,7 +21,7 @@ from PyQt6.QtWidgets import QApplication, QWidget
 from dbaide.assets import AssetStore
 from dbaide.config import ConfigManager
 from dbaide.desktop.service import DesktopService
-from dbaide.desktop.theme import APP_STYLE
+from dbaide.desktop.theme import app_style
 from dbaide.desktop.views.main_window import MainWindow
 from dbaide.models import ConnectionConfig, ModelConfig
 
@@ -161,7 +161,7 @@ def grab(widget: QWidget, name: str) -> None:
 
 def main() -> int:
     app = QApplication.instance() or QApplication([])
-    app.setStyleSheet(APP_STYLE)
+    app.setStyleSheet(app_style())
     win = build_window(app)
     populate(win)
     for _ in range(5):

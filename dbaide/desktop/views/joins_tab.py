@@ -21,13 +21,13 @@ from PyQt6.QtWidgets import (
 )
 
 from dbaide.desktop.components.inputs import FORM_INNER_LABEL_RULES, configure_form, form_label
-from dbaide.desktop.theme import APP_STYLE, Theme
+from dbaide.desktop.theme import app_style, Theme
 
 
 class JoinEditorDialog(QDialog):
     def __init__(self, parent=None, *, initial: dict[str, Any] | None = None) -> None:
         super().__init__(parent)
-        self.setStyleSheet(APP_STYLE)
+        self.setStyleSheet(app_style())
         self.setWindowTitle("Edit Join" if initial else "Add Join")
         layout = QFormLayout(self)
         configure_form(layout)

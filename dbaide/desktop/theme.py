@@ -1,62 +1,20 @@
-"""Dark theme tokens and global Qt stylesheet for DBAide desktop."""
+"""Theme tokens and global Qt stylesheet for DBAide desktop.
+
+Supports dark (default) and light themes. The module-level ``Theme`` reference
+always points at the active palette class; call ``set_theme("light")`` or
+``set_theme("dark")`` to switch. ``app_style()`` returns the full QSS string
+using the *current* Theme at call time so it can be re-applied after a switch.
+"""
 
 from __future__ import annotations
 
 import tempfile
 from pathlib import Path
 
-# Glyphs for native controls (checkbox tick, combo/spinbox chevrons). Each is
-# materialised from this embedded SVG to a temp file at import (rather than a
-# shipped asset) so the QSS url() resolves identically in dev, installed wheels,
-# and frozen PyInstaller builds — no package-data wiring needed. POSIX paths so
-# url() works on every platform.
-_ICON_SVGS = {
-    "check": (
-        '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 16 16">'
-        '<path d="M3.5 8.5 L6.5 11.5 L12.5 5" fill="none" stroke="#ffffff" stroke-width="2"'
-        ' stroke-linecap="round" stroke-linejoin="round"/></svg>'
-    ),
-    "chevron-down": (
-        '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 16 16">'
-        '<path d="M4 6.5 L8 10.5 L12 6.5" fill="none" stroke="#b7bec9" stroke-width="1.6"'
-        ' stroke-linecap="round" stroke-linejoin="round"/></svg>'
-    ),
-    "chevron-up": (
-        '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 16 16">'
-        '<path d="M4 9.5 L8 5.5 L12 9.5" fill="none" stroke="#b7bec9" stroke-width="1.6"'
-        ' stroke-linecap="round" stroke-linejoin="round"/></svg>'
-    ),
-    "close": (
-        '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 16 16">'
-        '<path d="M4.5 4.5 L11.5 11.5 M11.5 4.5 L4.5 11.5" fill="none" stroke="#8b93a1"'
-        ' stroke-width="1.5" stroke-linecap="round"/></svg>'
-    ),
-}
 
+# ── Palette classes ──────────────────────────────────────────────────────────
 
-def _materialize_icons() -> dict[str, str]:
-    paths: dict[str, str] = {}
-    try:
-        icon_dir = Path(tempfile.gettempdir()) / "dbaide-icons"
-        icon_dir.mkdir(exist_ok=True)
-        for name, svg in _ICON_SVGS.items():
-            path = icon_dir / f"{name}.svg"
-            if not path.exists() or path.read_text() != svg:
-                path.write_text(svg)
-            paths[name] = path.as_posix()
-    except OSError:
-        pass  # no writable temp → controls fall back to no-glyph states
-    return paths
-
-
-_ICONS = _materialize_icons()
-_CHECK_ICON = _ICONS.get("check", "")
-_CHEVRON_DOWN = _ICONS.get("chevron-down", "")
-_CHEVRON_UP = _ICONS.get("chevron-up", "")
-_CLOSE_ICON = _ICONS.get("close", "")
-
-
-class Theme:
+class _DarkTheme:
     BG = "#07080a"
     SURFACE = "#0d0f12"
     PANEL = "#111419"
@@ -80,76 +38,194 @@ class Theme:
     NULL = "#515865"
 
 
-_INPUT = f"""
-    background: {Theme.PANEL};
-    color: {Theme.TEXT};
-    border: 1px solid {Theme.BORDER};
-    border-radius: 9px;
-    min-height: 30px;
-    max-height: 30px;
-    selection-background-color: {Theme.PANEL_3};
-"""
+class _LightTheme:
+    BG = "#ffffff"
+    SURFACE = "#f8f9fa"
+    PANEL = "#f1f3f5"
+    PANEL_2 = "#e9ecef"
+    PANEL_3 = "#dee2e6"
+    BORDER = "#dee2e6"
+    BORDER_SOFT = "#e9ecef"
+    TEXT = "#1a1a2e"
+    TEXT_2 = "#495057"
+    MUTED = "#868e96"
+    MUTED_2 = "#adb5bd"
+    ACCENT = "#3b82f6"
+    ACCENT_HOVER = "#2563eb"
+    ACCENT_TEXT = "#ffffff"
+    BLUE = "#3b82f6"
+    FOCUS = "#3b82f6"
+    GREEN = "#22c55e"
+    YELLOW = "#eab308"
+    RED = "#ef4444"
+    CODE_BG = "#f1f3f5"
+    NULL = "#adb5bd"
 
-APP_STYLE = f"""
+
+# ── Theme accessor / switcher ────────────────────────────────────────────────
+
+_THEMES: dict[str, type] = {"dark": _DarkTheme, "light": _LightTheme}
+Theme = _DarkTheme  # module-level reference; reassigned by set_theme()
+
+
+def set_theme(name: str) -> None:
+    """Switch the active theme palette. Call ``app_style()`` afterwards to get
+    the updated QSS and re-apply it to your QApplication / top-level widgets."""
+    global Theme
+    Theme = _THEMES.get(name, _DarkTheme)
+    # Regenerate icon files so SVG stroke colors match the new palette.
+    _regenerate_icons()
+
+
+def current_theme_name() -> str:
+    return "light" if Theme is _LightTheme else "dark"
+
+
+# ── Icon materialisation ────────────────────────────────────────────────────
+# Glyphs for native controls (checkbox tick, combo/spinbox chevrons). Each is
+# materialised from embedded SVG to a temp file (rather than a shipped asset)
+# so the QSS url() resolves identically in dev, installed wheels, and frozen
+# PyInstaller builds. POSIX paths so url() works on every platform.
+
+
+def _icon_svgs() -> dict[str, str]:
+    """Build SVG strings using the *current* Theme palette."""
+    check_color = "#ffffff"  # always white on the accent background
+    chevron_color = Theme.TEXT_2
+    close_color = Theme.MUTED
+    return {
+        "check": (
+            '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 16 16">'
+            f'<path d="M3.5 8.5 L6.5 11.5 L12.5 5" fill="none" stroke="{check_color}" stroke-width="2"'
+            ' stroke-linecap="round" stroke-linejoin="round"/></svg>'
+        ),
+        "chevron-down": (
+            '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 16 16">'
+            f'<path d="M4 6.5 L8 10.5 L12 6.5" fill="none" stroke="{chevron_color}" stroke-width="1.6"'
+            ' stroke-linecap="round" stroke-linejoin="round"/></svg>'
+        ),
+        "chevron-up": (
+            '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 16 16">'
+            f'<path d="M4 9.5 L8 5.5 L12 9.5" fill="none" stroke="{chevron_color}" stroke-width="1.6"'
+            ' stroke-linecap="round" stroke-linejoin="round"/></svg>'
+        ),
+        "close": (
+            '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 16 16">'
+            f'<path d="M4.5 4.5 L11.5 11.5 M11.5 4.5 L4.5 11.5" fill="none" stroke="{close_color}"'
+            ' stroke-width="1.5" stroke-linecap="round"/></svg>'
+        ),
+    }
+
+
+def _materialize_icons() -> dict[str, str]:
+    paths: dict[str, str] = {}
+    try:
+        icon_dir = Path(tempfile.gettempdir()) / "dbaide-icons"
+        icon_dir.mkdir(exist_ok=True)
+        for name, svg in _icon_svgs().items():
+            path = icon_dir / f"{name}.svg"
+            # Always overwrite — the theme may have changed.
+            if not path.exists() or path.read_text() != svg:
+                path.write_text(svg)
+            paths[name] = path.as_posix()
+    except OSError:
+        pass  # no writable temp -> controls fall back to no-glyph states
+    return paths
+
+
+def _regenerate_icons() -> None:
+    """Re-materialise icon files after a theme switch."""
+    global _ICONS, _CHECK_ICON, _CHEVRON_DOWN, _CHEVRON_UP, _CLOSE_ICON
+    _ICONS = _materialize_icons()
+    _CHECK_ICON = _ICONS.get("check", "")
+    _CHEVRON_DOWN = _ICONS.get("chevron-down", "")
+    _CHEVRON_UP = _ICONS.get("chevron-up", "")
+    _CLOSE_ICON = _ICONS.get("close", "")
+
+
+_ICONS = _materialize_icons()
+_CHECK_ICON = _ICONS.get("check", "")
+_CHEVRON_DOWN = _ICONS.get("chevron-down", "")
+_CHEVRON_UP = _ICONS.get("chevron-up", "")
+_CLOSE_ICON = _ICONS.get("close", "")
+
+
+# ── Stylesheet ───────────────────────────────────────────────────────────────
+
+def app_style() -> str:
+    """Return the full application QSS using the *current* ``Theme``."""
+    T = Theme  # local alias for brevity
+
+    _INPUT = f"""
+        background: {T.PANEL};
+        color: {T.TEXT};
+        border: 1px solid {T.BORDER};
+        border-radius: 9px;
+        min-height: 26px;
+        max-height: 26px;
+        selection-background-color: {T.PANEL_3};
+    """
+
+    return f"""
 * {{
     font-family: Inter, -apple-system, BlinkMacSystemFont, "Segoe UI";
-    color: {Theme.TEXT};
+    color: {T.TEXT};
     font-size: 13px;
 }}
 QMainWindow, QWidget#root {{
-    background: {Theme.BG};
+    background: {T.BG};
 }}
 QDialog {{
-    background: {Theme.BG};
-    color: {Theme.TEXT};
+    background: {T.BG};
+    color: {T.TEXT};
 }}
 QFrame[panel="true"] {{
-    background: {Theme.SURFACE};
-    border: 1px solid {Theme.BORDER_SOFT};
+    background: {T.SURFACE};
+    border: 1px solid {T.BORDER_SOFT};
     border-radius: 10px;
 }}
 QLabel[muted="true"] {{
-    color: {Theme.MUTED};
+    color: {T.MUTED};
     font-size: 11px;
     font-weight: 700;
     letter-spacing: 0.8px;
     padding-left: 2px;
 }}
 QPushButton {{
-    background: {Theme.PANEL_2};
-    color: {Theme.TEXT_2};
-    border: 1px solid {Theme.BORDER};
+    background: {T.PANEL_2};
+    color: {T.TEXT_2};
+    border: 1px solid {T.BORDER};
     border-radius: 9px;
-    padding: 0px 13px;
-    min-height: 30px;
-    max-height: 30px;
+    padding: 0px 10px;
+    min-height: 26px;
+    max-height: 26px;
 }}
 QPushButton:hover {{
-    background: {Theme.PANEL_3};
-    color: {Theme.TEXT};
+    background: {T.PANEL_3};
+    color: {T.TEXT};
 }}
 QPushButton:disabled {{
-    color: {Theme.MUTED_2};
-    background: {Theme.PANEL};
+    color: {T.MUTED_2};
+    background: {T.PANEL};
 }}
 QPushButton[primary="true"] {{
-    background: {Theme.ACCENT};
-    color: {Theme.ACCENT_TEXT};
-    border: 1px solid {Theme.ACCENT};
+    background: {T.ACCENT};
+    color: {T.ACCENT_TEXT};
+    border: 1px solid {T.ACCENT};
     font-weight: 600;
-    padding: 0px 13px;
-    min-height: 30px;
-    max-height: 30px;
+    padding: 0px 10px;
+    min-height: 26px;
+    max-height: 26px;
 }}
 QPushButton[primary="true"]:hover {{
-    background: {Theme.ACCENT_HOVER};
-    border: 1px solid {Theme.ACCENT_HOVER};
-    color: {Theme.ACCENT_TEXT};
+    background: {T.ACCENT_HOVER};
+    border: 1px solid {T.ACCENT_HOVER};
+    color: {T.ACCENT_TEXT};
 }}
 QPushButton[primary="true"]:disabled {{
-    background: {Theme.PANEL_2};
-    color: {Theme.MUTED_2};
-    border: 1px solid {Theme.BORDER};
+    background: {T.PANEL_2};
+    color: {T.MUTED_2};
+    border: 1px solid {T.BORDER};
 }}
 QPushButton[tab="true"] {{
     border-radius: 8px 8px 0 0;
@@ -157,16 +233,16 @@ QPushButton[tab="true"] {{
     background: transparent;
 }}
 QPushButton[tab="true"][active="true"] {{
-    color: {Theme.TEXT};
-    border-bottom: 2px solid {Theme.BLUE};
-    background: {Theme.PANEL_2};
+    color: {T.TEXT};
+    border-bottom: 2px solid {T.BLUE};
+    background: {T.PANEL_2};
 }}
 QLineEdit {{
     {_INPUT}
     padding: 0px 12px;
 }}
 QLineEdit:focus, QTextEdit:focus, QPlainTextEdit:focus, QComboBox:focus, QSpinBox:focus {{
-    border: 1px solid {Theme.FOCUS};
+    border: 1px solid {T.FOCUS};
 }}
 QComboBox {{
     {_INPUT}
@@ -184,21 +260,21 @@ QComboBox::down-arrow {{
     width: 14px;
     height: 14px;
 }}
-/* Lighter topbar selectors — a soft chip (transparent, soft border) rather than a
+/* Lighter topbar selectors -- a soft chip (transparent, soft border) rather than a
    heavy boxed input, so the top bar reads calm. */
 QComboBox[soft="true"] {{
     background: transparent;
-    border: 1px solid {Theme.BORDER_SOFT};
+    border: 1px solid {T.BORDER_SOFT};
 }}
 QComboBox[soft="true"]:hover {{
-    background: {Theme.PANEL_2};
-    border: 1px solid {Theme.BORDER};
+    background: {T.PANEL_2};
+    border: 1px solid {T.BORDER};
 }}
 QComboBox QAbstractItemView {{
-    background: {Theme.PANEL};
-    color: {Theme.TEXT};
-    selection-background-color: {Theme.PANEL_3};
-    border: 1px solid {Theme.BORDER};
+    background: {T.PANEL};
+    color: {T.TEXT};
+    selection-background-color: {T.PANEL_3};
+    border: 1px solid {T.BORDER};
     border-radius: 8px;
     padding: 4px;
     outline: none;
@@ -230,7 +306,7 @@ QSpinBox::down-button {{
     background: transparent;
 }}
 QSpinBox::up-button:hover, QSpinBox::down-button:hover {{
-    background: {Theme.PANEL_3};
+    background: {T.PANEL_3};
 }}
 QSpinBox::up-arrow {{
     image: url({_CHEVRON_UP});
@@ -243,18 +319,18 @@ QSpinBox::down-arrow {{
     height: 12px;
 }}
 QTextEdit, QTextBrowser, QPlainTextEdit, QListWidget, QTreeWidget, QTableWidget {{
-    background: {Theme.SURFACE};
-    color: {Theme.TEXT};
-    border: 1px solid {Theme.BORDER_SOFT};
+    background: {T.SURFACE};
+    color: {T.TEXT};
+    border: 1px solid {T.BORDER_SOFT};
     border-radius: 8px;
-    selection-background-color: {Theme.PANEL_3};
+    selection-background-color: {T.PANEL_3};
 }}
 QScrollArea {{
     background: transparent;
     border: none;
 }}
 QScrollArea QWidget {{
-    background: {Theme.BG};
+    background: {T.BG};
 }}
 QLabel#formLabel {{
     background-color: rgba(0, 0, 0, 0);
@@ -262,57 +338,57 @@ QLabel#formLabel {{
     border: none;
     border-width: 0;
     border-radius: 0;
-    color: {Theme.TEXT_2};
+    color: {T.TEXT_2};
     font-size: 13px;
     font-weight: 400;
     padding: 0 10px 0 0;
     margin: 0;
 }}
 QTabWidget::pane {{
-    border: 1px solid {Theme.BORDER_SOFT};
+    border: 1px solid {T.BORDER_SOFT};
     border-radius: 8px;
-    background: {Theme.SURFACE};
+    background: {T.SURFACE};
     top: -1px;
 }}
 QTabBar::tab {{
-    background: {Theme.PANEL};
-    color: {Theme.MUTED};
-    padding: 8px 14px;
-    border: 1px solid {Theme.BORDER_SOFT};
+    background: {T.PANEL};
+    color: {T.MUTED};
+    padding: 6px 12px;
+    border: 1px solid {T.BORDER_SOFT};
     border-bottom: none;
     margin-right: 2px;
 }}
 QTabBar::tab:selected {{
-    background: {Theme.SURFACE};
-    color: {Theme.TEXT};
-    border-bottom: 2px solid {Theme.BLUE};
+    background: {T.SURFACE};
+    color: {T.TEXT};
+    border-bottom: 2px solid {T.BLUE};
 }}
 QHeaderView::section {{
-    background: {Theme.PANEL_2};
-    color: {Theme.TEXT_2};
+    background: {T.PANEL_2};
+    color: {T.TEXT_2};
     border: none;
-    padding: 6px 8px;
+    padding: 4px 8px;
     font-weight: 600;
 }}
 QSplitter::handle {{
-    background: {Theme.BORDER_SOFT};
+    background: {T.BORDER_SOFT};
     width: 1px;
 }}
 QSplitter::handle:hover {{
-    background: {Theme.BORDER};
+    background: {T.BORDER};
 }}
 QSplitter::handle:pressed {{
-    background: {Theme.ACCENT};
+    background: {T.ACCENT};
 }}
 QTreeWidget::item, QListWidget::item {{
-    padding: 5px 8px;
+    padding: 3px 6px;
 }}
 QTreeWidget::item:hover {{
-    background: {Theme.PANEL_2};
+    background: {T.PANEL_2};
 }}
 QTreeWidget::item:selected {{
-    background: {Theme.PANEL_3};
-    color: {Theme.TEXT};
+    background: {T.PANEL_3};
+    color: {T.TEXT};
 }}
 /* Lists are always single-column, so a rounded hover/selection reads cleanly
    (unlike the multi-column trace tree, which keeps square full-row highlights). */
@@ -321,29 +397,29 @@ QListWidget::item {{
     margin: 1px 0;
 }}
 QListWidget::item:hover {{
-    background: {Theme.PANEL_2};
+    background: {T.PANEL_2};
 }}
 QListWidget::item:selected {{
-    background: {Theme.PANEL_3};
-    color: {Theme.TEXT};
+    background: {T.PANEL_3};
+    color: {T.TEXT};
 }}
 /* Slim, floating scrollbars: transparent track, rounded handle that brightens on
-   hover, no arrow buttons — matches the rest of the dark chrome. */
+   hover, no arrow buttons -- matches the rest of the chrome. */
 QScrollBar:vertical {{
     background: transparent;
     width: 10px;
     margin: 2px;
 }}
 QScrollBar::handle:vertical {{
-    background: {Theme.PANEL_3};
+    background: {T.PANEL_3};
     border-radius: 3px;
     min-height: 28px;
 }}
 QScrollBar::handle:vertical:hover {{
-    background: {Theme.MUTED_2};
+    background: {T.MUTED_2};
 }}
 QScrollBar::handle:vertical:pressed {{
-    background: {Theme.MUTED};
+    background: {T.MUTED};
 }}
 QScrollBar:horizontal {{
     background: transparent;
@@ -351,15 +427,15 @@ QScrollBar:horizontal {{
     margin: 2px;
 }}
 QScrollBar::handle:horizontal {{
-    background: {Theme.PANEL_3};
+    background: {T.PANEL_3};
     border-radius: 3px;
     min-width: 28px;
 }}
 QScrollBar::handle:horizontal:hover {{
-    background: {Theme.MUTED_2};
+    background: {T.MUTED_2};
 }}
 QScrollBar::handle:horizontal:pressed {{
-    background: {Theme.MUTED};
+    background: {T.MUTED};
 }}
 QScrollBar::add-line, QScrollBar::sub-line {{
     width: 0; height: 0; background: none; border: none;
@@ -371,31 +447,31 @@ QAbstractScrollArea::corner {{
     background: transparent;
 }}
 QToolButton {{
-    background: {Theme.PANEL_2};
-    color: {Theme.TEXT_2};
-    border: 1px solid {Theme.BORDER};
+    background: {T.PANEL_2};
+    color: {T.TEXT_2};
+    border: 1px solid {T.BORDER};
     border-radius: 9px;
     padding: 0px 10px;
-    min-height: 30px;
-    max-height: 30px;
+    min-height: 26px;
+    max-height: 26px;
 }}
 QToolButton:hover {{
-    background: {Theme.PANEL_3};
-    color: {Theme.TEXT};
+    background: {T.PANEL_3};
+    color: {T.TEXT};
 }}
 QTabBar[segmented="true"]::tab {{
-    background: {Theme.PANEL};
-    color: {Theme.MUTED};
-    padding: 7px 18px;
-    border: 1px solid {Theme.BORDER_SOFT};
+    background: {T.PANEL};
+    color: {T.MUTED};
+    padding: 5px 14px;
+    border: 1px solid {T.BORDER_SOFT};
     margin-right: 0;
     min-width: 68px;
-    max-height: 30px;
+    max-height: 26px;
 }}
 QTabBar[segmented="true"]::tab:selected {{
-    background: {Theme.PANEL_3};
-    color: {Theme.TEXT};
-    border: 1px solid {Theme.BORDER};
+    background: {T.PANEL_3};
+    color: {T.TEXT};
+    border: 1px solid {T.BORDER};
 }}
 QTabBar[segmented="true"]::tab:first {{
     border-top-left-radius: 8px;
@@ -407,23 +483,23 @@ QTabBar[segmented="true"]::tab:last {{
 }}
 QTabBar[panelTabs="true"]::tab {{
     background: transparent;
-    color: {Theme.MUTED};
-    padding: 4px 12px;
+    color: {T.MUTED};
+    padding: 3px 10px;
     border: none;
     margin: 0;
-    min-height: 28px;
-    max-height: 28px;
+    min-height: 24px;
+    max-height: 24px;
     font-size: 12px;
     font-weight: 500;
 }}
 QTabBar[panelTabs="true"]::tab:selected {{
-    background: {Theme.PANEL_3};
-    color: {Theme.TEXT};
+    background: {T.PANEL_3};
+    color: {T.TEXT};
     border-radius: 6px;
 }}
 QTabBar[panelTabs="true"]::tab:hover:!selected {{
-    color: {Theme.TEXT_2};
-    background: {Theme.PANEL_2};
+    color: {T.TEXT_2};
+    background: {T.PANEL_2};
     border-radius: 6px;
 }}
 QTabBar[panelTabs="true"]::close-button {{
@@ -433,38 +509,38 @@ QTabBar[panelTabs="true"]::close-button {{
     border-radius: 4px;
 }}
 QTabBar[panelTabs="true"]::close-button:hover {{
-    background: {Theme.PANEL};
+    background: {T.PANEL};
 }}
 QFrame[panelContent="true"] {{
-    background: {Theme.SURFACE};
-    border: 1px solid {Theme.BORDER_SOFT};
+    background: {T.SURFACE};
+    border: 1px solid {T.BORDER_SOFT};
     border-radius: 10px;
 }}
 QStatusBar {{
-    background: {Theme.BG};
-    color: {Theme.MUTED};
-    border-top: 1px solid {Theme.BORDER_SOFT};
+    background: {T.BG};
+    color: {T.MUTED};
+    border-top: 1px solid {T.BORDER_SOFT};
 }}
-/* Dark tooltip — the native one is a light box that clashes with the chrome. */
+/* Tooltip -- the native one is a light box that clashes with the chrome. */
 QToolTip {{
-    background: {Theme.PANEL_3};
-    color: {Theme.TEXT};
-    border: 1px solid {Theme.BORDER};
+    background: {T.PANEL_3};
+    color: {T.TEXT};
+    border: 1px solid {T.BORDER};
     border-radius: 6px;
     padding: 4px 8px;
 }}
-/* Themed checkboxes / radios — without this they fall back to the native platform
+/* Themed checkboxes / radios -- without this they fall back to the native platform
    control, which clashes with the dark chrome. Checked = filled accent. */
 QCheckBox, QRadioButton {{
     spacing: 8px;
-    color: {Theme.TEXT_2};
+    color: {T.TEXT_2};
     background: transparent;
 }}
 QCheckBox::indicator, QRadioButton::indicator {{
     width: 16px;
     height: 16px;
-    background: {Theme.PANEL};
-    border: 1px solid {Theme.BORDER};
+    background: {T.PANEL};
+    border: 1px solid {T.BORDER};
 }}
 QCheckBox::indicator {{
     border-radius: 4px;
@@ -473,15 +549,22 @@ QRadioButton::indicator {{
     border-radius: 9px;
 }}
 QCheckBox::indicator:hover, QRadioButton::indicator:hover {{
-    border-color: {Theme.MUTED};
+    border-color: {T.MUTED};
 }}
 QCheckBox::indicator:checked, QRadioButton::indicator:checked {{
-    background: {Theme.ACCENT};
-    border-color: {Theme.ACCENT};
+    background: {T.ACCENT};
+    border-color: {T.ACCENT};
     image: url({_CHECK_ICON});
 }}
 QCheckBox::indicator:disabled, QRadioButton::indicator:disabled {{
-    background: {Theme.PANEL_2};
-    border-color: {Theme.BORDER_SOFT};
+    background: {T.PANEL_2};
+    border-color: {T.BORDER_SOFT};
 }}
 """
+
+
+# ── Backward compatibility ───────────────────────────────────────────────────
+# Old code imported ``APP_STYLE`` as a constant. Keep it available as a lazy
+# property-like string so ``from theme import APP_STYLE`` still works at module
+# level, but the value is computed fresh each time it is *used*.
+APP_STYLE = app_style()

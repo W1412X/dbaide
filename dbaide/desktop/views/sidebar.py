@@ -130,16 +130,22 @@ class Sidebar(QWidget):
             item.setFlags(Qt.ItemFlag.ItemIsEnabled)
             self.tree.addTopLevelItem(item)
             return
+        db_icon = svg_icon("database", size=14)
+        tbl_icon = svg_icon("table", size=14)
+        col_icon = svg_icon("columns", size=14)
         for db in rows:
             db_item = QTreeWidgetItem([db["name"]])
+            db_item.setIcon(0, db_icon)
             db_item.setData(0, Qt.ItemDataRole.UserRole, db)
             for table in db.get("children", []):
                 table_item = QTreeWidgetItem([f"{table['name']} ({table.get('column_count', 0)})"])
+                table_item.setIcon(0, tbl_icon)
                 table_item.setData(0, Qt.ItemDataRole.UserRole, table)
                 db_item.addChild(table_item)
                 for col in table.get("children", []):
                     suffix = f" · {col.get('data_type')}" if col.get("data_type") else ""
                     col_item = QTreeWidgetItem([f"{col['name']}{suffix}"])
+                    col_item.setIcon(0, col_icon)
                     col_item.setData(0, Qt.ItemDataRole.UserRole, col)
                     table_item.addChild(col_item)
             self.tree.addTopLevelItem(db_item)

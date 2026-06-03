@@ -103,6 +103,9 @@ _STRINGS: dict[str, dict[str, str]] = {
     "settings.resources": {"en": "Resources", "zh": "资源"},
     "settings.general": {"en": "General", "zh": "通用"},
     "settings.back": {"en": "← Back", "zh": "← 返回"},
+    "settings.theme": {"en": "Theme", "zh": "主题"},
+    "settings.theme.light": {"en": "Light", "zh": "浅色"},
+    "settings.theme.dark": {"en": "Dark", "zh": "深色"},
     "settings.language": {"en": "Language", "zh": "语言"},
     "settings.language.hint": {
         "en": "Interface, prompts and the model's default answer language.",

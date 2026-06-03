@@ -58,16 +58,16 @@ class MenuButton(QToolButton):
         self._icon_only = icon_only
         if icon_only and icon is not None:
             self.setIcon(icon)
-            self.setIconSize(QSize(17, 17))
+            self.setIconSize(QSize(15, 15))
             self.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonIconOnly)
-            self.setFixedSize(30, 30)
+            self.setFixedSize(26, 26)
             self.setAutoRaise(True)
             if tooltip:
                 self.setToolTip(tooltip)
         else:
             self.setText(text)
             self.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextOnly)
-            self.setFixedHeight(30)
+            self.setFixedHeight(26)
         self.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
         self._menu = QMenu(self)
         _style_menu(self._menu)
@@ -170,7 +170,7 @@ class PillSelect(QToolButton):
         self.setMenu(self._menu)
         self.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextOnly)
         self.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.setFixedHeight(30)
+        self.setFixedHeight(26)
         self.setMaximumWidth(max_width)
         self.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Fixed)
         # Soft selector — a subtle visible fill (no border, so it doesn't double up

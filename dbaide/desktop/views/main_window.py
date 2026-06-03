@@ -25,7 +25,7 @@ from dbaide.desktop.components.composer import ComposerWidget
 from dbaide.desktop.dialogs.build_assets import BuildAssetsDialog
 from dbaide.desktop.dialogs.settings import SettingsDialog
 from dbaide.agent.progress_events import progress_label
-from dbaide.desktop.theme import APP_STYLE
+from dbaide.desktop.theme import app_style
 from dbaide.desktop.event_bus import (
     ASSETS_CHANGED,
     CONNECTIONS_CHANGED,
@@ -88,7 +88,7 @@ class MainWindow(QMainWindow):
         self.setWindowTitle("DBAide")
         self.resize(1440, 900)
         self.setMinimumSize(1000, 720)
-        self.setStyleSheet(APP_STYLE)
+        self.setStyleSheet(app_style())
         self._build()
         # The activity panel (Trace/Inspector) is available in both modes — in
         # Workbench it shows Inspector (asset docs), in Assistant it shows Trace.

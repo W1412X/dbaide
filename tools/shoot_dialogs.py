@@ -9,7 +9,7 @@ from pathlib import Path
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 from PyQt6.QtWidgets import QApplication  # noqa: E402
 
-from dbaide.desktop.theme import APP_STYLE  # noqa: E402
+from dbaide.desktop.theme import app_style  # noqa: E402
 
 TAG = sys.argv[1] if len(sys.argv) > 1 else "base"
 OUT = Path("/tmp/shots")
@@ -25,7 +25,7 @@ def grab(w, name):
 
 def main() -> int:
     app = QApplication.instance() or QApplication([])
-    app.setStyleSheet(APP_STYLE)
+    app.setStyleSheet(app_style())
 
     from dbaide.desktop.dialogs.settings import SettingsDialog
     from dbaide.desktop.dialogs.connection import ConnectionForm, ConnectionDialog
@@ -71,7 +71,7 @@ if __name__ == "__main__":
 
 def main_extra() -> int:
     app = QApplication.instance() or QApplication([])
-    app.setStyleSheet(APP_STYLE)
+    app.setStyleSheet(app_style())
     from dbaide.desktop.views.history_tab import HistoryTab
     from dbaide.desktop.views.joins_tab import JoinsTab
     h = HistoryTab(); h.resize(560, 460)

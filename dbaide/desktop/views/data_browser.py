@@ -135,7 +135,7 @@ class DataBrowser(QWidget):
         self._filter.setClearButtonEnabled(True)
         self._filter.returnPressed.connect(self._on_filter)
         # leading magnifier-ish handled by placeholder; keep it simple/compact
-        self._filter.setFixedHeight(30)
+        self._filter.setFixedHeight(26)
         pl.addWidget(self._filter)
 
         self.grid = ResultTableWidget()

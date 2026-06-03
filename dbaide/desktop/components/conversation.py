@@ -282,7 +282,7 @@ class _ClarificationBar(QFrame):
             chips = FlowLayout(chips_host, spacing=6)
             for option in options:
                 btn = AgentButton(option)            # sizes to its full text — no truncation
-                btn.setFixedHeight(30)
+                btn.setFixedHeight(26)
                 btn.setMaximumWidth(360)             # very long → clips with a tooltip (full text)
                 btn.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Fixed)
                 btn.setToolTip(option)
@@ -297,7 +297,7 @@ class _ClarificationBar(QFrame):
         self._input.setPlaceholderText(
             "Type your answer…" if allow_direct_submit else "Type your answers (one line covers all the questions)…"
         )
-        self._input.setFixedHeight(30)
+        self._input.setFixedHeight(26)
         self._input.returnPressed.connect(self._on_send)
         row.addWidget(self._input, 1)
         self._send = compact_button("Send", primary=True, width=72)
