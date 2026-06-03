@@ -47,6 +47,10 @@ class SqlTab(QWidget):
         hint.setStyleSheet(f"color: {Theme.MUTED_2}; font-size: 11px; background: transparent;")
         run_row.addWidget(hint)
         run_row.addStretch(1)
+        self.format_btn = compact_button(t("sql.format"), width=84)
+        self.format_btn.setToolTip(t("sql.format_tooltip"))
+        self.format_btn.clicked.connect(self._format)
+        run_row.addWidget(self.format_btn)
         self.run_btn = compact_button(t("sql.run"), primary=True, width=92)
         self.run_btn.setIcon(svg_icon("play", color="#ffffff", size=13))
         self.run_btn.setIconSize(QSize(13, 13))
@@ -81,11 +85,30 @@ class SqlTab(QWidget):
             if event.key() in (Qt.Key.Key_Return, Qt.Key.Key_Enter) and mod:
                 self._run()
                 return True
+            # ⌘⇧F / Ctrl+Shift+F — format the editor contents.
+            if event.key() == Qt.Key.Key_F and mod and (
+                event.modifiers() & Qt.KeyboardModifier.ShiftModifier
+            ):
+                self._format()
+                return True
         return super().eventFilter(obj, event)
+
+    def _current_sql(self) -> str:
+        """The statement under the cursor (so multi-statement editors 'just run')."""
+        from dbaide.rendering.sql_format import statement_at
+        text = self.editor.toPlainText()
+        return statement_at(text, self.editor.textCursor().position())
 
     def _run(self) -> None:
         if self.run_btn.isEnabled():
-            self.run_requested.emit(self.editor.toPlainText(), "execute")
+            self.run_requested.emit(self._current_sql(), "execute")
+
+    def _format(self) -> None:
+        from dbaide.rendering.sql_format import format_sql
+        text = self.editor.toPlainText()
+        formatted = format_sql(text)
+        if formatted and formatted != text:
+            self.editor.setPlainText(formatted)
 
     def set_running(self, running: bool) -> None:
         if running:

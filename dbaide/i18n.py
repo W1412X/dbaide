@@ -152,7 +152,9 @@ _STRINGS: dict[str, dict[str, str]] = {
     # SQL tab
     "sql.run": {"en": "Run", "zh": "运行"},
     "sql.running": {"en": "Running", "zh": "运行中"},
-    "sql.run_hint": {"en": "⌘↵ to run", "zh": "⌘↵ 运行"},
+    "sql.run_hint": {"en": "⌘↵ run statement at cursor", "zh": "⌘↵ 运行光标处语句"},
+    "sql.format": {"en": "Format", "zh": "格式化"},
+    "sql.format_tooltip": {"en": "Format SQL (⌘⇧F)", "zh": "格式化 SQL（⌘⇧F）"},
     "sql.result": {"en": "Result", "zh": "结果"},
     "sql.messages": {"en": "Messages", "zh": "消息"},
     "sql.run_tooltip": {"en": "Run read-only query", "zh": "运行只读查询"},
