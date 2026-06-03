@@ -77,6 +77,9 @@ class TracePanel(QWidget):
         self._tree.setTextElideMode(Qt.TextElideMode.ElideRight)
         self._tree.setFont(QFont("Inter", 11))
         self._tree.setExpandsOnDoubleClick(False)
+        # Borderless — it lives inside the bordered panel; its own box would just be a
+        # redundant frame-in-a-frame. The splitter handle separates it from the detail.
+        self._tree.setStyleSheet("QTreeWidget { background: transparent; border: none; }")
         self._tree.itemClicked.connect(self._on_click)
 
         # Detail pane: a formatted (HTML) view whose top-right corner carries a small
@@ -87,6 +90,7 @@ class TracePanel(QWidget):
         configure_readonly_text_view(self._detail)
         self._detail.setPlaceholderText("Click a step to inspect it.")
         self._detail.setMinimumHeight(96)
+        self._detail.setStyleSheet("QTextBrowser { background: transparent; border: none; }")
         self._detail.viewport().installEventFilter(self)
 
         self._copy_raw_btn = QToolButton(self._detail)

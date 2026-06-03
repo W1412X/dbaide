@@ -66,6 +66,8 @@ class RightPanel(QWidget):
         self.inspect_json = QTextBrowser()
         self.inspect_json.setFontFamily("Menlo")
         configure_readonly_text_view(self.inspect_json)
+        # Borderless — lives inside the bordered panel (no frame-in-a-frame).
+        self.inspect_json.setStyleSheet("QTextBrowser { background: transparent; border: none; }")
         inspect = QWidget()
         inspect_layout = QVBoxLayout(inspect)
         inspect_layout.setContentsMargins(0, 0, 0, 0)
