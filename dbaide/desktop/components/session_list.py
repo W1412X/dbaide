@@ -137,11 +137,16 @@ class _SessionRow(QWidget):
         self._elide()
 
     @staticmethod
-    def height_for(title: str, *, content_width: int) -> int:
-        """Row height for a single-line title plus the (smaller) subtitle."""
-        title_h = QFontMetrics(_TITLE_FONT).lineSpacing()
-        sub_h = QFontMetrics(_SUB_FONT).lineSpacing()
-        return title_h + sub_h + 20  # margins (7+7) + spacing (4) + a hair
+    def height_for(title: str, *, content_width: int = 0) -> int:
+        """Row height for a single-line title + the (smaller) subtitle.
+
+        Uses generous padding on top of the metric heights: "Inter" is often absent
+        (the fallback font's line box can be taller) and CJK glyphs are full-height,
+        so a tight fit clips. Width-independent now that the title is one line."""
+        title_h = QFontMetrics(_TITLE_FONT).height()
+        sub_h = QFontMetrics(_SUB_FONT).height()
+        chrome = 7 + 7 + 4  # top/bottom margins + title→sub spacing
+        return title_h + sub_h + chrome + 10  # +10 headroom for font/CJK variance
 
 
 class SessionList(QWidget):
@@ -227,9 +232,10 @@ class SessionList(QWidget):
         row = _SessionRow(title, subtitle)
         item = QListWidgetItem()
         item.setData(_ID_ROLE, key)
-        vw = self.list.viewport().width()
-        content_w = (vw if vw > 40 else 232) - 24
-        item.setSizeHint(QSize(0, _SessionRow.height_for(title, content_width=content_w)))
+        # Take the larger of the metric estimate and the row's own sizeHint — the
+        # latter adapts to whatever font is actually used (incl. CJK / fallbacks).
+        h = max(_SessionRow.height_for(title), row.sizeHint().height() + 4)
+        item.setSizeHint(QSize(0, h))
         self.list.addItem(item)
         self.list.setItemWidget(item, row)
 
@@ -263,18 +269,8 @@ class SessionList(QWidget):
         self.set_current(self._current)
 
     def resizeEvent(self, event) -> None:  # noqa: N802
-        # Recompute row heights for the current width (load may run before layout,
-        # and the sidebar splitter can change the width).
+        # Row heights are single-line (width-independent) now; just keep selection.
         super().resizeEvent(event)
-        vw = self.list.viewport().width()
-        if vw <= 40:
-            return
-        content_w = vw - 24
-        for i in range(self.list.count()):
-            it = self.list.item(i)
-            w = self.list.itemWidget(it)
-            if isinstance(w, _SessionRow):
-                it.setSizeHint(QSize(0, _SessionRow.height_for(w.title(), content_width=content_w)))
         self.set_current(self._current)
 
     def set_current(self, session_id: str) -> None:
