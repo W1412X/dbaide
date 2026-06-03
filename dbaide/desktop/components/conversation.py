@@ -227,24 +227,12 @@ class _MarkdownBlock(QFrame):
         self._body.setStyleSheet(
             f"QTextBrowser {{ background: transparent; border: none; color: {Theme.TEXT}; padding: 0; }}"
         )
-        html = render_markdown_safe(markdown or "")
-        self._body.setHtml(
-            f"<style>body{{margin:0;color:{Theme.TEXT};font-family:Inter,sans-serif;font-size:13px;line-height:1.55;}}"
-            f"p{{margin:5px 0;}}"
-            # Code: an inset block with its own subtle border, the way an AI IDE frames code.
-            f"pre{{background:{Theme.CODE_BG};border:1px solid {Theme.BORDER_SOFT};"
-            f"border-radius:8px;padding:10px 12px;font-family:Menlo,monospace;font-size:12px;white-space:pre-wrap;}}"
-            f"code{{background:{Theme.CODE_BG};border-radius:4px;padding:1px 5px;font-family:Menlo,monospace;font-size:12px;}}"
-            f"pre code{{background:transparent;padding:0;}}"
-            # Tables: horizontal rules only (no boxy grid) — header underlined, rows
-            # separated by a faint line. Reads clean and modern.
-            f"table.md-table{{border-collapse:collapse;width:100%;margin:8px 0;}}"
-            f"table.md-table th,table.md-table td{{border:none;border-bottom:1px solid {Theme.BORDER_SOFT};"
-            f"padding:7px 14px 7px 0;text-align:left;}}"
-            f"table.md-table th{{color:{Theme.MUTED};font-weight:600;font-size:11px;"
-            f"letter-spacing:0.4px;text-transform:uppercase;border-bottom:1px solid {Theme.BORDER};}}"
-            f"a{{color:{Theme.BLUE};}}</style>{html}"
-        )
+        # Qt rich text honours a document's default stylesheet far more reliably than
+        # an inline <style> (which silently drops e.g. inline-code backgrounds), so
+        # full Markdown — blockquotes, headings, lists, code, tables — renders.
+        from dbaide.desktop.components.md_css import markdown_stylesheet
+        self._body.document().setDefaultStyleSheet(markdown_stylesheet())
+        self._body.setHtml(render_markdown_safe(markdown or ""))
         layout.addWidget(self._body)
         self._body.document().documentLayout().documentSizeChanged.connect(self._sync_body_height)
         self._sync_body_height()
