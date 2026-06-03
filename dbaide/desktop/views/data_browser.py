@@ -140,6 +140,7 @@ class DataBrowser(QWidget):
         self._filter.clear()
         self._filter.blockSignals(False)
         self._title.setText(f"{database + '.' if database else ''}{table}")
+        self.grid.set_table_name(table)
         self.stack.setCurrentIndex(1)
         self._reload()
 

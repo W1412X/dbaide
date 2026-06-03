@@ -22,7 +22,7 @@ from PyQt6.QtWidgets import (
 from dbaide.desktop.components.base import AgentButton
 from dbaide.desktop.components.menu import MenuButton
 from dbaide.desktop.theme import Theme
-from dbaide.rendering.table import export_csv
+from dbaide.rendering.table import export_csv, export_insert, export_json, export_markdown_table
 
 
 class ResultTableWidget(QWidget):
@@ -30,6 +30,7 @@ class ResultTableWidget(QWidget):
         super().__init__(parent)
         self._columns: list[str] = []
         self._rows: list[dict[str, Any]] = []
+        self._table_name = "table"  # used by "Copy as INSERT"
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(6)
@@ -40,9 +41,15 @@ class ResultTableWidget(QWidget):
         toolbar.addStretch(1)
         self.export_menu = MenuButton("Export ▾", max_width=96)
         self.export_menu.add_action("Copy as CSV", self.copy_csv)
+        self.export_menu.add_action("Copy as JSON", self.copy_json)
+        self.export_menu.add_action("Copy as Markdown", self.copy_markdown)
+        self.export_menu.add_action("Copy as INSERT", self.copy_insert)
         toolbar.addWidget(self.export_menu)
         layout.addLayout(toolbar)
         self.table = QTableWidget()
+        # Right-click a cell → copy the cell value or the whole row.
+        self.table.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self.table.customContextMenuRequested.connect(self._cell_menu)
         self.table.setFont(QFont("Menlo", 10))
         self.table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Interactive)
         self.table.horizontalHeader().setMinimumSectionSize(72)
@@ -168,8 +175,40 @@ class ResultTableWidget(QWidget):
         value = self._rows[row].get(column)
         CellValueDialog(column, _full_text(value), parent=self).exec()
 
+    def set_table_name(self, name: str) -> None:
+        """Hint used by 'Copy as INSERT' (e.g. the browsed table's name)."""
+        self._table_name = str(name or "table")
+
     def copy_csv(self) -> None:
         QApplication.clipboard().setText(export_csv(self._rows, self._columns))
+
+    def copy_json(self) -> None:
+        QApplication.clipboard().setText(export_json(self._rows, self._columns))
+
+    def copy_markdown(self) -> None:
+        QApplication.clipboard().setText(export_markdown_table(self._rows, self._columns))
+
+    def copy_insert(self) -> None:
+        QApplication.clipboard().setText(export_insert(self._rows, self._columns, table=self._table_name))
+
+    def _cell_menu(self, pos) -> None:
+        item = self.table.itemAt(pos)
+        if item is None:
+            return
+        r, c = item.row(), item.column()
+        from dbaide.desktop.components.menu import _style_menu
+        from PyQt6.QtWidgets import QMenu
+        menu = QMenu(self)
+        _style_menu(menu)
+        menu.addAction("Copy cell", lambda: QApplication.clipboard().setText(self._cell_text(r, c)))
+        menu.addAction("Copy row (JSON)", lambda: QApplication.clipboard().setText(
+            export_json([self._rows[r]], self._columns) if 0 <= r < len(self._rows) else ""))
+        menu.exec(self.table.viewport().mapToGlobal(pos))
+
+    def _cell_text(self, row: int, col: int) -> str:
+        if 0 <= row < len(self._rows) and 0 <= col < len(self._columns):
+            return _full_text(self._rows[row].get(self._columns[col]))
+        return ""
 
     def clear(self) -> None:
         self.table.setRowCount(0)

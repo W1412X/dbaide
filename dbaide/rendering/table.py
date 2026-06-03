@@ -3,7 +3,40 @@ from __future__ import annotations
 
 import csv
 import io
+import json
 from typing import Any
+
+
+def export_json(rows: list[dict[str, Any]], columns: list[str] | None = None) -> str:
+    """Export rows as a pretty-printed JSON array of objects."""
+    if not rows:
+        return "[]"
+    cols = columns or list(rows[0].keys())
+    data = [{c: row.get(c) for c in cols} for row in rows]
+    return json.dumps(data, ensure_ascii=False, indent=2, default=str)
+
+
+def _sql_literal(value: Any) -> str:
+    if value is None:
+        return "NULL"
+    if isinstance(value, bool):
+        return "TRUE" if value else "FALSE"
+    if isinstance(value, (int, float)):
+        return str(value)
+    return "'" + str(value).replace("'", "''") + "'"
+
+
+def export_insert(rows: list[dict[str, Any]], columns: list[str] | None = None,
+                  table: str = "table") -> str:
+    """Export rows as INSERT statements (one per row)."""
+    if not rows:
+        return ""
+    cols = columns or list(rows[0].keys())
+    col_list = ", ".join(cols)
+    return "\n".join(
+        f"INSERT INTO {table} ({col_list}) VALUES (" + ", ".join(_sql_literal(row.get(c)) for c in cols) + ");"
+        for row in rows
+    )
 
 
 def export_csv(rows: list[dict[str, Any]], columns: list[str] | None = None) -> str:
