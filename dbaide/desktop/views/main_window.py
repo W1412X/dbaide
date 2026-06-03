@@ -135,6 +135,15 @@ class MainWindow(QMainWindow):
         self.right.setVisible(self._panel_pref)
         # Panel toggle is always visible
         self.topbar.panel_toggle.setVisible(True)
+        # When showing, guarantee a real width — a previously-collapsed splitter can
+        # leave the panel at 0px so setVisible(True) alone would keep it invisible.
+        if self._panel_pref and hasattr(self, "body_splitter"):
+            sizes = self.body_splitter.sizes()
+            if len(sizes) == 3 and sizes[2] < 120:
+                panel_w = 360
+                sizes[2] = panel_w
+                sizes[1] = max(420, sizes[1] - panel_w)
+                self.body_splitter.setSizes(sizes)
 
     def _wire_bus(self) -> None:
         """Central map of data-change events → who re-fetches. Components react to
@@ -348,7 +357,9 @@ class MainWindow(QMainWindow):
 
     def _save_splitter_sizes(self, *_args) -> None:
         sizes = self.body_splitter.sizes()
-        if len(sizes) == 3 and sizes[0] >= 180 and sizes[1] >= 420:
+        # Only persist a layout where the right panel has a real width — never save a
+        # collapsed (0px) panel, or it would stay invisible after the next launch.
+        if len(sizes) == 3 and sizes[0] >= 180 and sizes[1] >= 420 and sizes[2] >= 120:
             self._settings.setValue("splitter_sizes", sizes)
 
     def current_connection(self) -> str:
