@@ -207,6 +207,38 @@ A: 可以。独立包不依赖系统 Python，配置目录相同。
 
 ---
 
+## 自动构建与发布（GitHub Actions）
+
+`.github/workflows/release.yml` 在 **macOS / Linux / Windows** 上分别用 PyInstaller
+构建桌面包,产物如下:
+
+| 平台 | 产物 |
+| --- | --- |
+| macOS (Apple Silicon) | `DBAide-macOS-arm64.dmg` |
+| macOS (Intel) | `DBAide-macOS-x86_64.dmg` |
+| Linux (x86_64) | `DBAide-Linux-x86_64.tar.gz` |
+| Windows (x86_64) | `DBAide-Windows-x86_64.zip` |
+
+**手动构建(不发布)** — 在 Actions 页面点 *Run workflow*(`workflow_dispatch`),
+产物作为 workflow artifacts 提供下载。
+
+**正式发布** — 打一个 `v*` 标签即可,CI 构建完四个平台后自动创建对应的 GitHub Release
+并附上全部安装包(release notes 自动生成):
+
+```bash
+# 先在 pyproject.toml 里更新 version,提交,然后:
+git tag v0.1.0
+git push origin v0.1.0
+```
+
+`v0.1.0-rc1` 这类带连字符的标签会被标记为 pre-release。发布用的是 GitHub 自动注入的
+`GITHUB_TOKEN`,无需额外配置 secret。
+
+> 提示:PyInstaller 不能交叉编译,所以必须在各目标 OS 上分别构建 —— 这正是用
+> Actions 矩阵的原因。macOS 包未做签名/公证,首次打开需在「系统设置 → 隐私与安全性」放行。
+
+---
+
 ## 相关文件
 
 - [pyproject.toml](../pyproject.toml) — 依赖与 entry points
