@@ -34,6 +34,7 @@ _PAGE_SIZES = ("50", "100", "200", "500")
 class DataBrowser(QWidget):
     query_requested = pyqtSignal(dict)  # browse_table payload
     count_requested = pyqtSignal(dict)  # count_table payload (on-demand exact total)
+    navigate_fk = pyqtSignal(str, str, object)  # (ref_table, ref_column, value)
 
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
@@ -49,6 +50,7 @@ class DataBrowser(QWidget):
         self._where = ""
         self._total: int | None = None      # exact COUNT(*), once requested
         self._total_where = None             # the WHERE the total was computed for
+        self._fk_map: dict[str, tuple[str, str]] = {}  # column -> (ref_table, ref_column)
         self._has_more = False
         self._columns: list[str] = []
         self._loading = False
@@ -139,6 +141,7 @@ class DataBrowser(QWidget):
         # Sorting: clicking a column header re-queries ORDER BY that column.
         self.grid.table.horizontalHeader().setSectionsClickable(True)
         self.grid.table.horizontalHeader().sectionClicked.connect(self._on_sort)
+        self.grid.set_cell_actions_provider(self._fk_cell_actions)
         pl.addWidget(self.grid, 1)
         self.stack.addWidget(page)
 
@@ -198,6 +201,40 @@ class DataBrowser(QWidget):
     def set_running(self, running: bool) -> None:
         self._loading = running
         self._set_controls_enabled(not running)
+
+    def browse_filtered(self, connection: str, database: str, table: str, where: str) -> None:
+        """Set the table identity and a WHERE filter (e.g. from FK navigation) and
+        load from page 1 — used for lazy table docs that haven't browsed yet."""
+        self._conn, self._db, self._table = connection, database, table
+        self._order_by, self._order_dir = "", "asc"
+        self._where = str(where or "")
+        self._offset = 0
+        self._reset_total()
+        self._filter.blockSignals(True)
+        self._filter.setText(self._where)
+        self._filter.blockSignals(False)
+        self._title.setText(f"{database + '.' if database else ''}{table}")
+        self.grid.set_table_name(table)
+        self.stack.setCurrentIndex(1)
+        self._reload()
+
+    def set_foreign_keys(self, fk_map: dict[str, tuple[str, str]]) -> None:
+        """column name -> (referenced table, referenced column), for FK navigation."""
+        self._fk_map = dict(fk_map or {})
+
+    def _fk_cell_actions(self, row: int, col: int):
+        if not (0 <= row < len(self._columns)):
+            return []
+        column = self._columns[col]
+        ref = self._fk_map.get(column)
+        if not ref or not (0 <= row < self.grid.table.rowCount()):
+            return []
+        value = (self.grid._rows[row].get(column) if 0 <= row < len(self.grid._rows) else None)
+        if value is None:
+            return []
+        ref_table, ref_column = ref
+        label = self._t("data.open_referenced", table=ref_table)
+        return [(label, lambda: self.navigate_fk.emit(ref_table, ref_column, value))]
 
     def show_count(self, total: int) -> None:
         """Display the exact COUNT(*) result (for the current WHERE filter)."""

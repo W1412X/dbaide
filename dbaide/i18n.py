@@ -34,6 +34,7 @@ _STRINGS: dict[str, dict[str, str]] = {
     "data.rows_range": {"en": "Rows {start}–{end}", "zh": "第 {start}–{end} 行"},
     "data.rows_range_total": {"en": "Rows {start}–{end} of {total}", "zh": "第 {start}–{end} 行 / 共 {total}"},
     "data.count": {"en": "Count", "zh": "统计行数"},
+    "data.open_referenced": {"en": "Open referenced row in {table}", "zh": "打开 {table} 中被引用的行"},
     "data.count_total": {"en": "{n} rows", "zh": "{n} 行"},
     "data.refresh": {"en": "Refresh", "zh": "刷新"},
     "data.page_size": {"en": "Page size", "zh": "每页"},

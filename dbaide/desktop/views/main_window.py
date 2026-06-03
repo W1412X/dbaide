@@ -237,6 +237,7 @@ class MainWindow(QMainWindow):
         self.workbench.count_requested.connect(self._count_from)
         self.workbench.doc_closed.connect(self._on_doc_closed)
         self.workbench.navigate_table.connect(self._open_table_by_name)
+        self.workbench.navigate_fk.connect(self._navigate_fk)
         self.stack.addWidget(self.ask_tab)    # mode 0 — Assistant
         self.stack.addWidget(self.workbench)  # mode 1 — Workbench
         center_layout.addWidget(self.stack, 1)
@@ -960,17 +961,40 @@ class MainWindow(QMainWindow):
         self.tabbar.setCurrentIndex(1)
         self.workbench.open_sql(sql)
 
+    def _find_table_node(self, table: str) -> dict[str, Any] | None:
+        for db in self.schema_rows:
+            for node in db.get("children") or []:
+                if node.get("kind") == "table" and node.get("name") == table:
+                    return node
+        return None
+
     def _open_table_by_name(self, table: str) -> None:
         """Open a table by name (used by Structure-panel FK links). Searches the
         loaded schema for the matching node so we carry its columns + relations."""
         if not table:
             return
-        for db in self.schema_rows:
-            for node in db.get("children") or []:
-                if node.get("kind") == "table" and node.get("name") == table:
-                    self.open_schema_asset(node)
-                    return
-        self.toast(_i18n_t("toast.table_not_found", table=table))
+        node = self._find_table_node(table)
+        if node is not None:
+            self.open_schema_asset(node)
+        else:
+            self.toast(_i18n_t("toast.table_not_found", table=table))
+
+    def _navigate_fk(self, ref_table: str, ref_column: str, value: object) -> None:
+        """Open the referenced table filtered to the clicked FK value (data-cell
+        'Open referenced row')."""
+        from dbaide.adapters.base import quote_identifier
+        from dbaide.rendering.table import _sql_literal
+        node = self._find_table_node(ref_table)
+        if node is None:
+            self.toast(_i18n_t("toast.table_not_found", table=ref_table))
+            return
+        self.tabbar.setCurrentIndex(1)
+        self.open_schema_asset(node)
+        doc = self.workbench.tabs.currentWidget()
+        if doc is None or not hasattr(doc, "browse_with_filter"):
+            return
+        where = f"{quote_identifier(ref_column, self._dialect())} = {_sql_literal(value)}"
+        doc.browse_with_filter(where)
 
     def load_asset(self, path: str) -> None:
         if path:

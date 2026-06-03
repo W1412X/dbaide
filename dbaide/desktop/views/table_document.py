@@ -20,6 +20,7 @@ class TableDocument(QWidget):
     query_requested = pyqtSignal(dict)
     count_requested = pyqtSignal(dict)
     navigate_table = pyqtSignal(str)  # bubbled from the Structure panel's FK links
+    navigate_fk = pyqtSignal(str, str, object)  # (ref_table, ref_column, value)
 
     def __init__(self, connection: str, database: str, table: str, parent=None) -> None:
         super().__init__(parent)
@@ -36,6 +37,7 @@ class TableDocument(QWidget):
         self.data = DataBrowser()
         self.data.query_requested.connect(self.query_requested.emit)
         self.data.count_requested.connect(self.count_requested.emit)
+        self.data.navigate_fk.connect(self.navigate_fk.emit)
         self.structure = StructurePanel()
         self.structure.navigate_table.connect(self.navigate_table.emit)
         # Structure first — opening a table shows its (offline, instant) structure;
@@ -60,6 +62,13 @@ class TableDocument(QWidget):
         """Render the offline structure and show it. No query runs until the user
         opens the Data tab (see ``_ensure_data``)."""
         self.structure.show_table(self.table, columns or [], relations or {}, indexes or [])
+        # Feed the data grid the outgoing FK map so cells can navigate to refs.
+        fk_map = {
+            fk.get("column"): (fk.get("ref_table"), fk.get("ref_column"))
+            for fk in ((relations or {}).get("foreign_keys") or [])
+            if fk.get("column") and fk.get("ref_table")
+        }
+        self.data.set_foreign_keys(fk_map)
         self.tabs.setCurrentIndex(self._structure_index)
 
     def _on_subtab(self, index: int) -> None:
@@ -75,6 +84,12 @@ class TableDocument(QWidget):
     def focus_data(self) -> None:
         self.tabs.setCurrentIndex(self._data_index)
         self._ensure_data()
+
+    def browse_with_filter(self, where: str) -> None:
+        """Open the Data tab and load it filtered (used by FK navigation)."""
+        self._data_loaded = True  # we load explicitly below; skip the lazy reload
+        self.tabs.setCurrentIndex(self._data_index)
+        self.data.browse_filtered(self.connection, self.database, self.table, where)
 
     def focus_structure(self) -> None:
         self.tabs.setCurrentIndex(self._structure_index)

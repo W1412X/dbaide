@@ -108,3 +108,30 @@ def test_data_browser_count_button(qapp):
     w._filter.setText("id > 1"); w._on_filter()
     assert w._total is None
     assert w._count_btn.text() == w._t("data.count")
+
+
+def test_fk_cell_navigation(qapp):
+    from dbaide.desktop.views.data_browser import DataBrowser
+    w = DataBrowser()
+    nav = []
+    w.navigate_fk.connect(lambda t, c, v: nav.append((t, c, v)))
+    w.set_foreign_keys({"user_id": ("users", "id")})
+    w.show_result({"columns": ["id", "user_id"], "rows": [{"id": 1, "user_id": 7}], "offset": 0})
+    fk_col = w._columns.index("user_id")
+    acts = w._fk_cell_actions(0, fk_col)
+    assert acts and "users" in acts[0][0]
+    acts[0][1]()  # trigger the action
+    assert nav == [("users", "id", 7)]
+    # a non-FK column offers no navigation
+    assert w._fk_cell_actions(0, w._columns.index("id")) == []
+
+
+def test_browse_filtered_sets_identity_and_where(qapp):
+    from dbaide.desktop.views.data_browser import DataBrowser
+    w = DataBrowser()
+    payloads = []
+    w.query_requested.connect(payloads.append)
+    w.browse_filtered("local", "main", "users", '"id" = 3')
+    assert payloads
+    assert payloads[0]["table"] == "users" and payloads[0]["where"] == '"id" = 3'
+    assert w._filter.text() == '"id" = 3'

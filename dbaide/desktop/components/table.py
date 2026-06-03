@@ -35,6 +35,7 @@ class ResultTableWidget(QWidget):
         self._columns: list[str] = []
         self._rows: list[dict[str, Any]] = []
         self._table_name = "table"  # used by "Copy as INSERT"
+        self._cell_actions_provider = None  # optional (row, col) -> [(label, fn)]
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(6)
@@ -350,7 +351,18 @@ class ResultTableWidget(QWidget):
         menu.addAction("Copy cell", lambda: QApplication.clipboard().setText(self._cell_text(r, c)))
         menu.addAction("Copy row (JSON)", lambda: QApplication.clipboard().setText(
             export_json([self._rows[r]], self._columns) if 0 <= r < len(self._rows) else ""))
+        # Context-specific extras (e.g. the data browser's "Open referenced row").
+        if self._cell_actions_provider is not None:
+            extras = self._cell_actions_provider(r, c) or []
+            if extras:
+                menu.addSeparator()
+                for label, fn in extras:
+                    menu.addAction(label, fn)
         menu.exec(self.table.viewport().mapToGlobal(pos))
+
+    def set_cell_actions_provider(self, provider) -> None:
+        """Provide extra right-click actions: (row, col) -> [(label, callable)]."""
+        self._cell_actions_provider = provider
 
     def _cell_text(self, row: int, col: int) -> str:
         if 0 <= row < len(self._rows) and 0 <= col < len(self._columns):
