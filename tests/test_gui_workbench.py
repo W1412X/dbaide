@@ -69,9 +69,9 @@ def test_history_is_pinned(qapp):
 def test_completions_apply_to_all_editors(qapp):
     wb = _wb(qapp)
     wb.new_sql_editor()
-    wb.set_sql_completions(["users", "orders"])
+    wb.set_sql_schema({"tables": ["users", "orders"], "columns_by_table": {}})
     new = wb.new_sql_editor()
-    assert "users" in new.editor._model.stringList()  # applied to freshly-created editor too
+    assert "users" in new.editor.completion_names()  # applied to freshly-created editor too
 
 
 def test_run_sql_signal(qapp):

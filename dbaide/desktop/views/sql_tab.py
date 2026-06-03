@@ -143,6 +143,9 @@ class SqlTab(QWidget):
     def set_completions(self, names: list[str]) -> None:
         self.editor.set_completions(names)
 
+    def set_schema(self, schema: dict) -> None:
+        self.editor.set_schema(schema)
+
     def show_result(self, payload: dict) -> None:
         self.result_table.load(
             columns=payload.get("columns") or [],

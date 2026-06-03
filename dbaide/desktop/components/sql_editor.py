@@ -8,6 +8,8 @@ comments on the selection.
 """
 from __future__ import annotations
 
+import re
+
 from PyQt6.QtCore import QRect, QSize, Qt, QStringListModel
 from PyQt6.QtGui import QColor, QPainter, QTextCursor, QTextFormat
 from PyQt6.QtWidgets import QCompleter, QPlainTextEdit, QTextEdit, QWidget
@@ -16,6 +18,9 @@ from dbaide.desktop.theme import Theme
 from dbaide.rendering.sanitize import _SQL_KEYWORDS
 
 _KEYWORDS = sorted({kw.upper() for kw in _SQL_KEYWORDS})
+
+# Word immediately before a trailing dot, e.g. the "orders" in "orders.cit".
+_DOT_PREFIX = re.compile(r"([A-Za-z_][\w]*)\.\w*$")
 
 
 class _LineNumberArea(QWidget):
@@ -33,7 +38,17 @@ class _LineNumberArea(QWidget):
 class SqlEditor(QPlainTextEdit):
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
-        self._model = QStringListModel(list(_KEYWORDS), self)
+        # Structured schema for context-aware completion.
+        self._databases: list[str] = []
+        self._tables: list[str] = []
+        self._columns_by_table: dict[str, list[str]] = {}
+        self._all_columns: list[str] = []
+        # A single QStringListModel holds the active completion words; we swap its
+        # string list for the general vocabulary vs. a table's columns. (Plain string
+        # model — robust across the widget lifecycle; richer item models proved
+        # crash-prone on teardown across rapid window create/destroy cycles.)
+        self._model = QStringListModel(self)
+        self._set_general_words()
         self._completer = QCompleter(self._model, self)
         self._completer.setWidget(self)
         self._completer.setCompletionMode(QCompleter.CompletionMode.PopupCompletion)
@@ -49,10 +64,42 @@ class SqlEditor(QPlainTextEdit):
         self._update_line_area_width()
         self._highlight_current_line()
 
+    def _general_words(self) -> list[str]:
+        """The general completion vocabulary: keywords + databases + tables + all
+        columns (deduped, keywords last so identifiers rank first)."""
+        ident = list(dict.fromkeys(self._databases + self._tables + self._all_columns))
+        return ident + _KEYWORDS
+
+    def _set_general_words(self) -> None:
+        self._mode = "general"
+        self._model.setStringList(self._general_words())
+
+    def set_schema(self, schema: dict) -> None:
+        """Feed structured schema for context-aware completion.
+
+        schema = {"databases": [...], "tables": [...],
+                  "columns_by_table": {table: [col, ...]}}
+        """
+        schema = schema or {}
+        self._databases = [str(d) for d in (schema.get("databases") or []) if str(d).strip()]
+        self._tables = sorted({str(t) for t in (schema.get("tables") or []) if str(t).strip()})
+        self._columns_by_table = {
+            str(t): [str(c) for c in (cols or [])]
+            for t, cols in (schema.get("columns_by_table") or {}).items()
+        }
+        self._all_columns = sorted({c for cols in self._columns_by_table.values() for c in cols})
+        self._set_general_words()
+
     def set_completions(self, names: list[str]) -> None:
-        """Merge schema identifiers (tables/columns) with the SQL keywords."""
-        words = sorted(set(_KEYWORDS) | {str(n) for n in (names or []) if str(n).strip()})
-        self._model.setStringList(words)
+        """Back-compat: a flat identifier list (treated as tables + columns)."""
+        names = [str(n) for n in (names or []) if str(n).strip()]
+        self.set_schema({"tables": names, "columns_by_table": {}})
+        self._all_columns = sorted(set(names))
+        self._set_general_words()
+
+    def completion_names(self) -> list[str]:
+        """The active general completion vocabulary (for tests/introspection)."""
+        return self._general_words()
 
     # ── line-number gutter ──────────────────────────────────────────────────--
 
@@ -172,6 +219,30 @@ class SqlEditor(QPlainTextEdit):
             self.toggle_comment()
             return
         super().keyPressEvent(event)
+
+        # Context: are we completing columns of "<table>." ?
+        tc = self.textCursor()
+        before = tc.block().text()[: tc.positionInBlock()]
+        dot = _DOT_PREFIX.search(before)
+        dot_table = self._match_table(dot.group(1)) if dot else None
+
+        if dot_table is not None:
+            # Swap the model's words to that table's columns — completed even right
+            # after the dot (empty prefix).
+            self._mode = dot_table
+            self._model.setStringList(self._columns_by_table.get(dot_table, []))
+            prefix = self._current_prefix()
+            self._completer.setCompletionPrefix(prefix)
+            popup.setCurrentIndex(self._completer.completionModel().index(0, 0))
+            if self._completer.completionCount() == 0:
+                popup.hide()
+                return
+            self._popup_at_cursor(popup)
+            return
+
+        # General completion: keywords + db + tables + columns.
+        if self._mode != "general":
+            self._set_general_words()
         prefix = self._current_prefix()
         # Only pop up for word-ish prefixes of length ≥ 2 (avoid noise while typing
         # operators/whitespace).
@@ -184,6 +255,19 @@ class SqlEditor(QPlainTextEdit):
         if self._completer.completionCount() == 0:
             popup.hide()
             return
+        self._popup_at_cursor(popup)
+
+    def _match_table(self, word: str) -> str | None:
+        """Case-insensitive lookup of a table name (the part before a dot)."""
+        if not word:
+            return None
+        low = word.lower()
+        for t in self._tables:
+            if t.lower() == low:
+                return t
+        return None
+
+    def _popup_at_cursor(self, popup) -> None:
         rect = self.cursorRect()
-        rect.setWidth(popup.sizeHintForColumn(0) + popup.verticalScrollBar().sizeHint().width() + 24)
+        rect.setWidth(popup.sizeHintForColumn(0) + popup.verticalScrollBar().sizeHint().width() + 40)
         self._completer.complete(rect)

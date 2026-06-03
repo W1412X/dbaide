@@ -76,6 +76,9 @@ class MainWindow(QMainWindow):
         self._slot_session: dict[str, str] = {}                   # slot key → server session_id (once known)
         self._new_counter = 0                                     # source of "new:N" temp keys
         self._active_key = ""                                     # the slot currently on screen
+        # Background workers (bootstrap / schema / sessions / asset preview) kept
+        # alive until they finish — see _run_background.
+        self._bg_workers: list[ServiceWorker] = []
         # One-off non-conversation action (build assets / run SQL / etc.).
         self._oneoff_worker: ServiceWorker | None = None
         self._oneoff_action = ""
@@ -330,11 +333,25 @@ class MainWindow(QMainWindow):
         on_error: Callable[[object], None] | None = None,
     ) -> None:
         worker = ServiceWorker(self.service, action, payload)
+        # Retain a reference until the worker finishes. Without this the local
+        # `worker` (and its WorkerSignals QObject) can be garbage-collected while the
+        # pool thread is still running, so the thread emits on a deleted signals
+        # object → hard crash ("WorkerSignals has been deleted"). Released on finish.
+        self._bg_workers.append(worker)
+
+        def _release(*_a) -> None:
+            try:
+                self._bg_workers.remove(worker)
+            except ValueError:
+                pass
+
         worker.signals.done.connect(lambda act, result: on_success(result) if act == action else None)
         if on_error:
             worker.signals.failed.connect(on_error)
         else:
             worker.signals.failed.connect(self._background_failed)
+        worker.signals.done.connect(_release)
+        worker.signals.failed.connect(_release)
         self.pool.start(worker)
 
     def _background_failed(self, exc: object) -> None:
@@ -465,17 +482,30 @@ class MainWindow(QMainWindow):
         dbs = [row["name"] for row in self.schema_rows]
         self.topbar.set_databases(dbs)
         self.sidebar.load_schema(self.schema_rows)
-        self.workbench.set_sql_completions(self._schema_identifiers())
+        self.workbench.set_sql_schema(self._schema_completion())
 
-    def _schema_identifiers(self) -> list[str]:
-        """Table + column names from the loaded schema, for SQL autocomplete."""
-        names: set[str] = set()
+    def _schema_completion(self) -> dict[str, Any]:
+        """Structured schema for context-aware SQL completion: database names,
+        table names, and columns per table (so `table.` completes its columns)."""
+        databases: list[str] = []
+        tables: list[str] = []
+        columns_by_table: dict[str, list[str]] = {}
         for db in self.schema_rows:
+            db_name = str(db.get("name") or "")
+            if db_name:
+                databases.append(db_name)
             for table in db.get("children", []):
-                names.add(str(table.get("name") or ""))
-                for col in table.get("children", []):
-                    names.add(str(col.get("name") or ""))
-        return sorted(n for n in names if n)
+                tname = str(table.get("name") or "")
+                if not tname:
+                    continue
+                tables.append(tname)
+                cols = [str(c.get("name") or "") for c in table.get("children", []) if c.get("name")]
+                # Merge if the same table name appears in multiple databases.
+                columns_by_table.setdefault(tname, [])
+                for c in cols:
+                    if c not in columns_by_table[tname]:
+                        columns_by_table[tname].append(c)
+        return {"databases": databases, "tables": tables, "columns_by_table": columns_by_table}
 
     def _apply_schema_error(self, name: str, message: str) -> None:
         # Don't wipe the current connection's schema because an old one failed.
@@ -1460,10 +1490,22 @@ class MainWindow(QMainWindow):
         worker.signals.progress.connect(lambda m, k=key: self._on_ask_progress(k, m))
         worker.signals.done.connect(lambda _a, r, k=key: self._on_ask_done(k, r))
         worker.signals.failed.connect(lambda e, k=key: self._on_ask_failed(k, e))
+        # Keep the worker (and its WorkerSignals QObject) referenced independently of
+        # self._runs until it finishes — otherwise clearing _runs while it's still on
+        # a pool thread frees the signals object and the thread crashes on emit.
+        self._bg_workers.append(worker)
+        worker.signals.done.connect(lambda *_a, w=worker: self._release_bg_worker(w))
+        worker.signals.failed.connect(lambda *_a, w=worker: self._release_bg_worker(w))
         self._runs[key] = worker
         self._sync_active_ui()
         self._refresh_run_status()
         self.pool.start(worker)
+
+    def _release_bg_worker(self, worker) -> None:
+        try:
+            self._bg_workers.remove(worker)
+        except ValueError:
+            pass
 
     def _on_ask_progress(self, key: str, message: object) -> None:
         if key not in self._runs:

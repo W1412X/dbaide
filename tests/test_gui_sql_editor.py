@@ -21,7 +21,7 @@ def test_completion_vocab_merges_keywords_and_schema(qapp):
     from dbaide.desktop.components.sql_editor import SqlEditor
     e = SqlEditor()
     e.set_completions(["users", "orders", "user_id"])
-    words = set(e._model.stringList())
+    words = set(e.completion_names())
     assert "SELECT" in words and "JOIN" in words  # keywords
     assert {"users", "orders", "user_id"} <= words  # schema identifiers
 
@@ -101,3 +101,33 @@ def test_run_uses_statement_at_cursor_without_selection(qapp):
     c.setPosition(2)  # inside first statement
     t.editor.setTextCursor(c)
     assert t._current_sql() == "SELECT 1"
+
+
+def test_set_schema_general_vocab(qapp):
+    from dbaide.desktop.components.sql_editor import SqlEditor
+    e = SqlEditor()
+    e.set_schema({
+        "databases": ["main"],
+        "tables": ["orders", "users"],
+        "columns_by_table": {"orders": ["id", "amount"], "users": ["id", "email"]},
+    })
+    words = set(e.completion_names())
+    assert {"main", "orders", "users", "amount", "email"} <= words  # db+tables+columns
+    assert "SELECT" in words  # keywords still present
+
+
+def test_dot_context_matches_table(qapp):
+    from dbaide.desktop.components.sql_editor import SqlEditor
+    e = SqlEditor()
+    e.set_schema({"tables": ["orders"], "columns_by_table": {"orders": ["id", "amount", "created_at"]}})
+    assert e._match_table("orders") == "orders"
+    assert e._match_table("ORDERS") == "orders"      # case-insensitive
+    assert e._match_table("nope") is None
+    assert e._columns_by_table["orders"] == ["id", "amount", "created_at"]
+
+
+def test_dot_prefix_regex(qapp):
+    from dbaide.desktop.components.sql_editor import _DOT_PREFIX
+    assert _DOT_PREFIX.search("SELECT * FROM orders WHERE orders.cit").group(1) == "orders"
+    assert _DOT_PREFIX.search("o.").group(1) == "o"
+    assert _DOT_PREFIX.search("plain") is None
