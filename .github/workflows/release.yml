@@ -76,11 +76,13 @@ jobs:
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
-          dotnet tool install --global wix --version 4.0.5
+          dotnet tool install --global wix --version 5.0.2
           $env:PATH += ";$env:USERPROFILE\.dotnet\tools"
-          wix extension add -g WixToolset.UI.wixext
-          wix build -arch x64 -ext WixToolset.UI.wixext -d Version=$env:MSI_VERSION `
-            packaging\windows\DBAide.wxs -o "dist\${{ matrix.artifact }}.msi"
+          wix --version
+          wix extension add -g WixToolset.UI.wixext/5.0.2
+          (Get-Content packaging\windows\DBAide.wxs -Raw) -replace '__DBAIDE_VERSION__', $env:MSI_VERSION |
+            Set-Content -Encoding utf8 DBAide.gen.wxs
+          wix build -arch x64 -ext WixToolset.UI.wixext DBAide.gen.wxs -o "dist\${{ matrix.artifact }}.msi"
 
       - name: Upload build artifact
         uses: actions/upload-artifact@v4

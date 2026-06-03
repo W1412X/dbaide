@@ -4,17 +4,15 @@
   (dist\DBAide) via <Files>, installs into "Program Files\DBAide", adds a Start
   Menu shortcut, and shows the standard InstallDir wizard UI.
 
-  Build (see .github/workflows/release.yml):
-    wix extension add -g WixToolset.UI.wixext
-    wix build -arch x64 -ext WixToolset.UI.wixext -d Version=<x.y.z> \
-      packaging\windows\DBAide.wxs -o DBAide-Windows-x86_64.msi
+  The __DBAIDE_VERSION__ token is replaced with the real version in CI before
+  building (avoids WiX preprocessor-variable ambiguity). See release.yml.
 -->
 <Wix xmlns="http://wixtoolset.org/schemas/v4/wxs"
      xmlns:ui="http://wixtoolset.org/schemas/v4/wxs/ui">
 
   <Package Name="DBAide"
            Manufacturer="DBAide"
-           Version="$(Version)"
+           Version="__DBAIDE_VERSION__"
            UpgradeCode="DBF830BD-93DD-4E74-957D-4A9B158C7B04"
            Scope="perMachine"
            Compressed="yes">
