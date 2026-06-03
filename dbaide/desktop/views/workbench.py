@@ -87,6 +87,10 @@ class WorkbenchView(QWidget):
         self.doc_closed.emit(widget)
         widget.deleteLater()
 
+    def close_current(self) -> None:
+        """Close the current document (no-op on the pinned History tab)."""
+        self._on_close(self.tabs.currentIndex())
+
     # ── SQL editors ─────────────────────────────────────────────────────────────
 
     def new_sql_editor(self, sql: str = "") -> SqlTab:

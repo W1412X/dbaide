@@ -79,3 +79,24 @@ def test_toggle_is_noop_in_workbench(qapp, tmp_path):
     win._toggle_panel()                          # no-op in Workbench
     assert win.right.isVisibleTo(win) is False
     win.deleteLater(); _drain(qapp)
+
+
+def test_shortcut_new_query_and_close(qapp, tmp_path):
+    win = _make_window(tmp_path, qapp)
+    n0 = win.workbench.tabs.count()
+    win._shortcut_new_query()
+    assert win._current_mode() == "Workbench"
+    assert win.workbench.tabs.count() == n0 + 1
+    win._shortcut_close_doc()  # closes the just-opened editor
+    assert win.workbench.tabs.count() == n0
+    win.deleteLater(); _drain(qapp)
+
+
+def test_shortcut_close_keeps_history_pinned(qapp, tmp_path):
+    win = _make_window(tmp_path, qapp)
+    win.tabbar.setCurrentIndex(1)
+    win.workbench.focus_history()
+    before = win.workbench.tabs.count()
+    win._shortcut_close_doc()  # History is pinned → no-op
+    assert win.workbench.tabs.count() == before
+    win.deleteLater(); _drain(qapp)

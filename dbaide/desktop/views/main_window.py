@@ -5,6 +5,7 @@ import sys
 from typing import Any, Callable
 
 from PyQt6.QtCore import Qt, QSettings, QThreadPool
+from PyQt6.QtGui import QKeySequence, QShortcut
 from PyQt6.QtWidgets import (
     QApplication,
     QDialog,
@@ -93,8 +94,26 @@ class MainWindow(QMainWindow):
         # Assistant and force-hide the panel (and its toggle) in Workbench.
         self._panel_pref = str(self._settings.value("panel_visible", "true")).lower() != "false"
         self._apply_panel_visibility()
+        self._install_shortcuts()
         self._wire_bus()
         self.refresh_all()
+
+    def _install_shortcuts(self) -> None:
+        """Global accelerators (⌘ on macOS maps from Ctrl in QKeySequence)."""
+        def sc(seq: str, fn) -> None:
+            QShortcut(QKeySequence(seq), self).activated.connect(fn)
+        sc("Ctrl+1", lambda: self.tabbar.setCurrentIndex(0))   # Assistant
+        sc("Ctrl+2", lambda: self.tabbar.setCurrentIndex(1))   # Workbench
+        sc("Ctrl+T", self._shortcut_new_query)                 # new SQL editor
+        sc("Ctrl+W", self._shortcut_close_doc)                 # close workbench doc
+
+    def _shortcut_new_query(self) -> None:
+        self.tabbar.setCurrentIndex(1)
+        self.workbench.new_sql_editor()
+
+    def _shortcut_close_doc(self) -> None:
+        if self._current_mode() == "Workbench":
+            self.workbench.close_current()
 
     def _current_mode(self) -> str:
         idx = self.tabbar.currentIndex()
