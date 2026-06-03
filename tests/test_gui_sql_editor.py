@@ -35,3 +35,46 @@ def test_insert_completion_replaces_current_word(qapp):
     assert e._current_prefix() == "use"
     e._insert_completion("users")
     assert e.toPlainText() == "SELECT * FROM users"
+
+
+def _select_all(e):
+    c = e.textCursor()
+    c.select(QTextCursor.SelectionType.Document)
+    e.setTextCursor(c)
+
+
+def test_comment_toggle_round_trip(qapp):
+    from dbaide.desktop.components.sql_editor import SqlEditor
+    e = SqlEditor()
+    e.setPlainText("select id\nfrom users")
+    _select_all(e)
+    e.toggle_comment()
+    assert e.toPlainText() == "-- select id\n-- from users"
+    _select_all(e)
+    e.toggle_comment()
+    assert e.toPlainText() == "select id\nfrom users"
+
+
+def test_comment_toggle_single_line(qapp):
+    from dbaide.desktop.components.sql_editor import SqlEditor
+    e = SqlEditor()
+    e.setPlainText("select 1")
+    e.toggle_comment()
+    assert e.toPlainText() == "-- select 1"
+
+
+def test_comment_toggle_preserves_indent(qapp):
+    from dbaide.desktop.components.sql_editor import SqlEditor
+    e = SqlEditor()
+    e.setPlainText("  select 1")
+    e.toggle_comment()
+    assert e.toPlainText() == "  -- select 1"
+
+
+def test_line_number_width_grows_with_lines(qapp):
+    from dbaide.desktop.components.sql_editor import SqlEditor
+    e = SqlEditor()
+    e.setPlainText("a")
+    narrow = e.line_number_area_width()
+    e.setPlainText("\n".join(str(i) for i in range(200)))
+    assert e.line_number_area_width() > narrow
