@@ -27,6 +27,7 @@ class Sidebar(QWidget):
     schema_selected = pyqtSignal(dict)
     semantic_search_requested = pyqtSignal(str)
     settings_requested = pyqtSignal()
+    generate_sql = pyqtSignal(dict, str)  # (table node, template kind)
 
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
@@ -79,6 +80,8 @@ class Sidebar(QWidget):
         self.tree.setStyleSheet("QTreeWidget { background: transparent; border: none; }")
         self.tree.itemSelectionChanged.connect(self._selection_changed)
         self.tree.itemDoubleClicked.connect(self._double_clicked)
+        self.tree.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self.tree.customContextMenuRequested.connect(self._context_menu)
         schema_layout.addWidget(self.tree, 1)
         split.addWidget(schema_panel)
 
@@ -182,3 +185,28 @@ class Sidebar(QWidget):
         data = item.data(0, Qt.ItemDataRole.UserRole)
         if isinstance(data, dict) and data.get("path"):
             self.schema_selected.emit(data)
+
+    def _context_menu(self, pos) -> None:
+        item = self.tree.itemAt(pos)
+        if item is None:
+            return
+        data = item.data(0, Qt.ItemDataRole.UserRole)
+        if not (isinstance(data, dict) and data.get("kind") == "table"):
+            return
+        from PyQt6.QtWidgets import QMenu
+        from dbaide.desktop.components.menu import _style_menu
+        from dbaide.i18n import t
+        menu = QMenu(self)
+        _style_menu(menu)
+        menu.addAction(t("schema.open_data"), lambda: self.schema_selected.emit(data))
+        gen = menu.addMenu(t("schema.generate_sql"))
+        _style_menu(gen)
+        for kind, key in (
+            ("select_star", "schema.gen_select_star"),
+            ("select_columns", "schema.gen_select_columns"),
+            ("count", "schema.gen_count"),
+            ("insert", "schema.gen_insert"),
+            ("update", "schema.gen_update"),
+        ):
+            gen.addAction(t(key), lambda _checked=False, k=kind: self.generate_sql.emit(data, k))
+        menu.exec(self.tree.viewport().mapToGlobal(pos))

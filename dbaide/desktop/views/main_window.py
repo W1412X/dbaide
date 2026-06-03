@@ -152,6 +152,7 @@ class MainWindow(QMainWindow):
         self.sidebar = Sidebar()
         self.sidebar.schema_preview.connect(self.preview_schema)
         self.sidebar.schema_selected.connect(self.open_schema_asset)
+        self.sidebar.generate_sql.connect(self._generate_sql)
         self.sidebar.semantic_search_requested.connect(self.search_assets)
         self.sidebar.settings_requested.connect(lambda: self.open_settings("connections"))
         self.sidebar.chats.new_requested.connect(self.new_session)
@@ -884,6 +885,23 @@ class MainWindow(QMainWindow):
         path = str(data.get("path") or "")
         if path:
             self._show_asset("asset_markdown", path)
+
+    def _dialect(self) -> str:
+        conn = self.current_connection()
+        for c in (self.bootstrap.get("connections") or []):
+            if c.get("name") == conn:
+                return "mysql" if str(c.get("type", "")).lower() in ("mysql", "mariadb") else "generic"
+        return "generic"
+
+    def _generate_sql(self, node: dict[str, Any], kind: str) -> None:
+        """Generate a starter statement for a table and open it in a new editor."""
+        from dbaide.rendering.sql_templates import generate
+        table = str(node.get("name") or "")
+        if not table:
+            return
+        sql = generate(kind, table, node.get("children") or [], self._dialect())
+        self.tabbar.setCurrentIndex(1)
+        self.workbench.open_sql(sql)
 
     def _open_table_by_name(self, table: str) -> None:
         """Open a table by name (used by Structure-panel FK links). Searches the
