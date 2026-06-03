@@ -9,8 +9,6 @@ on:
   push:
     tags:
       - "v*"
-    branches:
-      - slim-build   # temporary: iterate on bundle size (build only, no release)
 
 permissions:
   contents: write
