@@ -192,3 +192,16 @@ def test_explain_routes_to_explain_signal(qapp):
     assert explained == ["select 1"] and ran == []
     ed.run_requested.emit("select 2", "execute")
     assert ran == ["select 2"] and explained == ["select 1"]
+
+
+def test_close_table_docs_keeps_editors(qapp):
+    wb = _wb(qapp)
+    wb.new_sql_editor("select 1")
+    wb.open_table("c", "db", "orders", [])
+    wb.open_table("c", "db", "users", [])
+    titles = [wb.tabs.tabText(i) for i in range(wb.tabs.count())]
+    assert "orders" in titles and "users" in titles
+    wb.close_table_docs()
+    after = [wb.tabs.tabText(i) for i in range(wb.tabs.count())]
+    assert "orders" not in after and "users" not in after
+    assert "History" in after and any(t.startswith("Query") for t in after)

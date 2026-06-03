@@ -384,6 +384,9 @@ class MainWindow(QMainWindow):
         # bootstrap: set_connections blocks signals.)
         self._reset_all_slots()
         self.right.trace.clear_trace()
+        # Table viewers show the old connection's data — close them. SQL editors are
+        # portable text and stay; History re-loads for the new connection below.
+        self.workbench.close_table_docs()
         conn = self.current_connection()
         if conn:
             self._refresh_connection_context(conn)

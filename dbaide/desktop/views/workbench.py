@@ -91,6 +91,17 @@ class WorkbenchView(QWidget):
         """Close the current document (no-op on the pinned History tab)."""
         self._on_close(self.tabs.currentIndex())
 
+    def close_table_docs(self) -> None:
+        """Close every open table viewer — used when the connection changes, since
+        their data/structure belong to the old connection. SQL editors (portable
+        text) and the pinned History are kept."""
+        for i in range(self.tabs.count() - 1, -1, -1):
+            w = self.tabs.widget(i)
+            if isinstance(w, TableDocument):
+                self.tabs.removeTab(i)
+                self.doc_closed.emit(w)
+                w.deleteLater()
+
     # ── SQL editors ─────────────────────────────────────────────────────────────
 
     def new_sql_editor(self, sql: str = "") -> SqlTab:
