@@ -276,18 +276,22 @@ class ResultTableWidget(QWidget):
             return
         header = self.table.horizontalHeader()
         self.table.resizeColumnsToContents()
-        # First column whose values are not numeric — the natural one to widen.
-        text_col = next(
-            (i for i, c in enumerate(self._columns)
-             if not any(_is_numeric(r.get(c)) for r in self._rows)),
-            0,
-        )
+        # Size every column to its content (capped), leaving any slack as trailing
+        # space on the right — like a standard database-client grid. No single column
+        # is stretched to fill, which previously left an awkward mid-grid gap when the
+        # stretched column held short values.
+        total = 0
         for i in range(self.table.columnCount()):
-            if i == text_col:
-                header.setSectionResizeMode(i, QHeaderView.ResizeMode.Stretch)
-            else:
-                header.setSectionResizeMode(i, QHeaderView.ResizeMode.Interactive)
-                header.resizeSection(i, min(420, max(72, header.sectionSize(i))))
+            header.setSectionResizeMode(i, QHeaderView.ResizeMode.Interactive)
+            header.resizeSection(i, min(420, max(72, header.sectionSize(i))))
+            total += header.sectionSize(i)
+        # If the content leaves real slack in the viewport, let the last column take
+        # it so there's no thin dangling gap at the right edge. The fudge keeps us
+        # just inside the viewport so no spurious horizontal scrollbar appears.
+        slack = self.table.viewport().width() - total - 4
+        if slack > 16 and self.table.columnCount():
+            last = self.table.columnCount() - 1
+            header.resizeSection(last, header.sectionSize(last) + slack)
 
     def _show_full_cell(self, row: int, col: int) -> None:
         if not (0 <= row < len(self._rows) and 0 <= col < len(self._columns)):
