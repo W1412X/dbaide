@@ -40,7 +40,7 @@ class TableDocument(QWidget):
         ask_row = QHBoxLayout()
         ask_row.setContentsMargins(2, 0, 2, 6)
         ask_row.addStretch(1)
-        ask_btn = compact_button(t("doc.ask_ai"), width=110)
+        ask_btn = compact_button(t("doc.ask_ai"), width=132)
         ask_btn.setToolTip(t("doc.ask_ai_tooltip"))
         ask_btn.setIcon(svg_icon("terminal", color=Theme.TEXT_2, size=13))
         ask_btn.setIconSize(QSize(13, 13))
