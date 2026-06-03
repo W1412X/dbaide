@@ -47,7 +47,9 @@ from dbaide.desktop.views.sidebar import Sidebar
 from dbaide.desktop.views.sql_tab import SqlTab
 from dbaide.desktop.views.data_browser import DataBrowser
 from dbaide.desktop.views.workbench import WorkbenchView
+from dbaide.desktop.views.query_history import QueryHistoryPanel
 from dbaide.desktop.views.structure_panel import StructurePanel
+from dbaide.history.query_store import QueryHistoryStore
 from dbaide.desktop.views.topbar import TopBar
 from dbaide.desktop.workers import CancelledError, ServiceWorker
 
@@ -190,7 +192,15 @@ class MainWindow(QMainWindow):
         self.data_tab = DataBrowser()
         self.data_tab.query_requested.connect(lambda payload: self.run_action("browse_table", payload))
         self.structure_panel = StructurePanel()
-        self.workbench = WorkbenchView(self.sql_tab, self.data_tab, self.structure_panel)
+        self.query_history_store = QueryHistoryStore()
+        self.history_panel = QueryHistoryPanel()
+        self.history_panel.sql_selected.connect(self._on_history_select)
+        self.history_panel.sql_run.connect(self._on_history_run)
+        self.history_panel.clear_requested.connect(self._on_history_clear)
+        self._last_sql = ""
+        self.workbench = WorkbenchView(
+            self.sql_tab, self.data_tab, self.structure_panel, self.history_panel
+        )
         self.stack.addWidget(self.ask_tab)    # mode 0 — Assistant
         self.stack.addWidget(self.workbench)  # mode 1 — Workbench
         center_layout.addWidget(self.stack, 1)
@@ -365,6 +375,7 @@ class MainWindow(QMainWindow):
         conns = self.bootstrap.get("connections") or []
         self._load_schema(conn_name)
         self._load_sessions(conn_name)
+        self._refresh_query_history()
         self.refresh_joins()
         asset_status = "missing"
         for c in conns:
@@ -779,11 +790,40 @@ class MainWindow(QMainWindow):
     def execute_sql(self, sql: str) -> None:
         if not sql.strip():
             return
+        self._last_sql = sql
         self.run_action("execute_sql", {
             "connection_name": self.current_connection(),
             "database": self.current_database(),
             "sql": sql,
         })
+
+    # ── Query history ─────────────────────────────────────────────────────────
+
+    def _record_query(self, sql: str, *, ok: bool, row_count=None, elapsed_ms=None) -> None:
+        if not (sql or "").strip():
+            return
+        self.query_history_store.record(
+            self.current_connection(), sql, ok=ok,
+            row_count=row_count, elapsed_ms=elapsed_ms,
+            database=self.current_database(),
+        )
+        self._refresh_query_history()
+
+    def _refresh_query_history(self) -> None:
+        self.history_panel.load(self.query_history_store.recent(self.current_connection()))
+
+    def _on_history_select(self, sql: str) -> None:
+        self.sql_tab.set_sql(sql)
+        self.switch_tab("SQL")
+
+    def _on_history_run(self, sql: str) -> None:
+        self.sql_tab.set_sql(sql)
+        self.switch_tab("SQL")
+        self.execute_sql(sql)
+
+    def _on_history_clear(self) -> None:
+        self.query_history_store.clear(self.current_connection())
+        self._refresh_query_history()
 
     def inspect_schema(self, data: dict[str, Any]) -> None:
         self.open_schema_asset(data)
@@ -1039,6 +1079,11 @@ class MainWindow(QMainWindow):
             return
         if action == "execute_sql":
             self.sql_tab.show_result(result)
+            self._record_query(
+                self._last_sql, ok=True,
+                row_count=result.get("row_count"),
+                elapsed_ms=result.get("elapsed_ms"),
+            )
             self.bus.emit(QUERY_COMPLETED, {"instance": self.current_connection()})
             return
         if action == "browse_table":
@@ -1071,6 +1116,7 @@ class MainWindow(QMainWindow):
             return
         if action == "execute_sql":
             self.sql_tab.show_error(str(exc))
+            self._record_query(self._last_sql, ok=False)
             self.toast(str(exc))
             return
         if action == "browse_table":

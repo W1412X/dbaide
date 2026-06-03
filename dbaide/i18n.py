@@ -38,6 +38,14 @@ _STRINGS: dict[str, dict[str, str]] = {
     "data.next": {"en": "Next page", "zh": "下一页"},
     "data.sorted_by": {"en": "sorted by {col} {dir}", "zh": "按 {col} {dir} 排序"},
     "tab.structure": {"en": "Structure", "zh": "结构"},
+    "tab.history": {"en": "History", "zh": "历史"},
+    "history.clear": {"en": "Clear", "zh": "清空"},
+    "history.failed": {"en": "failed", "zh": "失败"},
+    "history.rows": {"en": "{n} rows", "zh": "{n} 行"},
+    "history.empty_hint": {
+        "en": "Queries you run appear here. Click to load, double-click to run.",
+        "zh": "运行过的查询会显示在这里。单击载入，双击运行。",
+    },
     "structure.empty_hint": {
         "en": "Double-click a table in the schema (left) to see its structure.",
         "zh": "双击左侧结构树中的表即可查看其结构。",
