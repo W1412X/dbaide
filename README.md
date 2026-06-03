@@ -1,138 +1,111 @@
-# DBAide CLI
+<div align="center">
 
-DBAide is a lightweight command-line data assistant. It connects to local or remote databases, progressively discloses schema only when needed, validates SQL before execution, and answers database questions as an assistant rather than a pure SQL generator.
+# DBAide
 
-## Goals
+**A local-first AI database assistant — ask your data in plain language, safely.**
 
-- No vector index or embedding initialization.
-- CLI-first workflow.
-- Multi-instance and multi-database adapter architecture.
-- Safe default query execution: single statement, read-only, timeout, row limit, and `EXPLAIN` preflight where supported.
-- Progressive disclosure: instance first, then database/schema, table, column, profile/sample, and execution evidence.
+DBAide connects to your databases, discovers schema progressively, refuses to guess
+ambiguous business meaning, writes safe read-only SQL, and explains the results — as
+a CLI **and** a polished desktop app that share the same Python core.
 
-## Quick Start
+[![Python](https://img.shields.io/badge/python-3.11%2B-3776AB?logo=python&logoColor=white)](https://www.python.org/)
+[![Desktop](https://img.shields.io/badge/desktop-PyQt6-41CD52)](https://pypi.org/project/PyQt6/)
+[![Databases](https://img.shields.io/badge/db-SQLite%20·%20MySQL%20·%20PostgreSQL-336791)](#connect-a-database)
+[![License](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 
-SQLite works without optional dependencies:
+<img src="docs/images/ask.png" alt="DBAide — Ask view with answer, trace and schema" width="900">
 
-```bash
-pip install -r requirements-gui.txt   # CLI + desktop GUI
-# or: pip install -r requirements.txt  # CLI only
-# or: pip install -e ".[gui]"          # editable install from pyproject.toml
+</div>
 
-python -m dbaide.cli connect add local --type sqlite --path ./app.db
-python -m dbaide.cli ask "这个库有哪些表？" --conn local
-python -m dbaide.cli inspect users --conn local
-python -m dbaide.cli profile users --conn local
-python -m dbaide.cli sql "select * from users" --conn local --execute
-```
+---
 
-`connect add` tests the instance and builds offline schema assets by default. New
-connections default to the **production** load profile (lowest DB load): builds run
-single-threaded with `light` profiling (metadata + key columns), and the agent uses
-conservative row/timeout limits. Pass `--load-profile staging|dev` to relax this.
+## Why DBAide
 
-> **Production safety.** DBAide caps concurrent queries, times out every statement,
-> never uses `ORDER BY RAND()`, drops large tables to metadata-only profiling, and
-> rejects oversized/unfiltered queries. Every SQL it runs is logged — inspect with
-> `dbaide queries <conn> --tail 50`. Estimate a build's cost first with
-> `dbaide assets build <conn> --dry-run`. See **Resource & Safety** in `docs/DESIGN.md`.
+Most "text-to-SQL" tools happily guess what you meant and hand you a confidently wrong
+number. DBAide is built on the opposite principle:
 
-```text
-~/.dbaide/assets/instances/<instance>/
-  instance.json
-  databases.json
-  databases/<database>/database.json
-  databases/<database>/tables.json
-  databases/<database>/tables/<table>/table.json
-  databases/<database>/tables/<table>/columns/<column>.json
-```
+- 🧠 **Agentic, not a one-shot generator.** A tool loop discovers schema, maps joins,
+  writes SQL, validates it, runs it, and interprets the result — you watch every step.
+- 🙋 **Never guesses.** When the question is ambiguous (which table, what a status value
+  means, which timezone, what a metric counts), it **asks you to confirm** instead of
+  inventing a default. Your confirmations are remembered for the run.
+- 🛡️ **Safe by default.** Read-only, single statement, per-statement timeout, row caps,
+  `EXPLAIN` cost gate, and confirmation on risky queries. Every executed SQL is logged.
+- 🗂️ **Progressive disclosure.** It narrows instance → database → table → column instead
+  of dumping the whole schema into the prompt.
+- 💬 **Run many conversations at once.** Each session runs in its own thread; start a
+  query in one and switch to another while it works (concurrency is configurable).
+- 🔌 **Works offline-ish.** No LLM configured? It falls back to deterministic heuristics
+  for inspection, profiling, guardrails and simple queries.
 
-Skip initialization only when you explicitly want to save the connection first:
+Supports **SQLite, MySQL/MariaDB, and PostgreSQL**, in **English and 简体中文**.
 
-```bash
-dbaide connect add local --type sqlite --path ./app.db --skip-assets
-dbaide assets build local
-dbaide assets build local --profile-mode all
-dbaide assets enrich local --database main --table orders --columns status,total_amount
-dbaide assets status local
-dbaide assets show local.main.orders.status
-```
+## Screenshots
 
-Column assets are intentionally detailed. A column document stores physical
-metadata, inferred semantic role, null/distinct statistics, min/max values,
-top-value distribution, sample values, type-specific stats, and usage hints.
-Table, database, and instance documents are then synthesized upward from those
-column documents.
+| Ask — answer · trace · schema | SQL workspace | Resources & safety |
+| --- | --- | --- |
+| <img src="docs/images/ask.png" width="280"> | <img src="docs/images/sql.png" width="280"> | <img src="docs/images/settings-resources.png" width="280"> |
 
-For programmer lookup workflows:
+## Install
+
+Requires **Python 3.11+**.
 
 ```bash
-dbaide find "用户邮箱在哪" --conn local
-dbaide find "订单金额字段" --conn all
+# Desktop app + CLI
+pip install -e ".[gui]"
+
+# CLI only
+pip install -e .
 ```
 
-Developer-focused helpers:
+SQLite needs no extra drivers; MySQL/PostgreSQL drivers ship with the core install.
 
-```bash
-dbaide tree --conn local
-dbaide ddl orders --conn local --database main
-dbaide relations --conn local
-dbaide doc --conn local --out schema.md
-dbaide diff dev.shop prod.shop
-```
+## Quickstart
 
-## Desktop Workbench
-
-DBAide now ships a Tauri + React desktop workbench instead of the old PyQt GUI.
-The desktop app uses the same Python core as the CLI for connections, assets,
-workflow trace, SQL validation, history, and debug bundles.
-
-```bash
-python -m pip install -e .[dev]
-npm install
-npm run desktop:tauri -- dev
-```
-
-The compatibility command starts the desktop app in development when the
-workspace checkout is available:
+### Desktop
 
 ```bash
 dbaide-gui
 ```
 
-Release packaging is configured for Windows, macOS, and Linux:
+Add a connection from **Settings → Connections**, then ask in natural language. The
+agent's steps stream into the **Trace** panel on the right; generated SQL can be opened
+in the **SQL** tab to tweak and re-run (`⌘↵` / `Ctrl+↵`).
+
+### CLI
 
 ```bash
-npm run desktop:package
+# Connect (tests the instance and builds offline schema assets by default)
+dbaide connect add local --type sqlite --path ./app.db
+
+# Ask in natural language
+dbaide ask "Which cities have the most paying users?" --conn local
+
+# Inspect / profile / run SQL
+dbaide inspect users --conn local
+dbaide profile users --conn local
+dbaide sql "select * from users limit 10" --conn local --execute
+
+# Find where something lives, across one or all connections
+dbaide find "where is the user email" --conn all
 ```
 
-Desktop capabilities mirror the CLI workflows:
+## Safe by default
 
-- Connections: create/test SQLite, MySQL/MariaDB, and PostgreSQL instances and build offline assets.
-- Assets: hierarchical instance/database/table/column tree, search, and rendered document inspection.
-- Ask: Claude/Codex-style answer cards with SQL, result evidence, warnings, assumptions, and trace.
-- SQL: validate, explain, and execute read-only SQL through the same guards as the CLI.
-- Trace/Plan/Inspector: structured workflow events, generated plan metadata, SQL validation, and execution details.
-- History/debug: workflow replay and debug bundle export.
+New connections use the conservative **production** load profile. DBAide:
 
-Multiple configured connections are treated as multiple database instances:
+- runs **read-only, single statements** with a per-statement timeout and row caps;
+- runs an **`EXPLAIN` cost gate** and asks for confirmation on oversized/low-confidence queries;
+- caps **concurrent queries** and drops very large tables to metadata-only profiling;
+- **logs every SQL** it runs — inspect with `dbaide queries <conn> --tail 50`.
 
-```bash
-dbaide ask "这些实例里订单相关的表有哪些？" --conn all
-dbaide ask "最近 7 天每天订单数" --conn dev,prod --database dev=shop,prod=shop
-dbaide ask "每个库里有哪些表？" --conn dev --database all
-```
+Relax limits per connection with `--load-profile staging|dev`, or tune every knob in
+**Settings → Resources** (desktop) / `[resource_defaults]` in `config.toml`. The per-run
+limits are independent of **Max concurrent runs**, which caps how many sessions run at once.
 
-Install as a command:
+## Configuration
 
-```bash
-pip install -e .
-dbaide chat --conn local
-```
-
-## Model Configuration
-
-Configuration is stored at `~/.dbaide/config.toml`.
+Config lives at `~/.dbaide/config.toml`.
 
 ```toml
 [models.default]
@@ -141,36 +114,68 @@ base_url = "https://api.openai.com/v1"
 api_key_env = "OPENAI_API_KEY"
 model = "gpt-4.1-mini"
 timeout_seconds = 60
+
+[ui]
+language = "en"   # or "zh"
 ```
 
-If no model is configured, DBAide falls back to deterministic local heuristics for schema inspection, profiling, SQL guardrails, simple query generation, and offline asset summaries.
+The agent's answer language follows the UI language so everything stays consistent. If
+no model is configured, DBAide uses local heuristics instead of failing.
+
+## Multiple connections
+
+Configured connections are treated as separate database instances and can be queried
+together:
+
+```bash
+dbaide ask "which instances have order-related tables?" --conn all
+dbaide ask "daily order count last 7 days" --conn dev,prod --database dev=shop,prod=shop
+```
 
 ## Architecture
 
-See [docs/DESIGN.md](docs/DESIGN.md) for the full system design (assets → agent loop → execution).
+```text
+dbaide/
+  cli.py            command-line entry point
+  config.py         TOML config (connections, models, resources, language)
+  i18n.py           en / zh strings + answer-language policy
+  agent/            tool loop, clarifier, SQL writer, controllers, orchestrator
+  adapters/         SQLite / MySQL / PostgreSQL
+  assets/           offline schema assets (instance → db → table → column)
+  rendering/        safe Markdown (mistune) + sanitization
+  history/          chat sessions + workflow history
+  desktop/          PyQt6 app (views, components, dialogs)
+```
 
-## Packaging
+The deep design — assets → agent loop → execution, and the safety model — is documented
+in **[docs/DESIGN.md](docs/DESIGN.md)**.
 
-Build installable packages for macOS, Windows, and Ubuntu:
+## Development
 
 ```bash
 pip install -e ".[gui,dev]"
-./scripts/build_package.sh gui    # desktop bundle → dist/DBAide/
-./scripts/build_package.sh wheel  # Python wheel → dist/
+pytest -q                       # full suite (GUI tests run headless)
+QT_QPA_PLATFORM=offscreen pytest -q tests/   # explicit headless
 ```
 
-Details: [docs/PACKAGING.md](docs/PACKAGING.md)
+GUI tests render off-screen, so no display is required. See **[CONTRIBUTING.md](CONTRIBUTING.md)**.
 
-```text
-dbaide/
-  cli.py                  command-line entry
-  config.py               TOML config manager
-  llm.py                  configurable OpenAI-compatible client
-  models.py               shared dataclasses
-  session.py              per-run state
-  adapters/               SQLite/MySQL/PostgreSQL adapters
-  context/                progressive disclosure state and catalog matching
-  tools/                  schema/profile/query/diagnose tools
-  agent/                  router, planner, SQL writer, answerer, assistant
-  validation/             SQL and schema guards
+## Packaging
+
+Build native bundles (PyInstaller) for macOS, Windows, and Linux:
+
+```bash
+./scripts/build_package.sh gui     # desktop bundle  → dist/DBAide/
+./scripts/build_package.sh wheel   # Python wheel    → dist/
 ```
+
+Details: **[docs/PACKAGING.md](docs/PACKAGING.md)**.
+
+## Contributing
+
+Issues and pull requests are welcome. Please read **[CONTRIBUTING.md](CONTRIBUTING.md)**
+for the dev setup, test conventions, and commit style.
+
+## License
+
+[MIT](LICENSE) © DBAide contributors.
