@@ -386,6 +386,9 @@ class TurnBlock(QFrame):
 
 class ConversationView(QScrollArea):
     _H_MARGIN = 20
+    # Cap the conversation to a comfortable reading column and center it on wide
+    # viewports, rather than letting turns stretch edge-to-edge (AI-IDE style).
+    _MAX_CONTENT_W = 860
 
     # Emitted when a turn's status chip is clicked: the turn's trace events to show
     # in the right panel, or None (still running → just reveal the live trace).
@@ -429,7 +432,11 @@ class ConversationView(QScrollArea):
         if viewport_w <= 0:
             return
         self._root.setMinimumWidth(viewport_w)
-        content_w = max(200, viewport_w - self._H_MARGIN * 2)
+        # Center a capped content column when the viewport is wider than it needs.
+        inner = min(self._MAX_CONTENT_W, viewport_w - self._H_MARGIN * 2)
+        side = max(self._H_MARGIN, (viewport_w - inner) // 2)
+        self._layout.setContentsMargins(side, 16, side, 24)
+        content_w = max(200, inner)
         for index in range(self._layout.count()):
             item = self._layout.itemAt(index)
             widget = item.widget() if item is not None else None
