@@ -91,7 +91,10 @@ def populate(win: MainWindow) -> None:
     """Drive a realistic populated conversation + trace + result table."""
     ask = win.ask_tab
     ask.set_has_connection(True)
-    ask.begin_turn("Which cities have the most paying users, and what's their total order value?",
+    key = "demo"
+    win._active_key = key
+    ask.set_active(key)
+    ask.begin_turn(key, "Which cities have the most paying users, and what's their total order value?",
                    connection="shop", database="auto", policy="safe_auto")
     events = [
         {"stage": "loop", "title": "started", "status": "completed", "kind": "agent"},
@@ -118,7 +121,7 @@ def populate(win: MainWindow) -> None:
         "| Tokyo | 10 | $1,234.50 |\n| NYC | 10 | $1,100.00 |\n| SF | 9 | $980.10 |\n| LA | 9 | $870.30 |\n\n"
         "The values come from joining `orders` to `users` on `user_id` and filtering to `status = 'paid'`."
     )
-    ask.append_result({
+    ask.append_result(key, {
         "status": "completed", "answer_markdown": answer,
         "selected_sql": "SELECT u.city, COUNT(*) AS users, SUM(o.amount) AS total\nFROM users u JOIN orders o ON o.user_id = u.id\nWHERE o.status = 'paid' GROUP BY u.city ORDER BY total DESC",
         "trace": events, "workflow_id": "wf_8a21",

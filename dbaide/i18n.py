@@ -34,6 +34,12 @@ _STRINGS: dict[str, dict[str, str]] = {
     # Composer
     "composer.send": {"en": "Send", "zh": "发送"},
     "composer.stop": {"en": "Stop", "zh": "停止"},
+    "toast.run_queued": {
+        "en": "Queued — starts when a run slot frees up",
+        "zh": "已排队 — 有空位后自动开始",
+    },
+    "status.runs_active": {"en": "{n} running", "zh": "{n} 运行中"},
+    "session.running": {"en": "Running…", "zh": "运行中…"},
     "composer.placeholder.ready": {
         "en": "Ask anything about your data…",
         "zh": "用自然语言提问你的数据…",
@@ -85,6 +91,12 @@ _STRINGS: dict[str, dict[str, str]] = {
     "res.explain_max_rows": {"en": "EXPLAIN cost gate (rows)", "zh": "EXPLAIN 成本闸（行）"},
     "res.max_join_tables": {"en": "Max joined tables", "zh": "最大关联表数"},
     "res.join_sample_size": {"en": "Join sample size (rows)", "zh": "关联采样行数"},
+    "res.max_concurrent_runs": {"en": "Max concurrent runs", "zh": "最大并发运行数"},
+    "res.concurrency_section": {"en": "Concurrency", "zh": "并发"},
+    "res.per_run_note": {
+        "en": "How many sessions may run at once. The limits below apply to each run individually.",
+        "zh": "最多同时运行多少个会话。下面的限制对每个运行单独生效。",
+    },
     # Common buttons
     "btn.save": {"en": "Save", "zh": "保存"},
     "btn.cancel": {"en": "Cancel", "zh": "取消"},

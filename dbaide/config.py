@@ -12,6 +12,9 @@ logger = logging.getLogger("dbaide.config")
 DEFAULT_CONFIG_DIR = Path.home() / ".dbaide"
 DEFAULT_CONFIG_PATH = DEFAULT_CONFIG_DIR / "config.toml"
 
+# Default number of agent runs (sessions) allowed to execute concurrently.
+DEFAULT_MAX_CONCURRENT_RUNS = 3
+
 # Valid keys for ConnectionConfig and ModelConfig
 _CONNECTION_KEYS = {"name", "type", "database", "host", "port", "user", "password_env", "password", "path", "load_profile"}
 _MODEL_KEYS = {"name", "provider", "base_url", "api_key_env", "api_key", "model", "timeout_seconds"}
@@ -173,6 +176,16 @@ class ConfigManager:
         """Return the ``[resource_defaults]`` overrides (may be empty)."""
         raw = self._data.get("resource_defaults") or {}
         return dict(raw) if isinstance(raw, dict) else {}
+
+    def max_concurrent_runs(self) -> int:
+        """How many agent runs (one per session) may execute at once. A global
+        app-level cap, distinct from the per-run database knobs in ResourcePolicy.
+        Stored in ``[resource_defaults].max_concurrent_runs``; defaults to 3."""
+        raw = self.resource_defaults().get("max_concurrent_runs")
+        try:
+            return max(1, min(16, int(raw)))
+        except (TypeError, ValueError):
+            return DEFAULT_MAX_CONCURRENT_RUNS
 
     def set_resource_defaults(self, values: dict[str, Any]) -> None:
         """Persist ``[resource_defaults]`` (drops None/empty values)."""

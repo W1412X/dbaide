@@ -34,13 +34,15 @@ def test_ask_tab_load_session_renders_turns(qapp):
     from dbaide.desktop.views.ask_tab import AskTab
 
     tab = AskTab()
-    tab.load_session(_turns(), connection="shop")
-    text = tab.copy_text()
+    tab.set_has_connection(True)
+    tab.load_session("s1", _turns(), connection="shop")
+    tab.set_active("s1")
+    text = tab.copy_text("s1")
     assert "count paid orders" in text and "and refunded?" in text   # both questions
     assert "There are 3." in text and "Just 1." in text              # both answers
     assert "execute_sql" in text or "SQL" in text                    # turn-1 trace restored
     # the conversation now holds two turn records
-    assert len(tab.conversation._turns) == 2
+    assert len(tab.view("s1")._turns) == 2
 
 
 def _drain(qapp):
@@ -95,8 +97,9 @@ def test_load_session_replaces_previous(qapp):
     from dbaide.desktop.views.ask_tab import AskTab
 
     tab = AskTab()
-    tab.load_session(_turns(), connection="shop")
-    tab.load_session([{"question": "only one", "answer_markdown": "ok", "status": "completed",
-                       "trace": [], "meta": {}}], connection="shop")
-    assert len(tab.conversation._turns) == 1
-    assert "only one" in tab.copy_text() and "count paid orders" not in tab.copy_text()
+    tab.set_has_connection(True)
+    tab.load_session("s1", _turns(), connection="shop")
+    tab.load_session("s1", [{"question": "only one", "answer_markdown": "ok", "status": "completed",
+                             "trace": [], "meta": {}}], connection="shop")
+    assert len(tab.view("s1")._turns) == 1
+    assert "only one" in tab.copy_text("s1") and "count paid orders" not in tab.copy_text("s1")
