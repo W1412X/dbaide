@@ -215,7 +215,6 @@ A: 可以。独立包不依赖系统 Python，配置目录相同。
 | 平台 | 产物 |
 | --- | --- |
 | macOS (Apple Silicon) | `DBAide-macOS-arm64.dmg` |
-| macOS (Intel) | `DBAide-macOS-x86_64.dmg` |
 | Linux (x86_64) | `DBAide-Linux-x86_64.tar.gz` |
 | Windows (x86_64) | `DBAide-Windows-x86_64.zip` |
 
