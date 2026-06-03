@@ -13,13 +13,17 @@ from typing import Any
 from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtGui import QFont
 from PyQt6.QtWidgets import (
+    QApplication,
+    QHBoxLayout,
     QLabel,
     QPlainTextEdit,
     QStackedWidget,
+    QToolButton,
     QVBoxLayout,
     QWidget,
 )
 
+from dbaide.desktop.components.icons import svg_icon
 from dbaide.desktop.components.sql_highlighter import SqlHighlighter
 from dbaide.desktop.components.table import ResultTableWidget
 from dbaide.desktop.theme import Theme
@@ -90,9 +94,24 @@ class StructurePanel(QWidget):
         self._indexes.setStyleSheet(f"QLabel {{ color: {Theme.TEXT_2}; font-size: 12px; }}")
         pl.addWidget(self._indexes)
 
+        ddl_row = QHBoxLayout()
+        ddl_row.setContentsMargins(0, 0, 0, 0)
         ddl_label = QLabel(t("structure.ddl"))
         ddl_label.setStyleSheet(f"color: {Theme.MUTED}; font-size: 11px; font-weight: 600;")
-        pl.addWidget(ddl_label)
+        ddl_row.addWidget(ddl_label)
+        ddl_row.addStretch(1)
+        self._copy_ddl = QToolButton()
+        self._copy_ddl.setIcon(svg_icon("copy", color=Theme.TEXT_2, size=13))
+        self._copy_ddl.setToolTip(t("structure.copy_ddl"))
+        self._copy_ddl.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._copy_ddl.setFixedSize(24, 24)
+        self._copy_ddl.setStyleSheet(
+            f"QToolButton {{ background: transparent; border: none; border-radius: 6px; }}"
+            f"QToolButton:hover {{ background: {Theme.PANEL_3}; }}"
+        )
+        self._copy_ddl.clicked.connect(self._on_copy_ddl)
+        ddl_row.addWidget(self._copy_ddl)
+        pl.addLayout(ddl_row)
         self._ddl = QPlainTextEdit()
         self._ddl.setReadOnly(True)
         self._ddl.setFont(QFont("Menlo", 11))
@@ -173,3 +192,6 @@ class StructurePanel(QWidget):
     def _on_link(self, href: str) -> None:
         if href:
             self.navigate_table.emit(href)
+
+    def _on_copy_ddl(self) -> None:
+        QApplication.clipboard().setText(self._ddl.toPlainText())

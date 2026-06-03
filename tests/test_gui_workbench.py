@@ -205,3 +205,12 @@ def test_close_table_docs_keeps_editors(qapp):
     after = [wb.tabs.tabText(i) for i in range(wb.tabs.count())]
     assert "orders" not in after and "users" not in after
     assert "History" in after and any(t.startswith("Query") for t in after)
+
+
+def test_structure_copy_ddl(qapp):
+    from PyQt6.QtWidgets import QApplication
+    from dbaide.desktop.views.structure_panel import StructurePanel
+    sp = StructurePanel()
+    sp.show_table("orders", [{"name": "id", "data_type": "INTEGER", "primary_key": True}], {}, [])
+    sp._on_copy_ddl()
+    assert "CREATE TABLE orders" in QApplication.clipboard().text()

@@ -191,22 +191,35 @@ class Sidebar(QWidget):
         if item is None:
             return
         data = item.data(0, Qt.ItemDataRole.UserRole)
-        if not (isinstance(data, dict) and data.get("kind") == "table"):
+        if not (isinstance(data, dict) and data.get("name")):
             return
-        from PyQt6.QtWidgets import QMenu
+        from PyQt6.QtWidgets import QApplication, QMenu
         from dbaide.desktop.components.menu import _style_menu
         from dbaide.i18n import t
+        kind = data.get("kind")
         menu = QMenu(self)
         _style_menu(menu)
-        menu.addAction(t("schema.open_data"), lambda: self.schema_selected.emit(data))
-        gen = menu.addMenu(t("schema.generate_sql"))
-        _style_menu(gen)
-        for kind, key in (
-            ("select_star", "schema.gen_select_star"),
-            ("select_columns", "schema.gen_select_columns"),
-            ("count", "schema.gen_count"),
-            ("insert", "schema.gen_insert"),
-            ("update", "schema.gen_update"),
-        ):
-            gen.addAction(t(key), lambda _checked=False, k=kind: self.generate_sql.emit(data, k))
+        if kind == "table":
+            menu.addAction(t("schema.open_data"), lambda: self.schema_selected.emit(data))
+            gen = menu.addMenu(t("schema.generate_sql"))
+            _style_menu(gen)
+            for gkind, key in (
+                ("select_star", "schema.gen_select_star"),
+                ("select_columns", "schema.gen_select_columns"),
+                ("count", "schema.gen_count"),
+                ("insert", "schema.gen_insert"),
+                ("update", "schema.gen_update"),
+            ):
+                gen.addAction(t(key), lambda _checked=False, k=gkind: self.generate_sql.emit(data, k))
+            menu.addSeparator()
+        # Copy name — available for any named node (table, column, database).
+        name = str(data.get("name") or "")
+        menu.addAction(t("schema.copy_name"),
+                       lambda: QApplication.clipboard().setText(name))
+        path = str(data.get("path") or "")
+        if path:
+            # Qualified name = the dotted path minus the connection prefix.
+            qualified = ".".join(path.split(".")[1:]) or name
+            menu.addAction(t("schema.copy_qualified"),
+                           lambda: QApplication.clipboard().setText(qualified))
         menu.exec(self.tree.viewport().mapToGlobal(pos))
