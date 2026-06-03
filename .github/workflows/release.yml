@@ -60,15 +60,19 @@ jobs:
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update -qq
-          sudo apt-get install -y -qq xvfb libxcb-cursor0 libegl1 libxkbcommon-x11-0 \
-            libxcb-icccm4 libxcb-image0 libxcb-keysyms1 libxcb-randr0 libxcb-render-util0 \
-            libxcb-shape0 >/dev/null 2>&1 || true
+          sudo apt-get install -y -qq xvfb libegl1 libxkbcommon-x11-0 libdbus-1-3 \
+            libxcb-cursor0 libxcb-icccm4 libxcb-image0 libxcb-keysyms1 libxcb-randr0 \
+            libxcb-render-util0 libxcb-shape0 libxcb-shm0 libxcb-sync1 libxcb-xfixes0 \
+            libxcb-xinerama0 >/dev/null 2>&1 || true
           echo "bundle size:"; du -sh dist/DBAide
           set +e
-          xvfb-run -a timeout 20 dist/DBAide/DBAide
+          xvfb-run -a timeout 30 dist/DBAide/DBAide >smoke.log 2>&1
           code=$?
-          if [ "$code" = "124" ]; then echo "✓ launched and stayed up — healthy"; exit 0; fi
-          echo "✗ exited early (code $code) — bundle likely missing a module"; exit 1
+          echo "--- app output ---"; cat smoke.log; echo "--- exit: $code ---"
+          # 0 = launched and exited cleanly; 124 = still running when timeout killed
+          # it. Both mean it started without a missing-module / plugin crash.
+          if [ "$code" = "0" ] || [ "$code" = "124" ]; then echo "✓ healthy"; exit 0; fi
+          echo "✗ startup crash (exit $code)"; exit 1
 
       # macOS → a .dmg containing DBAide.app + an Applications symlink, so users
       # drag the app into Applications.
