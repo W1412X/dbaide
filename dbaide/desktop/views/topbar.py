@@ -48,13 +48,13 @@ class TopBar(QWidget):
         self.status = StatusBadge("Idle", "idle")
         row.addWidget(self.status)
 
-        self.panel_toggle = IconToolButton(panel_icon(), "Toggle activity panel")
+        self.panel_toggle = IconToolButton(panel_icon(color=Theme.TEXT_2), "Toggle activity panel")
         self.panel_toggle.clicked.connect(self.toggle_panel.emit)
         row.addWidget(self.panel_toggle)
 
         from dbaide.i18n import t
-        # Flat icon button matching the panel toggle (was a bordered text-glyph box).
-        self.menu = MenuButton(icon=more_icon(), tooltip=t("topbar.settings"), icon_only=True)
+        # Soft icon button matching the panel toggle.
+        self.menu = MenuButton(icon=more_icon(color=Theme.TEXT_2), tooltip=t("topbar.settings"), icon_only=True)
         self.menu.add_action(t("topbar.build"), self.build_assets.emit)
         self.menu.add_action(t("topbar.refresh"), self.refresh.emit)
         self.menu.add_separator()

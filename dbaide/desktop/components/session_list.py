@@ -115,7 +115,7 @@ class SessionList(QWidget):
         header.setContentsMargins(0, 0, 0, 0)
         header.addWidget(SectionLabel(t("session.chats")))
         header.addStretch(1)
-        self._new_btn = IconToolButton(plus_icon(), t("session.new"))
+        self._new_btn = IconToolButton(plus_icon(color=Theme.TEXT_2), t("session.new"))
         self._new_btn.clicked.connect(self.new_requested.emit)
         header.addWidget(self._new_btn)
         layout.addLayout(header)

@@ -7,6 +7,7 @@ from PyQt6.QtWidgets import QHBoxLayout, QTabBar, QWidget
 
 from dbaide.desktop.components.icons import more_icon
 from dbaide.desktop.components.menu import MenuButton
+from dbaide.desktop.theme import Theme
 
 
 class PanelHeader(QWidget):
@@ -43,7 +44,7 @@ class PanelHeader(QWidget):
         # One overflow menu holds the secondary navigation/management and the
         # contextual trace actions — keeps the header to "[views] · [⋯]".
         from dbaide.i18n import t
-        self._menu = MenuButton(icon=more_icon(), tooltip="More", icon_only=True)
+        self._menu = MenuButton(icon=more_icon(color=Theme.TEXT_2), tooltip="More", icon_only=True)
         # Query history is now the Chats list in the sidebar (sessions group turns);
         # the old per-workflow History dialog is superseded, so it's no longer here.
         self._menu.add_action(t("menu.joins"), self.joins_clicked.emit)

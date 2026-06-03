@@ -10,35 +10,37 @@ from dbaide.desktop.theme import Theme
 
 
 class IconToolButton(QToolButton):
-    """Square ghost icon button — centered glyph, no clipping."""
+    """Square soft icon button — a subtle but visible fill (no border) carries the
+    button shape, so it reads as a control rather than an invisible hotspot."""
 
     def __init__(self, icon: QIcon, tooltip: str, *, parent=None) -> None:
         super().__init__(parent)
         self._base_icon = icon
         self.setIcon(icon)
-        self.setIconSize(QSize(16, 16))
+        self.setIconSize(QSize(17, 17))
         self.setToolTip(tooltip)
         self.setCursor(Qt.CursorShape.PointingHandCursor)
         self.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonIconOnly)
         self.setAutoRaise(True)
-        self.setFixedSize(28, 28)
+        self.setFixedSize(30, 30)
         self._apply_style()
 
     def _apply_style(self) -> None:
+        # Visible soft fill (not transparent), no border; brightens on hover.
         self.setStyleSheet(
             f"""
             QToolButton {{
-                background: transparent;
+                background: {Theme.PANEL_2};
                 border: none;
-                border-radius: 6px;
+                border-radius: 7px;
                 padding: 0;
                 margin: 0;
             }}
             QToolButton:hover {{
-                background: {Theme.PANEL_2};
+                background: {Theme.PANEL_3};
             }}
             QToolButton:pressed {{
-                background: {Theme.PANEL_3};
+                background: {Theme.BORDER};
             }}
             """
         )

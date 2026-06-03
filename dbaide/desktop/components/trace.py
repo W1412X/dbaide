@@ -94,14 +94,15 @@ class TracePanel(QWidget):
         self._detail.viewport().installEventFilter(self)
 
         self._copy_raw_btn = QToolButton(self._detail)
-        self._copy_raw_btn.setIcon(svg_icon("copy", color=Theme.MUTED, size=15))
-        self._copy_raw_btn.setIconSize(QSize(15, 15))
+        self._copy_raw_btn.setIcon(svg_icon("copy", color=Theme.TEXT_2, size=16))
+        self._copy_raw_btn.setIconSize(QSize(16, 16))
         self._copy_raw_btn.setToolTip("Copy raw event JSON")
         self._copy_raw_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        self._copy_raw_btn.setFixedSize(24, 24)
-        # Ghost icon — no boxed border; just a faint hover wash (modern icon-button style).
+        self._copy_raw_btn.setFixedSize(28, 28)
+        # Soft button: a visible fill (no border) so it's clearly a control, not an
+        # invisible hotspot; brightens on hover.
         self._copy_raw_btn.setStyleSheet(
-            "QToolButton { background: transparent; border: none; border-radius: 6px; }"
+            f"QToolButton {{ background:{Theme.PANEL_2}; border: none; border-radius: 7px; }}"
             f"QToolButton:hover {{ background:{Theme.PANEL_3}; }}"
         )
         self._copy_raw_btn.clicked.connect(self._copy_raw)
@@ -331,8 +332,8 @@ class TracePanel(QWidget):
     def _copy_raw(self) -> None:
         if self._raw_text:
             QApplication.clipboard().setText(self._raw_text)
-            self._copy_raw_btn.setIcon(svg_icon("check", color=Theme.GREEN, size=15))
-            QTimer.singleShot(1200, lambda: self._copy_raw_btn.setIcon(svg_icon("copy", color=Theme.MUTED, size=15)))
+            self._copy_raw_btn.setIcon(svg_icon("check", color=Theme.GREEN, size=16))
+            QTimer.singleShot(1200, lambda: self._copy_raw_btn.setIcon(svg_icon("copy", color=Theme.TEXT_2, size=16)))
 
 
 def _esc(text: str) -> str:
