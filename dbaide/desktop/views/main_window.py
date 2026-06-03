@@ -253,6 +253,7 @@ class MainWindow(QMainWindow):
         self.composer.submit_requested.connect(self.submit_composer)
         self.composer.stop_requested.connect(self.stop_task)
         self.composer.model_changed.connect(self._model_changed)
+        self.composer.attach_requested.connect(self._show_attach_menu)
         center_layout.addWidget(self.composer)
 
         self.right = RightPanel()
@@ -566,6 +567,15 @@ class MainWindow(QMainWindow):
         self._last_question = question
         self._slot_question[key] = question
         database = self.current_database()
+        # Pinned db/table context is injected into the model prompt but NOT shown in
+        # the visible user message (the displayed question stays the user's text).
+        attachments = self.composer.attachments()
+        agent_question = question
+        if attachments:
+            ctx = self._build_attached_context(attachments)
+            if ctx:
+                agent_question = f"{ctx}\n\n[User question]\n{question}"
+        self.composer.clear_attachments()
         self.composer.clear_input()
         self.ask_tab.append_user(key, question, connection=conn, database=database, policy=policy)
         # Fresh trace for this turn; show it live since this slot is the active one.
@@ -574,7 +584,7 @@ class MainWindow(QMainWindow):
         self.right.focus_trace()
         self._start_ask(key, {
             "connection_name": conn,
-            "question": question,
+            "question": agent_question,
             "database": database,
             "execution_policy": policy,
             "show_trace": True,
@@ -1003,6 +1013,85 @@ class MainWindow(QMainWindow):
             if c.get("name") == conn:
                 return "mysql" if str(c.get("type", "")).lower() in ("mysql", "mariadb") else "generic"
         return "generic"
+
+    # ── Composer context attachment (the "+" button) ──────────────────────────
+
+    def _show_attach_menu(self) -> None:
+        """Build a db → table picker from the loaded schema; selecting attaches the
+        asset as prompt context (cascading a table's database in automatically)."""
+        from PyQt6.QtWidgets import QMenu
+        from dbaide.desktop.components.menu import _style_menu
+        menu = QMenu(self)
+        _style_menu(menu)
+        if not self.schema_rows:
+            act = menu.addAction(_i18n_t("composer.attach_none"))
+            act.setEnabled(False)
+            menu.exec(self._attach_menu_pos())
+            return
+        for db in self.schema_rows:
+            db_name = str(db.get("name") or "")
+            tables = db.get("children") or []
+            sub = menu.addMenu(db_name or "(database)")
+            _style_menu(sub)
+            # The database itself, as one attachable item.
+            sub.addAction(
+                _i18n_t("schema.open_data") and f"📦 {db_name}" or db_name,
+                lambda _=False, d=db: self._attach_node(d),
+            )
+            sub.addSeparator()
+            for tnode in tables:
+                if tnode.get("kind") != "table":
+                    continue
+                tname = str(tnode.get("name") or "")
+                sub.addAction(tname, lambda _=False, tn=tnode: self._attach_node(tn))
+        menu.exec(self._attach_menu_pos())
+
+    def _attach_menu_pos(self):
+        # Pop the menu just above the composer's attach button.
+        btn = self.composer.attach_btn
+        return btn.mapToGlobal(btn.rect().topLeft())
+
+    def _attach_node(self, node: dict[str, Any]) -> None:
+        """Attach a schema node (table or database) as prompt context. Attaching a
+        table cascades its database in (deduplicated by path)."""
+        kind = str(node.get("kind") or "")
+        path = str(node.get("path") or "")
+        name = str(node.get("name") or "")
+        if not path:
+            return
+        if kind == "table":
+            # Cascade: ensure the parent database is attached first (no duplicate).
+            parts = path.split(".")
+            if len(parts) >= 2:
+                db_path = ".".join(parts[:2])  # conn.database
+                db_name = parts[1]
+                self.composer.add_attachment(
+                    kind="database", path=db_path, name=db_name, database=db_name,
+                )
+            db_name = parts[1] if len(parts) >= 2 else ""
+            self.composer.add_attachment(kind="table", path=path, name=name, database=db_name)
+        elif kind == "database":
+            self.composer.add_attachment(kind="database", path=path, name=name, database=name)
+
+    def _build_attached_context(self, attachments: list[dict]) -> str:
+        """Fetch the asset doc for each attached db/table and assemble a context
+        preamble for the model. Read synchronously (local files, fast)."""
+        blocks: list[str] = []
+        for att in attachments:
+            try:
+                res = self.service.dispatch("asset_markdown", {"path": att.get("path", "")})
+                md = str((res or {}).get("markdown") or "").strip()
+            except Exception:
+                md = ""
+            if md:
+                blocks.append(md)
+        if not blocks:
+            return ""
+        header = (
+            "[Attached schema context provided by the user. Use it to ground your "
+            "answer; do not repeat it back verbatim.]"
+        )
+        return header + "\n\n" + "\n\n---\n\n".join(blocks)
 
     def _generate_sql(self, node: dict[str, Any], kind: str) -> None:
         """Generate a starter statement for a table and open it in a new editor."""

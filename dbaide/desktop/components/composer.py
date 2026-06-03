@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from PyQt6.QtCore import QEvent, QSize, Qt, pyqtSignal
-from PyQt6.QtWidgets import QHBoxLayout, QTextEdit, QVBoxLayout
+from PyQt6.QtWidgets import QHBoxLayout, QLabel, QTextEdit, QVBoxLayout, QWidget
 
 from dbaide.desktop.components.base import compact_button, Panel
 from dbaide.desktop.components.composer_options import POLICIES, POLICY_TOOLTIPS
@@ -32,6 +32,7 @@ class ComposerWidget(Panel):
     submit_requested = pyqtSignal(str, str)
     stop_requested = pyqtSignal()
     model_changed = pyqtSignal(str)
+    attach_requested = pyqtSignal()  # the "+" context button was clicked
 
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
@@ -71,8 +72,27 @@ class ComposerWidget(Panel):
         self.input.installEventFilter(self)
         outer.addWidget(self.input)
 
+        # ── Context attachment chips (db/table the user pinned for this prompt) ──
+        # The attached assets are injected into the model prompt at submit time but
+        # NOT shown in the visible user message. Chips let the user see/remove them.
+        self._attachments: list[dict] = []          # [{kind, path, name, database}]
+        self._chips_row = QHBoxLayout()
+        self._chips_row.setSpacing(6)
+        self._chips_row.setContentsMargins(0, 0, 0, 0)
+        self._chips_host = QWidget()
+        self._chips_host.setLayout(self._chips_row)
+        self._chips_host.setVisible(False)
+        outer.addWidget(self._chips_host)
+
         footer = QHBoxLayout()
         footer.setSpacing(8)
+        # "+" context button — pick a database/table to attach as prompt context.
+        self.attach_btn = compact_button("", width=30)
+        self.attach_btn.setIcon(svg_icon("plus", color=Theme.TEXT_2, size=15))
+        self.attach_btn.setIconSize(QSize(15, 15))
+        self.attach_btn.setToolTip(t("composer.attach_tooltip"))
+        self.attach_btn.clicked.connect(self.attach_requested.emit)
+        footer.addWidget(self.attach_btn)
         self.policy_select = PillSelect("Safe", max_width=108)
         self.policy_select.set_options(POLICIES)
         self.policy_select.set_option_tooltips(POLICY_TOOLTIPS)
@@ -183,6 +203,48 @@ class ComposerWidget(Panel):
         self.input.clear()
         self._sync_input_height()
 
+    # ── context attachments ─────────────────────────────────────────────────--
+
+    def add_attachment(self, *, kind: str, path: str, name: str, database: str = "") -> bool:
+        """Pin a db/table as prompt context. Deduplicates by path. Returns True if
+        newly added."""
+        if any(a["path"] == path for a in self._attachments):
+            return False
+        self._attachments.append({"kind": kind, "path": path, "name": name, "database": database})
+        self._render_chips()
+        return True
+
+    def attachments(self) -> list[dict]:
+        return list(self._attachments)
+
+    def clear_attachments(self) -> None:
+        self._attachments.clear()
+        self._render_chips()
+
+    def _remove_attachment(self, path: str) -> None:
+        self._attachments = [a for a in self._attachments if a["path"] != path]
+        self._render_chips()
+
+    def _render_chips(self) -> None:
+        # Clear existing chip widgets. setParent(None) removes them from the display
+        # immediately — relying on deleteLater alone leaves ghost chips floating at
+        # their old positions until the event loop runs (visible overlap).
+        while self._chips_row.count():
+            item = self._chips_row.takeAt(0)
+            w = item.widget()
+            if w is not None:
+                w.setParent(None)
+                w.deleteLater()
+        if not self._attachments:
+            self._chips_host.setVisible(False)
+            return
+        for att in self._attachments:
+            chip = _ContextChip(att["kind"], att["name"], att["path"])
+            chip.removed.connect(self._remove_attachment)
+            self._chips_row.addWidget(chip)
+        self._chips_row.addStretch(1)
+        self._chips_host.setVisible(True)
+
     def question(self) -> str:
         return self.input.toPlainText().strip()
 
@@ -201,3 +263,37 @@ class ComposerWidget(Panel):
             self.stop_requested.emit()
             return
         self.submit_requested.emit(self.question(), self.policy())
+
+
+class _ContextChip(QWidget):
+    """A small removable chip showing an attached db/table context."""
+
+    removed = pyqtSignal(str)  # path
+
+    def __init__(self, kind: str, name: str, path: str, parent=None) -> None:
+        super().__init__(parent)
+        self._path = path
+        lay = QHBoxLayout(self)
+        lay.setContentsMargins(8, 0, 4, 0)
+        lay.setSpacing(4)
+        icon = "database" if kind == "database" else "table"
+        icon_lbl = QLabel()
+        icon_lbl.setPixmap(svg_icon(icon, color=Theme.TEXT_2, size=12).pixmap(QSize(12, 12)))
+        icon_lbl.setFixedSize(12, 12)
+        lay.addWidget(icon_lbl)
+        text = QLabel(name)
+        text.setStyleSheet(f"color: {Theme.TEXT_2}; font-size: 11px; background: transparent;")
+        lay.addWidget(text)
+        close = compact_button("✕", width=18)
+        close.setFixedSize(16, 16)
+        close.setStyleSheet(
+            f"QPushButton {{ background: transparent; border: none; color: {Theme.MUTED};"
+            f" font-size: 10px; }} QPushButton:hover {{ color: {Theme.TEXT}; }}"
+        )
+        close.clicked.connect(lambda: self.removed.emit(self._path))
+        lay.addWidget(close)
+        self.setFixedHeight(22)
+        self.setStyleSheet(
+            f"background: {Theme.PANEL_2}; border: 1px solid {Theme.BORDER_SOFT};"
+            f" border-radius: 6px;"
+        )

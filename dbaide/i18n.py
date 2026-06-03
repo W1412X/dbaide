@@ -92,6 +92,15 @@ _STRINGS: dict[str, dict[str, str]] = {
         "zh": "请先添加或选择一个连接",
     },
     "composer.hint": {"en": "Enter = newline · ⌘Enter = send", "zh": "Enter 换行 · ⌘Enter 发送"},
+    "composer.attach_tooltip": {
+        "en": "Add a database/table as context",
+        "zh": "添加数据库/表作为上下文",
+    },
+    "composer.attach_menu": {"en": "Attach context", "zh": "添加上下文"},
+    "composer.attach_none": {
+        "en": "No schema — build assets first",
+        "zh": "暂无结构 — 请先构建资产",
+    },
     "composer.placeholder.reply": {
         "en": "Reply to continue…",
         "zh": "回复以继续…",
