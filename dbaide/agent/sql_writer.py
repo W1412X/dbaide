@@ -5,6 +5,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from dbaide.agent.progressive_schema import ModelRequiredError
+from dbaide.i18n import answer_language_directive
 from dbaide.llm import LLMClient, LLMMessage, NullLLMClient
 from dbaide.models import ColumnInfo
 
@@ -122,7 +123,8 @@ class SQLWriter:
             "Reference tables by their BARE name (e.g. `orders`, never `mydb.orders`) — the "
             "connection is already pointed at the correct database. Only qualify a table with a "
             "database prefix when the query genuinely spans MORE THAN ONE database. "
-            "Return confidence 0.0-1.0 based on how sure you are about the mapping."
+            "Return confidence 0.0-1.0 based on how sure you are about the mapping. "
+            + answer_language_directive()
         )
         if multi_table:
             base += (

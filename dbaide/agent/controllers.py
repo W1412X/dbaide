@@ -221,10 +221,9 @@ class ResultInterpreter:
 
 
 def _prefers_chinese(text: str) -> bool:
-    # The user's actual language wins (CJK in the question \u2192 Chinese); otherwise
-    # fall back to the configured default answer language.
-    if any("\u4e00" <= ch <= "\u9fff" for ch in text):
-        return True
+    # The UI language is authoritative, so result interpretations stay consistent
+    # with the rest of the app (and with the LLM's answer language) rather than
+    # flipping based on the characters in the question.
     try:
         from dbaide.i18n import get_language
         return get_language() == "zh"

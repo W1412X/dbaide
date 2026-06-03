@@ -24,6 +24,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
+from dbaide.i18n import answer_language_directive
 from dbaide.llm import LLMMessage, NullLLMClient
 from dbaide.models import ColumnInfo
 
@@ -140,6 +141,7 @@ class SemanticClarifier:
             "what is already unambiguous. If everything is clear, return no questions.\n"
             "- 'assumptions' may contain ONLY facts that are CERTAIN from the schema/values "
             "(e.g. 'amount is a numeric column'), never a guess about meaning.\n"
+            f"{answer_language_directive()}\n"
             f"Return at most {_MAX_QUESTIONS} questions. JSON only."
         )
         confirmed = [str(c).strip() for c in (already_confirmed or []) if str(c).strip()]

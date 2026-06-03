@@ -274,11 +274,14 @@ def on_change(callback: Callable[[str], None]) -> Callable[[], None]:
 
 
 def answer_language_directive(lang: str | None = None) -> str:
-    """Instruction appended to the agent's prompt so it answers in the chosen
-    language by default (the user writing in another language still wins)."""
+    """Instruction appended to the agent's prompts so ALL user-facing prose matches
+    the app's UI language — answers, summaries and clarification questions stay
+    consistent with the rest of the interface, regardless of the question's language.
+    SQL, identifiers and code are kept verbatim."""
     code = normalize(lang if lang is not None else _current)
-    if code == "zh":
-        return ("Respond in Simplified Chinese (简体中文) by default. "
-                "If the user writes in another language, match the user's language.")
-    return ("Respond in English by default. "
-            "If the user writes in another language, match the user's language.")
+    target = "Simplified Chinese (简体中文)" if code == "zh" else "English"
+    return (
+        f"Language: write ALL user-facing prose — explanations, summaries, notes and "
+        f"clarification questions — in {target}. Do NOT switch languages based on the "
+        f"question's language. Keep SQL, table/column identifiers and code verbatim."
+    )

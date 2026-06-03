@@ -38,7 +38,9 @@ def test_orchestrator_live_schema_query_without_assets(tmp_path):
     session = Session(connection=conn)
     orchestrator = AskOrchestrator(adapter, session, AgentMockLLM())
     response = orchestrator.run("最近 7 天每天订单数量", execute=True)
-    assert "查询结果" in response.answer or "条记录" in response.answer
+    # Answer language follows the UI setting now (default en); assert behaviour, not language.
+    assert response.answer.strip()
+    assert any(m in response.answer for m in ("条记录", "查询结果", "rows", "row", "Results"))
     assert response.sql.strip()
     assert response.result is not None
     assert response.result.row_count >= 1

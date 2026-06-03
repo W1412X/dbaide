@@ -1,12 +1,17 @@
 import pytest
 
 from dbaide.agent.answerer import AnswerFormatter
+from dbaide.i18n import set_language
 from dbaide.models import ColumnProfile, QueryResult, TableInfo
 
 
 class TestAnswerFormatter:
     def setup_method(self):
         self.formatter = AnswerFormatter()
+        set_language("en")  # default; the Chinese-output tests opt into zh explicitly
+
+    def teardown_method(self):
+        set_language("en")
 
     def test_tables_empty(self):
         result = self.formatter.tables([])
@@ -55,6 +60,7 @@ class TestAnswerFormatter:
         assert "80" in result
 
     def test_query_result_with_interpretation(self):
+        set_language("zh")
         result = QueryResult(
             columns=["id"],
             rows=[],
@@ -72,12 +78,14 @@ class TestAnswerFormatter:
         assert "放宽 WHERE 条件" in formatted
 
     def test_query_result_empty(self):
+        set_language("zh")
         result = QueryResult(columns=[], rows=[], sql="SELECT 1", row_count=0, elapsed_ms=1.0)
         formatted = self.formatter.query_result(result, sql="SELECT 1")
         assert "查询未返回任何数据" in formatted
         assert "共 0 条记录" in formatted
 
     def test_query_result_with_rows(self):
+        set_language("zh")
         result = QueryResult(
             columns=["id", "name"],
             rows=[{"id": 1, "name": "test"}],
@@ -92,6 +100,7 @@ class TestAnswerFormatter:
         assert "共 1 条记录" in formatted
 
     def test_query_result_truncated(self):
+        set_language("zh")
         rows = [{"id": i} for i in range(25)]
         result = QueryResult(columns=["id"], rows=rows[:20], sql="SELECT id", row_count=25, elapsed_ms=5.0, truncated=True)
         formatted = self.formatter.query_result(result, sql="SELECT id")
@@ -99,7 +108,27 @@ class TestAnswerFormatter:
         assert "25" in formatted
 
     def test_query_result_with_rationale(self):
+        set_language("zh")
         result = QueryResult(columns=[], rows=[], sql="SELECT 1", row_count=0, elapsed_ms=1.0)
         formatted = self.formatter.query_result(result, sql="SELECT 1", rationale="Test rationale")
         assert "Test rationale" in formatted
         assert "查询未返回任何数据" in formatted
+
+    def test_query_result_english_when_ui_en(self):
+        set_language("en")
+        result = QueryResult(columns=["id", "name"], rows=[{"id": 1, "name": "x"}],
+                             sql="", row_count=1, elapsed_ms=5.0)
+        formatted = self.formatter.query_result(result)
+        assert "1 row" in formatted
+        assert "条记录" not in formatted and "查询" not in formatted
+
+
+def test_answer_language_directive_is_ui_authoritative():
+    from dbaide.i18n import answer_language_directive
+    zh = answer_language_directive("zh")
+    en = answer_language_directive("en")
+    assert "简体中文" in zh and "Chinese" in zh
+    assert "English" in en
+    # No longer flips to the question's language — the UI language is authoritative.
+    assert "match the user's language" not in zh.lower()
+    assert "match the user's language" not in en.lower()

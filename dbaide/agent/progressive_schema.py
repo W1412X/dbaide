@@ -8,6 +8,7 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Callable
 
 from dbaide.assets import AssetStore
+from dbaide.i18n import answer_language_directive
 from dbaide.llm import LLMClient, LLMMessage, NullLLMClient
 
 if TYPE_CHECKING:
@@ -400,8 +401,9 @@ class ProgressiveSchemaAgent:
                 LLMMessage(
                     "system",
                     "You are a database schema assistant. Answer using ONLY the relevant schema below. "
-                    "Be concise. Use the user's language. Format as markdown with bullet groups by database. "
-                    "Do NOT list unrelated tables.",
+                    "Be concise. Format as markdown with bullet groups by database. "
+                    "Do NOT list unrelated tables. "
+                    + answer_language_directive(),
                 ),
                 LLMMessage("user", f"Question:\n{question}\n\nSchema:\n{context}"),
             ]
