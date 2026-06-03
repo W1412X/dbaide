@@ -37,3 +37,16 @@ def test_connection_form_type_change_resets_default_port(qapp):
     form.port.setValue(3308)
     form.type_select.setCurrentText("postgres")
     assert form.port.value() == 5432
+
+
+def test_connection_form_fields_visible_by_type(qapp):
+    form = ConnectionForm(conn_type="sqlite")
+    form.show()
+    assert form.path.isVisibleTo(form) is True
+    assert form.host.isVisibleTo(form) is False
+    assert form.password.isVisibleTo(form) is False
+    form.type_select.setCurrentText("postgres")
+    assert form.path.isVisibleTo(form) is False
+    assert form.host.isVisibleTo(form) is True
+    assert form.database.isVisibleTo(form) is True
+    form.close()

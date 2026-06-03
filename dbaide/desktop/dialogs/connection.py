@@ -79,14 +79,17 @@ class ConnectionForm(QWidget):
         path_layout.addWidget(self.path, 1)
         path_layout.addWidget(browse)
 
+        self._form = form
         form.addRow(form_label(t("conn.name")), self.name)
         form.addRow(form_label(t("conn.type")), self.type_select)
         form.addRow(form_label(t("conn.sqlite_path")), path_row)
+        self._row_path = 2
         form.addRow(form_label(t("conn.host")), self.host)
         form.addRow(form_label(t("conn.port")), self.port)
         form.addRow(form_label(t("conn.database")), self.database)
         form.addRow(form_label(t("conn.user")), self.user)
         form.addRow(form_label(t("conn.password")), self.password)
+        self._rows_server = (3, 4, 5, 6, 7)  # host, port, database, user, password
         form.addRow(form_label(t("conn.load_profile")), self.load_profile)
         scroll.setWidget(inner)
         outer.addWidget(scroll)
@@ -125,6 +128,17 @@ class ConnectionForm(QWidget):
         self.load_profile.setCurrentText("production")
         self._sync_fields(conn_type, reset_port=True)
 
+    def _set_row_visible(self, row: int, visible: bool) -> None:
+        # Qt 6.4+ has setRowVisible; fall back to toggling both row widgets.
+        try:
+            self._form.setRowVisible(row, visible)
+        except (AttributeError, TypeError):
+            from PyQt6.QtWidgets import QFormLayout
+            for role in (QFormLayout.ItemRole.LabelRole, QFormLayout.ItemRole.FieldRole):
+                item = self._form.itemAt(row, role)
+                if item is not None and item.widget() is not None:
+                    item.widget().setVisible(visible)
+
     def _browse(self) -> None:
         path, _ = QFileDialog.getOpenFileName(self, "Select SQLite database")
         if path:
@@ -133,10 +147,13 @@ class ConnectionForm(QWidget):
                 self.name.setText(path.rsplit("/", 1)[-1].split(".")[0])
 
     def _sync_fields(self, conn_type: str, *, reset_port: bool = False) -> None:
+        # Show only the fields relevant to the type: SQLite → just the file path;
+        # server types → host/port/database/user/password. Irrelevant rows hide
+        # entirely (cleaner than greying out).
         sqlite = conn_type == "sqlite"
-        self.path.setEnabled(sqlite)
-        for widget in (self.host, self.port, self.database, self.user, self.password):
-            widget.setEnabled(not sqlite)
+        self._set_row_visible(self._row_path, sqlite)
+        for row in self._rows_server:
+            self._set_row_visible(row, not sqlite)
         if reset_port:
             if conn_type in {"mysql", "mariadb"}:
                 self.port.setValue(3306)
