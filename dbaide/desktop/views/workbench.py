@@ -18,6 +18,7 @@ from PyQt6.QtGui import QFont
 from PyQt6.QtWidgets import QTabBar, QTabWidget, QToolButton, QVBoxLayout, QWidget
 
 from dbaide.desktop.theme import Theme
+from dbaide.desktop.views.doc_tab import DocTab
 from dbaide.desktop.views.query_history import QueryHistoryPanel
 from dbaide.desktop.views.sql_tab import SqlTab
 from dbaide.desktop.views.table_document import TableDocument
@@ -31,6 +32,8 @@ class WorkbenchView(QWidget):
     doc_closed = pyqtSignal(object)          # the closed widget
     navigate_table = pyqtSignal(str)         # FK link → open a related table
     navigate_fk = pyqtSignal(str, str, object)  # data-cell FK → open referenced row
+    ask_ai_requested = pyqtSignal(str, str)  # (table_name, schema_summary) from TableDocument
+    doc_requested = pyqtSignal(str)          # path — emitted when a DocTab is activated
 
     def __init__(self, history_panel: QueryHistoryPanel, parent=None) -> None:
         super().__init__(parent)
@@ -38,6 +41,7 @@ class WorkbenchView(QWidget):
         self._t = t
         self._completions: list[str] = []
         self._query_seq = 0
+        self._doc_tabs: dict[str, DocTab] = {}  # path → DocTab
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
@@ -65,6 +69,7 @@ class WorkbenchView(QWidget):
         )
         add_btn.clicked.connect(lambda: self.new_sql_editor())
         self.tabs.setCornerWidget(add_btn)
+        self.tabs.currentChanged.connect(self._on_workbench_tab_changed)
 
         # Start on a single empty SQL editor (DBeaver opens an editor by default).
         self.new_sql_editor()
@@ -79,14 +84,6 @@ class WorkbenchView(QWidget):
             if btn is not None:
                 btn.deleteLater()
                 bar.setTabButton(index, side, None)
-
-    def _on_close(self, index: int) -> None:
-        widget = self.tabs.widget(index)
-        if widget is self.history_panel:
-            return  # pinned
-        self.tabs.removeTab(index)
-        self.doc_closed.emit(widget)
-        widget.deleteLater()
 
     def close_current(self) -> None:
         """Close the current document (no-op on the pinned History tab)."""
@@ -168,6 +165,7 @@ class WorkbenchView(QWidget):
         doc.count_requested.connect(lambda payload, d=doc: self.count_requested.emit(d, payload))
         doc.navigate_table.connect(self.navigate_table.emit)
         doc.navigate_fk.connect(self.navigate_fk.emit)
+        doc.ask_ai_requested.connect(self.ask_ai_requested.emit)
         index = self.tabs.addTab(doc, table)
         self.tabs.setCurrentIndex(index)
         doc.open(columns, relations, indexes)
@@ -190,3 +188,62 @@ class WorkbenchView(QWidget):
 
     def focus_history(self) -> None:
         self.tabs.setCurrentWidget(self.history_panel)
+
+    # ── Doc tabs (asset markdown viewer) ────────────────────────────────────────
+
+    def open_doc(self, path: str, title: str, markdown: str = "") -> DocTab:
+        """Open (or focus) a DocTab for the given asset path.
+
+        At most one DocTab per path. If already open, just bring it forward.
+        The tab title is the last segment of the dot-separated path (table name).
+        """
+        if path in self._doc_tabs:
+            w = self._doc_tabs[path]
+            idx = self.tabs.indexOf(w)
+            if idx >= 0:
+                self.tabs.setCurrentIndex(idx)
+                return w
+            # Tab was closed externally — clean up registry
+            del self._doc_tabs[path]
+
+        tab_title = path.split(".")[-1] if path else title
+        doc = DocTab(title, markdown)
+        self._doc_tabs[path] = doc
+        index = self.tabs.addTab(doc, tab_title)
+        self.tabs.setCurrentIndex(index)
+        return doc
+
+    def update_doc(self, path: str, markdown: str) -> None:
+        """Update the content of an open DocTab for *path* (no-op if not open)."""
+        doc = self._doc_tabs.get(path)
+        if doc is None:
+            return
+        title = path.split(".")[-1] if path else path
+        doc.set_content(title, markdown)
+
+    def _on_workbench_tab_changed(self, index: int) -> None:
+        """When a DocTab becomes active, emit doc_requested so MainWindow can
+        lazily load the markdown if it hasn't been loaded yet."""
+        w = self.tabs.widget(index)
+        if isinstance(w, DocTab):
+            # Find its registered path
+            for path, tab in list(self._doc_tabs.items()):
+                if tab is w:
+                    self.doc_requested.emit(path)
+                    break
+
+    # ── close helpers (override to also clean up _doc_tabs) ─────────────────────
+
+    def _on_close(self, index: int) -> None:
+        widget = self.tabs.widget(index)
+        if widget is self.history_panel:
+            return  # pinned
+        # Remove from doc_tabs registry if it's a DocTab
+        if isinstance(widget, DocTab):
+            for path, tab in list(self._doc_tabs.items()):
+                if tab is widget:
+                    del self._doc_tabs[path]
+                    break
+        self.tabs.removeTab(index)
+        self.doc_closed.emit(widget)
+        widget.deleteLater()

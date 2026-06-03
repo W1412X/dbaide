@@ -2,12 +2,12 @@ from __future__ import annotations
 
 from typing import Any
 
-from PyQt6.QtCore import pyqtSignal
+from PyQt6.QtCore import QSize, pyqtSignal
 from PyQt6.QtWidgets import QHBoxLayout, QLabel, QSizePolicy, QWidget
 
-from dbaide.desktop.components.base import StatusBadge
+from dbaide.desktop.components.base import StatusBadge, compact_button
 from dbaide.desktop.components.icon_button import IconToolButton
-from dbaide.desktop.components.icons import more_icon, panel_icon
+from dbaide.desktop.components.icons import more_icon, panel_icon, svg_icon
 from dbaide.desktop.components.inputs import DropdownCombo
 from dbaide.desktop.components.menu import MenuButton
 from dbaide.desktop.theme import Theme
@@ -20,6 +20,8 @@ class TopBar(QWidget):
     build_assets = pyqtSignal()
     settings = pyqtSignal()
     toggle_panel = pyqtSignal()
+    new_query_requested = pyqtSignal()
+    new_conn_requested = pyqtSignal()
 
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
@@ -34,6 +36,26 @@ class TopBar(QWidget):
         brand.setStyleSheet("font-size:15px;font-weight:700;letter-spacing:0.2px;padding:0;margin:0;")
         brand.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
         row.addWidget(brand)
+
+        from dbaide.i18n import t as _t
+        # Quick-action buttons (after brand, before connection dropdown)
+        self.new_query_btn = compact_button(_t("toolbar.new_query"), width=104)
+        self.new_query_btn.setIcon(svg_icon("plus", color=Theme.TEXT_2, size=13))
+        self.new_query_btn.setIconSize(QSize(13, 13))
+        self.new_query_btn.clicked.connect(self.new_query_requested.emit)
+        row.addWidget(self.new_query_btn)
+
+        self.build_btn = compact_button(_t("toolbar.build"), width=96)
+        self.build_btn.setIcon(svg_icon("database", color=Theme.TEXT_2, size=13))
+        self.build_btn.setIconSize(QSize(13, 13))
+        self.build_btn.clicked.connect(self.build_assets.emit)
+        row.addWidget(self.build_btn)
+
+        self.new_conn_btn = compact_button(_t("toolbar.new_conn"), width=104)
+        self.new_conn_btn.setIcon(svg_icon("link", color=Theme.TEXT_2, size=13))
+        self.new_conn_btn.setIconSize(QSize(13, 13))
+        self.new_conn_btn.clicked.connect(self.new_conn_requested.emit)
+        row.addWidget(self.new_conn_btn)
 
         self.connection = DropdownCombo(max_visible=8)
         self.connection.currentIndexChanged.connect(self._emit_connection)

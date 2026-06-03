@@ -9,9 +9,12 @@ from __future__ import annotations
 
 from typing import Any
 
-from PyQt6.QtCore import pyqtSignal
-from PyQt6.QtWidgets import QTabWidget, QVBoxLayout, QWidget
+from PyQt6.QtCore import QSize, pyqtSignal
+from PyQt6.QtWidgets import QHBoxLayout, QTabWidget, QVBoxLayout, QWidget
 
+from dbaide.desktop.components.base import compact_button
+from dbaide.desktop.components.icons import svg_icon
+from dbaide.desktop.theme import Theme
 from dbaide.desktop.views.data_browser import DataBrowser
 from dbaide.desktop.views.structure_panel import StructurePanel
 
@@ -21,6 +24,7 @@ class TableDocument(QWidget):
     count_requested = pyqtSignal(dict)
     navigate_table = pyqtSignal(str)  # bubbled from the Structure panel's FK links
     navigate_fk = pyqtSignal(str, str, object)  # (ref_table, ref_column, value)
+    ask_ai_requested = pyqtSignal(str, str)  # (table_name, schema_summary)
 
     def __init__(self, connection: str, database: str, table: str, parent=None) -> None:
         super().__init__(parent)
@@ -31,6 +35,19 @@ class TableDocument(QWidget):
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
+
+        # Ask AI toolbar row (at the very top)
+        ask_row = QHBoxLayout()
+        ask_row.setContentsMargins(2, 0, 2, 6)
+        ask_row.addStretch(1)
+        ask_btn = compact_button(t("doc.ask_ai"), width=110)
+        ask_btn.setToolTip(t("doc.ask_ai_tooltip"))
+        ask_btn.setIcon(svg_icon("terminal", color=Theme.TEXT_2, size=13))
+        ask_btn.setIconSize(QSize(13, 13))
+        ask_btn.clicked.connect(self._on_ask_ai)
+        ask_row.addWidget(ask_btn)
+        layout.addLayout(ask_row)
+
         self.tabs = QTabWidget()
         self.tabs.setDocumentMode(True)
         self.tabs.tabBar().setProperty("panelTabs", True)
@@ -47,6 +64,13 @@ class TableDocument(QWidget):
         self._data_loaded = False
         self.tabs.currentChanged.connect(self._on_subtab)
         layout.addWidget(self.tabs)
+
+    def _on_ask_ai(self) -> None:
+        """Emit ask_ai_requested with the table name and a brief schema summary."""
+        # structure._cols._rows uses "Column"/"Type"/"Key" keys (as set by show_table)
+        cols = ", ".join(c.get("Column", "") for c in self.structure._cols._rows if c.get("Column"))
+        schema_summary = f"Table: {self.table}\nColumns: {cols}"
+        self.ask_ai_requested.emit(self.table, schema_summary)
 
     @staticmethod
     def key(connection: str, database: str, table: str) -> str:

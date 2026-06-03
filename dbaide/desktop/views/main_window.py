@@ -89,9 +89,9 @@ class MainWindow(QMainWindow):
         self.setMinimumSize(1000, 720)
         self.setStyleSheet(APP_STYLE)
         self._build()
-        # The activity panel (Trace/Inspector) belongs to Assistant mode only; the
-        # Workbench gets the full width. Remember the user's show/hide preference for
-        # Assistant and force-hide the panel (and its toggle) in Workbench.
+        # The activity panel (Trace/Inspector) is available in both modes — in
+        # Workbench it shows Inspector (asset docs), in Assistant it shows Trace.
+        # Remember the user's show/hide preference across both modes.
         self._panel_pref = str(self._settings.value("panel_visible", "true")).lower() != "false"
         self._apply_panel_visibility()
         self._install_shortcuts()
@@ -120,26 +120,20 @@ class MainWindow(QMainWindow):
         return self._tab_names[idx] if 0 <= idx < len(self._tab_names) else "Assistant"
 
     def _toggle_panel(self) -> None:
-        # Only meaningful in Assistant mode (Workbench has no activity panel).
-        if self._current_mode() != "Assistant":
-            return
         self._panel_pref = not self._panel_pref
         self._settings.setValue("panel_visible", "true" if self._panel_pref else "false")
         self._apply_panel_visibility()
 
     def _show_panel(self) -> None:
-        # A panel surface (history/preview/joins) asked to be shown — those are
-        # Assistant-mode concerns, so switch there and reveal it.
-        if self._current_mode() != "Assistant":
-            self.tabbar.setCurrentIndex(0)
         self._panel_pref = True
         self._settings.setValue("panel_visible", "true")
         self._apply_panel_visibility()
 
     def _apply_panel_visibility(self) -> None:
-        assistant = self._current_mode() == "Assistant"
-        self.right.setVisible(assistant and self._panel_pref)
-        self.topbar.panel_toggle.setVisible(assistant)
+        # Panel is available in ALL modes; only respect the user's show/hide pref.
+        self.right.setVisible(self._panel_pref)
+        # Panel toggle is always visible
+        self.topbar.panel_toggle.setVisible(True)
 
     def _wire_bus(self) -> None:
         """Central map of data-change events → who re-fetches. Components react to
@@ -177,6 +171,8 @@ class MainWindow(QMainWindow):
         self.topbar.build_assets.connect(self.build_assets)
         self.topbar.settings.connect(lambda: self.open_settings("connections"))
         self.topbar.toggle_panel.connect(self._toggle_panel)
+        self.topbar.new_query_requested.connect(self._shortcut_new_query)
+        self.topbar.new_conn_requested.connect(lambda: self.open_settings("connections"))
         layout.addWidget(self.topbar)
 
         body = QSplitter(Qt.Orientation.Horizontal)
@@ -238,6 +234,7 @@ class MainWindow(QMainWindow):
         self.workbench.doc_closed.connect(self._on_doc_closed)
         self.workbench.navigate_table.connect(self._open_table_by_name)
         self.workbench.navigate_fk.connect(self._navigate_fk)
+        self.workbench.ask_ai_requested.connect(self._on_ask_ai_about_table)
         self.stack.addWidget(self.ask_tab)    # mode 0 — Assistant
         self.stack.addWidget(self.workbench)  # mode 1 — Workbench
         center_layout.addWidget(self.stack, 1)
@@ -362,11 +359,13 @@ class MainWindow(QMainWindow):
     def _on_tab_changed(self, index: int) -> None:
         if 0 <= index < self.stack.count():
             self.stack.setCurrentIndex(index)
-            # The chat composer and the activity panel both belong to Assistant mode
-            # only; the Workbench has its own Run action + panels and uses the full
-            # width.
             self.composer.setVisible(self._tab_names[index] == "Assistant")
             self._apply_panel_visibility()
+            # Default the right panel to the contextually appropriate tab per mode.
+            if self._tab_names[index] == "Workbench":
+                self.right._switch_tab(self.right._TAB_INSPECTOR)
+            else:
+                self.right._switch_tab(self.right._TAB_TRACE)
 
     def switch_tab(self, name: str) -> None:
         """Route the old per-tab names to the new Assistant/Workbench modes."""
@@ -909,15 +908,24 @@ class MainWindow(QMainWindow):
         # never flips the global status to "running" and works even while a query
         # is in flight (you can inspect tables mid-run).
         def on_loaded(res: dict[str, Any]) -> None:
+            markdown = res.get("markdown") or ""
             self.right.show_inspector(
-                markdown=res.get("markdown") or "", doc=res.get("doc"), focus=True,
+                markdown=markdown, doc=res.get("doc"), focus=True,
             )
+            # Also update any open DocTab for this path
+            self.workbench.update_doc(path, markdown)
         self._run_background(action, {"path": path}, on_loaded)
 
     def preview_schema(self, data: dict[str, Any]) -> None:
         path = str(data.get("path") or "")
-        if path:
-            self._show_asset("preview_asset", path)
+        if not path:
+            return
+        # Always load into the right panel Inspector
+        self._show_asset("preview_asset", path)
+        # In Workbench mode, also open a (lazy) DocTab
+        if self._current_mode() == "Workbench":
+            title = path.split(".")[-1] if path else path
+            self.workbench.open_doc(path, title, "")
 
     def open_schema_asset(self, data: dict[str, Any]) -> None:
         # Double-clicking a table opens its data in the Data browser; other nodes
@@ -978,6 +986,12 @@ class MainWindow(QMainWindow):
             self.open_schema_asset(node)
         else:
             self.toast(_i18n_t("toast.table_not_found", table=table))
+
+    def _on_ask_ai_about_table(self, table_name: str, schema_summary: str) -> None:
+        """Switch to Assistant mode and pre-fill the composer with context about the table."""
+        self.tabbar.setCurrentIndex(0)
+        context = f"Table `{table_name}`:\n{schema_summary}"
+        self.composer.set_context_hint(context)
 
     def _navigate_fk(self, ref_table: str, ref_column: str, value: object) -> None:
         """Open the referenced table filtered to the clicked FK value (data-cell

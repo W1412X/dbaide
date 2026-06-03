@@ -1,5 +1,5 @@
-"""The activity panel (Trace/Inspector) belongs to Assistant mode only; Workbench
-force-hides it (and its topbar toggle) and uses the full width."""
+"""The activity panel (Trace/Inspector) is available in both modes; it respects
+the user's show/hide preference and the toggle button is always visible."""
 from __future__ import annotations
 
 import os
@@ -51,11 +51,12 @@ def _vis(win):
     return (win.right.isVisibleTo(win), win.topbar.panel_toggle.isVisibleTo(win))
 
 
-def test_panel_hidden_in_workbench_restored_in_assistant(qapp, tmp_path):
+def test_panel_visible_in_both_modes(qapp, tmp_path):
+    """Panel and its toggle are visible in both Assistant and Workbench modes."""
     win = _make_window(tmp_path, qapp)
     assert _vis(win) == (True, True)            # Assistant default
     win.tabbar.setCurrentIndex(1)               # Workbench
-    assert _vis(win) == (False, False)
+    assert _vis(win) == (True, True)            # still visible in Workbench
     win.tabbar.setCurrentIndex(0)               # back to Assistant
     assert _vis(win) == (True, True)
     win.deleteLater(); _drain(qapp)
@@ -63,21 +64,26 @@ def test_panel_hidden_in_workbench_restored_in_assistant(qapp, tmp_path):
 
 def test_user_collapse_pref_persists_across_modes(qapp, tmp_path):
     win = _make_window(tmp_path, qapp)
-    win._toggle_panel()                          # user hides it in Assistant
+    win._toggle_panel()                          # user hides it
     assert win.right.isVisibleTo(win) is False
-    win.tabbar.setCurrentIndex(1)
-    win.tabbar.setCurrentIndex(0)                # stays hidden (pref remembered)
-    assert win.right.isVisibleTo(win) is False
+    win.tabbar.setCurrentIndex(1)               # switch to Workbench
+    assert win.right.isVisibleTo(win) is False  # still hidden (pref remembered)
+    win.tabbar.setCurrentIndex(0)               # back to Assistant
+    assert win.right.isVisibleTo(win) is False  # pref still respected
     win._toggle_panel()                          # show again
     assert win.right.isVisibleTo(win) is True
     win.deleteLater(); _drain(qapp)
 
 
-def test_toggle_is_noop_in_workbench(qapp, tmp_path):
+def test_toggle_works_in_both_modes(qapp, tmp_path):
+    """_toggle_panel works in Workbench mode (no longer a no-op)."""
     win = _make_window(tmp_path, qapp)
-    win.tabbar.setCurrentIndex(1)
-    win._toggle_panel()                          # no-op in Workbench
+    win.tabbar.setCurrentIndex(1)               # switch to Workbench
+    assert win.right.isVisibleTo(win) is True   # panel visible
+    win._toggle_panel()                          # hide it
     assert win.right.isVisibleTo(win) is False
+    win._toggle_panel()                          # show it again
+    assert win.right.isVisibleTo(win) is True
     win.deleteLater(); _drain(qapp)
 
 
