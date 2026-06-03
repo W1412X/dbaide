@@ -64,3 +64,17 @@ def test_value_viewer_toggle_and_update(qapp):
     w.value_toggle.setChecked(False)
     assert not w._viewer.isVisible()
     w.close()
+
+
+def test_write_file(qapp, tmp_path):
+    from dbaide.rendering.table import export_csv, export_json
+    w = ResultTableWidget()
+    w.load(columns=["id", "name"], rows=[{"id": 1, "name": "Ada"}], row_count=1)
+    csv_path = tmp_path / "out.csv"
+    assert w._write_file(str(csv_path), export_csv(w._rows, w._columns)) is True
+    assert "Ada" in csv_path.read_text(encoding="utf-8")
+    json_path = tmp_path / "out.json"
+    assert w._write_file(str(json_path), export_json(w._rows, w._columns)) is True
+    assert "Ada" in json_path.read_text(encoding="utf-8")
+    # bad path → graceful False, no raise
+    assert w._write_file("/nonexistent-dir-xyz/out.csv", "x") is False

@@ -63,6 +63,9 @@ class ResultTableWidget(QWidget):
         self.export_menu.add_action("Copy as JSON", self.copy_json)
         self.export_menu.add_action("Copy as Markdown", self.copy_markdown)
         self.export_menu.add_action("Copy as INSERT", self.copy_insert)
+        self.export_menu.add_separator()
+        self.export_menu.add_action("Save as CSV…", self.save_csv)
+        self.export_menu.add_action("Save as JSON…", self.save_json)
         toolbar.addWidget(self.export_menu)
         layout.addLayout(toolbar)
         self.table = QTableWidget()
@@ -284,6 +287,28 @@ class ResultTableWidget(QWidget):
 
     def copy_insert(self) -> None:
         QApplication.clipboard().setText(export_insert(self._rows, self._columns, table=self._table_name))
+
+    def save_csv(self) -> None:
+        self._save_to_file(export_csv(self._rows, self._columns), "csv", "CSV (*.csv)")
+
+    def save_json(self) -> None:
+        self._save_to_file(export_json(self._rows, self._columns), "json", "JSON (*.json)")
+
+    def _save_to_file(self, content: str, ext: str, file_filter: str) -> None:
+        from PyQt6.QtWidgets import QFileDialog
+        suggested = f"{self._table_name}.{ext}"
+        path, _ = QFileDialog.getSaveFileName(self, "Export results", suggested, file_filter)
+        if path:
+            self._write_file(path, content)
+
+    @staticmethod
+    def _write_file(path: str, content: str) -> bool:
+        try:
+            with open(path, "w", encoding="utf-8", newline="") as fh:
+                fh.write(content)
+            return True
+        except OSError:
+            return False
 
     def _cell_menu(self, pos) -> None:
         item = self.table.itemAt(pos)
