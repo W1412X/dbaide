@@ -18,6 +18,7 @@ from dbaide.desktop.views.structure_panel import StructurePanel
 
 class TableDocument(QWidget):
     query_requested = pyqtSignal(dict)
+    count_requested = pyqtSignal(dict)
     navigate_table = pyqtSignal(str)  # bubbled from the Structure panel's FK links
 
     def __init__(self, connection: str, database: str, table: str, parent=None) -> None:
@@ -34,6 +35,7 @@ class TableDocument(QWidget):
         self.tabs.tabBar().setProperty("panelTabs", True)
         self.data = DataBrowser()
         self.data.query_requested.connect(self.query_requested.emit)
+        self.data.count_requested.connect(self.count_requested.emit)
         self.structure = StructurePanel()
         self.structure.navigate_table.connect(self.navigate_table.emit)
         # Structure first — opening a table shows its (offline, instant) structure;
@@ -82,3 +84,6 @@ class TableDocument(QWidget):
 
     def show_result(self, result: dict[str, Any]) -> None:
         self.data.show_result(result)
+
+    def show_count(self, total: int) -> None:
+        self.data.show_count(total)

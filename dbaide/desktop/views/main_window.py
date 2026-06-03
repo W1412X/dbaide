@@ -214,6 +214,7 @@ class MainWindow(QMainWindow):
         self.workbench = WorkbenchView(self.history_panel)
         self.workbench.run_sql.connect(self._run_sql_from)
         self.workbench.browse_requested.connect(self._browse_from)
+        self.workbench.count_requested.connect(self._count_from)
         self.workbench.doc_closed.connect(self._on_doc_closed)
         self.workbench.navigate_table.connect(self._open_table_by_name)
         self.stack.addWidget(self.ask_tab)    # mode 0 — Assistant
@@ -817,6 +818,10 @@ class MainWindow(QMainWindow):
         self._active_data_doc = doc
         self.run_action("browse_table", payload)
 
+    def _count_from(self, doc, payload: dict[str, Any]) -> None:
+        self._active_data_doc = doc
+        self.run_action("count_table", payload)
+
     def _on_doc_closed(self, widget) -> None:
         if widget is self._active_sql_doc:
             self._active_sql_doc = None
@@ -1092,7 +1097,7 @@ class MainWindow(QMainWindow):
             self._building = True
         if action == "execute_sql" and self._active_sql_doc is not None:
             self._active_sql_doc.set_running(True)
-        if action == "browse_table" and self._active_data_doc is not None:
+        if action in ("browse_table", "count_table") and self._active_data_doc is not None:
             self._active_data_doc.set_running(True)
         worker = ServiceWorker(self.service, action, payload)
         worker.signals.progress.connect(self._on_oneoff_progress)
@@ -1166,6 +1171,10 @@ class MainWindow(QMainWindow):
             if self._active_data_doc is not None:
                 self._active_data_doc.show_result(result)
             return
+        if action == "count_table":
+            if self._active_data_doc is not None:
+                self._active_data_doc.show_count(int(result.get("count") or 0))
+            return
         if action == "load_history":
             key = self._active_or_new_key()
             self.ask_tab.append_result(key, result)
@@ -1198,7 +1207,7 @@ class MainWindow(QMainWindow):
             self._record_query(self._last_sql, ok=False)
             self.toast(str(exc))
             return
-        if action == "browse_table":
+        if action in ("browse_table", "count_table"):
             self.toast(str(exc))  # e.g. a bad WHERE filter; controls already re-enabled
             return
         self.fail(exc, modal=action not in ("preview_asset", "search_assets"))

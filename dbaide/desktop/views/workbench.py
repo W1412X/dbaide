@@ -26,6 +26,7 @@ from dbaide.desktop.views.table_document import TableDocument
 class WorkbenchView(QWidget):
     run_sql = pyqtSignal(object, str)        # (SqlTab, sql)
     browse_requested = pyqtSignal(object, dict)  # (TableDocument, payload)
+    count_requested = pyqtSignal(object, dict)   # (TableDocument, count payload)
     doc_closed = pyqtSignal(object)          # the closed widget
     navigate_table = pyqtSignal(str)         # FK link → open a related table
 
@@ -144,6 +145,7 @@ class WorkbenchView(QWidget):
                 return w
         doc = TableDocument(connection, database, table)
         doc.query_requested.connect(lambda payload, d=doc: self.browse_requested.emit(d, payload))
+        doc.count_requested.connect(lambda payload, d=doc: self.count_requested.emit(d, payload))
         doc.navigate_table.connect(self.navigate_table.emit)
         index = self.tabs.addTab(doc, table)
         self.tabs.setCurrentIndex(index)

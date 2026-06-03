@@ -83,3 +83,28 @@ def test_structure_panel(qapp):
     sp.show_table("orders", cols)
     assert len(sp._cols._rows) == 2
     assert sp.stack.currentIndex() == 1
+
+
+def test_count_table_service(qapp, tmp_path):
+    svc = _service(tmp_path, rows=25)
+    out = svc.count_table({"connection_name": "local", "table": "t"})
+    assert out["count"] == 25
+    out2 = svc.count_table({"connection_name": "local", "table": "t", "where": "city = 'NYC'"})
+    assert 0 < out2["count"] < 25
+
+
+def test_data_browser_count_button(qapp):
+    from dbaide.desktop.views.data_browser import DataBrowser
+    w = DataBrowser()
+    payloads = []
+    w.count_requested.connect(payloads.append)
+    w.open_table("local", "main", "t")
+    w.set_running(False)  # no MainWindow here to clear the loading flag
+    w._on_count()
+    assert payloads and payloads[0]["table"] == "t"
+    w.show_count(123)
+    assert "123" in w._count_btn.text()
+    # filter change invalidates the total
+    w._filter.setText("id > 1"); w._on_filter()
+    assert w._total is None
+    assert w._count_btn.text() == w._t("data.count")

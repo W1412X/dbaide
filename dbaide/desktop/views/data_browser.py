@@ -17,6 +17,7 @@ from PyQt6.QtWidgets import (
     QLabel,
     QLineEdit,
     QStackedWidget,
+    QToolButton,
     QVBoxLayout,
     QWidget,
 )
@@ -32,6 +33,7 @@ _PAGE_SIZES = ("50", "100", "200", "500")
 
 class DataBrowser(QWidget):
     query_requested = pyqtSignal(dict)  # browse_table payload
+    count_requested = pyqtSignal(dict)  # count_table payload (on-demand exact total)
 
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
@@ -45,6 +47,8 @@ class DataBrowser(QWidget):
         self._order_by = ""
         self._order_dir = "asc"
         self._where = ""
+        self._total: int | None = None      # exact COUNT(*), once requested
+        self._total_where = None             # the WHERE the total was computed for
         self._has_more = False
         self._columns: list[str] = []
         self._loading = False
@@ -103,6 +107,19 @@ class DataBrowser(QWidget):
         self._next.clicked.connect(self._on_next)
         bar.addWidget(self._next)
 
+        # On-demand exact total (COUNT(*)). Browsing never counts, so this is a
+        # quiet text button the user clicks to get the precise row total.
+        self._count_btn = QToolButton()
+        self._count_btn.setText(t("data.count"))
+        self._count_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._count_btn.setStyleSheet(
+            f"QToolButton {{ background: transparent; border: none; color: {Theme.MUTED};"
+            f" font-size: 12px; padding: 0 8px; }}"
+            f"QToolButton:hover {{ color: {Theme.TEXT_2}; }}"
+        )
+        self._count_btn.clicked.connect(self._on_count)
+        bar.addWidget(self._count_btn)
+
         self._refresh = IconToolButton(svg_icon("refresh", color=Theme.TEXT_2), t("data.refresh"))
         self._refresh.clicked.connect(self._reload)
         bar.addWidget(self._refresh)
@@ -136,6 +153,7 @@ class DataBrowser(QWidget):
         self._offset = 0
         self._order_by, self._order_dir = "", "asc"
         self._where = ""
+        self._reset_total()
         self._filter.blockSignals(True)
         self._filter.clear()
         self._filter.blockSignals(False)
@@ -159,11 +177,7 @@ class DataBrowser(QWidget):
         self._offset = int(result.get("offset") or 0)
         self._order_by = str(result.get("order_by") or "")
         self._order_dir = str(result.get("order_dir") or "asc")
-        n = len(rows)
-        if n == 0:
-            self._range.setText(self._t("data.no_rows"))
-        else:
-            self._range.setText(self._t("data.rows_range", start=self._offset + 1, end=self._offset + n))
+        self._update_range_label(len(rows))
         self._sort_caption.setText(
             self._t("data.sorted_by", col=self._order_by, dir=self._order_dir.upper())
             if self._order_by else ""
@@ -185,10 +199,48 @@ class DataBrowser(QWidget):
         self._loading = running
         self._set_controls_enabled(not running)
 
+    def show_count(self, total: int) -> None:
+        """Display the exact COUNT(*) result (for the current WHERE filter)."""
+        self._total = int(total)
+        self._total_where = self._where
+        self._count_btn.setText(self._t("data.count_total", n=f"{self._total:,}"))
+        # Refresh the range caption to fold in the total.
+        rows = self.grid.table.rowCount()
+        self._update_range_label(rows)
+
     # ── internals ──────────────────────────────────────────────────────────────
 
+    def _reset_total(self) -> None:
+        self._total = None
+        self._total_where = None
+        self._count_btn.setText(self._t("data.count"))
+
+    def _update_range_label(self, n: int) -> None:
+        has_total = self._total is not None and self._total_where == self._where
+        if n == 0:
+            base = (self._t("data.count_total", n=f"{self._total:,}") if has_total and self._total
+                    else self._t("data.no_rows"))
+            self._range.setText(base)
+            return
+        base = self._t("data.rows_range", start=self._offset + 1, end=self._offset + n)
+        if has_total:
+            base = self._t("data.rows_range_total", start=self._offset + 1,
+                           end=self._offset + n, total=f"{self._total:,}")
+        self._range.setText(base)
+
+    def _on_count(self) -> None:
+        if not self._table or self._loading:
+            return
+        self.count_requested.emit({
+            "connection_name": self._conn,
+            "database": self._db,
+            "table": self._table,
+            "where": self._where,
+        })
+
     def _set_controls_enabled(self, on: bool) -> None:
-        for w in (self._prev, self._next, self._refresh, self._page_select, self._filter):
+        for w in (self._prev, self._next, self._refresh, self._page_select, self._filter,
+                  self._count_btn):
             w.setEnabled(on)
 
     def _reload(self) -> None:
@@ -227,6 +279,7 @@ class DataBrowser(QWidget):
     def _on_filter(self) -> None:
         self._where = self._filter.text().strip()
         self._offset = 0
+        self._reset_total()  # a different filter invalidates the previous total
         self._reload()
 
     def _on_sort(self, index: int) -> None:

@@ -148,6 +148,7 @@ class DesktopService:
             "validate_sql": self.validate_sql,
             "execute_sql": self.execute_sql,
             "browse_table": self.browse_table,
+            "count_table": self.count_table,
             "explain_sql": self.explain_sql,
             "list_history": self.list_history,
             "load_history": self.load_history,
@@ -546,6 +547,33 @@ class DesktopService:
             "order_by": order_by, "order_dir": order_dir, "where": where,
             "has_more": len(rows) >= page_size,
         }
+
+    def count_table(self, payload: dict[str, Any]) -> dict[str, Any]:
+        """Exact ``COUNT(*)`` for a table (honouring the current WHERE filter).
+
+        Run on demand from the data grid — browsing itself never issues a COUNT so
+        large tables stay cheap; the user asks for the exact total explicitly."""
+        from dbaide.adapters.base import quote_identifier
+
+        conn = self.cfg.get_connection(str(payload.get("connection_name") or "") or None)
+        self._guard_busy(conn.name)
+        database = str(payload.get("database") or "")
+        table = str(payload.get("table") or "")
+        if not table:
+            raise ValueError("table is required")
+        where = str(payload.get("where") or "").strip()
+        dialect = "mysql" if str(conn.type).lower() in ("mysql", "mariadb") else "generic"
+
+        sql = f"SELECT COUNT(*) AS n FROM {quote_identifier(table, dialect)}"
+        if where:
+            sql += f" WHERE {where}"
+        tools = self._query_tools(conn)
+        result = tools.execute_sql(sql, database=database, limit=1)
+        count = 0
+        if result.rows:
+            first = result.rows[0]
+            count = int(next(iter(first.values())) if isinstance(first, dict) else first[0])
+        return {"count": count, "table": table, "where": where}
 
     def explain_sql(self, payload: dict[str, Any]) -> dict[str, Any]:
         conn = self.cfg.get_connection(str(payload.get("connection_name") or "") or None)
