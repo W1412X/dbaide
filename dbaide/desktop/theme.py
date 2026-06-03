@@ -26,6 +26,11 @@ _ICON_SVGS = {
         '<path d="M4 9.5 L8 5.5 L12 9.5" fill="none" stroke="#b7bec9" stroke-width="1.6"'
         ' stroke-linecap="round" stroke-linejoin="round"/></svg>'
     ),
+    "close": (
+        '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 16 16">'
+        '<path d="M4.5 4.5 L11.5 11.5 M11.5 4.5 L4.5 11.5" fill="none" stroke="#8b93a1"'
+        ' stroke-width="1.5" stroke-linecap="round"/></svg>'
+    ),
 }
 
 
@@ -48,6 +53,7 @@ _ICONS = _materialize_icons()
 _CHECK_ICON = _ICONS.get("check", "")
 _CHEVRON_DOWN = _ICONS.get("chevron-down", "")
 _CHEVRON_UP = _ICONS.get("chevron-up", "")
+_CLOSE_ICON = _ICONS.get("close", "")
 
 
 class Theme:
@@ -419,6 +425,15 @@ QTabBar[panelTabs="true"]::tab:hover:!selected {{
     color: {Theme.TEXT_2};
     background: {Theme.PANEL_2};
     border-radius: 6px;
+}}
+QTabBar[panelTabs="true"]::close-button {{
+    image: url({_CLOSE_ICON});
+    subcontrol-position: right;
+    margin-left: 4px;
+    border-radius: 4px;
+}}
+QTabBar[panelTabs="true"]::close-button:hover {{
+    background: {Theme.PANEL};
 }}
 QFrame[panelContent="true"] {{
     background: {Theme.SURFACE};

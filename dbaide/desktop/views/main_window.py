@@ -44,11 +44,8 @@ def _tab_label(tab_id: str) -> str:
 from dbaide.desktop.views.ask_tab import AskTab
 from dbaide.desktop.views.right_panel import RightPanel
 from dbaide.desktop.views.sidebar import Sidebar
-from dbaide.desktop.views.sql_tab import SqlTab
-from dbaide.desktop.views.data_browser import DataBrowser
 from dbaide.desktop.views.workbench import WorkbenchView
 from dbaide.desktop.views.query_history import QueryHistoryPanel
-from dbaide.desktop.views.structure_panel import StructurePanel
 from dbaide.history.query_store import QueryHistoryStore
 from dbaide.desktop.views.topbar import TopBar
 from dbaide.desktop.workers import CancelledError, ServiceWorker
@@ -183,24 +180,24 @@ class MainWindow(QMainWindow):
         # Assistant mode = the AI conversation; Workbench mode = the database client
         # (SQL editor + data browser). The two are deliberately separate surfaces.
         self.ask_tab = AskTab()
-        self.sql_tab = SqlTab()
         self.ask_tab.empty_action.connect(self._empty_action)
         self.ask_tab.open_sql.connect(self.open_sql)
         self.ask_tab.clarification_choice.connect(self._submit_clarification)
         self.ask_tab.trace_requested.connect(self._reveal_turn_trace)
-        self.sql_tab.run_requested.connect(lambda sql, _action: self.execute_sql(sql))
-        self.data_tab = DataBrowser()
-        self.data_tab.query_requested.connect(lambda payload: self.run_action("browse_table", payload))
-        self.structure_panel = StructurePanel()
         self.query_history_store = QueryHistoryStore()
         self.history_panel = QueryHistoryPanel()
         self.history_panel.sql_selected.connect(self._on_history_select)
         self.history_panel.sql_run.connect(self._on_history_run)
         self.history_panel.clear_requested.connect(self._on_history_clear)
         self._last_sql = ""
-        self.workbench = WorkbenchView(
-            self.sql_tab, self.data_tab, self.structure_panel, self.history_panel
-        )
+        # Active documents the current one-off query writes back to (set when a run
+        # starts, cleared if that document is closed mid-run).
+        self._active_sql_doc = None
+        self._active_data_doc = None
+        self.workbench = WorkbenchView(self.history_panel)
+        self.workbench.run_sql.connect(self._run_sql_from)
+        self.workbench.browse_requested.connect(self._browse_from)
+        self.workbench.doc_closed.connect(self._on_doc_closed)
         self.stack.addWidget(self.ask_tab)    # mode 0 — Assistant
         self.stack.addWidget(self.workbench)  # mode 1 — Workbench
         center_layout.addWidget(self.stack, 1)
@@ -411,7 +408,7 @@ class MainWindow(QMainWindow):
         dbs = [row["name"] for row in self.schema_rows]
         self.topbar.set_databases(dbs)
         self.sidebar.load_schema(self.schema_rows)
-        self.sql_tab.set_completions(self._schema_identifiers())
+        self.workbench.set_sql_completions(self._schema_identifiers())
 
     def _schema_identifiers(self) -> list[str]:
         """Table + column names from the loaded schema, for SQL autocomplete."""
@@ -485,8 +482,8 @@ class MainWindow(QMainWindow):
             self.toast(str(exc))
 
     def open_sql(self, sql: str) -> None:
-        self.sql_tab.set_sql(sql)
-        self.switch_tab("SQL")
+        self.tabbar.setCurrentIndex(1)
+        self.workbench.open_sql(sql)
 
     def submit_composer(self, question: str, policy: str) -> None:
         key = self._active_key
@@ -787,6 +784,25 @@ class MainWindow(QMainWindow):
 
         self._run_background("test_model_profile", payload, on_done, on_error=on_fail)
 
+    @property
+    def sql_tab(self):
+        """Backward-compatible accessor: the current (or a fresh) SQL editor."""
+        return self.workbench.ensure_sql_editor()
+
+    def _run_sql_from(self, editor, sql: str) -> None:
+        self._active_sql_doc = editor
+        self.execute_sql(sql)
+
+    def _browse_from(self, doc, payload: dict[str, Any]) -> None:
+        self._active_data_doc = doc
+        self.run_action("browse_table", payload)
+
+    def _on_doc_closed(self, widget) -> None:
+        if widget is self._active_sql_doc:
+            self._active_sql_doc = None
+        if widget is self._active_data_doc:
+            self._active_data_doc = None
+
     def execute_sql(self, sql: str) -> None:
         if not sql.strip():
             return
@@ -813,12 +829,13 @@ class MainWindow(QMainWindow):
         self.history_panel.load(self.query_history_store.recent(self.current_connection()))
 
     def _on_history_select(self, sql: str) -> None:
-        self.sql_tab.set_sql(sql)
-        self.switch_tab("SQL")
+        self.tabbar.setCurrentIndex(1)
+        self.workbench.open_sql(sql)
 
     def _on_history_run(self, sql: str) -> None:
-        self.sql_tab.set_sql(sql)
-        self.switch_tab("SQL")
+        self.tabbar.setCurrentIndex(1)
+        editor = self.workbench.open_sql(sql)
+        self._active_sql_doc = editor
         self.execute_sql(sql)
 
     def _on_history_clear(self) -> None:
@@ -851,11 +868,11 @@ class MainWindow(QMainWindow):
             if len(parts) >= 3:
                 conn = self.current_connection()
                 _, database, table = parts[0], parts[1], parts[2]
+                # Opens (or focuses) a table document with Data + Structure sub-tabs.
                 # Structure is built from the columns already in the node — instant,
-                # no query. Data is the primary view; Structure is one tab away.
-                self.structure_panel.show_table(table, data.get("children") or [])
-                self.data_tab.open_table(conn, database, table)
-                self.switch_tab("Data")
+                # no query; Data is the default view and loads its first page.
+                self.tabbar.setCurrentIndex(1)
+                self.workbench.open_table(conn, database, table, data.get("children") or [])
                 return
         path = str(data.get("path") or "")
         if path:
@@ -1017,10 +1034,10 @@ class MainWindow(QMainWindow):
         self._oneoff_action = action
         if action == "build_assets":
             self._building = True
-        if action == "execute_sql":
-            self.sql_tab.set_running(True)
-        if action == "browse_table":
-            self.data_tab.set_running(True)
+        if action == "execute_sql" and self._active_sql_doc is not None:
+            self._active_sql_doc.set_running(True)
+        if action == "browse_table" and self._active_data_doc is not None:
+            self._active_data_doc.set_running(True)
         worker = ServiceWorker(self.service, action, payload)
         worker.signals.progress.connect(self._on_oneoff_progress)
         worker.signals.done.connect(self._on_oneoff_done)
@@ -1046,8 +1063,10 @@ class MainWindow(QMainWindow):
         self._oneoff_worker = None
         self._oneoff_action = ""
         self._building = False
-        self.sql_tab.set_running(False)
-        self.data_tab.set_running(False)
+        if self._active_sql_doc is not None:
+            self._active_sql_doc.set_running(False)
+        if self._active_data_doc is not None:
+            self._active_data_doc.set_running(False)
         self._sync_active_ui()
         self._refresh_run_status()
         if action == "build_assets":
@@ -1078,7 +1097,8 @@ class MainWindow(QMainWindow):
             )
             return
         if action == "execute_sql":
-            self.sql_tab.show_result(result)
+            if self._active_sql_doc is not None:
+                self._active_sql_doc.show_result(result)
             self._record_query(
                 self._last_sql, ok=True,
                 row_count=result.get("row_count"),
@@ -1087,8 +1107,8 @@ class MainWindow(QMainWindow):
             self.bus.emit(QUERY_COMPLETED, {"instance": self.current_connection()})
             return
         if action == "browse_table":
-            self.data_tab.show_result(result)
-            self.switch_tab("Data")
+            if self._active_data_doc is not None:
+                self._active_data_doc.show_result(result)
             return
         if action == "load_history":
             key = self._active_or_new_key()
@@ -1106,8 +1126,10 @@ class MainWindow(QMainWindow):
         self._oneoff_worker = None
         self._oneoff_action = ""
         self._building = False
-        self.sql_tab.set_running(False)
-        self.data_tab.set_running(False)
+        if self._active_sql_doc is not None:
+            self._active_sql_doc.set_running(False)
+        if self._active_data_doc is not None:
+            self._active_data_doc.set_running(False)
         self.right.trace.end_live()
         self._sync_active_ui()
         self._refresh_run_status()
@@ -1115,7 +1137,8 @@ class MainWindow(QMainWindow):
             self.toast(_i18n_t("toast.cancelled"))
             return
         if action == "execute_sql":
-            self.sql_tab.show_error(str(exc))
+            if self._active_sql_doc is not None:
+                self._active_sql_doc.show_error(str(exc))
             self._record_query(self._last_sql, ok=False)
             self.toast(str(exc))
             return

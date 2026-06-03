@@ -39,6 +39,8 @@ _STRINGS: dict[str, dict[str, str]] = {
     "data.sorted_by": {"en": "sorted by {col} {dir}", "zh": "按 {col} {dir} 排序"},
     "tab.structure": {"en": "Structure", "zh": "结构"},
     "tab.history": {"en": "History", "zh": "历史"},
+    "workbench.new_query": {"en": "New SQL editor", "zh": "新建 SQL 编辑器"},
+    "workbench.query_n": {"en": "Query {n}", "zh": "查询 {n}"},
     "history.clear": {"en": "Clear", "zh": "清空"},
     "history.failed": {"en": "failed", "zh": "失败"},
     "history.rows": {"en": "{n} rows", "zh": "{n} 行"},
