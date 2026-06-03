@@ -2,10 +2,11 @@ from __future__ import annotations
 
 from PyQt6.QtCore import QEvent, QSize, Qt, pyqtSignal
 from PyQt6.QtGui import QFont
-from PyQt6.QtWidgets import QHBoxLayout, QLabel, QPlainTextEdit, QTabWidget, QTextBrowser, QVBoxLayout, QWidget
+from PyQt6.QtWidgets import QHBoxLayout, QLabel, QTabWidget, QTextBrowser, QVBoxLayout, QWidget
 
 from dbaide.desktop.components.base import compact_button
 from dbaide.desktop.components.icons import svg_icon
+from dbaide.desktop.components.sql_editor import SqlEditor
 from dbaide.desktop.components.inputs import configure_multiline_text_edit, configure_readonly_text_view
 from dbaide.desktop.components.spinner import BusyAnimator, spinner_icon
 from dbaide.desktop.components.table import ResultTableWidget
@@ -24,7 +25,7 @@ class SqlTab(QWidget):
         self._t = t
 
         # ── Editor ────────────────────────────────────────────────────────────
-        self.editor = QPlainTextEdit()
+        self.editor = SqlEditor()
         self.editor.setPlaceholderText(t("sql.placeholder"))
         self.editor.setFont(QFont("Menlo", 11))
         configure_multiline_text_edit(self.editor, min_height=120, max_height=480, padding=16)
@@ -99,6 +100,9 @@ class SqlTab(QWidget):
 
     def set_sql(self, sql: str) -> None:
         self.editor.setPlainText(sql)
+
+    def set_completions(self, names: list[str]) -> None:
+        self.editor.set_completions(names)
 
     def show_result(self, payload: dict) -> None:
         self.result_table.load(

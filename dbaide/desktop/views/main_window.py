@@ -398,6 +398,17 @@ class MainWindow(QMainWindow):
         dbs = [row["name"] for row in self.schema_rows]
         self.topbar.set_databases(dbs)
         self.sidebar.load_schema(self.schema_rows)
+        self.sql_tab.set_completions(self._schema_identifiers())
+
+    def _schema_identifiers(self) -> list[str]:
+        """Table + column names from the loaded schema, for SQL autocomplete."""
+        names: set[str] = set()
+        for db in self.schema_rows:
+            for table in db.get("children", []):
+                names.add(str(table.get("name") or ""))
+                for col in table.get("children", []):
+                    names.add(str(col.get("name") or ""))
+        return sorted(n for n in names if n)
 
     def _apply_schema_error(self, name: str, message: str) -> None:
         # Don't wipe the current connection's schema because an old one failed.
