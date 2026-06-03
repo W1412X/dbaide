@@ -30,8 +30,8 @@ class TopBar(QWidget):
         row.setSpacing(10)
 
         brand = QLabel("DBAide")
-        brand.setFixedWidth(72)
-        brand.setStyleSheet("font-size:17px;font-weight:900;padding:0;margin:0;")
+        brand.setFixedWidth(74)
+        brand.setStyleSheet("font-size:15px;font-weight:700;letter-spacing:0.2px;padding:0;margin:0;")
         brand.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
         row.addWidget(brand)
 

@@ -58,8 +58,18 @@ class StatusBadge(Pill):
     }
 
     def set_state(self, text: str, state: str = "idle") -> None:
-        self.setText(text)
-        self.set_color(self.COLORS.get(state, Theme.MUTED))
+        # A small colored status dot + muted label on a quiet pill — calmer than a
+        # fully color-outlined badge, the way AI IDEs show status.
+        color = self.COLORS.get(state, Theme.MUTED)
+        self.setTextFormat(Qt.TextFormat.RichText)
+        self.setText(
+            f"<span style='color:{color}; font-size:13px;'>●</span>"
+            f"&nbsp;<span style='color:{Theme.TEXT_2};'>{text}</span>"
+        )
+        self.setStyleSheet(
+            f"background:{Theme.PANEL_2}; border:1px solid {Theme.BORDER_SOFT};"
+            " border-radius:9px; padding:3px 11px; font-size:11px; font-weight:600;"
+        )
 
 
 class SectionLabel(QLabel):
