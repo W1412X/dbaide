@@ -13,7 +13,7 @@ a CLI **and** a polished desktop app that share the same Python core.
 [![Databases](https://img.shields.io/badge/db-SQLite%20·%20MySQL%20·%20PostgreSQL-336791)](#connect-a-database)
 [![License](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 
-<img src="docs/images/ask.png" alt="DBAide — Ask view with answer, trace and schema" width="900">
+<img src="docs/images/social-preview.png" alt="DBAide — ask your database in plain language" width="900">
 
 </div>
 
