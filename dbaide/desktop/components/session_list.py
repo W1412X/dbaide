@@ -48,7 +48,7 @@ def _relative_time(ts: float) -> str:
 
 
 _TITLE_FONT = QFont("Inter", 12, QFont.Weight.DemiBold)
-_SUB_FONT = QFont("Inter", 9)
+_SUB_FONT = QFont("Inter", 8)
 # Width the spinner + its gap reserve at the right of the title (so the elided
 # title clears it whether or not the spinner is currently shown).
 _SPINNER_RESERVE = 20
@@ -63,7 +63,7 @@ class _SessionRow(QWidget):
         self.setToolTip(title)  # full title on hover, since it's elided
         layout = QVBoxLayout(self)
         layout.setContentsMargins(6, 7, 6, 7)
-        layout.setSpacing(2)
+        layout.setSpacing(4)  # breathing room between the title and the meta line
         self._full_title = title
         title_row = QHBoxLayout()
         title_row.setContentsMargins(0, 0, 0, 0)
@@ -120,7 +120,7 @@ class _SessionRow(QWidget):
         """Row height for a single-line title plus the (smaller) subtitle."""
         title_h = QFontMetrics(_TITLE_FONT).lineSpacing()
         sub_h = QFontMetrics(_SUB_FONT).lineSpacing()
-        return title_h + sub_h + 18  # margins (7+7) + spacing (2) + a hair
+        return title_h + sub_h + 20  # margins (7+7) + spacing (4) + a hair
 
 
 class SessionList(QWidget):
