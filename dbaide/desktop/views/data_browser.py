@@ -153,6 +153,7 @@ class DataBrowser(QWidget):
             row_count=result.get("row_count") or len(rows),
             truncated=bool(result.get("truncated")),
             elapsed_ms=float(result.get("elapsed_ms") or 0),
+            row_offset=int(result.get("offset") or 0),
         )
         self._has_more = bool(result.get("has_more"))
         self._offset = int(result.get("offset") or 0)

@@ -81,7 +81,11 @@ class ResultTableWidget(QWidget):
         # with its value pinned to the far right reads as broken. Trailing space on
         # the right is normal for a result grid.
         self.table.horizontalHeader().setStretchLastSection(False)
-        self.table.verticalHeader().setVisible(False)
+        # Row-number gutter (1-based, page-relative) like a database client.
+        vh = self.table.verticalHeader()
+        vh.setVisible(True)
+        vh.setDefaultAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+        vh.setSectionResizeMode(QHeaderView.ResizeMode.Fixed)
         # No striping, no full grid — horizontal row rules only (a faint line under
         # each row) with a quiet, underlined header. Reads clean like an AI-IDE grid.
         self.table.setAlternatingRowColors(False)
@@ -91,6 +95,15 @@ class ResultTableWidget(QWidget):
         # the full value.
         self.table.cellDoubleClicked.connect(self._show_full_cell)
         self.table.itemSelectionChanged.connect(self._update_value_viewer)
+        # Header right-click → auto-fit columns (kept off the click/double-click
+        # gestures so it never collides with the data browser's sort-on-click).
+        hh = self.table.horizontalHeader()
+        hh.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        hh.customContextMenuRequested.connect(self._header_menu)
+        # Ctrl/Cmd+C copies the current selection as TSV.
+        from PyQt6.QtGui import QKeySequence, QShortcut
+        copy_sc = QShortcut(QKeySequence.StandardKey.Copy, self.table)
+        copy_sc.activated.connect(self._copy_selection)
         self.table.setStyleSheet(
             f"""
             QTableWidget {{
@@ -109,13 +122,21 @@ class ResultTableWidget(QWidget):
             QHeaderView {{
                 background: {Theme.SURFACE};
             }}
-            QHeaderView::section {{
+            QHeaderView::section:horizontal {{
                 background: {Theme.SURFACE};
                 color: {Theme.MUTED};
                 padding: 7px 10px;
                 border: none;
                 border-bottom: 1px solid {Theme.BORDER};
                 font-weight: 600;
+            }}
+            QHeaderView::section:vertical {{
+                background: {Theme.SURFACE};
+                color: {Theme.MUTED_2};
+                padding: 0 8px;
+                border: none;
+                border-bottom: 1px solid {Theme.BORDER_SOFT};
+                font-weight: 400;
             }}
             """
         )
@@ -203,6 +224,7 @@ class ResultTableWidget(QWidget):
         row_count: int = 0,
         truncated: bool = False,
         elapsed_ms: float = 0.0,
+        row_offset: int = 0,
     ) -> None:
         self._columns = columns or (list(rows[0].keys()) if rows else [])
         self._rows = rows or []
@@ -210,6 +232,8 @@ class ResultTableWidget(QWidget):
         self.table.setColumnCount(len(self._columns))
         self.table.setHorizontalHeaderLabels(self._columns)
         self.table.setRowCount(len(self._rows))
+        # Row-number gutter — absolute (offset-aware) so pages read continuously.
+        self.table.setVerticalHeaderLabels([str(row_offset + i + 1) for i in range(len(self._rows))])
         # Unified alignment: every cell is vertically centred; numbers align right,
         # everything else left. Headers follow their column so they line up.
         numeric_cols = {
@@ -328,6 +352,36 @@ class ResultTableWidget(QWidget):
         if 0 <= row < len(self._rows) and 0 <= col < len(self._columns):
             return _full_text(self._rows[row].get(self._columns[col]))
         return ""
+
+    def _header_menu(self, pos) -> None:
+        from dbaide.desktop.components.menu import _style_menu
+        from PyQt6.QtWidgets import QMenu
+        hh = self.table.horizontalHeader()
+        section = hh.logicalIndexAt(pos)
+        menu = QMenu(self)
+        _style_menu(menu)
+        if section >= 0:
+            menu.addAction("Auto-fit column",
+                           lambda: self.table.resizeColumnToContents(section))
+        menu.addAction("Auto-fit all columns", self.table.resizeColumnsToContents)
+        menu.exec(hh.mapToGlobal(pos))
+
+    def _copy_selection(self) -> None:
+        """Copy the selected cells as TSV (single cell → just its value)."""
+        items = self.table.selectedItems()
+        if not items:
+            return
+        rows = sorted({it.row() for it in items})
+        cols = sorted({it.column() for it in items})
+        if len(rows) == 1 and len(cols) == 1:
+            QApplication.clipboard().setText(self._cell_text(rows[0], cols[0]))
+            return
+        lines = []
+        for r in rows:
+            line = [self._cell_text(r, c) if self.table.item(r, c) and self.table.item(r, c).isSelected()
+                    else "" for c in cols]
+            lines.append("\t".join(line))
+        QApplication.clipboard().setText("\n".join(lines))
 
     def clear(self) -> None:
         self.table.setRowCount(0)

@@ -78,3 +78,39 @@ def test_write_file(qapp, tmp_path):
     assert "Ada" in json_path.read_text(encoding="utf-8")
     # bad path → graceful False, no raise
     assert w._write_file("/nonexistent-dir-xyz/out.csv", "x") is False
+
+
+def test_row_number_gutter_is_offset_aware(qapp):
+    w = ResultTableWidget()
+    w.load(columns=["id"], rows=[{"id": 1}, {"id": 2}], row_count=200, row_offset=100)
+    assert w.table.verticalHeaderItem(0).text() == "101"
+    assert w.table.verticalHeaderItem(1).text() == "102"
+
+
+def test_copy_selection_single_cell(qapp):
+    from PyQt6.QtWidgets import QApplication
+    w = ResultTableWidget()
+    w.load(columns=["id", "name"], rows=[{"id": 1, "name": "Ada"}], row_count=1)
+    w.table.setCurrentCell(0, 1)
+    w._copy_selection()
+    assert QApplication.clipboard().text() == "Ada"
+
+
+def test_copy_selection_multi_cell_tsv(qapp):
+    from PyQt6.QtWidgets import QApplication, QTableWidgetSelectionRange
+    w = ResultTableWidget()
+    w.load(columns=["id", "name"],
+           rows=[{"id": 1, "name": "Ada"}, {"id": 2, "name": "Bo"}], row_count=2)
+    w.table.clearSelection()
+    w.table.setRangeSelected(QTableWidgetSelectionRange(0, 0, 1, 1), True)
+    w._copy_selection()
+    assert QApplication.clipboard().text() == "1\tAda\n2\tBo"
+
+
+def test_auto_fit_columns_resizes(qapp):
+    # The header menu's actions are just resizeColumns* calls; exercise them
+    # directly (QMenu.exec would block headless).
+    w = ResultTableWidget()
+    w.load(columns=["id", "name"], rows=[{"id": 1, "name": "a-very-long-name-value"}], row_count=1)
+    w.table.resizeColumnToContents(1)
+    w.table.resizeColumnsToContents()  # should not raise
