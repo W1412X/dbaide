@@ -38,3 +38,29 @@ def test_long_cell_truncates_display_but_keeps_full_value(qapp):
     assert item.text().endswith("…") and len(item.text()) < len(long)
     assert item.toolTip() == long          # full value on hover
     assert _full_text(w._rows[0]["note"]) == long  # and available to the detail dialog
+
+
+def test_pretty_value_json():
+    from dbaide.desktop.components.table import _pretty_value
+    out = _pretty_value('{"a":1,"b":[2,3]}')
+    assert out.startswith("{") and '"a": 1' in out and "\n" in out
+    assert _pretty_value("plain text") == "plain text"
+    assert _pretty_value(None) == "NULL"
+    assert _pretty_value({"k": "v"}).strip().startswith("{")
+
+
+def test_value_viewer_toggle_and_update(qapp):
+    w = ResultTableWidget()
+    w.show()
+    w.load(columns=["id", "meta"],
+           rows=[{"id": 1, "meta": '{"x":1}'}, {"id": 2, "meta": "hi"}], row_count=2)
+    assert not w._viewer.isVisible()
+    w.value_toggle.setChecked(True)
+    assert w._viewer.isVisible()
+    w.table.setCurrentCell(0, 1)
+    qapp.processEvents()
+    assert w._viewer_label.text() == "meta"
+    assert '"x": 1' in w._viewer_text.toPlainText()
+    w.value_toggle.setChecked(False)
+    assert not w._viewer.isVisible()
+    w.close()
