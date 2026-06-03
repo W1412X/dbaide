@@ -37,11 +37,16 @@ from dbaide.desktop.service import DesktopService
 
 
 def _tab_label(tab_id: str) -> str:
-    return _i18n_t("tab.ask") if tab_id == "Ask" else _i18n_t("tab.sql") if tab_id == "SQL" else tab_id
+    return {
+        "Ask": _i18n_t("tab.ask"),
+        "SQL": _i18n_t("tab.sql"),
+        "Data": _i18n_t("tab.data"),
+    }.get(tab_id, tab_id)
 from dbaide.desktop.views.ask_tab import AskTab
 from dbaide.desktop.views.right_panel import RightPanel
 from dbaide.desktop.views.sidebar import Sidebar
 from dbaide.desktop.views.sql_tab import SqlTab
+from dbaide.desktop.views.data_browser import DataBrowser
 from dbaide.desktop.views.topbar import TopBar
 from dbaide.desktop.workers import CancelledError, ServiceWorker
 
@@ -77,7 +82,7 @@ class MainWindow(QMainWindow):
         # The active chat session (会话) — the server id of the visible slot.
         self.current_session_id = ""
         self._settings = QSettings("DBAide", "DBAide")
-        self._tab_names = ("Ask", "SQL")
+        self._tab_names = ("Ask", "SQL", "Data")
         self.setWindowTitle("DBAide")
         self.resize(1440, 900)
         self.setMinimumSize(1000, 720)
@@ -179,8 +184,11 @@ class MainWindow(QMainWindow):
         self.ask_tab.clarification_choice.connect(self._submit_clarification)
         self.ask_tab.trace_requested.connect(self._reveal_turn_trace)
         self.sql_tab.run_requested.connect(lambda sql, _action: self.execute_sql(sql))
+        self.data_tab = DataBrowser()
+        self.data_tab.query_requested.connect(lambda payload: self.run_action("browse_table", payload))
         self.stack.addWidget(self.ask_tab)
         self.stack.addWidget(self.sql_tab)
+        self.stack.addWidget(self.data_tab)
         center_layout.addWidget(self.stack, 1)
 
         self.composer = ComposerWidget()
@@ -774,6 +782,16 @@ class MainWindow(QMainWindow):
             self._show_asset("preview_asset", path)
 
     def open_schema_asset(self, data: dict[str, Any]) -> None:
+        # Double-clicking a table opens its data in the Data browser; other nodes
+        # (databases, columns) fall back to the asset preview in the right panel.
+        if str(data.get("kind") or "") == "table":
+            parts = str(data.get("path") or "").split(".")
+            if len(parts) >= 3:
+                conn = self.current_connection()
+                _, database, table = parts[0], parts[1], parts[2]
+                self.data_tab.open_table(conn, database, table)
+                self.switch_tab("Data")
+                return
         path = str(data.get("path") or "")
         if path:
             self._show_asset("asset_markdown", path)
@@ -936,6 +954,8 @@ class MainWindow(QMainWindow):
             self._building = True
         if action == "execute_sql":
             self.sql_tab.set_running(True)
+        if action == "browse_table":
+            self.data_tab.set_running(True)
         worker = ServiceWorker(self.service, action, payload)
         worker.signals.progress.connect(self._on_oneoff_progress)
         worker.signals.done.connect(self._on_oneoff_done)
@@ -962,6 +982,7 @@ class MainWindow(QMainWindow):
         self._oneoff_action = ""
         self._building = False
         self.sql_tab.set_running(False)
+        self.data_tab.set_running(False)
         self._sync_active_ui()
         self._refresh_run_status()
         if action == "build_assets":
@@ -995,6 +1016,10 @@ class MainWindow(QMainWindow):
             self.sql_tab.show_result(result)
             self.bus.emit(QUERY_COMPLETED, {"instance": self.current_connection()})
             return
+        if action == "browse_table":
+            self.data_tab.show_result(result)
+            self.switch_tab("Data")
+            return
         if action == "load_history":
             key = self._active_or_new_key()
             self.ask_tab.append_result(key, result)
@@ -1012,6 +1037,7 @@ class MainWindow(QMainWindow):
         self._oneoff_action = ""
         self._building = False
         self.sql_tab.set_running(False)
+        self.data_tab.set_running(False)
         self.right.trace.end_live()
         self._sync_active_ui()
         self._refresh_run_status()
@@ -1021,6 +1047,9 @@ class MainWindow(QMainWindow):
         if action == "execute_sql":
             self.sql_tab.show_error(str(exc))
             self.toast(str(exc))
+            return
+        if action == "browse_table":
+            self.toast(str(exc))  # e.g. a bad WHERE filter; controls already re-enabled
             return
         self.fail(exc, modal=action not in ("preview_asset", "search_assets"))
 

@@ -147,6 +147,7 @@ class DesktopService:
             "test_connection": self.test_connection,
             "validate_sql": self.validate_sql,
             "execute_sql": self.execute_sql,
+            "browse_table": self.browse_table,
             "explain_sql": self.explain_sql,
             "list_history": self.list_history,
             "load_history": self.load_history,
@@ -476,6 +477,52 @@ class DesktopService:
             "truncated": result.truncated,
             "sql": result.sql,
             "elapsed_ms": result.elapsed_ms,
+        }
+
+    def browse_table(self, payload: dict[str, Any]) -> dict[str, Any]:
+        """Read-only, paginated browse of a single table for the data grid.
+
+        Builds ``SELECT * FROM <table> [WHERE …] [ORDER BY <col> <dir>] LIMIT n OFFSET m``
+        with dialect-correct identifier quoting and runs it through the same guarded,
+        read-only path as the SQL tab. No COUNT(*) — pagination is "has more = a full
+        page came back", so big tables stay cheap."""
+        from dbaide.adapters.base import quote_identifier
+
+        conn = self.cfg.get_connection(str(payload.get("connection_name") or "") or None)
+        self._guard_busy(conn.name)
+        database = str(payload.get("database") or "")
+        table = str(payload.get("table") or "")
+        if not table:
+            raise ValueError("table is required")
+        page_size = max(1, min(500, int(payload.get("page_size") or 100)))
+        offset = max(0, int(payload.get("offset") or 0))
+        order_by = str(payload.get("order_by") or "").strip()
+        order_dir = "DESC" if str(payload.get("order_dir") or "asc").lower() == "desc" else "ASC"
+        where = str(payload.get("where") or "").strip()
+        dialect = "mysql" if str(conn.type).lower() in ("mysql", "mariadb") else "generic"
+
+        sql = f"SELECT * FROM {quote_identifier(table, dialect)}"
+        if where:
+            sql += f" WHERE {where}"
+        if order_by:
+            sql += f" ORDER BY {quote_identifier(order_by, dialect)} {order_dir}"
+        sql += f" LIMIT {page_size} OFFSET {offset}"
+
+        tools = self._query_tools(conn)
+        result = tools.execute_sql(sql, database=database, limit=page_size)
+        rows = result.rows or []
+        return {
+            "columns": result.columns,
+            "rows": rows,
+            "row_count": result.row_count,
+            "truncated": result.truncated,
+            "sql": result.sql,
+            "elapsed_ms": result.elapsed_ms,
+            # Pagination echo (no COUNT(*) — "more" means a full page returned).
+            "table": table, "database": database,
+            "page_size": page_size, "offset": offset,
+            "order_by": order_by, "order_dir": order_dir, "where": where,
+            "has_more": len(rows) >= page_size,
         }
 
     def explain_sql(self, payload: dict[str, Any]) -> dict[str, Any]:
