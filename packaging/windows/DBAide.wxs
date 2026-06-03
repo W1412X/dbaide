@@ -1,0 +1,49 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  WiX v4 installer for DBAide. Auto-harvests the PyInstaller folder
+  (dist\DBAide) via <Files>, installs into "Program Files\DBAide", adds a Start
+  Menu shortcut, and shows the standard InstallDir wizard UI.
+
+  Build (see .github/workflows/release.yml):
+    wix extension add -g WixToolset.UI.wixext
+    wix build -arch x64 -ext WixToolset.UI.wixext -d Version=<x.y.z> \
+      packaging\windows\DBAide.wxs -o DBAide-Windows-x86_64.msi
+-->
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs"
+     xmlns:ui="http://wixtoolset.org/schemas/v4/wxs/ui">
+
+  <Package Name="DBAide"
+           Manufacturer="DBAide"
+           Version="$(Version)"
+           UpgradeCode="DBF830BD-93DD-4E74-957D-4A9B158C7B04"
+           Scope="perMachine"
+           Compressed="yes">
+
+    <MajorUpgrade DowngradeErrorMessage="A newer version of DBAide is already installed." />
+    <MediaTemplate EmbedCab="yes" />
+
+    <StandardDirectory Id="ProgramFiles64Folder">
+      <Directory Id="INSTALLFOLDER" Name="DBAide" />
+    </StandardDirectory>
+    <StandardDirectory Id="ProgramMenuFolder" />
+
+    <Feature Id="Main" Title="DBAide" Level="1">
+      <!-- Harvest the entire PyInstaller output into the install folder. -->
+      <Files Include="dist\DBAide\**" Directory="INSTALLFOLDER" />
+
+      <!-- Start Menu shortcut to the app executable. -->
+      <Component Id="StartMenuShortcut" Directory="ProgramMenuFolder" Guid="*">
+        <Shortcut Id="DBAideShortcut"
+                  Name="DBAide"
+                  Target="[INSTALLFOLDER]DBAide.exe"
+                  WorkingDirectory="INSTALLFOLDER" />
+        <RemoveFolder Id="CleanupShortcut" On="uninstall" />
+        <RegistryValue Root="HKCU" Key="Software\DBAide"
+                       Name="installed" Type="integer" Value="1" KeyPath="yes" />
+      </Component>
+    </Feature>
+
+    <!-- Standard "choose install directory" wizard. -->
+    <ui:WixUI Id="WixUI_InstallDir" InstallDirectory="INSTALLFOLDER" />
+  </Package>
+</Wix>

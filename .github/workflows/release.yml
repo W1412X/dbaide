@@ -1,14 +1,19 @@
 name: Build & Release
 
-# Builds the desktop app on macOS, Linux and Windows. Pushing a tag like `v1.2.3`
-# also publishes a GitHub Release with the bundles attached. `workflow_dispatch`
-# builds the artifacts without releasing (handy for testing).
+# Builds native installers for macOS (.dmg, drag-to-Applications), Windows (.msi
+# wizard) and Linux (.tar.gz). Pushing a tag like `v1.2.3` also publishes a GitHub
+# Release with the installers attached. `workflow_dispatch` builds without releasing.
+#
+# NOTE: `feat/installers` is a temporary branch trigger for iterating on the
+# installer steps — pushes there build (no release). Remove it before merging.
 
 on:
   workflow_dispatch:
   push:
     tags:
       - "v*"
+    branches:
+      - feat/installers
 
 permissions:
   contents: write
@@ -35,6 +40,14 @@ jobs:
         with:
           python-version: "3.11"
 
+      - name: Resolve version
+        shell: bash
+        run: |
+          ver="${GITHUB_REF_NAME#v}"
+          case "$ver" in [0-9]*) ;; *) ver="0.0.0" ;; esac   # branch builds → 0.0.0
+          echo "DBAIDE_VERSION=$ver" >> "$GITHUB_ENV"
+          echo "MSI_VERSION=${ver%%-*}" >> "$GITHUB_ENV"      # MSI needs numeric x.y.z
+
       - name: Install build dependencies
         run: |
           python -m pip install --upgrade pip
@@ -43,20 +56,31 @@ jobs:
       - name: Build desktop bundle (PyInstaller)
         run: python -m PyInstaller packaging/pyinstaller/dbaide-gui.spec --noconfirm --clean
 
-      - name: Package (macOS → .dmg)
+      # macOS → a .dmg containing DBAide.app + an Applications symlink, so users
+      # drag the app into Applications.
+      - name: Package (macOS → drag-install .dmg)
         if: runner.os == 'macOS'
-        working-directory: dist
-        run: hdiutil create -volname DBAide -srcfolder DBAide -ov -format UDZO "${{ matrix.artifact }}.dmg"
+        run: |
+          mkdir -p dmgroot
+          cp -R dist/DBAide.app dmgroot/
+          ln -s /Applications dmgroot/Applications
+          hdiutil create -volname DBAide -srcfolder dmgroot -ov -format UDZO "dist/${{ matrix.artifact }}.dmg"
 
       - name: Package (Linux → .tar.gz)
         if: runner.os == 'Linux'
         working-directory: dist
         run: tar -czf "${{ matrix.artifact }}.tar.gz" DBAide
 
-      - name: Package (Windows → .zip)
+      # Windows → an MSI installer wizard (WiX v4 auto-harvests the PyInstaller folder).
+      - name: Package (Windows → .msi)
         if: runner.os == 'Windows'
-        working-directory: dist
-        run: Compress-Archive -Path DBAide -DestinationPath "${{ matrix.artifact }}.zip"
+        shell: pwsh
+        run: |
+          dotnet tool install --global wix --version 4.0.5
+          $env:PATH += ";$env:USERPROFILE\.dotnet\tools"
+          wix extension add -g WixToolset.UI.wixext
+          wix build -arch x64 -ext WixToolset.UI.wixext -d Version=$env:MSI_VERSION `
+            packaging\windows\DBAide.wxs -o "dist\${{ matrix.artifact }}.msi"
 
       - name: Upload build artifact
         uses: actions/upload-artifact@v4
@@ -65,7 +89,7 @@ jobs:
           path: |
             dist/*.dmg
             dist/*.tar.gz
-            dist/*.zip
+            dist/*.msi
           if-no-files-found: error
 
   release:

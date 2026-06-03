@@ -91,3 +91,23 @@ coll = COLLECT(
     upx_exclude=[],
     name="DBAide",
 )
+
+# On macOS, wrap the collected bundle into a proper .app so it can be
+# dragged into /Applications. Other platforms keep the plain dist/DBAide folder.
+if sys.platform == "darwin":
+    import os
+    app = BUNDLE(
+        coll,
+        name="DBAide.app",
+        icon=None,
+        bundle_identifier="dev.dbaide.app",
+        version=os.environ.get("DBAIDE_VERSION", "0.0.0"),
+        info_plist={
+            "CFBundleName": "DBAide",
+            "CFBundleDisplayName": "DBAide",
+            "CFBundleShortVersionString": os.environ.get("DBAIDE_VERSION", "0.0.0"),
+            "CFBundleVersion": os.environ.get("DBAIDE_VERSION", "0.0.0"),
+            "NSHighResolutionCapable": True,
+            "LSMinimumSystemVersion": "11.0",
+        },
+    )
