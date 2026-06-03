@@ -153,6 +153,10 @@ class SessionList(QWidget):
         # Session ids with an in-flight/queued run — their rows show a spinner driven
         # by one shared animator (no per-row timers).
         self._running_ids: set[str] = set()
+        # Ephemeral rows for brand-new chats that are running but not yet saved
+        # (so they appear in the list and can be switched back to mid-run).
+        self._pending: list[dict[str, Any]] = []
+        self._sessions: list[dict[str, Any]] = []
         from dbaide.desktop.components.spinner import BusyAnimator
         self._busy = BusyAnimator(self._tick_spinners)
 
@@ -183,17 +187,42 @@ class SessionList(QWidget):
                     w.set_running(True, angle=self._busy.angle)
 
     def load(self, sessions: list[dict[str, Any]]) -> None:
+        self._sessions = list(sessions or [])
+        self._render()
+
+    def set_pending(self, items: list[dict[str, Any]]) -> None:
+        """Ephemeral running rows for unsaved new chats — ``[{key, title}]``."""
+        if items == self._pending:
+            return
+        self._pending = list(items or [])
+        self._render()
+
+    def _add_row(self, key: str, title: str, subtitle: str) -> None:
+        row = _SessionRow(title, subtitle)
+        item = QListWidgetItem()
+        item.setData(_ID_ROLE, key)
+        vw = self.list.viewport().width()
+        content_w = (vw if vw > 40 else 232) - 24
+        item.setSizeHint(QSize(0, _SessionRow.height_for(title, content_width=content_w)))
+        self.list.addItem(item)
+        self.list.setItemWidget(item, row)
+
+    def _render(self) -> None:
         self.list.clear()
-        if not sessions:
+        # Running unsaved chats first (most relevant, can be switched back to).
+        for p in self._pending:
+            self._add_row(str(p.get("key") or ""), str(p.get("title") or t("session.new")),
+                          t("session.running"))
+        if not self._pending and not self._sessions:
             item = QListWidgetItem(t("session.empty"))
             item.setFlags(Qt.ItemFlag.NoItemFlags)
-            item.setForeground(self.palette().color(self.foregroundRole()))
             from PyQt6.QtGui import QColor
             item.setForeground(QColor(Theme.MUTED))
             self.list.addItem(item)
+            self._apply_running()
             return
         from dbaide.history.session_store import DEFAULT_TITLE
-        for s in sessions:
+        for s in self._sessions:
             sid = str(s.get("session_id") or "")
             title = str(s.get("title") or "")
             if not title or title == DEFAULT_TITLE:
@@ -203,18 +232,9 @@ class SessionList(QWidget):
             bits = [t("session.turns_one") if n == 1 else t("session.turns_many", n=n)]
             if when:
                 bits.append(when)
-            row = _SessionRow(title, " · ".join(bits))
-            item = QListWidgetItem()
-            item.setData(_ID_ROLE, sid)
-            # Width available to the title inside the row: list viewport minus the
-            # item padding (8+8) and the row margins (4+4). Fall back to a typical
-            # sidebar width before the list has been laid out.
-            vw = self.list.viewport().width()
-            content_w = (vw if vw > 40 else 232) - 24
-            item.setSizeHint(QSize(0, _SessionRow.height_for(title, content_width=content_w)))
-            self.list.addItem(item)
-            self.list.setItemWidget(item, row)
+            self._add_row(sid, title, " · ".join(bits))
         self._apply_running()  # restore spinners after a rebuild
+        self.set_current(self._current)
 
     def resizeEvent(self, event) -> None:  # noqa: N802
         # Recompute row heights for the current width (load may run before layout,

@@ -39,6 +39,7 @@ _STRINGS: dict[str, dict[str, str]] = {
         "zh": "已排队 — 有空位后自动开始",
     },
     "status.runs_active": {"en": "{n} running", "zh": "{n} 运行中"},
+    "session.running": {"en": "Running…", "zh": "运行中…"},
     "composer.placeholder.ready": {
         "en": "Ask anything about your data…",
         "zh": "用自然语言提问你的数据…",

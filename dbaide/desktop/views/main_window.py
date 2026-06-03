@@ -844,7 +844,7 @@ class MainWindow(QMainWindow):
         self.ask_tab.set_active(key)
         events = self._slot_trace.get(key, [])
         self.right.trace.show_events(events, live=key in self._runs)
-        self.sidebar.chats.set_current(self.current_session_id)
+        self._sync_chat_selection()
         self._sync_active_ui()
 
     def rename_session(self, session_id: str, title: str) -> None:
@@ -1190,9 +1190,27 @@ class MainWindow(QMainWindow):
             self.topbar.set_global_status(_i18n_t("status.runs_active", n=active), "running")
         else:
             self._restore_status_badge()
-        running_ids = {(self._slot_session.get(k) or k) for k in self._runs}
-        running_ids |= {(self._slot_session.get(k) or k) for k, _ in self._run_queue}
+        keys = list(self._runs.keys()) + [k for k, _ in self._run_queue]
+        running_ids = {(self._slot_session.get(k) or k) for k in keys}
         self.sidebar.chats.set_running(running_ids)
+        # New (unsaved) chats that are running get an ephemeral row so they stay
+        # reachable mid-run; dedupe by key, label with the question.
+        pending: list[dict[str, Any]] = []
+        seen: set[str] = set()
+        for k in keys:
+            if k.startswith("new:") and k not in seen:
+                seen.add(k)
+                title = (self._slot_question.get(k) or "").strip()
+                pending.append({"key": k, "title": title[:60] or _i18n_t("session.new")})
+        self.sidebar.chats.set_pending(pending)
+        self._sync_chat_selection()
+
+    def _sync_chat_selection(self) -> None:
+        """Highlight the active slot's row — its server id, or the ephemeral key for a
+        running new chat."""
+        key = self._active_key
+        sel = key if (key and key.startswith("new:")) else self.current_session_id
+        self.sidebar.chats.set_current(sel)
 
     def _restore_status_badge(self) -> None:
         conn = self.current_connection()
