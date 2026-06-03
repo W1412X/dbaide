@@ -83,6 +83,13 @@ class StructurePanel(QWidget):
         self._relations.linkActivated.connect(self._on_link)
         pl.addWidget(self._relations)
 
+        # Indexes — name (columns) [UNIQUE], offline from the schema asset.
+        self._indexes = QLabel("")
+        self._indexes.setTextFormat(Qt.TextFormat.RichText)
+        self._indexes.setWordWrap(True)
+        self._indexes.setStyleSheet(f"QLabel {{ color: {Theme.TEXT_2}; font-size: 12px; }}")
+        pl.addWidget(self._indexes)
+
         ddl_label = QLabel(t("structure.ddl"))
         ddl_label.setStyleSheet(f"color: {Theme.MUTED}; font-size: 11px; font-weight: 600;")
         pl.addWidget(ddl_label)
@@ -104,6 +111,7 @@ class StructurePanel(QWidget):
         table: str,
         columns: list[dict[str, Any]],
         relations: dict[str, list[dict[str, Any]]] | None = None,
+        indexes: list[dict[str, Any]] | None = None,
     ) -> None:
         self._title.setText(table)
         rows = [{
@@ -113,8 +121,24 @@ class StructurePanel(QWidget):
         } for c in (columns or [])]
         self._cols.load(columns=["Column", "Type", "Key"], rows=rows, row_count=len(rows))
         self._relations.setText(self._relations_html(relations or {}))
+        self._indexes.setText(self._indexes_text(indexes or []))
         self._ddl.setPlainText(_generate_ddl(table, columns or []))
         self.stack.setCurrentIndex(1)
+
+    def _indexes_text(self, indexes: list[dict[str, Any]]) -> str:
+        # Skip the primary-key index (already shown in the Key column).
+        items = []
+        for ix in indexes:
+            if ix.get("primary"):
+                continue
+            cols = ", ".join(ix.get("columns") or [])
+            label = f"{ix.get('name', '')} ({cols})"
+            if ix.get("unique"):
+                label += " UNIQUE"
+            items.append(label)
+        if not items:
+            return ""
+        return f"<b>{self._t('structure.indexes')}</b> " + ",  ".join(items)
 
     # ── relations rendering ──────────────────────────────────────────────────--
 

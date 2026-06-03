@@ -37,13 +37,14 @@ class _HistoryRow(QWidget):
     def __init__(self, entry: dict[str, Any]) -> None:
         super().__init__()
         lay = QVBoxLayout(self)
-        lay.setContentsMargins(4, 5, 4, 5)
-        lay.setSpacing(2)
+        lay.setContentsMargins(10, 8, 10, 8)
+        lay.setSpacing(5)
         sql_label = QLabel(_one_line(entry.get("sql", "")))
         sql_label.setFont(QFont("Menlo", 11))
         ok = entry.get("ok", True)
         sql_label.setStyleSheet(
-            f"color: {Theme.TEXT if ok else Theme.RED}; background: transparent; font-size: 12px;"
+            f"color: {Theme.TEXT if ok else Theme.RED}; background: transparent;"
+            f" font-size: 12px; line-height: 16px;"
         )
         lay.addWidget(sql_label)
 

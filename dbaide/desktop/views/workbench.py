@@ -133,7 +133,8 @@ class WorkbenchView(QWidget):
 
     def open_table(self, connection: str, database: str, table: str,
                    columns: list[dict[str, Any]],
-                   relations: dict[str, list[dict[str, Any]]] | None = None) -> TableDocument:
+                   relations: dict[str, list[dict[str, Any]]] | None = None,
+                   indexes: list[dict[str, Any]] | None = None) -> TableDocument:
         target_key = TableDocument.key(connection, database, table)
         for i in range(self.tabs.count()):
             w = self.tabs.widget(i)
@@ -146,7 +147,7 @@ class WorkbenchView(QWidget):
         doc.navigate_table.connect(self.navigate_table.emit)
         index = self.tabs.addTab(doc, table)
         self.tabs.setCurrentIndex(index)
-        doc.open(columns, relations)
+        doc.open(columns, relations, indexes)
         return doc
 
     # ── focus helpers (used by MainWindow.switch_tab) ────────────────────────────

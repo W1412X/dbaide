@@ -154,3 +154,29 @@ def test_reopen_table_keeps_subtab(qapp):
     assert doc.tabs.currentIndex() == doc._data_index
     wb.open_table("c", "db", "orders", [])  # re-open → bring forward, keep sub-tab
     assert doc.tabs.currentIndex() == doc._data_index
+
+
+def test_structure_panel_indexes(qapp):
+    from dbaide.desktop.views.structure_panel import StructurePanel
+    sp = StructurePanel()
+    sp.show_table(
+        "orders",
+        [{"name": "id", "data_type": "INTEGER", "primary_key": True}],
+        {},
+        [
+            {"name": "idx_user", "columns": ["user_id"], "unique": False, "primary": False},
+            {"name": "idx_uniq", "columns": ["a", "b"], "unique": True, "primary": False},
+            {"name": "pk_auto", "columns": ["id"], "unique": True, "primary": True},
+        ],
+    )
+    txt = sp._indexes.text()
+    assert "idx_user (user_id)" in txt
+    assert "idx_uniq (a, b) UNIQUE" in txt
+    assert "pk_auto" not in txt  # primary index is omitted (PK shown in grid)
+
+
+def test_structure_panel_no_indexes_blank(qapp):
+    from dbaide.desktop.views.structure_panel import StructurePanel
+    sp = StructurePanel()
+    sp.show_table("t", [{"name": "id", "data_type": "INTEGER"}], {}, [])
+    assert sp._indexes.text() == ""

@@ -345,6 +345,7 @@ class DesktopService:
                     "column_count": table_doc.get("column_count") or len(table_doc.get("columns") or []),
                     "foreign_keys": outgoing,
                     "referenced_by": referenced_by.get(table, []),
+                    "indexes": table_doc.get("indexes") or [],
                     "children": [],
                 }
                 for col_doc in self.store.column_docs(name, db_name, table):

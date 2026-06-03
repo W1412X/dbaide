@@ -53,10 +53,11 @@ class TableDocument(QWidget):
         return self.key(self.connection, self.database, self.table)
 
     def open(self, columns: list[dict[str, Any]],
-             relations: dict[str, list[dict[str, Any]]] | None = None) -> None:
+             relations: dict[str, list[dict[str, Any]]] | None = None,
+             indexes: list[dict[str, Any]] | None = None) -> None:
         """Render the offline structure and show it. No query runs until the user
         opens the Data tab (see ``_ensure_data``)."""
-        self.structure.show_table(self.table, columns or [], relations or {})
+        self.structure.show_table(self.table, columns or [], relations or {}, indexes or [])
         self.tabs.setCurrentIndex(self._structure_index)
 
     def _on_subtab(self, index: int) -> None:

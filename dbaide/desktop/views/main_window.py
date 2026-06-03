@@ -898,6 +898,7 @@ class MainWindow(QMainWindow):
                         "foreign_keys": data.get("foreign_keys") or [],
                         "referenced_by": data.get("referenced_by") or [],
                     },
+                    indexes=data.get("indexes") or [],
                 )
                 return
         path = str(data.get("path") or "")

@@ -55,6 +55,7 @@ _STRINGS: dict[str, dict[str, str]] = {
     "structure.ddl": {"en": "CREATE statement (generated)", "zh": "CREATE 语句(自动生成)"},
     "structure.references": {"en": "References:", "zh": "外键引用："},
     "structure.referenced_by": {"en": "Referenced by:", "zh": "被引用："},
+    "structure.indexes": {"en": "Indexes:", "zh": "索引："},
     "panel.inspector": {"en": "Inspector", "zh": "检查器"},
     "panel.trace": {"en": "Trace", "zh": "执行轨迹"},
     "panel.plan": {"en": "Plan", "zh": "计划"},
