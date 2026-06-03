@@ -303,6 +303,9 @@ class MainWindow(QMainWindow):
     def _on_tab_changed(self, index: int) -> None:
         if 0 <= index < self.stack.count():
             self.stack.setCurrentIndex(index)
+            # The chat composer belongs to Ask only — hide it on the SQL tab (which
+            # has its own Run action), so the SQL results get the full height.
+            self.composer.setVisible(self._tab_names[index] == "Ask")
 
     def switch_tab(self, name: str) -> None:
         if name in self._tab_names:
