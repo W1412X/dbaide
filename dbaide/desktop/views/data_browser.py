@@ -113,6 +113,8 @@ class DataBrowser(QWidget):
         # quiet text button the user clicks to get the precise row total.
         self._count_btn = QToolButton()
         self._count_btn.setText(t("data.count"))
+        self._count_btn.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextOnly)
+        self._count_btn.setMinimumWidth(80)
         self._count_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self._count_btn.setStyleSheet(
             f"QToolButton {{ background: transparent; border: none; color: {Theme.MUTED};"
