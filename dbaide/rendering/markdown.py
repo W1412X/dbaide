@@ -1,4 +1,11 @@
-"""Safe Markdown rendering for DBAide."""
+"""Safe Markdown rendering for DBAide.
+
+Rendering is delegated to mistune (a small, pure-Python CommonMark + GFM library)
+when it is available — it handles the cases a hand-rolled regex renderer keeps
+getting wrong: inline code containing ``*`` / ``_``, nested emphasis, escaping,
+tables with inline markup, etc. If mistune isn't installed (e.g. a minimal CLI
+install), we fall back to the original regex renderer so nothing hard-breaks.
+"""
 from __future__ import annotations
 
 import re
@@ -6,18 +13,41 @@ from typing import Any
 
 from dbaide.rendering.sanitize import escape_user_text, sanitize_markdown_html
 
+try:  # Preferred path: a real Markdown parser.
+    import mistune
+
+    # escape=True → raw inline HTML in the text is escaped (XSS-safe). The `table`
+    # plugin gives GitHub pipe tables; `strikethrough` and `url` are cheap niceties.
+    _MISTUNE = mistune.create_markdown(
+        escape=True,
+        plugins=["table", "strikethrough", "url"],
+    )
+except Exception:  # noqa: BLE001 — any import/init failure → use the fallback
+    _MISTUNE = None
+
 
 def render_markdown_safe(text: str) -> str:
     """Render Markdown to safe HTML.
 
-    - Escapes raw HTML in user text
-    - Supports basic Markdown: bold, italic, code, lists, headers, links
-    - Sanitizes output to prevent XSS
-    - Code blocks get special treatment for SQL highlighting
+    - Escapes raw HTML in user text (no XSS)
+    - Supports bold, italic, code, fenced code, lists, headers, links, tables
+    - Sanitizes output as a defense-in-depth final pass
     """
     if not text:
         return ""
+    if _MISTUNE is not None:
+        try:
+            html = _MISTUNE(str(text))
+            # Tag tables so the app's `table.md-table` CSS styles them.
+            html = re.sub(r"<table(?![^>]*\bclass=)", '<table class="md-table"', html)
+            return sanitize_markdown_html(html)
+        except Exception:  # noqa: BLE001 — never let rendering throw; fall back
+            pass
+    return _render_markdown_regex(str(text))
 
+
+def _render_markdown_regex(text: str) -> str:
+    """Original dependency-free renderer — the fallback when mistune is absent."""
     # First escape all HTML in the source
     safe = escape_user_text(str(text))
 

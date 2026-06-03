@@ -45,3 +45,28 @@ def test_render_markdown_pipe_table():
     assert "| 序号 |" not in html
     assert "<p>| 1 |" not in html
 
+
+def test_loose_asterisks_not_italicized():
+    """Regex renderers turn `2 * 3 = 6 and 4 * 5` into spurious italics; a real
+    parser leaves arithmetic asterisks alone."""
+    html = render_markdown_safe("Revenue = 2 * 3 = 6 and margin 4 * 5 percent.")
+    assert "<em>" not in html
+    assert "2 * 3 = 6" in html
+
+
+def test_blockquote_renders():
+    html = render_markdown_safe("> A note about the result.\n> second line.")
+    assert "<blockquote>" in html
+    assert "&gt; A note" not in html  # not shown as a literal '>'
+
+
+def test_inline_code_with_stars_not_mangled():
+    html = render_markdown_safe("Run `SELECT a*b FROM t` then **go**.")
+    assert "<code>SELECT a*b FROM t</code>" in html
+    assert "<strong>go</strong>" in html
+
+
+def test_raw_html_is_escaped():
+    html = render_markdown_safe("Hello <script>alert(1)</script> world")
+    assert "<script>" not in html
+    assert "&lt;script&gt;" in html

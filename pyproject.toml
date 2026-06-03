@@ -16,8 +16,8 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-gui = ["PyQt6>=6.5.0"]
-dev = ["pytest>=8.0.0", "pyinstaller>=6.0.0", "build>=1.0.0"]
+gui = ["PyQt6>=6.5.0", "mistune>=3.0"]
+dev = ["pytest>=8.0.0", "pyinstaller>=6.0.0", "build>=1.0.0", "mistune>=3.0"]
 packaging = ["pyinstaller>=6.0.0", "build>=1.0.0"]
 
 [project.scripts]
