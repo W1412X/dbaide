@@ -61,10 +61,20 @@ jobs:
       - name: Package (macOS → drag-install .dmg)
         if: runner.os == 'macOS'
         run: |
+          set -euo pipefail
           mkdir -p dmgroot
           cp -R dist/DBAide.app dmgroot/
           ln -s /Applications dmgroot/Applications
-          hdiutil create -volname DBAide -srcfolder dmgroot -ov -format UDZO "dist/${{ matrix.artifact }}.dmg"
+          out="dist/${{ matrix.artifact }}.dmg"
+          # hdiutil intermittently fails with "Resource busy" on CI runners — retry.
+          for attempt in 1 2 3 4 5; do
+            if hdiutil create -volname DBAide -srcfolder dmgroot -ov -format UDZO "$out"; then
+              break
+            fi
+            echo "hdiutil failed (attempt $attempt) — retrying in 8s…"
+            sleep 8
+          done
+          test -f "$out"
 
       - name: Package (Linux → .tar.gz)
         if: runner.os == 'Linux'
