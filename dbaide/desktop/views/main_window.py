@@ -1035,7 +1035,7 @@ class MainWindow(QMainWindow):
             _style_menu(sub)
             # The database itself, as one attachable item.
             sub.addAction(
-                _i18n_t("schema.open_data") and f"📦 {db_name}" or db_name,
+                f"{db_name}  (whole database)",
                 lambda _=False, d=db: self._attach_node(d),
             )
             sub.addSeparator()
