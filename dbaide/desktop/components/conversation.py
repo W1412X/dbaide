@@ -52,11 +52,11 @@ class _Bubble(QFrame):
         label.setFont(QFont("Inter", 13))
         label.setStyleSheet(
             f"""
-            background: {Theme.PANEL_3};
+            background: {Theme.PANEL_2};
             color: {Theme.TEXT};
-            border: 1px solid {Theme.BORDER};
-            border-radius: 18px;
-            padding: 10px 16px;
+            border: 1px solid {Theme.BORDER_SOFT};
+            border-radius: 14px;
+            padding: 9px 14px;
             """
         )
         self._label = label
@@ -185,26 +185,34 @@ class _ThinkingIndicator(QPushButton):
 
 
 class _MarkdownBlock(QFrame):
-    def __init__(self, markdown: str, *, title: str = "", parent=None) -> None:
+    """A rendered-markdown chunk in the conversation. By default it flows directly
+    on the background (no card) — the assistant's answer reads like prose, the way
+    Claude/Cursor present it. Pass ``boxed=True`` for set-apart content (warnings,
+    errors) that deserves a subtle inset card; ``accent`` tints that card's edge."""
+
+    def __init__(self, markdown: str, *, title: str = "", boxed: bool = False,
+                 accent: str = "", parent=None) -> None:
         super().__init__(parent)
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
         self.setObjectName("answerBlock")
-        self.setStyleSheet(
-            f"""
-            QFrame#answerBlock {{
-                background: {Theme.PANEL};
-                border: 1px solid {Theme.BORDER_SOFT};
-                border-radius: 12px;
-            }}
-            """
-        )
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(16, 14, 16, 14)
-        layout.setSpacing(8)
+        if boxed:
+            self.setStyleSheet(
+                f"QFrame#answerBlock {{ background: {Theme.PANEL};"
+                f" border: 1px solid {accent or Theme.BORDER_SOFT}; border-radius: 12px; }}"
+            )
+            layout = QVBoxLayout(self)
+            layout.setContentsMargins(16, 12, 16, 12)
+        else:
+            self.setStyleSheet("QFrame#answerBlock { background: transparent; border: none; }")
+            layout = QVBoxLayout(self)
+            layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(6)
         if title:
             t = QLabel(title)
             t.setFont(QFont("Inter", 10, QFont.Weight.DemiBold))
-            t.setStyleSheet(f"color: {Theme.MUTED}; background: transparent;")
+            t.setStyleSheet(
+                f"color: {accent or Theme.MUTED}; background: transparent; letter-spacing: 0.3px;"
+            )
             layout.addWidget(t)
         self._body = QTextBrowser()
         self._body.setOpenExternalLinks(True)
@@ -219,13 +227,20 @@ class _MarkdownBlock(QFrame):
         )
         html = render_markdown_safe(markdown or "")
         self._body.setHtml(
-            f"<style>body{{margin:0;color:{Theme.TEXT};font-family:Inter,sans-serif;font-size:13px;}}"
-            f"p{{margin:4px 0;}} pre,code{{background:{Theme.CODE_BG};"
-            f"border-radius:8px;padding:8px;font-family:Menlo,monospace;font-size:11px;white-space:pre-wrap;}}"
+            f"<style>body{{margin:0;color:{Theme.TEXT};font-family:Inter,sans-serif;font-size:13px;line-height:1.55;}}"
+            f"p{{margin:5px 0;}}"
+            # Code: an inset block with its own subtle border, the way an AI IDE frames code.
+            f"pre{{background:{Theme.CODE_BG};border:1px solid {Theme.BORDER_SOFT};"
+            f"border-radius:8px;padding:10px 12px;font-family:Menlo,monospace;font-size:12px;white-space:pre-wrap;}}"
+            f"code{{background:{Theme.CODE_BG};border-radius:4px;padding:1px 5px;font-family:Menlo,monospace;font-size:12px;}}"
+            f"pre code{{background:transparent;padding:0;}}"
+            # Tables: horizontal rules only (no boxy grid) — header underlined, rows
+            # separated by a faint line. Reads clean and modern.
             f"table.md-table{{border-collapse:collapse;width:100%;margin:8px 0;}}"
-            f"table.md-table th,table.md-table td{{border:1px solid {Theme.BORDER_SOFT};padding:6px 10px;text-align:left;}}"
-            f"table.md-table th{{background:{Theme.PANEL_2};font-weight:600;}}"
-            f"table.md-table tr:nth-child(even) td{{background:{Theme.PANEL};}}"
+            f"table.md-table th,table.md-table td{{border:none;border-bottom:1px solid {Theme.BORDER_SOFT};"
+            f"padding:7px 14px 7px 0;text-align:left;}}"
+            f"table.md-table th{{color:{Theme.MUTED};font-weight:600;font-size:11px;"
+            f"letter-spacing:0.4px;text-transform:uppercase;border-bottom:1px solid {Theme.BORDER};}}"
             f"a{{color:{Theme.BLUE};}}</style>{html}"
         )
         layout.addWidget(self._body)
@@ -537,7 +552,7 @@ class ConversationView(QScrollArea):
                     lines.append(f"- {err}")
             notes.append("**Notes**\n" + "\n".join(lines))
         if notes:
-            turn.append_content(_MarkdownBlock("\n\n".join(notes)))
+            turn.append_content(_MarkdownBlock("\n\n".join(notes), boxed=True))
 
         self._current_turn = None
         self._current_record = None
@@ -571,7 +586,9 @@ class ConversationView(QScrollArea):
         if self._current_turn:
             events = list((self._current_record or {}).get("events") or [])
             self._current_turn.status.set_done(ok=False, step_count=len(events), events=events)
-            self._current_turn.append_content(_MarkdownBlock(message, title="Error"))
+            self._current_turn.append_content(
+                _MarkdownBlock(message, title="Error", boxed=True, accent=Theme.RED)
+            )
             if self._current_record is not None:
                 self._current_record["answer"] = message
             self._current_turn = None
