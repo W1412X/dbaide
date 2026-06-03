@@ -225,18 +225,21 @@ class DataBrowser(QWidget):
         self._fk_map = dict(fk_map or {})
 
     def _fk_cell_actions(self, row: int, col: int):
-        if not (0 <= row < len(self._columns)):
+        if not (0 <= col < len(self._columns)):
             return []
         column = self._columns[col]
         ref = self._fk_map.get(column)
-        if not ref or not (0 <= row < self.grid.table.rowCount()):
+        if not ref:
             return []
-        value = (self.grid._rows[row].get(column) if 0 <= row < len(self.grid._rows) else None)
+        if not (0 <= row < len(self.grid._rows)):
+            return []
+        value = self.grid._rows[row].get(column)
         if value is None:
             return []
         ref_table, ref_column = ref
         label = self._t("data.open_referenced", table=ref_table)
-        return [(label, lambda: self.navigate_fk.emit(ref_table, ref_column, value))]
+        # Capture value by binding default arg — avoids late-binding closure bug
+        return [(label, lambda rt=ref_table, rc=ref_column, v=value: self.navigate_fk.emit(rt, rc, v))]
 
     def show_count(self, total: int) -> None:
         """Display the exact COUNT(*) result (for the current WHERE filter)."""

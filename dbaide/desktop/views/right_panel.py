@@ -86,9 +86,11 @@ class RightPanel(QWidget):
     def _switch_tab(self, index: int) -> None:
         if 0 <= index < self.stack.count():
             self.stack.setCurrentIndex(index)
-            # Keep the header tab indicator in sync (it may be already set, but
-            # calling switch_tab from outside doesn't go through the header).
+            # Sync the header tab — block its signal to avoid a re-entry loop
+            # (header.tab_changed → _switch_tab → set_current_tab → tab_changed).
+            self.header.tabbar.blockSignals(True)
             self.header.set_current_tab(index)
+            self.header.tabbar.blockSignals(False)
 
     def _history_popup(self) -> HistoryDialog:
         if self._history_dialog is None:

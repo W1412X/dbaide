@@ -4,6 +4,7 @@ import json
 import sys
 from typing import Any, Callable
 
+from PyQt6 import sip
 from PyQt6.QtCore import Qt, QSettings, QThreadPool
 from PyQt6.QtGui import QKeySequence, QShortcut
 from PyQt6.QtWidgets import (
@@ -861,6 +862,22 @@ class MainWindow(QMainWindow):
         if widget is self._active_data_doc:
             self._active_data_doc = None
 
+    def _safe_sql_doc(self):
+        """Return the active SQL doc only if it's still alive (not deleteLater'd)."""
+        d = self._active_sql_doc
+        if d is not None and not sip.isdeleted(d):
+            return d
+        self._active_sql_doc = None
+        return None
+
+    def _safe_data_doc(self):
+        """Return the active data doc only if it's still alive."""
+        d = self._active_data_doc
+        if d is not None and not sip.isdeleted(d):
+            return d
+        self._active_data_doc = None
+        return None
+
     def execute_sql(self, sql: str) -> None:
         if not sql.strip():
             return
@@ -930,8 +947,9 @@ class MainWindow(QMainWindow):
     def open_schema_asset(self, data: dict[str, Any]) -> None:
         # Double-clicking a table opens its data in the Data browser; other nodes
         # (databases, columns) fall back to the asset preview in the right panel.
+        path = str(data.get("path") or "")
         if str(data.get("kind") or "") == "table":
-            parts = str(data.get("path") or "").split(".")
+            parts = path.split(".") if path else []
             if len(parts) >= 3:
                 conn = self.current_connection()
                 _, database, table = parts[0], parts[1], parts[2]
@@ -948,7 +966,7 @@ class MainWindow(QMainWindow):
                     indexes=data.get("indexes") or [],
                 )
                 return
-        path = str(data.get("path") or "")
+            # Fall through: table with a malformed/short path → show as doc
         if path:
             self._show_asset("asset_markdown", path)
 
@@ -1166,10 +1184,12 @@ class MainWindow(QMainWindow):
         self._oneoff_action = action
         if action == "build_assets":
             self._building = True
-        if action in ("execute_sql", "explain_sql") and self._active_sql_doc is not None:
-            self._active_sql_doc.set_running(True)
-        if action in ("browse_table", "count_table") and self._active_data_doc is not None:
-            self._active_data_doc.set_running(True)
+        sql_doc = self._safe_sql_doc()
+        data_doc = self._safe_data_doc()
+        if action in ("execute_sql", "explain_sql") and sql_doc is not None:
+            sql_doc.set_running(True)
+        if action in ("browse_table", "count_table") and data_doc is not None:
+            data_doc.set_running(True)
         worker = ServiceWorker(self.service, action, payload)
         worker.signals.progress.connect(self._on_oneoff_progress)
         worker.signals.done.connect(self._on_oneoff_done)
@@ -1195,10 +1215,12 @@ class MainWindow(QMainWindow):
         self._oneoff_worker = None
         self._oneoff_action = ""
         self._building = False
-        if self._active_sql_doc is not None:
-            self._active_sql_doc.set_running(False)
-        if self._active_data_doc is not None:
-            self._active_data_doc.set_running(False)
+        sql_doc = self._safe_sql_doc()
+        data_doc = self._safe_data_doc()
+        if sql_doc is not None:
+            sql_doc.set_running(False)
+        if data_doc is not None:
+            data_doc.set_running(False)
         self._sync_active_ui()
         self._refresh_run_status()
         if action == "build_assets":
@@ -1229,8 +1251,8 @@ class MainWindow(QMainWindow):
             )
             return
         if action == "execute_sql":
-            if self._active_sql_doc is not None:
-                self._active_sql_doc.show_result(result)
+            if sql_doc is not None:
+                sql_doc.show_result(result)
             self._record_query(
                 self._last_sql, ok=True,
                 row_count=result.get("row_count"),
@@ -1239,16 +1261,16 @@ class MainWindow(QMainWindow):
             self.bus.emit(QUERY_COMPLETED, {"instance": self.current_connection()})
             return
         if action == "browse_table":
-            if self._active_data_doc is not None:
-                self._active_data_doc.show_result(result)
+            if data_doc is not None:
+                data_doc.show_result(result)
             return
         if action == "count_table":
-            if self._active_data_doc is not None:
-                self._active_data_doc.show_count(int(result.get("count") or 0))
+            if data_doc is not None:
+                data_doc.show_count(int(result.get("count") or 0))
             return
         if action == "explain_sql":
-            if self._active_sql_doc is not None:
-                self._active_sql_doc.show_result(result)
+            if sql_doc is not None:
+                sql_doc.show_result(result)
             return
         if action == "load_history":
             key = self._active_or_new_key()
@@ -1266,10 +1288,12 @@ class MainWindow(QMainWindow):
         self._oneoff_worker = None
         self._oneoff_action = ""
         self._building = False
-        if self._active_sql_doc is not None:
-            self._active_sql_doc.set_running(False)
-        if self._active_data_doc is not None:
-            self._active_data_doc.set_running(False)
+        sql_doc = self._safe_sql_doc()
+        data_doc = self._safe_data_doc()
+        if sql_doc is not None:
+            sql_doc.set_running(False)
+        if data_doc is not None:
+            data_doc.set_running(False)
         self.right.trace.end_live()
         self._sync_active_ui()
         self._refresh_run_status()
@@ -1277,14 +1301,14 @@ class MainWindow(QMainWindow):
             self.toast(_i18n_t("toast.cancelled"))
             return
         if action == "execute_sql":
-            if self._active_sql_doc is not None:
-                self._active_sql_doc.show_error(str(exc))
+            if sql_doc is not None:
+                sql_doc.show_error(str(exc))
             self._record_query(self._last_sql, ok=False)
             self.toast(str(exc))
             return
         if action == "explain_sql":
-            if self._active_sql_doc is not None:
-                self._active_sql_doc.show_error(str(exc))
+            if sql_doc is not None:
+                sql_doc.show_error(str(exc))
             self.toast(str(exc))
             return
         if action in ("browse_table", "count_table"):

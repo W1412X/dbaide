@@ -174,6 +174,12 @@ _STRINGS: dict[str, dict[str, str]] = {
     "schema.gen_update": {"en": "UPDATE template", "zh": "UPDATE 模板"},
     "schema.copy_name": {"en": "Copy name", "zh": "复制名称"},
     "schema.copy_qualified": {"en": "Copy qualified name", "zh": "复制限定名"},
+    "schema.no_assets": {"en": "No assets yet", "zh": "尚无资产"},
+    "schema.no_assets_hint": {
+        "en": "Build assets from the toolbar for richer answers.",
+        "zh": "从工具栏构建资产以获得更准确的回答。",
+    },
+    "schema.load_failed": {"en": "Schema load failed: {error}", "zh": "结构加载失败：{error}"},
     "toast.model": {"en": "Model: {name}", "zh": "模型：{name}"},
     "toast.waiting_reply": {"en": "Waiting for your reply", "zh": "等待你的回复"},
     "toast.connection_ok": {"en": "Connection OK", "zh": "连接正常"},

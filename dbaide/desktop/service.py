@@ -570,9 +570,13 @@ class DesktopService:
         tools = self._query_tools(conn)
         result = tools.execute_sql(sql, database=database, limit=1)
         count = 0
-        if result.rows:
-            first = result.rows[0]
-            count = int(next(iter(first.values())) if isinstance(first, dict) else first[0])
+        try:
+            if result.rows:
+                first = result.rows[0]
+                raw = next(iter(first.values())) if isinstance(first, dict) else first[0]
+                count = int(raw) if raw is not None else 0
+        except (StopIteration, IndexError, TypeError, ValueError):
+            count = 0
         return {"count": count, "table": table, "where": where}
 
     def explain_sql(self, payload: dict[str, Any]) -> dict[str, Any]:

@@ -113,7 +113,8 @@ class Sidebar(QWidget):
         self._rows = rows
         if error:
             self.tree.clear()
-            self.tree.addTopLevelItem(QTreeWidgetItem([f"Schema load failed: {error}"]))
+            from dbaide.i18n import t as _t
+            self.tree.addTopLevelItem(QTreeWidgetItem([_t("schema.load_failed", error=error)]))
             return
         self._render(rows)
 
@@ -122,8 +123,9 @@ class Sidebar(QWidget):
         if not rows:
             from dbaide.desktop.theme import Theme
             from PyQt6.QtGui import QColor
-            item = QTreeWidgetItem(["No assets yet"])
-            item.setToolTip(0, "Build assets from the ⋯ menu (top-right) for richer answers.")
+            from dbaide.i18n import t as _t
+            item = QTreeWidgetItem([_t("schema.no_assets")])
+            item.setToolTip(0, _t("schema.no_assets_hint"))
             item.setForeground(0, QColor(Theme.MUTED))
             item.setFlags(Qt.ItemFlag.ItemIsEnabled)
             self.tree.addTopLevelItem(item)

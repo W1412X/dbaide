@@ -90,12 +90,18 @@ class WorkbenchView(QWidget):
         self._on_close(self.tabs.currentIndex())
 
     def close_table_docs(self) -> None:
-        """Close every open table viewer — used when the connection changes, since
-        their data/structure belong to the old connection. SQL editors (portable
-        text) and the pinned History are kept."""
+        """Close every open table viewer AND DocTab — used when the connection
+        changes, since their data/structure/docs belong to the old connection.
+        SQL editors (portable text) and the pinned History are kept."""
         for i in range(self.tabs.count() - 1, -1, -1):
             w = self.tabs.widget(i)
-            if isinstance(w, TableDocument):
+            if isinstance(w, (TableDocument, DocTab)):
+                # Clean up DocTab registry
+                if isinstance(w, DocTab):
+                    for path, tab in list(self._doc_tabs.items()):
+                        if tab is w:
+                            del self._doc_tabs[path]
+                            break
                 self.tabs.removeTab(i)
                 self.doc_closed.emit(w)
                 w.deleteLater()
