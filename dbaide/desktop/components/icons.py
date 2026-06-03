@@ -43,6 +43,7 @@ _GLYPHS: dict[str, str] = {
                'a.5.5 0 0 0 .623.622l4.353-1.32a2 2 0 0 0 .83-.497z"/><path d="m15 5 4 4"/>'),
     "database": ('<ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M3 5V19A9 3 0 0 0 21 19V5"/>'
                  '<path d="M3 12A9 3 0 0 0 21 12"/>'),
+    "play": '<polygon points="6 3 20 12 6 21 6 3"/>',
     "loader": '<path d="M21 12a9 9 0 1 1-6.219-8.56"/>',  # 270° arc — the spinner
 }
 

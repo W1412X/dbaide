@@ -1,10 +1,11 @@
 from __future__ import annotations
 
-from PyQt6.QtCore import pyqtSignal
-from PyQt6.QtGui import QFont, QIcon
+from PyQt6.QtCore import QSize, pyqtSignal
+from PyQt6.QtGui import QFont
 from PyQt6.QtWidgets import QHBoxLayout, QPlainTextEdit, QTabWidget, QTextBrowser, QVBoxLayout, QWidget
 
 from dbaide.desktop.components.base import compact_button
+from dbaide.desktop.components.icons import svg_icon
 from dbaide.desktop.components.inputs import configure_multiline_text_edit, configure_readonly_text_view
 from dbaide.desktop.components.spinner import BusyAnimator, spinner_icon
 from dbaide.desktop.components.table import ResultTableWidget
@@ -23,7 +24,9 @@ class SqlTab(QWidget):
         toolbar = QHBoxLayout()
         # Run is the only action: validation/explain happen automatically and any
         # problem surfaces as an execution error in Messages — no separate buttons.
-        self.run_btn = compact_button(t("sql.run"), primary=True, width=96)
+        self.run_btn = compact_button(t("sql.run"), primary=True, width=90)
+        self.run_btn.setIcon(svg_icon("play", color="#ffffff", size=13))
+        self.run_btn.setIconSize(QSize(13, 13))
         self.run_btn.setToolTip(t("sql.run_tooltip"))
         self.run_btn.clicked.connect(lambda: self.run_requested.emit(self.editor.toPlainText(), "execute"))
         toolbar.addWidget(self.run_btn)
@@ -53,7 +56,7 @@ class SqlTab(QWidget):
             self._busy.start()
         else:
             self._busy.stop()
-            self.run_btn.setIcon(QIcon())
+            self.run_btn.setIcon(svg_icon("play", color="#ffffff", size=13))
             self.run_btn.setText(self._t("sql.run"))
         self.run_btn.setEnabled(not running)
         self.editor.setEnabled(not running)

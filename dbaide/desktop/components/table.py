@@ -53,7 +53,10 @@ class ResultTableWidget(QWidget):
         # the right is normal for a result grid.
         self.table.horizontalHeader().setStretchLastSection(False)
         self.table.verticalHeader().setVisible(False)
-        self.table.setAlternatingRowColors(True)
+        # No striping, no full grid — horizontal row rules only (a faint line under
+        # each row) with a quiet, underlined header. Reads clean like an AI-IDE grid.
+        self.table.setAlternatingRowColors(False)
+        self.table.setShowGrid(False)
         self.table.setWordWrap(False)
         # Long values are truncated for layout; double-click (or the tooltip) reveals
         # the full value.
@@ -61,17 +64,26 @@ class ResultTableWidget(QWidget):
         self.table.setStyleSheet(
             f"""
             QTableWidget {{
-                alternate-background-color: {Theme.PANEL};
-                gridline-color: {Theme.BORDER_SOFT};
+                background: {Theme.SURFACE};
                 border: 1px solid {Theme.BORDER_SOFT};
                 border-radius: 8px;
+                outline: none;
+            }}
+            QTableWidget::item {{
+                border-bottom: 1px solid {Theme.BORDER_SOFT};
+                padding: 4px 10px;
+            }}
+            QTableWidget::item:selected {{
+                background: {Theme.PANEL_3};
+                color: {Theme.TEXT};
             }}
             QHeaderView::section {{
-                background: {Theme.PANEL_2};
-                color: {Theme.TEXT_2};
-                padding: 6px 8px;
+                background: transparent;
+                color: {Theme.MUTED};
+                padding: 7px 10px;
                 border: none;
-                border-bottom: 1px solid {Theme.BORDER_SOFT};
+                border-bottom: 1px solid {Theme.BORDER};
+                font-weight: 600;
             }}
             """
         )
