@@ -71,3 +71,15 @@ def test_data_browser_widget(qapp):
                    "has_more": True, "offset": 0, "page_size": 100})
     assert w._next.isEnabled() and not w._prev.isEnabled()
     assert "1" in w._range.text()
+
+
+def test_structure_panel(qapp):
+    from dbaide.desktop.views.structure_panel import StructurePanel, _generate_ddl
+    cols = [{"name": "id", "data_type": "INTEGER", "primary_key": True},
+            {"name": "city", "data_type": "TEXT", "indexed": True}]
+    ddl = _generate_ddl("orders", cols)
+    assert "CREATE TABLE orders" in ddl and "id INTEGER PRIMARY KEY" in ddl
+    sp = StructurePanel()
+    sp.show_table("orders", cols)
+    assert len(sp._cols._rows) == 2
+    assert sp.stack.currentIndex() == 1

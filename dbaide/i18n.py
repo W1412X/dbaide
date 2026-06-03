@@ -37,6 +37,12 @@ _STRINGS: dict[str, dict[str, str]] = {
     "data.prev": {"en": "Previous page", "zh": "上一页"},
     "data.next": {"en": "Next page", "zh": "下一页"},
     "data.sorted_by": {"en": "sorted by {col} {dir}", "zh": "按 {col} {dir} 排序"},
+    "tab.structure": {"en": "Structure", "zh": "结构"},
+    "structure.empty_hint": {
+        "en": "Double-click a table in the schema (left) to see its structure.",
+        "zh": "双击左侧结构树中的表即可查看其结构。",
+    },
+    "structure.ddl": {"en": "CREATE statement (generated)", "zh": "CREATE 语句(自动生成)"},
     "panel.inspector": {"en": "Inspector", "zh": "检查器"},
     "panel.trace": {"en": "Trace", "zh": "执行轨迹"},
     "panel.plan": {"en": "Plan", "zh": "计划"},

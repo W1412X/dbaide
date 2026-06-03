@@ -47,6 +47,7 @@ from dbaide.desktop.views.sidebar import Sidebar
 from dbaide.desktop.views.sql_tab import SqlTab
 from dbaide.desktop.views.data_browser import DataBrowser
 from dbaide.desktop.views.workbench import WorkbenchView
+from dbaide.desktop.views.structure_panel import StructurePanel
 from dbaide.desktop.views.topbar import TopBar
 from dbaide.desktop.workers import CancelledError, ServiceWorker
 
@@ -188,7 +189,8 @@ class MainWindow(QMainWindow):
         self.sql_tab.run_requested.connect(lambda sql, _action: self.execute_sql(sql))
         self.data_tab = DataBrowser()
         self.data_tab.query_requested.connect(lambda payload: self.run_action("browse_table", payload))
-        self.workbench = WorkbenchView(self.sql_tab, self.data_tab)
+        self.structure_panel = StructurePanel()
+        self.workbench = WorkbenchView(self.sql_tab, self.data_tab, self.structure_panel)
         self.stack.addWidget(self.ask_tab)    # mode 0 — Assistant
         self.stack.addWidget(self.workbench)  # mode 1 — Workbench
         center_layout.addWidget(self.stack, 1)
@@ -809,6 +811,9 @@ class MainWindow(QMainWindow):
             if len(parts) >= 3:
                 conn = self.current_connection()
                 _, database, table = parts[0], parts[1], parts[2]
+                # Structure is built from the columns already in the node — instant,
+                # no query. Data is the primary view; Structure is one tab away.
+                self.structure_panel.show_table(table, data.get("children") or [])
                 self.data_tab.open_table(conn, database, table)
                 self.switch_tab("Data")
                 return
