@@ -38,17 +38,17 @@ def test_language_change_persists_and_prompts_restart(qapp, tmp_path, monkeypatc
     monkeypatch.setattr(mw.QMessageBox, "information", lambda *a, **k: prompts.append(a[-1]))
     i18n.set_language("en")
     win = mw.MainWindow(DesktopService(cfg, AssetStore(tmp_path / "assets")))
-    assert win.tabbar.tabText(0) == "Ask"
+    assert win.tabbar.tabText(0) == "Assistant"
 
     win._change_language("zh")
     # Restart-required: config persists but the live UI does NOT change.
     assert ConfigManager(path=tmp_path / "config.toml").ui_language() == "zh"
-    assert win.tabbar.tabText(0) == "Ask"           # unchanged until restart
+    assert win.tabbar.tabText(0) == "Assistant"           # unchanged until restart
     assert prompts and "重启" in prompts[-1]          # restart prompt shown in zh
 
     # Startup in zh would render Chinese:
     i18n.set_language("zh")
     win2 = mw.MainWindow(DesktopService(ConfigManager(path=tmp_path / "config.toml"),
                                         AssetStore(tmp_path / "assets")))
-    assert win2.tabbar.tabText(0) == "提问"
+    assert win2.tabbar.tabText(0) == "助手"
     i18n.set_language("en")

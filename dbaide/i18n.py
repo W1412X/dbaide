@@ -23,6 +23,8 @@ _STRINGS: dict[str, dict[str, str]] = {
     "tab.ask": {"en": "Ask", "zh": "提问"},
     "tab.sql": {"en": "SQL", "zh": "SQL"},
     "tab.data": {"en": "Data", "zh": "数据"},
+    "mode.assistant": {"en": "Assistant", "zh": "助手"},
+    "mode.workbench": {"en": "Workbench", "zh": "工作台"},
     "data.empty_hint": {
         "en": "Double-click a table in the schema (left) to browse its data.",
         "zh": "双击左侧结构树中的表即可浏览数据。",

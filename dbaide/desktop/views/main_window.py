@@ -38,15 +38,15 @@ from dbaide.desktop.service import DesktopService
 
 def _tab_label(tab_id: str) -> str:
     return {
-        "Ask": _i18n_t("tab.ask"),
-        "SQL": _i18n_t("tab.sql"),
-        "Data": _i18n_t("tab.data"),
+        "Assistant": _i18n_t("mode.assistant"),
+        "Workbench": _i18n_t("mode.workbench"),
     }.get(tab_id, tab_id)
 from dbaide.desktop.views.ask_tab import AskTab
 from dbaide.desktop.views.right_panel import RightPanel
 from dbaide.desktop.views.sidebar import Sidebar
 from dbaide.desktop.views.sql_tab import SqlTab
 from dbaide.desktop.views.data_browser import DataBrowser
+from dbaide.desktop.views.workbench import WorkbenchView
 from dbaide.desktop.views.topbar import TopBar
 from dbaide.desktop.workers import CancelledError, ServiceWorker
 
@@ -82,7 +82,7 @@ class MainWindow(QMainWindow):
         # The active chat session (会话) — the server id of the visible slot.
         self.current_session_id = ""
         self._settings = QSettings("DBAide", "DBAide")
-        self._tab_names = ("Ask", "SQL", "Data")
+        self._tab_names = ("Assistant", "Workbench")
         self.setWindowTitle("DBAide")
         self.resize(1440, 900)
         self.setMinimumSize(1000, 720)
@@ -177,6 +177,8 @@ class MainWindow(QMainWindow):
         center_layout.addLayout(tab_row)
 
         self.stack = QStackedWidget()
+        # Assistant mode = the AI conversation; Workbench mode = the database client
+        # (SQL editor + data browser). The two are deliberately separate surfaces.
         self.ask_tab = AskTab()
         self.sql_tab = SqlTab()
         self.ask_tab.empty_action.connect(self._empty_action)
@@ -186,9 +188,9 @@ class MainWindow(QMainWindow):
         self.sql_tab.run_requested.connect(lambda sql, _action: self.execute_sql(sql))
         self.data_tab = DataBrowser()
         self.data_tab.query_requested.connect(lambda payload: self.run_action("browse_table", payload))
-        self.stack.addWidget(self.ask_tab)
-        self.stack.addWidget(self.sql_tab)
-        self.stack.addWidget(self.data_tab)
+        self.workbench = WorkbenchView(self.sql_tab, self.data_tab)
+        self.stack.addWidget(self.ask_tab)    # mode 0 — Assistant
+        self.stack.addWidget(self.workbench)  # mode 1 — Workbench
         center_layout.addWidget(self.stack, 1)
 
         self.composer = ComposerWidget()
@@ -311,13 +313,20 @@ class MainWindow(QMainWindow):
     def _on_tab_changed(self, index: int) -> None:
         if 0 <= index < self.stack.count():
             self.stack.setCurrentIndex(index)
-            # The chat composer belongs to Ask only — hide it on the SQL tab (which
-            # has its own Run action), so the SQL results get the full height.
-            self.composer.setVisible(self._tab_names[index] == "Ask")
+            # The chat composer belongs to the Assistant mode only; the Workbench
+            # has its own Run action and uses the full height.
+            self.composer.setVisible(self._tab_names[index] == "Assistant")
 
     def switch_tab(self, name: str) -> None:
-        if name in self._tab_names:
-            self.tabbar.setCurrentIndex(self._tab_names.index(name))
+        """Route the old per-tab names to the new Assistant/Workbench modes."""
+        if name in ("Ask", "Assistant"):
+            self.tabbar.setCurrentIndex(0)
+        elif name in ("SQL", "Workbench"):
+            self.tabbar.setCurrentIndex(1)
+            self.workbench.focus_sql()
+        elif name == "Data":
+            self.tabbar.setCurrentIndex(1)
+            self.workbench.focus_data()
 
     def _connection_changed(self, _text: str) -> None:
         # Sessions are per-connection — drop the active session and clear the view so

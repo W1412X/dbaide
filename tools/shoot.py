@@ -172,9 +172,8 @@ def main() -> int:
     grab(win.composer, "composer")
     grab(win.right, "right_panel")
     grab(win.ask_tab, "ask_tab")
-    # SQL tab view
-    win.stack.setCurrentIndex(1)
-    win.tabbar.setCurrentIndex(1)
+    # Workbench (SQL editor)
+    win.switch_tab("SQL")
     for _ in range(4):
         app.processEvents()
     grab(win, "window_sql")
