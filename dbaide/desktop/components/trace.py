@@ -94,11 +94,11 @@ class TracePanel(QWidget):
         self._copy_raw_btn.setIconSize(QSize(15, 15))
         self._copy_raw_btn.setToolTip("Copy raw event JSON")
         self._copy_raw_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        self._copy_raw_btn.setFixedSize(26, 24)
+        self._copy_raw_btn.setFixedSize(24, 24)
+        # Ghost icon — no boxed border; just a faint hover wash (modern icon-button style).
         self._copy_raw_btn.setStyleSheet(
-            f"QToolButton {{ background:{Theme.PANEL}; border:1px solid {Theme.BORDER_SOFT};"
-            f" border-radius:6px; }}"
-            f"QToolButton:hover {{ background:{Theme.PANEL_2}; }}"
+            "QToolButton { background: transparent; border: none; border-radius: 6px; }"
+            f"QToolButton:hover {{ background:{Theme.PANEL_3}; }}"
         )
         self._copy_raw_btn.clicked.connect(self._copy_raw)
         self._copy_raw_btn.setVisible(False)

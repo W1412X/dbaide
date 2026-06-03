@@ -14,8 +14,10 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 
+from PyQt6.QtWidgets import QLabel
+
 from dbaide.desktop.components.base import SectionLabel, compact_button
-from dbaide.desktop.components.icons import svg_icon
+from dbaide.desktop.components.icons import svg_icon, svg_pixmap
 from dbaide.desktop.components.session_list import SessionList
 from dbaide.desktop.theme import Theme
 
@@ -50,10 +52,20 @@ class Sidebar(QWidget):
         schema_layout.addWidget(SectionLabel("SCHEMA"))
         self.search = QLineEdit()
         self.search.setPlaceholderText(t("sidebar.filter"))
-        self.search.setFixedHeight(30)
-        self.search.addAction(
-            svg_icon("search", color=Theme.MUTED, size=15), QLineEdit.ActionPosition.LeadingPosition
+        self.search.setFixedHeight(32)
+        # A precisely-placed magnifier overlaid at the left (Qt's addAction leaves an
+        # awkward double gap between icon and text); the text is inset to clear it.
+        self.search.setStyleSheet(
+            f"QLineEdit {{ background:{Theme.PANEL}; border:1px solid {Theme.BORDER};"
+            f" border-radius:8px; padding:0 10px 0 31px; }}"
+            f"QLineEdit:focus {{ border:1px solid {Theme.FOCUS}; }}"
         )
+        search_icon = QLabel(self.search)
+        search_icon.setPixmap(svg_pixmap("search", color=Theme.MUTED, size=15))
+        search_icon.setFixedSize(15, 15)
+        search_icon.move(10, (32 - 15) // 2)
+        search_icon.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
+        search_icon.setStyleSheet("background: transparent; border: none;")
         self.search.textChanged.connect(self._filter_tree)
         self.search.returnPressed.connect(self._semantic_search)
         schema_layout.addWidget(self.search)
