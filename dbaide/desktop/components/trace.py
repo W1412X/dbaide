@@ -7,7 +7,6 @@ from PyQt6.QtCore import Qt, QSize, QTimer
 from PyQt6.QtGui import QColor, QFont
 from PyQt6.QtWidgets import (
     QApplication,
-    QHBoxLayout,
     QHeaderView,
     QLabel,
     QSplitter,
@@ -80,40 +79,33 @@ class TracePanel(QWidget):
         self._tree.setExpandsOnDoubleClick(False)
         self._tree.itemClicked.connect(self._on_click)
 
-        # Detail pane: a header with a "Copy raw" action over a formatted (HTML) view.
-        detail_box = QWidget()
-        detail_layout = QVBoxLayout(detail_box)
-        detail_layout.setContentsMargins(0, 6, 0, 0)
-        detail_layout.setSpacing(4)
-        header = QHBoxLayout()
-        header.setContentsMargins(2, 0, 2, 0)
-        # The detail body renders its own prominent title; the header carries only
-        # the Copy-raw action, right-aligned.
-        header.addStretch(1)
-        self._copy_raw_btn = QToolButton()
+        # Detail pane: a formatted (HTML) view whose top-right corner carries a small
+        # "Copy raw" action overlaid on the text (no dedicated header band — that read
+        # as an empty strip with a lone floating button).
+        self._detail = QTextBrowser()
+        self._detail.setFont(QFont("Inter", 11))
+        configure_readonly_text_view(self._detail)
+        self._detail.setPlaceholderText("Click a step to inspect it.")
+        self._detail.setMinimumHeight(96)
+        self._detail.viewport().installEventFilter(self)
+
+        self._copy_raw_btn = QToolButton(self._detail)
         self._copy_raw_btn.setIcon(svg_icon("copy", color=Theme.MUTED, size=15))
         self._copy_raw_btn.setIconSize(QSize(15, 15))
         self._copy_raw_btn.setToolTip("Copy raw event JSON")
         self._copy_raw_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self._copy_raw_btn.setFixedSize(26, 24)
         self._copy_raw_btn.setStyleSheet(
-            f"QToolButton {{ border:1px solid {Theme.BORDER_SOFT}; border-radius:6px; }}"
+            f"QToolButton {{ background:{Theme.PANEL}; border:1px solid {Theme.BORDER_SOFT};"
+            f" border-radius:6px; }}"
             f"QToolButton:hover {{ background:{Theme.PANEL_2}; }}"
         )
         self._copy_raw_btn.clicked.connect(self._copy_raw)
         self._copy_raw_btn.setVisible(False)
-        header.addWidget(self._copy_raw_btn)
-        detail_layout.addLayout(header)
-        self._detail = QTextBrowser()
-        self._detail.setFont(QFont("Inter", 11))
-        configure_readonly_text_view(self._detail)
-        self._detail.setPlaceholderText("Click a step to inspect it.")
-        self._detail.setMinimumHeight(96)
-        detail_layout.addWidget(self._detail, 1)
         self._raw_text = ""  # original event JSON for the current node (for Copy raw)
 
         split.addWidget(self._tree)
-        split.addWidget(detail_box)
+        split.addWidget(self._detail)
         split.setStretchFactor(0, 3)
         split.setStretchFactor(1, 1)
         layout.addWidget(split)
@@ -130,6 +122,15 @@ class TracePanel(QWidget):
         self._render_timer.setSingleShot(True)
         self._render_timer.setInterval(60)
         self._render_timer.timeout.connect(self._render)
+
+    def eventFilter(self, obj, event):  # noqa: N802 (Qt signature)
+        if obj is self._detail.viewport() and event.type() == event.Type.Resize:
+            self._place_copy_btn()
+        return super().eventFilter(obj, event)
+
+    def _place_copy_btn(self) -> None:
+        vp = self._detail.viewport()
+        self._copy_raw_btn.move(vp.width() - self._copy_raw_btn.width() - 6, 6)
 
     # ── Public API (preserved for callers) ───────────────────────────────────
 
@@ -316,8 +317,12 @@ class TracePanel(QWidget):
             self._raw_text = json.dumps(raw, ensure_ascii=False, indent=2, default=str) if raw else ""
         except (TypeError, ValueError):
             self._raw_text = str(raw)
-        self._copy_raw_btn.setVisible(bool(self._raw_text) and not data.get("__summary__"))
+        show_copy = bool(self._raw_text) and not data.get("__summary__")
         self._detail.setHtml(_detail_html(data))
+        if show_copy:
+            self._place_copy_btn()
+            self._copy_raw_btn.raise_()
+        self._copy_raw_btn.setVisible(show_copy)
 
     def _copy_raw(self) -> None:
         if self._raw_text:
@@ -339,7 +344,10 @@ def _detail_html(data: dict) -> str:
     raw = data.get("raw") if isinstance(data.get("raw"), dict) else {}
     parts: list[str] = []
     title = str(data.get("title") or data.get("phase") or data.get("stage") or "step")
-    parts.append(f"<div style='color:{Theme.TEXT}; font-size:13px; font-weight:600;'>{_esc(title)}</div>")
+    # Right padding on the top two rows clears the floating Copy-raw button (overlaid
+    # in the detail's top-right corner) so its tail text isn't covered.
+    parts.append(f"<div style='color:{Theme.TEXT}; font-size:13px; font-weight:600;"
+                 f" margin-right:38px;'>{_esc(title)}</div>")
 
     # Keep the chip row lean: skip phase/stage/agent values that just echo the
     # title (or each other), so it carries information rather than noise.
@@ -362,7 +370,7 @@ def _detail_html(data: dict) -> str:
         f"<span style='color:{Theme.TEXT_2};'>{_esc(v)}</span></span>"
         for k, v in chips
     )
-    parts.append(f"<div style='font-size:11px; margin:4px 0 8px;'>{chip_html}</div>")
+    parts.append(f"<div style='font-size:11px; margin:4px 0 8px; margin-right:38px;'>{chip_html}</div>")
 
     if node_type == "sql":
         facts = []
