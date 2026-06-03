@@ -191,7 +191,7 @@ class _MarkdownBlock(QFrame):
     errors) that deserves a subtle inset card; ``accent`` tints that card's edge."""
 
     def __init__(self, markdown: str, *, title: str = "", boxed: bool = False,
-                 accent: str = "", parent=None) -> None:
+                 accent: str = "", title_tooltip: str = "", parent=None) -> None:
         super().__init__(parent)
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
         self.setObjectName("answerBlock")
@@ -213,6 +213,8 @@ class _MarkdownBlock(QFrame):
             t.setStyleSheet(
                 f"color: {accent or Theme.MUTED}; background: transparent; letter-spacing: 0.3px;"
             )
+            if title_tooltip:
+                t.setToolTip(title_tooltip)
             layout.addWidget(t)
         self._body = QTextBrowser()
         self._body.setOpenExternalLinks(True)
@@ -540,9 +542,13 @@ class ConversationView(QScrollArea):
             self._current_record["answer"] = answer
         turn.status.set_done(ok=ok, step_count=len(events), events=events)
 
-        subtitle = f"DBAide · {workflow_id}" if workflow_id else "DBAide"
+        # Clean author label — just "DBAide" (the internal workflow id is noise in the
+        # message header, Codex-style; keep it reachable as a tooltip and in the trace).
         if answer.strip():
-            turn.append_content(_MarkdownBlock(answer, title=subtitle))
+            turn.append_content(_MarkdownBlock(
+                answer, title="DBAide",
+                title_tooltip=f"workflow {workflow_id}" if workflow_id else "",
+            ))
         if sql.strip() and "```sql" not in answer:
             turn.append_content(_MarkdownBlock(f"```sql\n{sql}\n```", title="SQL"))
         if actions_widget is not None:
