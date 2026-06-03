@@ -214,9 +214,9 @@ A: 可以。独立包不依赖系统 Python，配置目录相同。
 
 | 平台 | 产物 |
 | --- | --- |
-| macOS (Apple Silicon) | `DBAide-macOS-arm64.dmg` |
+| macOS (Apple Silicon) | `DBAide-macOS-arm64.dmg`(拖入 Applications 安装) |
 | Linux (x86_64) | `DBAide-Linux-x86_64.tar.gz` |
-| Windows (x86_64) | `DBAide-Windows-x86_64.zip` |
+| Windows (x86_64) | `DBAide-Windows-x86_64.msi`(安装向导) |
 
 **手动构建(不发布)** — 在 Actions 页面点 *Run workflow*(`workflow_dispatch`),
 产物作为 workflow artifacts 提供下载。

@@ -3,17 +3,12 @@ name: Build & Release
 # Builds native installers for macOS (.dmg, drag-to-Applications), Windows (.msi
 # wizard) and Linux (.tar.gz). Pushing a tag like `v1.2.3` also publishes a GitHub
 # Release with the installers attached. `workflow_dispatch` builds without releasing.
-#
-# NOTE: `feat/installers` is a temporary branch trigger for iterating on the
-# installer steps — pushes there build (no release). Remove it before merging.
 
 on:
   workflow_dispatch:
   push:
     tags:
       - "v*"
-    branches:
-      - feat/installers
 
 permissions:
   contents: write

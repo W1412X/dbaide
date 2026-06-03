@@ -170,8 +170,8 @@ Build native bundles (PyInstaller) for macOS, Windows, and Linux:
 ```
 
 CI does this for all three platforms automatically: pushing a `v*` tag builds the
-macOS (`.dmg`), Linux (`.tar.gz`) and Windows (`.zip`) bundles and publishes them to a
-GitHub Release. Details: **[docs/PACKAGING.md](docs/PACKAGING.md)**.
+macOS (`.dmg`, drag-to-Applications), Linux (`.tar.gz`) and Windows (`.msi` installer)
+and publishes them to a GitHub Release. Details: **[docs/PACKAGING.md](docs/PACKAGING.md)**.
 
 ## Contributing
 
