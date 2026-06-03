@@ -703,7 +703,23 @@ class MainWindow(QMainWindow):
         dialog.model_test.connect(lambda payload: self._settings_test_model(dialog, payload))
         dialog.resource_saved.connect(self._settings_save_resources)
         dialog.language_changed.connect(self._change_language)
+        dialog.theme_changed.connect(self._change_theme)
         dialog.exec()
+
+    def _change_theme(self, theme: str) -> None:
+        from dbaide.desktop.theme import current_theme_name
+        if theme == current_theme_name():
+            return
+        try:
+            self.service.cfg.set_ui_theme(theme)
+        except Exception as exc:
+            self.fail(exc)
+            return
+        from dbaide.i18n import _STRINGS, DEFAULT_LANGUAGE
+        code = self.service.cfg.ui_language()
+        entry = _STRINGS.get("settings.restart_required", {})
+        msg = entry.get(code) or entry.get(DEFAULT_LANGUAGE) or "Restart to apply."
+        QMessageBox.information(self, "DBAide", msg)
 
     def _change_language(self, lang: str) -> None:
         # Language is applied at startup from config (UI + the model's answer

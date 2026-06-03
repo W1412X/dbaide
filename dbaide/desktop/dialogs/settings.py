@@ -127,6 +127,7 @@ class SettingsDialog(QDialog):
     model_test = pyqtSignal(dict)
     resource_saved = pyqtSignal(dict)
     language_changed = pyqtSignal(str)
+    theme_changed = pyqtSignal(str)
 
     # Numeric resource knobs shown on the Resources page: (key, min, max).
     # The display label comes from i18n ("res.<key>").
@@ -160,6 +161,8 @@ class SettingsDialog(QDialog):
         super().__init__(parent)
         from dbaide.i18n import t as _t
         self._language = language
+        from dbaide.desktop.theme import current_theme_name
+        self._theme = current_theme_name()
         self.setWindowTitle(_t("settings.title"))
         self.setMinimumSize(760, 540)
         self.resize(800, 580)
@@ -401,6 +404,17 @@ class SettingsDialog(QDialog):
             lambda _i: self.language_changed.emit(self.language_select.currentData())
         )
         form.addRow(t("settings.language"), self.language_select)
+
+        self.theme_select = QComboBox()
+        self.theme_select.addItem(t("settings.theme.dark"), "dark")
+        self.theme_select.addItem(t("settings.theme.light"), "light")
+        idx_t = max(0, self.theme_select.findData(self._theme))
+        self.theme_select.setCurrentIndex(idx_t)
+        self.theme_select.currentIndexChanged.connect(
+            lambda _i: self.theme_changed.emit(self.theme_select.currentData())
+        )
+        form.addRow(t("settings.theme"), self.theme_select)
+
         card_layout.addLayout(form)
         layout.addWidget(card)
         layout.addStretch(1)
