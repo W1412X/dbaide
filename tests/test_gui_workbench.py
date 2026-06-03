@@ -82,3 +82,41 @@ def test_run_sql_signal(qapp):
     ed.set_sql("select 9")
     ed.run_requested.emit("select 9", "execute")
     assert seen == ["select 9"]
+
+
+def test_structure_panel_relations_and_navigation(qapp):
+    from dbaide.desktop.views.structure_panel import StructurePanel
+    sp = StructurePanel()
+    seen = []
+    sp.navigate_table.connect(seen.append)
+    sp.show_table(
+        "orders",
+        [{"name": "user_id", "data_type": "INTEGER"}],
+        {
+            "foreign_keys": [{"column": "user_id", "ref_table": "users", "ref_column": "id"}],
+            "referenced_by": [{"table": "shipments", "column": "order_id", "ref_column": "id"}],
+        },
+    )
+    html = sp._relations.text()
+    assert 'href="users"' in html and 'href="shipments"' in html
+    sp._on_link("users")
+    assert seen == ["users"]
+
+
+def test_structure_panel_no_relations_is_blank(qapp):
+    from dbaide.desktop.views.structure_panel import StructurePanel
+    sp = StructurePanel()
+    sp.show_table("t", [{"name": "id", "data_type": "INTEGER", "primary_key": True}], {})
+    assert sp._relations.text() == ""
+
+
+def test_open_table_threads_relations(qapp):
+    wb = _wb(qapp)
+    rel = {"foreign_keys": [{"column": "user_id", "ref_table": "users", "ref_column": "id"}],
+           "referenced_by": []}
+    doc = wb.open_table("c", "db", "orders", [{"name": "user_id", "data_type": "INTEGER"}], rel)
+    assert 'href="users"' in doc.structure._relations.text()
+    got = []
+    wb.navigate_table.connect(got.append)
+    doc.structure._on_link("users")
+    assert got == ["users"]

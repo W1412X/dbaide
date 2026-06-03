@@ -18,6 +18,7 @@ from dbaide.desktop.views.structure_panel import StructurePanel
 
 class TableDocument(QWidget):
     query_requested = pyqtSignal(dict)
+    navigate_table = pyqtSignal(str)  # bubbled from the Structure panel's FK links
 
     def __init__(self, connection: str, database: str, table: str, parent=None) -> None:
         super().__init__(parent)
@@ -34,6 +35,7 @@ class TableDocument(QWidget):
         self.data = DataBrowser()
         self.data.query_requested.connect(self.query_requested.emit)
         self.structure = StructurePanel()
+        self.structure.navigate_table.connect(self.navigate_table.emit)
         self._data_index = self.tabs.addTab(self.data, t("tab.data"))
         self._structure_index = self.tabs.addTab(self.structure, t("tab.structure"))
         layout.addWidget(self.tabs)
@@ -46,9 +48,10 @@ class TableDocument(QWidget):
     def doc_key(self) -> str:
         return self.key(self.connection, self.database, self.table)
 
-    def open(self, columns: list[dict[str, Any]]) -> None:
+    def open(self, columns: list[dict[str, Any]],
+             relations: dict[str, list[dict[str, Any]]] | None = None) -> None:
         """Render structure from columns and kick off the first data page."""
-        self.structure.show_table(self.table, columns or [])
+        self.structure.show_table(self.table, columns or [], relations or {})
         self.data.open_table(self.connection, self.database, self.table)
 
     def focus_data(self) -> None:

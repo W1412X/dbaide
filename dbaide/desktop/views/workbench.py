@@ -27,6 +27,7 @@ class WorkbenchView(QWidget):
     run_sql = pyqtSignal(object, str)        # (SqlTab, sql)
     browse_requested = pyqtSignal(object, dict)  # (TableDocument, payload)
     doc_closed = pyqtSignal(object)          # the closed widget
+    navigate_table = pyqtSignal(str)         # FK link → open a related table
 
     def __init__(self, history_panel: QueryHistoryPanel, parent=None) -> None:
         super().__init__(parent)
@@ -131,7 +132,8 @@ class WorkbenchView(QWidget):
     # ── table documents ─────────────────────────────────────────────────────────
 
     def open_table(self, connection: str, database: str, table: str,
-                   columns: list[dict[str, Any]]) -> TableDocument:
+                   columns: list[dict[str, Any]],
+                   relations: dict[str, list[dict[str, Any]]] | None = None) -> TableDocument:
         target_key = TableDocument.key(connection, database, table)
         for i in range(self.tabs.count()):
             w = self.tabs.widget(i)
@@ -141,9 +143,10 @@ class WorkbenchView(QWidget):
                 return w
         doc = TableDocument(connection, database, table)
         doc.query_requested.connect(lambda payload, d=doc: self.browse_requested.emit(d, payload))
+        doc.navigate_table.connect(self.navigate_table.emit)
         index = self.tabs.addTab(doc, table)
         self.tabs.setCurrentIndex(index)
-        doc.open(columns)
+        doc.open(columns, relations)
         return doc
 
     # ── focus helpers (used by MainWindow.switch_tab) ────────────────────────────

@@ -198,6 +198,7 @@ class MainWindow(QMainWindow):
         self.workbench.run_sql.connect(self._run_sql_from)
         self.workbench.browse_requested.connect(self._browse_from)
         self.workbench.doc_closed.connect(self._on_doc_closed)
+        self.workbench.navigate_table.connect(self._open_table_by_name)
         self.stack.addWidget(self.ask_tab)    # mode 0 — Assistant
         self.stack.addWidget(self.workbench)  # mode 1 — Workbench
         center_layout.addWidget(self.stack, 1)
@@ -869,14 +870,32 @@ class MainWindow(QMainWindow):
                 conn = self.current_connection()
                 _, database, table = parts[0], parts[1], parts[2]
                 # Opens (or focuses) a table document with Data + Structure sub-tabs.
-                # Structure is built from the columns already in the node — instant,
-                # no query; Data is the default view and loads its first page.
+                # Structure is built from the columns and FK data already in the node
+                # — instant, no query; Data is the default view and loads its page 1.
                 self.tabbar.setCurrentIndex(1)
-                self.workbench.open_table(conn, database, table, data.get("children") or [])
+                self.workbench.open_table(
+                    conn, database, table, data.get("children") or [],
+                    relations={
+                        "foreign_keys": data.get("foreign_keys") or [],
+                        "referenced_by": data.get("referenced_by") or [],
+                    },
+                )
                 return
         path = str(data.get("path") or "")
         if path:
             self._show_asset("asset_markdown", path)
+
+    def _open_table_by_name(self, table: str) -> None:
+        """Open a table by name (used by Structure-panel FK links). Searches the
+        loaded schema for the matching node so we carry its columns + relations."""
+        if not table:
+            return
+        for db in self.schema_rows:
+            for node in db.get("children") or []:
+                if node.get("kind") == "table" and node.get("name") == table:
+                    self.open_schema_asset(node)
+                    return
+        self.toast(_i18n_t("toast.table_not_found", table=table))
 
     def load_asset(self, path: str) -> None:
         if path:

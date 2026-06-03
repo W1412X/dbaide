@@ -317,13 +317,34 @@ class DesktopService:
                 "path": f"{name}.{db_name}",
                 "children": [],
             }
-            for table_doc in self.store.table_docs(name, db_name):
+            table_docs = list(self.store.table_docs(name, db_name))
+            # Reverse FK index: which tables reference each table (incoming FKs).
+            referenced_by: dict[str, list[dict[str, Any]]] = {}
+            for td in table_docs:
+                src = str(td.get("name") or td.get("table") or "")
+                for fk in (td.get("foreign_keys") or []):
+                    ref = str(fk.get("ref_table") or "")
+                    if ref:
+                        referenced_by.setdefault(ref, []).append({
+                            "table": src,
+                            "column": fk.get("column") or "",
+                            "ref_column": fk.get("ref_column") or "",
+                        })
+            for table_doc in table_docs:
                 table = str(table_doc.get("name") or table_doc.get("table") or "")
+                outgoing = [
+                    {"column": fk.get("column") or "", "ref_table": fk.get("ref_table") or "",
+                     "ref_column": fk.get("ref_column") or ""}
+                    for fk in (table_doc.get("foreign_keys") or [])
+                    if fk.get("ref_table")
+                ]
                 table_row = {
                     "kind": "table",
                     "name": table,
                     "path": f"{name}.{db_name}.{table}",
                     "column_count": table_doc.get("column_count") or len(table_doc.get("columns") or []),
+                    "foreign_keys": outgoing,
+                    "referenced_by": referenced_by.get(table, []),
                     "children": [],
                 }
                 for col_doc in self.store.column_docs(name, db_name, table):

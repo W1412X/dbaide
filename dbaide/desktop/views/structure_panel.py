@@ -1,16 +1,24 @@
-"""Table structure view — columns grid + generated DDL (DBeaver-style).
+"""Table structure view — columns grid + relations + generated DDL (DBeaver-style).
 
-Renders from the schema asset already in memory (the columns carried by the tree
-node), so opening it is instant — no extra database round-trip. Columns show
-name/type/key; a generated CREATE TABLE skeleton is shown below.
+Renders from the schema asset already in memory (the columns and foreign-key data
+carried by the tree node), so opening it is instant — no extra database
+round-trip. Columns show name/type/key; the Relations section lists outgoing and
+incoming foreign keys with the related table as a clickable link (``navigate_table``);
+a generated CREATE TABLE skeleton is shown below.
 """
 from __future__ import annotations
 
 from typing import Any
 
-from PyQt6.QtCore import Qt
+from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtGui import QFont
-from PyQt6.QtWidgets import QLabel, QPlainTextEdit, QStackedWidget, QVBoxLayout, QWidget
+from PyQt6.QtWidgets import (
+    QLabel,
+    QPlainTextEdit,
+    QStackedWidget,
+    QVBoxLayout,
+    QWidget,
+)
 
 from dbaide.desktop.components.sql_highlighter import SqlHighlighter
 from dbaide.desktop.components.table import ResultTableWidget
@@ -30,9 +38,12 @@ def _generate_ddl(table: str, columns: list[dict[str, Any]]) -> str:
 
 
 class StructurePanel(QWidget):
+    navigate_table = pyqtSignal(str)  # a related table name was clicked
+
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
         from dbaide.i18n import t
+        self._t = t
         outer = QVBoxLayout(self)
         outer.setContentsMargins(0, 0, 0, 0)
         outer.setSpacing(8)
@@ -59,6 +70,19 @@ class StructurePanel(QWidget):
         self._cols = ResultTableWidget()
         self._cols.meta.setVisible(False)
         pl.addWidget(self._cols, 1)
+
+        # Relations — outgoing/incoming foreign keys, with clickable related tables.
+        self._relations = QLabel("")
+        self._relations.setTextFormat(Qt.TextFormat.RichText)
+        self._relations.setWordWrap(True)
+        self._relations.setOpenExternalLinks(False)
+        self._relations.setStyleSheet(
+            f"QLabel {{ color: {Theme.TEXT_2}; font-size: 12px; }}"
+            f"a {{ color: {Theme.BLUE}; text-decoration: none; }}"
+        )
+        self._relations.linkActivated.connect(self._on_link)
+        pl.addWidget(self._relations)
+
         ddl_label = QLabel(t("structure.ddl"))
         ddl_label.setStyleSheet(f"color: {Theme.MUTED}; font-size: 11px; font-weight: 600;")
         pl.addWidget(ddl_label)
@@ -75,7 +99,12 @@ class StructurePanel(QWidget):
         self.stack.addWidget(page)
         outer.addWidget(self.stack)
 
-    def show_table(self, table: str, columns: list[dict[str, Any]]) -> None:
+    def show_table(
+        self,
+        table: str,
+        columns: list[dict[str, Any]],
+        relations: dict[str, list[dict[str, Any]]] | None = None,
+    ) -> None:
         self._title.setText(table)
         rows = [{
             "Column": c.get("name", ""),
@@ -83,5 +112,40 @@ class StructurePanel(QWidget):
             "Key": "PK" if c.get("primary_key") else ("indexed" if c.get("indexed") else " "),
         } for c in (columns or [])]
         self._cols.load(columns=["Column", "Type", "Key"], rows=rows, row_count=len(rows))
+        self._relations.setText(self._relations_html(relations or {}))
         self._ddl.setPlainText(_generate_ddl(table, columns or []))
         self.stack.setCurrentIndex(1)
+
+    # ── relations rendering ──────────────────────────────────────────────────--
+
+    def _relations_html(self, relations: dict[str, list[dict[str, Any]]]) -> str:
+        t = self._t
+        outgoing = relations.get("foreign_keys") or []
+        incoming = relations.get("referenced_by") or []
+        if not outgoing and not incoming:
+            return ""
+        parts: list[str] = []
+        if outgoing:
+            items = ", ".join(
+                f"{fk.get('column', '')} → {self._link(fk.get('ref_table', ''))}.{fk.get('ref_column', '')}"
+                for fk in outgoing
+            )
+            parts.append(f"<b>{t('structure.references')}</b> {items}")
+        if incoming:
+            items = ", ".join(
+                f"{self._link(fk.get('table', ''))}.{fk.get('column', '')}"
+                for fk in incoming
+            )
+            parts.append(f"<b>{t('structure.referenced_by')}</b> {items}")
+        return "<br>".join(parts)
+
+    @staticmethod
+    def _link(table: str) -> str:
+        table = str(table or "")
+        if not table:
+            return ""
+        return f'<a href="{table}">{table}</a>'
+
+    def _on_link(self, href: str) -> None:
+        if href:
+            self.navigate_table.emit(href)

@@ -164,3 +164,33 @@ def test_delete_history_removes_workflow(tmp_path):
     res = service.dispatch("delete_history", {"connection_name": "local", "workflow_id": "wf1"})
     assert res["deleted"] is True
     assert service.dispatch("list_history", {"connection_name": "local"}) == []
+
+
+def test_schema_tree_includes_foreign_keys(tmp_path):
+    db = tmp_path / "app.db"
+    conn = sqlite3.connect(db)
+    conn.executescript(
+        """
+        CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT);
+        CREATE TABLE orders (
+            id INTEGER PRIMARY KEY,
+            user_id INTEGER REFERENCES users(id),
+            amount REAL
+        );
+        """
+    )
+    conn.commit(); conn.close()
+    cfg = ConfigManager(tmp_path / "config.toml")
+    store = AssetStore(tmp_path / "assets")
+    service = DesktopService(cfg, store)
+    cfg.upsert_connection(ConnectionConfig(name="local", type="sqlite", path=str(db)), make_default=True)
+    service.build_assets({"name": "local", "profile_mode": "none"})
+
+    rows = service.schema_tree({"name": "local"})
+    tables = {n["name"]: n for n in rows[0]["children"]}
+    assert tables["orders"]["foreign_keys"] == [
+        {"column": "user_id", "ref_table": "users", "ref_column": "id"}
+    ]
+    assert tables["users"]["referenced_by"] == [
+        {"table": "orders", "column": "user_id", "ref_column": "id"}
+    ]
