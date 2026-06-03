@@ -63,22 +63,50 @@ class _LightTheme:
 
 
 # ── Theme accessor / switcher ────────────────────────────────────────────────
+#
+# CRITICAL: ``Theme`` must be a single, stable object whose *attributes* are
+# rewritten in place by ``set_theme()`` — NOT a reference swapped between two
+# classes. Almost every module does ``from dbaide.desktop.theme import Theme``,
+# which captures the object at import time; reassigning the module global would
+# leave all those captured references pointing at the old palette (so inline
+# ``Theme.PANEL`` stylesheets would stay dark in light mode). Mutating one shared
+# object's attributes means every reference sees the switch.
 
 _THEMES: dict[str, type] = {"dark": _DarkTheme, "light": _LightTheme}
-Theme = _DarkTheme  # module-level reference; reassigned by set_theme()
+_COLOR_KEYS = [k for k in vars(_DarkTheme) if k.isupper()]
+
+
+class _Palette:
+    """Mutable holder for the active palette's colors (a stable singleton)."""
+    pass
+
+
+Theme = _Palette()
+_active_name = "dark"
+
+# Seed the dark palette immediately so ``Theme.*`` is usable at import time
+# (before set_theme / _regenerate_icons exist). The launcher calls set_theme()
+# with the saved preference once the module is fully loaded.
+for _k in _COLOR_KEYS:
+    setattr(Theme, _k, getattr(_DarkTheme, _k))
 
 
 def set_theme(name: str) -> None:
-    """Switch the active theme palette. Call ``app_style()`` afterwards to get
-    the updated QSS and re-apply it to your QApplication / top-level widgets."""
-    global Theme
-    Theme = _THEMES.get(name, _DarkTheme)
+    """Switch the active theme by copying the chosen palette's colors onto the
+    shared ``Theme`` object in place. Call ``app_style()`` afterwards to get the
+    updated QSS and re-apply it. (Inline per-widget styles only pick up the change
+    for widgets created *after* this call, so a live switch needs a restart.)"""
+    global _active_name
+    src = _THEMES.get(name, _DarkTheme)
+    _active_name = "light" if src is _LightTheme else "dark"
+    for key in _COLOR_KEYS:
+        setattr(Theme, key, getattr(src, key))
     # Regenerate icon files so SVG stroke colors match the new palette.
     _regenerate_icons()
 
 
 def current_theme_name() -> str:
-    return "light" if Theme is _LightTheme else "dark"
+    return _active_name
 
 
 # ── Icon materialisation ────────────────────────────────────────────────────
