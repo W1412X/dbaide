@@ -453,6 +453,15 @@ class MainWindow(QMainWindow):
         if not conn:
             self.toast(_i18n_t("toast.select_connection"))
             return
+        # CRITICAL: do not consume the pause state until we know the resume can
+        # actually start. If another action (a schema preview, a search, a refresh)
+        # is still in flight, run_action would reject this — and if we'd already
+        # hidden the bar and cleared _pending_resume, the reply would be lost and the
+        # user stuck with no way to answer. Bail early, keeping the bar and the
+        # pending state intact so they can submit again a moment later.
+        if self.running or self._current_worker is not None:
+            self.toast(_i18n_t("toast.task_running"))
+            return
         database = self.current_database()
         policy = self.composer.policy()
         original_question = str(self._pending_resume.get("question") or self._last_question)
