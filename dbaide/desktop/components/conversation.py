@@ -377,7 +377,7 @@ class TurnBlock(QFrame):
             meta_label = QLabel(meta)
             meta_label.setAlignment(Qt.AlignmentFlag.AlignRight)
             meta_label.setFont(QFont("Inter", 10))
-            meta_label.setStyleSheet(f"color: {Theme.MUTED}; background: transparent;")
+            meta_label.setStyleSheet(f"color: {Theme.MUTED_2}; background: transparent;")
             self._header_layout.addWidget(meta_label)
         self._header_layout.addWidget(_Bubble(text, align_right=True))
 
@@ -414,6 +414,7 @@ class ConversationView(QScrollArea):
         self.setWidget(self._root)
         self._current_turn: TurnBlock | None = None
         self._hint_label: QLabel | None = None
+        self._last_meta = ""  # last shown user-meta caption (to skip repeats)
         # Retained per-turn records (question, trace events, answer) for "copy the
         # whole conversation's trace".
         self._turns: list[dict[str, Any]] = []
@@ -448,7 +449,13 @@ class ConversationView(QScrollArea):
     def begin_turn(self, user_text: str, *, meta: str = "", placeholder: bool = True) -> None:
         turn = TurnBlock()
         if user_text.strip():
-            turn.set_user(user_text, meta=meta)
+            # Only surface the connection · db · policy caption when it changes from
+            # the previous turn — repeating unchanged context on every message is
+            # noise (Codex shows context once, not per turn).
+            show_meta = meta if (meta and meta != self._last_meta) else ""
+            if meta:
+                self._last_meta = meta
+            turn.set_user(user_text, meta=show_meta)
         self._insert_turn(turn)
         self._current_turn = turn
         self._current_record = {"question": user_text, "events": [], "answer": ""}
@@ -647,4 +654,5 @@ class ConversationView(QScrollArea):
         self._current_turn = None
         self._turns = []
         self._current_record = None
+        self._last_meta = ""
         self._sync_viewport_width()
