@@ -94,10 +94,16 @@ class SqlTab(QWidget):
         return super().eventFilter(obj, event)
 
     def _current_sql(self) -> str:
-        """The statement under the cursor (so multi-statement editors 'just run')."""
+        """What Run executes: the highlighted selection if any, else the statement
+        under the cursor (so multi-statement editors 'just run' the right one)."""
+        cursor = self.editor.textCursor()
+        if cursor.hasSelection():
+            selected = cursor.selectedText().replace(" ", "\n").strip()
+            if selected:
+                return selected
         from dbaide.rendering.sql_format import statement_at
         text = self.editor.toPlainText()
-        return statement_at(text, self.editor.textCursor().position())
+        return statement_at(text, cursor.position())
 
     def _run(self) -> None:
         if self.run_btn.isEnabled():

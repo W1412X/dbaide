@@ -78,3 +78,26 @@ def test_line_number_width_grows_with_lines(qapp):
     narrow = e.line_number_area_width()
     e.setPlainText("\n".join(str(i) for i in range(200)))
     assert e.line_number_area_width() > narrow
+
+
+def test_run_uses_selection_when_present(qapp):
+    from dbaide.desktop.views.sql_tab import SqlTab
+    from PyQt6.QtGui import QTextCursor
+    t = SqlTab()
+    t.set_sql("SELECT 1;\nSELECT 2 FROM t;")
+    doc = t.editor.document()
+    c = t.editor.textCursor()
+    c.setPosition(doc.findBlockByNumber(1).position())
+    c.movePosition(QTextCursor.MoveOperation.EndOfBlock, QTextCursor.MoveMode.KeepAnchor)
+    t.editor.setTextCursor(c)
+    assert t._current_sql() == "SELECT 2 FROM t;"
+
+
+def test_run_uses_statement_at_cursor_without_selection(qapp):
+    from dbaide.desktop.views.sql_tab import SqlTab
+    t = SqlTab()
+    t.set_sql("SELECT 1;\nSELECT 2 FROM t;")
+    c = t.editor.textCursor()
+    c.setPosition(2)  # inside first statement
+    t.editor.setTextCursor(c)
+    assert t._current_sql() == "SELECT 1"

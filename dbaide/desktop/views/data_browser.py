@@ -168,6 +168,15 @@ class DataBrowser(QWidget):
             self._t("data.sorted_by", col=self._order_by, dir=self._order_dir.upper())
             if self._order_by else ""
         )
+        # Visual sort arrow on the active column header.
+        header = self.grid.table.horizontalHeader()
+        if self._order_by and self._order_by in self._columns:
+            header.setSortIndicatorShown(True)
+            order = (Qt.SortOrder.AscendingOrder if self._order_dir == "asc"
+                     else Qt.SortOrder.DescendingOrder)
+            header.setSortIndicator(self._columns.index(self._order_by), order)
+        else:
+            header.setSortIndicatorShown(False)
         self.set_running(False)
         self._prev.setEnabled(self._offset > 0)
         self._next.setEnabled(self._has_more)
