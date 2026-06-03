@@ -312,6 +312,25 @@ class SettingsDialog(QDialog):
         prod = self._resource_presets.get("production", {})
         self._resource_spins: dict[str, QSpinBox] = {}
         self._resource_baselines: dict[str, int] = {}
+
+        # Global app concurrency cap — distinct from the per-run database knobs below,
+        # so it gets its own row + note at the top of the form.
+        from dbaide.config import DEFAULT_MAX_CONCURRENT_RUNS
+        conc_spin = QSpinBox()
+        conc_spin.setRange(1, 16)
+        conc_spin.setFixedHeight(30)
+        conc_spin.setMinimumWidth(120)
+        conc_spin.setMaximumWidth(150)
+        conc_cur = self._resource_values.get("max_concurrent_runs")
+        conc_spin.setValue(int(conc_cur) if conc_cur not in (None, "") else DEFAULT_MAX_CONCURRENT_RUNS)
+        self._resource_spins["max_concurrent_runs"] = conc_spin
+        self._resource_baselines["max_concurrent_runs"] = DEFAULT_MAX_CONCURRENT_RUNS
+        form.addRow(form_label(_t("res.max_concurrent_runs")), conc_spin)
+        note = QLabel(_t("res.per_run_note"))
+        note.setWordWrap(True)
+        note.setStyleSheet(f"color: {Theme.MUTED}; font-size: 11px; padding: 2px 0 8px 0;")
+        form.addRow("", note)
+
         for key, lo, hi in self._RESOURCE_FIELDS:
             spin = QSpinBox()
             spin.setRange(lo, hi)
