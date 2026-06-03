@@ -48,21 +48,22 @@ def _relative_time(ts: float) -> str:
 
 
 _TITLE_FONT = QFont("Inter", 12, QFont.Weight.DemiBold)
-_SUB_FONT = QFont("Inter", 10)
-_TITLE_MAX_LINES = 2
+_SUB_FONT = QFont("Inter", 9)
+# Width the spinner + its gap reserve at the right of the title (so the elided
+# title clears it whether or not the spinner is currently shown).
+_SPINNER_RESERVE = 20
 
 
 class _SessionRow(QWidget):
-    """Title (wraps to up to two lines so similar questions stay distinguishable)
-    over a muted 'N turns · time' subtitle."""
+    """A single-line, ellipsised title over a muted 'N turns · time' subtitle."""
 
     def __init__(self, title: str, subtitle: str, parent=None) -> None:
         super().__init__(parent)
         self.setStyleSheet("background: transparent;")
-        self.setToolTip(title)  # full title on hover, even when it wraps/clips
+        self.setToolTip(title)  # full title on hover, since it's elided
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(6, 8, 6, 8)
-        layout.setSpacing(3)
+        layout.setContentsMargins(6, 7, 6, 7)
+        layout.setSpacing(2)
         self._full_title = title
         title_row = QHBoxLayout()
         title_row.setContentsMargins(0, 0, 0, 0)
@@ -71,10 +72,8 @@ class _SessionRow(QWidget):
         self._title.setFont(_TITLE_FONT)
         self._title.setStyleSheet(f"color: {Theme.TEXT}; background: transparent;")
         self._title.setTextFormat(Qt.TextFormat.PlainText)
-        self._title.setWordWrap(True)
+        self._title.setWordWrap(False)  # single line — long titles elide (below)
         self._title.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
-        # Cap the visible title at two lines (a 3rd would just clip — rare for a title).
-        self._title.setMaximumHeight(_TITLE_MAX_LINES * QFontMetrics(_TITLE_FONT).lineSpacing())
         title_row.addWidget(self._title, 1)
         # A small spinner shown while this session has an in-flight (or queued) run.
         self._spinner = QLabel()
@@ -82,7 +81,7 @@ class _SessionRow(QWidget):
         self._spinner.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self._spinner.setStyleSheet("background: transparent;")
         self._spinner.hide()
-        title_row.addWidget(self._spinner, 0, Qt.AlignmentFlag.AlignTop)
+        title_row.addWidget(self._spinner, 0, Qt.AlignmentFlag.AlignVCenter)
         layout.addLayout(title_row)
         sub = QLabel(subtitle)
         sub.setFont(_SUB_FONT)
@@ -101,21 +100,19 @@ class _SessionRow(QWidget):
         return self._full_title
 
     def resizeEvent(self, event) -> None:  # noqa: N802
-        # Constrain the title to the row width so word-wrap actually wraps (an
-        # unconstrained wrapping label clips to one line instead).
         super().resizeEvent(event)
-        self._title.setFixedWidth(max(40, self.width() - 8))
+        avail = max(40, self.width() - 12 - _SPINNER_RESERVE)
+        elided = QFontMetrics(_TITLE_FONT).elidedText(
+            self._full_title, Qt.TextElideMode.ElideRight, avail
+        )
+        self._title.setText(elided)
 
     @staticmethod
     def height_for(title: str, *, content_width: int) -> int:
-        """Row height that fits the title (1 or 2 lines, the true wrapped height)
-        plus the subtitle."""
-        tfm = QFontMetrics(_TITLE_FONT)
-        w = max(60, content_width)
-        wrapped = tfm.boundingRect(0, 0, w, 10000, int(Qt.TextFlag.TextWordWrap), title).height()
-        title_h = min(wrapped, _TITLE_MAX_LINES * tfm.lineSpacing())
+        """Row height for a single-line title plus the (smaller) subtitle."""
+        title_h = QFontMetrics(_TITLE_FONT).lineSpacing()
         sub_h = QFontMetrics(_SUB_FONT).lineSpacing()
-        return title_h + sub_h + 22  # margins (8+8) + spacing (3) + a hair
+        return title_h + sub_h + 18  # margins (7+7) + spacing (2) + a hair
 
 
 class SessionList(QWidget):
