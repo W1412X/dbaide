@@ -9,7 +9,6 @@ from dbaide.desktop.components.base import compact_button
 from dbaide.desktop.components.conversation import ConversationView
 from dbaide.desktop.components.composer_options import POLICY_LABELS
 from dbaide.desktop.components.empty_state import EmptyState
-from dbaide.desktop.components.menu import MenuButton
 
 
 class AskTab(QWidget):
@@ -123,21 +122,41 @@ class AskTab(QWidget):
     def _build_actions(self, sql: str, cli_command: str | None) -> QWidget | None:
         if not sql:
             return None
-        from collections.abc import Callable
+        from PyQt6.QtCore import QSize, QTimer
+        from dbaide.desktop.components.base import ghost_action_button
+        from dbaide.desktop.components.icons import svg_icon
+        from dbaide.desktop.theme import Theme
 
-        menu_actions: list[tuple[str, Callable[[], None]]] = [
-            ("Copy SQL", lambda: QApplication.clipboard().setText(sql)),
-            ("Open in SQL Tab", lambda: self.open_sql.emit(sql)),
-        ]
-        if cli_command:
-            menu_actions.append(("Copy CLI", lambda: QApplication.clipboard().setText(str(cli_command))))
-        actions = MenuButton("Actions ▾", max_width=120)
-        for label, callback in menu_actions:
-            actions.add_action(label, callback)
+        def _copy_btn(label: str, payload: str) -> QWidget:
+            btn = ghost_action_button(
+                label, icon=svg_icon("copy", color=Theme.MUTED, size=14), tooltip=label
+            )
+
+            def _do() -> None:
+                QApplication.clipboard().setText(payload)
+                btn.setText("Copied")
+                btn.setIcon(svg_icon("check", color=Theme.GREEN, size=14))
+                QTimer.singleShot(
+                    1200,
+                    lambda: (btn.setText(label), btn.setIcon(svg_icon("copy", color=Theme.MUTED, size=14))),
+                )
+
+            btn.clicked.connect(_do)
+            return btn
+
         bar = QWidget()
         row = QHBoxLayout(bar)
-        row.setContentsMargins(0, 4, 0, 0)
-        row.addWidget(actions)
+        row.setContentsMargins(0, 2, 0, 0)
+        row.setSpacing(2)
+        row.addWidget(_copy_btn("Copy SQL", sql))
+        open_btn = ghost_action_button(
+            "Open in SQL", icon=svg_icon("external-link", color=Theme.MUTED, size=14),
+            tooltip="Open this query in the SQL tab",
+        )
+        open_btn.clicked.connect(lambda: self.open_sql.emit(sql))
+        row.addWidget(open_btn)
+        if cli_command:
+            row.addWidget(_copy_btn("Copy CLI", str(cli_command)))
         row.addStretch(1)
         return bar
 

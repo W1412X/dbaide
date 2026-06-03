@@ -1,10 +1,46 @@
 from __future__ import annotations
 
-from PyQt6.QtCore import Qt
+from PyQt6.QtCore import QSize, Qt
+from PyQt6.QtGui import QIcon
 from PyQt6.QtWidgets import QFrame, QLabel, QPushButton, QSizePolicy
 
 
 from dbaide.desktop.theme import Theme
+
+
+def ghost_action_button(
+    text: str, *, icon: QIcon | None = None, tooltip: str = "", parent=None
+) -> QPushButton:
+    """A low-profile inline action: small icon + label, no border, muted until
+    hover (Codex/Claude message-action style). For the row of actions under an
+    answer (Copy SQL, Open in SQL, …)."""
+    btn = QPushButton(text, parent)
+    btn.setCursor(Qt.CursorShape.PointingHandCursor)
+    btn.setAutoDefault(False)
+    btn.setDefault(False)
+    btn.setFixedHeight(26)
+    btn.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
+    if icon is not None:
+        btn.setIcon(icon)
+        btn.setIconSize(QSize(14, 14))
+    if tooltip:
+        btn.setToolTip(tooltip)
+    btn.setStyleSheet(
+        f"""
+        QPushButton {{
+            background: transparent;
+            color: {Theme.MUTED};
+            border: none;
+            border-radius: 6px;
+            padding: 0 8px;
+            font-size: 12px;
+            text-align: left;
+        }}
+        QPushButton:hover {{ background: {Theme.PANEL_2}; color: {Theme.TEXT}; }}
+        QPushButton:pressed {{ background: {Theme.PANEL_3}; }}
+        """
+    )
+    return btn
 
 
 def compact_button(
