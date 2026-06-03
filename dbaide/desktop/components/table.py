@@ -277,22 +277,15 @@ class ResultTableWidget(QWidget):
             return
         header = self.table.horizontalHeader()
         self.table.resizeColumnsToContents()
-        # Size every column to its content (capped), leaving any slack as trailing
-        # space on the right — like a standard database-client grid. No single column
-        # is stretched to fill, which previously left an awkward mid-grid gap when the
-        # stretched column held short values.
-        total = 0
+        # Size every column to its content (capped), then let the last column absorb
+        # any remaining width. setStretchLastSection handles both the underfill case
+        # (last column grows to fill — no dangling edge gap) and resize, and never
+        # overflows into a spurious horizontal scrollbar. Standard DB-client grid feel.
+        header.setStretchLastSection(False)
         for i in range(self.table.columnCount()):
             header.setSectionResizeMode(i, QHeaderView.ResizeMode.Interactive)
             header.resizeSection(i, min(420, max(72, header.sectionSize(i))))
-            total += header.sectionSize(i)
-        # If the content leaves real slack in the viewport, let the last column take
-        # it so there's no thin dangling gap at the right edge. The fudge keeps us
-        # just inside the viewport so no spurious horizontal scrollbar appears.
-        slack = self.table.viewport().width() - total - 4
-        if slack > 16 and self.table.columnCount():
-            last = self.table.columnCount() - 1
-            header.resizeSection(last, header.sectionSize(last) + slack)
+        header.setStretchLastSection(True)
 
     def _show_full_cell(self, row: int, col: int) -> None:
         if not (0 <= row < len(self._rows) and 0 <= col < len(self._columns)):

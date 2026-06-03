@@ -35,6 +35,9 @@ number. DBAide is built on the opposite principle:
   of dumping the whole schema into the prompt.
 - 💬 **Run many conversations at once.** Each session runs in its own thread; start a
   query in one and switch to another while it works (concurrency is configurable).
+- 🧰 **A real database client, too.** Switch to the **Workbench** for a DBeaver-style
+  workspace: multiple SQL editors and table viewers, a data browser, structure & DDL,
+  query history — all read-only and safe (see below).
 - 🔌 **Works offline-ish.** No LLM configured? It falls back to deterministic heuristics
   for inspection, profiling, guardrails and simple queries.
 
@@ -70,7 +73,31 @@ dbaide-gui
 
 Add a connection from **Settings → Connections**, then ask in natural language. The
 agent's steps stream into the **Trace** panel on the right; generated SQL can be opened
-in the **SQL** tab to tweak and re-run (`⌘↵` / `Ctrl+↵`).
+in the **Workbench** to tweak and re-run.
+
+### Workbench — the database client
+
+Toggle **Assistant / Workbench** at the top. The Workbench is a multi-document
+workspace, all read-only and routed through the same guardrails as the agent:
+
+- 📑 **Multiple documents** — open several SQL editors and table viewers at once,
+  closeable and re-orderable. `⌘1`/`⌘2` switch modes, `⌘T` opens a new editor, `⌘W`
+  closes one.
+- ✍️ **SQL editor** — syntax highlighting, schema-aware autocomplete, line numbers,
+  current-line highlight, **Format**, **Explain** (query plan), comment toggle (`⌘/`),
+  and **run the selection or the statement under the cursor** (`⌘↵`).
+- 🔎 **Data browser** — paginated, sortable, filterable (`WHERE …`) grid with a row-
+  number gutter, on-demand exact **row count**, an inline value viewer (with JSON
+  pretty-printing), and **foreign-key navigation** — right-click a FK cell to open the
+  referenced row.
+- 🏗️ **Structure** — columns (type/key), foreign-key relations (in/out, clickable),
+  indexes, and a generated `CREATE TABLE` you can copy.
+- 🕑 **Query history** — every statement you run, recalled per connection; click to
+  load, double-click to run.
+- ⤵️ **Export** — copy or save results as CSV / JSON / Markdown / `INSERT`.
+
+Right-click a table in the schema tree to open it, or to **Generate SQL**
+(`SELECT` / `COUNT` / `INSERT` / `UPDATE` templates).
 
 ### CLI
 
