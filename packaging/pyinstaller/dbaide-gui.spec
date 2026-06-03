@@ -4,18 +4,22 @@
 import sys
 from pathlib import Path
 
-from PyInstaller.utils.hooks import collect_all, collect_submodules
+from PyInstaller.utils.hooks import collect_submodules
 
 ROOT = Path(SPECPATH).resolve().parents[1]
 
 block_cipher = None
+STRIP = sys.platform != "win32"  # strip symbols on macOS/Linux (saves size); not on Windows
 
-pyqt_datas, pyqt_binaries, pyqt_hidden = collect_all("PyQt6")
 # mistune loads its plugins (table, strikethrough, url, …) by string name, so
 # PyInstaller's import graph misses them — collect every submodule explicitly or
 # Markdown rendering breaks at runtime in the frozen app.
 mistune_hidden = collect_submodules("mistune")
 
+# The app uses ONLY these four Qt modules. We deliberately do NOT collect_all("PyQt6")
+# (that force-bundles the entire Qt — QtQml/Quick/Network/Pdf/translations/… — and
+# bloats the package ~3-4x). PyInstaller's built-in PyQt6 hooks bundle just these
+# modules + the platform plugins they need.
 hiddenimports = [
     "dbaide",
     "dbaide.cli",
@@ -43,18 +47,36 @@ hiddenimports = [
     "psycopg",
     "psycopg_binary",
     "psycopg_binary._psycopg",
-] + pyqt_hidden + mistune_hidden
+    "PyQt6.QtCore",
+    "PyQt6.QtGui",
+    "PyQt6.QtWidgets",
+    "PyQt6.QtSvg",
+] + mistune_hidden
+
+# Drop big Qt modules we never import, so nothing transitively drags them in.
+_QT_EXCLUDES = [
+    "PyQt6.QtQml", "PyQt6.QtQuick", "PyQt6.QtQuickWidgets", "PyQt6.QtQuick3D",
+    "PyQt6.QtNetwork", "PyQt6.QtMultimedia", "PyQt6.QtMultimediaWidgets",
+    "PyQt6.QtWebEngineCore", "PyQt6.QtWebEngineWidgets", "PyQt6.QtWebChannel",
+    "PyQt6.QtWebSockets", "PyQt6.QtCharts", "PyQt6.QtDataVisualization",
+    "PyQt6.QtPdf", "PyQt6.QtPdfWidgets", "PyQt6.QtSql", "PyQt6.QtTest",
+    "PyQt6.QtDesigner", "PyQt6.QtUiTools", "PyQt6.QtHelp", "PyQt6.QtBluetooth",
+    "PyQt6.QtNfc", "PyQt6.QtPositioning", "PyQt6.QtSensors", "PyQt6.QtSerialPort",
+    "PyQt6.QtRemoteObjects", "PyQt6.QtScxml", "PyQt6.QtSpatialAudio",
+    "PyQt6.QtOpenGL", "PyQt6.QtOpenGLWidgets", "PyQt6.QtPrintSupport",
+    "PyQt6.Qt3DCore", "PyQt6.Qt3DRender", "PyQt6.Qt3DExtras",
+]
 
 a = Analysis(
     [str(ROOT / "dbaide" / "desktop" / "launcher.py")],
     pathex=[str(ROOT)],
-    binaries=pyqt_binaries,
-    datas=pyqt_datas,
+    binaries=[],
+    datas=[],
     hiddenimports=hiddenimports,
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],
-    excludes=["tkinter", "matplotlib", "numpy", "pandas"],
+    excludes=["tkinter", "matplotlib", "numpy", "pandas"] + _QT_EXCLUDES,
     win_no_prefer_redirects=False,
     win_private_assemblies=False,
     cipher=block_cipher,
@@ -71,7 +93,7 @@ exe = EXE(
     name="DBAide",
     debug=False,
     bootloader_ignore_signals=False,
-    strip=False,
+    strip=STRIP,
     upx=False,
     console=False,
     disable_windowed_traceback=False,
@@ -86,7 +108,7 @@ coll = COLLECT(
     a.binaries,
     a.zipfiles,
     a.datas,
-    strip=False,
+    strip=STRIP,
     upx=False,
     upx_exclude=[],
     name="DBAide",

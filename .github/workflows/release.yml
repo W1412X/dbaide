@@ -9,6 +9,8 @@ on:
   push:
     tags:
       - "v*"
+    branches:
+      - slim-build   # temporary: iterate on bundle size (build only, no release)
 
 permissions:
   contents: write
@@ -50,6 +52,23 @@ jobs:
 
       - name: Build desktop bundle (PyInstaller)
         run: python -m PyInstaller packaging/pyinstaller/dbaide-gui.spec --noconfirm --clean
+
+      # Catch a broken/over-trimmed bundle before we ship it: launch the real binary
+      # headlessly (xvfb → the actual xcb platform plugin). A missing Qt module would
+      # crash immediately; a healthy app runs until the timeout kills it (code 124).
+      - name: Smoke test (Linux — does it launch?)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq xvfb libxcb-cursor0 libegl1 libxkbcommon-x11-0 \
+            libxcb-icccm4 libxcb-image0 libxcb-keysyms1 libxcb-randr0 libxcb-render-util0 \
+            libxcb-shape0 >/dev/null 2>&1 || true
+          echo "bundle size:"; du -sh dist/DBAide
+          set +e
+          xvfb-run -a timeout 20 dist/DBAide/DBAide
+          code=$?
+          if [ "$code" = "124" ]; then echo "✓ launched and stayed up — healthy"; exit 0; fi
+          echo "✗ exited early (code $code) — bundle likely missing a module"; exit 1
 
       # macOS → a .dmg containing DBAide.app + an Applications symlink, so users
       # drag the app into Applications.
