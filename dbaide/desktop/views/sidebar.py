@@ -52,6 +52,7 @@ class Sidebar(QWidget):
         schema_layout.addWidget(SectionLabel("SCHEMA"))
         self.search = QLineEdit()
         self.search.setPlaceholderText(t("sidebar.filter"))
+        self.search.setToolTip(t("sidebar.filter.hint"))
         self.search.setFixedHeight(32)
         # A precisely-placed magnifier overlaid at the left (Qt's addAction leaves an
         # awkward double gap between icon and text); the text is inset to clear it.

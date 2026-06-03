@@ -322,7 +322,7 @@ class MainWindow(QMainWindow):
                 break
         self.topbar.set_asset_status(asset_status)
         key = "composer.placeholder.ready" if asset_status == "ready" else "composer.placeholder.build"
-        self.composer.set_placeholder(_i18n_t(key) + _i18n_t("composer.hint"))
+        self.composer.set_placeholder(_i18n_t(key))
 
     def _load_sessions(self, name: str) -> None:
         if not name:
@@ -497,7 +497,7 @@ class MainWindow(QMainWindow):
                 asset_status = c.get("asset_status") or "missing"
                 break
         key = "composer.placeholder.ready" if asset_status == "ready" else "composer.placeholder.build"
-        self.composer.set_placeholder(_i18n_t(key) + _i18n_t("composer.hint"))
+        self.composer.set_placeholder(_i18n_t(key))
 
     def build_assets(self) -> None:
         conn = self.current_connection()

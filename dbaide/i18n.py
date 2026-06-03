@@ -35,8 +35,8 @@ _STRINGS: dict[str, dict[str, str]] = {
     "composer.send": {"en": "Send", "zh": "发送"},
     "composer.stop": {"en": "Stop", "zh": "停止"},
     "composer.placeholder.ready": {
-        "en": "Ask about your data, e.g. \"daily orders for the last 7 days\"",
-        "zh": "用自然语言提问，例如「最近 7 天每天的订单数」",
+        "en": "Ask anything about your data…",
+        "zh": "用自然语言提问你的数据…",
     },
     "composer.placeholder.build": {
         "en": "Ask a question, or build assets for better accuracy",
@@ -46,10 +46,10 @@ _STRINGS: dict[str, dict[str, str]] = {
         "en": "Add or select a connection to start",
         "zh": "请先添加或选择一个连接",
     },
-    "composer.hint": {"en": "  Enter = newline · ⌘Enter = send", "zh": "  Enter 换行 · ⌘Enter 发送"},
+    "composer.hint": {"en": "Enter = newline · ⌘Enter = send", "zh": "Enter 换行 · ⌘Enter 发送"},
     "composer.placeholder.reply": {
-        "en": "Reply to continue…  Enter = newline · ⌘Enter = send",
-        "zh": "回复以继续…  Enter 换行 · ⌘Enter 发送",
+        "en": "Reply to continue…",
+        "zh": "回复以继续…",
     },
     # Settings nav / sections
     "settings.title": {"en": "Settings", "zh": "设置"},
@@ -125,7 +125,11 @@ _STRINGS: dict[str, dict[str, str]] = {
         "zh": "在此粘贴 SQL，仅允许单条只读语句。",
     },
     # Sidebar
-    "sidebar.filter": {"en": "Filter tree · Enter to semantic search", "zh": "筛选结构树 · 回车进行语义搜索"},
+    "sidebar.filter": {"en": "Search schema…", "zh": "搜索结构…"},
+    "sidebar.filter.hint": {
+        "en": "Filter the schema tree · press Enter for semantic search",
+        "zh": "筛选结构树 · 回车进行语义搜索",
+    },
     # Ask tab empty state
     "ask.open_settings": {"en": "Open Settings", "zh": "打开设置"},
     "ask.empty_title": {"en": "Connect your first database", "zh": "连接你的第一个数据库"},

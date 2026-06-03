@@ -47,7 +47,10 @@ class ComposerWidget(Panel):
         from dbaide.i18n import t
         self._running = False
         self.input = QTextEdit()
-        self.input.setPlaceholderText(t("composer.placeholder.ready") + t("composer.hint"))
+        # Clean, minimal placeholder (Codex-style); the keybind hint lives in the
+        # tooltip rather than cluttering the field.
+        self.input.setPlaceholderText(t("composer.placeholder.ready"))
+        self.input.setToolTip(t("composer.hint"))
         configure_multiline_text_edit(
             self.input,
             min_height=_INPUT_MIN,
