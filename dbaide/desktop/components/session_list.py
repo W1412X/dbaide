@@ -48,7 +48,7 @@ def _relative_time(ts: float) -> str:
 
 
 _TITLE_FONT = QFont("Inter", 12, QFont.Weight.DemiBold)
-_SUB_FONT = QFont("Inter", 8)
+_SUB_FONT = QFont("Inter", 6)
 # Width the spinner + its gap reserve at the right of the title (so the elided
 # title clears it whether or not the spinner is currently shown).
 _SPINNER_RESERVE = 20
