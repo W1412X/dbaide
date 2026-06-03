@@ -178,6 +178,16 @@ QComboBox::down-arrow {{
     width: 14px;
     height: 14px;
 }}
+/* Lighter topbar selectors — a soft chip (transparent, soft border) rather than a
+   heavy boxed input, so the top bar reads calm. */
+QComboBox[soft="true"] {{
+    background: transparent;
+    border: 1px solid {Theme.BORDER_SOFT};
+}}
+QComboBox[soft="true"]:hover {{
+    background: {Theme.PANEL_2};
+    border: 1px solid {Theme.BORDER};
+}}
 QComboBox QAbstractItemView {{
     background: {Theme.PANEL};
     color: {Theme.TEXT};

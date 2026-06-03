@@ -146,6 +146,7 @@ class DropdownCombo(QComboBox):
         self.setFixedHeight(30)
         self.setMinimumWidth(120)
         self.setMaximumWidth(260)
+        self.setProperty("soft", True)  # lighter topbar-chip styling
 
     def current_value(self) -> str:
         return str(self.currentData() or "")

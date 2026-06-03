@@ -61,8 +61,8 @@ class _SessionRow(QWidget):
         self.setStyleSheet("background: transparent;")
         self.setToolTip(title)  # full title on hover, even when it wraps/clips
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(4, 5, 4, 5)
-        layout.setSpacing(2)
+        layout.setContentsMargins(6, 8, 6, 8)
+        layout.setSpacing(3)
         self._full_title = title
         self._title = QLabel(title)
         self._title.setFont(_TITLE_FONT)
@@ -96,7 +96,7 @@ class _SessionRow(QWidget):
         wrapped = tfm.boundingRect(0, 0, w, 10000, int(Qt.TextFlag.TextWordWrap), title).height()
         title_h = min(wrapped, _TITLE_MAX_LINES * tfm.lineSpacing())
         sub_h = QFontMetrics(_SUB_FONT).lineSpacing()
-        return title_h + sub_h + 16  # margins (5+5) + spacing (2) + a hair
+        return title_h + sub_h + 22  # margins (8+8) + spacing (3) + a hair
 
 
 class SessionList(QWidget):
