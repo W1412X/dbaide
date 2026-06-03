@@ -89,23 +89,31 @@ class _SessionRow(QWidget):
         layout.addWidget(sub)
 
     def set_running(self, running: bool, *, angle: float = 0.0) -> None:
+        was = self._spinner.isVisible()
         if running:
             from dbaide.desktop.components.spinner import spinner_pixmap
             self._spinner.setPixmap(spinner_pixmap(angle, size=13, color=Theme.BLUE))
             self._spinner.show()
         else:
             self._spinner.hide()
+        if running != was:
+            self._elide()  # the title's available width just changed
 
     def title(self) -> str:
         return self._full_title
 
+    def _elide(self) -> None:
+        # Only reserve room for the spinner when it's actually shown, so idle rows
+        # use the full width (otherwise short-elided titles waste the right margin).
+        reserve = _SPINNER_RESERVE if self._spinner.isVisible() else 0
+        avail = max(40, self.width() - 12 - reserve)
+        self._title.setText(
+            QFontMetrics(_TITLE_FONT).elidedText(self._full_title, Qt.TextElideMode.ElideRight, avail)
+        )
+
     def resizeEvent(self, event) -> None:  # noqa: N802
         super().resizeEvent(event)
-        avail = max(40, self.width() - 12 - _SPINNER_RESERVE)
-        elided = QFontMetrics(_TITLE_FONT).elidedText(
-            self._full_title, Qt.TextElideMode.ElideRight, avail
-        )
-        self._title.setText(elided)
+        self._elide()
 
     @staticmethod
     def height_for(title: str, *, content_width: int) -> int:
