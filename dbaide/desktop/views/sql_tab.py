@@ -46,6 +46,8 @@ class SqlTab(QWidget):
         self.messages = QTextBrowser()
         self.messages.setFont(QFont("Menlo", 10))
         configure_readonly_text_view(self.messages)
+        # Borderless — it's a tab page inside the bordered tab pane (no frame-in-a-frame).
+        self.messages.setStyleSheet("QTextBrowser { background: transparent; border: none; }")
         self.tabs.addTab(self.result_table, "Result")
         self.tabs.addTab(self.messages, "Messages")
         layout.addWidget(self.tabs, 1)

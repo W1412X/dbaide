@@ -65,8 +65,7 @@ class ResultTableWidget(QWidget):
             f"""
             QTableWidget {{
                 background: {Theme.SURFACE};
-                border: 1px solid {Theme.BORDER_SOFT};
-                border-radius: 8px;
+                border: none;
                 outline: none;
             }}
             QTableWidget::item {{
@@ -77,8 +76,11 @@ class ResultTableWidget(QWidget):
                 background: {Theme.PANEL_3};
                 color: {Theme.TEXT};
             }}
+            QHeaderView {{
+                background: {Theme.SURFACE};
+            }}
             QHeaderView::section {{
-                background: transparent;
+                background: {Theme.SURFACE};
                 color: {Theme.MUTED};
                 padding: 7px 10px;
                 border: none;

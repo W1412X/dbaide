@@ -173,21 +173,21 @@ class PillSelect(QToolButton):
         self.setFixedHeight(30)
         self.setMaximumWidth(max_width)
         self.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Fixed)
-        # Ghost selector — no border (it lives inside the already-bordered composer);
-        # a faint hover wash carries the affordance, the way Codex/Cursor style their
-        # inline composer pills.
+        # Soft selector — a subtle visible fill (no border, so it doesn't double up
+        # with the composer's own border) makes it clearly an interactive pill rather
+        # than plain text; brightens on hover.
         self.setStyleSheet(
             f"""
             QToolButton {{
-                background: transparent;
-                color: {Theme.MUTED};
+                background: {Theme.PANEL_2};
+                color: {Theme.TEXT_2};
                 border: none;
                 border-radius: 8px;
-                padding: 0px 8px;
+                padding: 0px 10px;
                 font-size: 12px;
             }}
             QToolButton:hover {{
-                background: {Theme.PANEL_2};
+                background: {Theme.PANEL_3};
                 color: {Theme.TEXT};
             }}
             QToolButton::menu-indicator {{
