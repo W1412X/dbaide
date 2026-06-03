@@ -25,6 +25,7 @@ from dbaide.desktop.views.table_document import TableDocument
 
 class WorkbenchView(QWidget):
     run_sql = pyqtSignal(object, str)        # (SqlTab, sql)
+    explain_sql = pyqtSignal(object, str)    # (SqlTab, sql) — show query plan
     browse_requested = pyqtSignal(object, dict)  # (TableDocument, payload)
     count_requested = pyqtSignal(object, dict)   # (TableDocument, count payload)
     doc_closed = pyqtSignal(object)          # the closed widget
@@ -94,7 +95,10 @@ class WorkbenchView(QWidget):
         if sql:
             editor.set_sql(sql)
         editor.run_requested.connect(
-            lambda text, _action, ed=editor: self.run_sql.emit(ed, text)
+            lambda text, action, ed=editor: (
+                self.explain_sql.emit(ed, text) if action == "explain"
+                else self.run_sql.emit(ed, text)
+            )
         )
         self._query_seq += 1
         index = self.tabs.addTab(editor, self._t("workbench.query_n", n=self._query_seq))

@@ -213,6 +213,7 @@ class MainWindow(QMainWindow):
         self._active_data_doc = None
         self.workbench = WorkbenchView(self.history_panel)
         self.workbench.run_sql.connect(self._run_sql_from)
+        self.workbench.explain_sql.connect(self._explain_from)
         self.workbench.browse_requested.connect(self._browse_from)
         self.workbench.count_requested.connect(self._count_from)
         self.workbench.doc_closed.connect(self._on_doc_closed)
@@ -814,6 +815,16 @@ class MainWindow(QMainWindow):
         self._active_sql_doc = editor
         self.execute_sql(sql)
 
+    def _explain_from(self, editor, sql: str) -> None:
+        if not sql.strip():
+            return
+        self._active_sql_doc = editor
+        self.run_action("explain_sql", {
+            "connection_name": self.current_connection(),
+            "database": self.current_database(),
+            "sql": sql,
+        })
+
     def _browse_from(self, doc, payload: dict[str, Any]) -> None:
         self._active_data_doc = doc
         self.run_action("browse_table", payload)
@@ -1095,7 +1106,7 @@ class MainWindow(QMainWindow):
         self._oneoff_action = action
         if action == "build_assets":
             self._building = True
-        if action == "execute_sql" and self._active_sql_doc is not None:
+        if action in ("execute_sql", "explain_sql") and self._active_sql_doc is not None:
             self._active_sql_doc.set_running(True)
         if action in ("browse_table", "count_table") and self._active_data_doc is not None:
             self._active_data_doc.set_running(True)
@@ -1175,6 +1186,10 @@ class MainWindow(QMainWindow):
             if self._active_data_doc is not None:
                 self._active_data_doc.show_count(int(result.get("count") or 0))
             return
+        if action == "explain_sql":
+            if self._active_sql_doc is not None:
+                self._active_sql_doc.show_result(result)
+            return
         if action == "load_history":
             key = self._active_or_new_key()
             self.ask_tab.append_result(key, result)
@@ -1205,6 +1220,11 @@ class MainWindow(QMainWindow):
             if self._active_sql_doc is not None:
                 self._active_sql_doc.show_error(str(exc))
             self._record_query(self._last_sql, ok=False)
+            self.toast(str(exc))
+            return
+        if action == "explain_sql":
+            if self._active_sql_doc is not None:
+                self._active_sql_doc.show_error(str(exc))
             self.toast(str(exc))
             return
         if action in ("browse_table", "count_table"):

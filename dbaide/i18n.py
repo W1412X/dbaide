@@ -179,6 +179,8 @@ _STRINGS: dict[str, dict[str, str]] = {
     "sql.run_hint": {"en": "⌘↵ run selection or statement at cursor", "zh": "⌘↵ 运行选中内容或光标处语句"},
     "sql.format": {"en": "Format", "zh": "格式化"},
     "sql.format_tooltip": {"en": "Format SQL (⌘⇧F)", "zh": "格式化 SQL（⌘⇧F）"},
+    "sql.explain": {"en": "Explain", "zh": "执行计划"},
+    "sql.explain_tooltip": {"en": "Show the query plan (EXPLAIN)", "zh": "查看查询计划（EXPLAIN）"},
     "sql.result": {"en": "Result", "zh": "结果"},
     "sql.messages": {"en": "Messages", "zh": "消息"},
     "sql.run_tooltip": {"en": "Run read-only query", "zh": "运行只读查询"},

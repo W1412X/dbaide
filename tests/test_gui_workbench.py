@@ -180,3 +180,15 @@ def test_structure_panel_no_indexes_blank(qapp):
     sp = StructurePanel()
     sp.show_table("t", [{"name": "id", "data_type": "INTEGER"}], {}, [])
     assert sp._indexes.text() == ""
+
+
+def test_explain_routes_to_explain_signal(qapp):
+    wb = _wb(qapp)
+    ran, explained = [], []
+    wb.run_sql.connect(lambda ed, sql: ran.append(sql))
+    wb.explain_sql.connect(lambda ed, sql: explained.append(sql))
+    ed = wb.current_sql_editor()
+    ed.run_requested.emit("select 1", "explain")
+    assert explained == ["select 1"] and ran == []
+    ed.run_requested.emit("select 2", "execute")
+    assert ran == ["select 2"] and explained == ["select 1"]

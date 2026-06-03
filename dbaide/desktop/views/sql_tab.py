@@ -51,6 +51,10 @@ class SqlTab(QWidget):
         self.format_btn.setToolTip(t("sql.format_tooltip"))
         self.format_btn.clicked.connect(self._format)
         run_row.addWidget(self.format_btn)
+        self.explain_btn = compact_button(t("sql.explain"), width=84)
+        self.explain_btn.setToolTip(t("sql.explain_tooltip"))
+        self.explain_btn.clicked.connect(self._explain)
+        run_row.addWidget(self.explain_btn)
         self.run_btn = compact_button(t("sql.run"), primary=True, width=92)
         self.run_btn.setIcon(svg_icon("play", color="#ffffff", size=13))
         self.run_btn.setIconSize(QSize(13, 13))
@@ -109,6 +113,10 @@ class SqlTab(QWidget):
         if self.run_btn.isEnabled():
             self.run_requested.emit(self._current_sql(), "execute")
 
+    def _explain(self) -> None:
+        if self.explain_btn.isEnabled():
+            self.run_requested.emit(self._current_sql(), "explain")
+
     def _format(self) -> None:
         from dbaide.rendering.sql_format import format_sql
         text = self.editor.toPlainText()
@@ -125,6 +133,8 @@ class SqlTab(QWidget):
             self.run_btn.setIcon(svg_icon("play", color="#ffffff", size=13))
             self.run_btn.setText(self._t("sql.run"))
         self.run_btn.setEnabled(not running)
+        self.explain_btn.setEnabled(not running)
+        self.format_btn.setEnabled(not running)
         self.editor.setEnabled(not running)
 
     def set_sql(self, sql: str) -> None:
