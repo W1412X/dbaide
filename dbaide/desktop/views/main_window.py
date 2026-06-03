@@ -54,13 +54,27 @@ class MainWindow(QMainWindow):
         self.pool = QThreadPool.globalInstance()
         self.bootstrap: dict[str, Any] = {}
         self.schema_rows: list[dict[str, Any]] = []
-        self.running = False
+        # ── Multi-run state ──────────────────────────────────────────────────
+        # Each conversation (session) runs in its own worker; up to
+        # max_concurrent_runs run at once, the rest queue. Everything is keyed by a
+        # stable *slot key* — the server session_id once known, or a temporary
+        # "new:N" key for a brand-new, not-yet-saved chat — so a run's progress and
+        # result always land in the right session even when it isn't on screen.
+        self._max_runs = self.service.cfg.max_concurrent_runs()
+        self._runs: dict[str, ServiceWorker] = {}                 # slot key → active ask worker
+        self._run_queue: list[tuple[str, dict[str, Any]]] = []    # (slot key, payload) waiting for a slot
+        self._pending_resume: dict[str, dict[str, Any]] = {}      # slot key → clarification resume_state
+        self._slot_trace: dict[str, list[dict[str, Any]]] = {}    # slot key → accumulated trace events
+        self._slot_question: dict[str, str] = {}                  # slot key → last question (for resume label)
+        self._slot_session: dict[str, str] = {}                   # slot key → server session_id (once known)
+        self._new_counter = 0                                     # source of "new:N" temp keys
+        self._active_key = ""                                     # the slot currently on screen
+        # One-off non-conversation action (build assets / run SQL / etc.).
+        self._oneoff_worker: ServiceWorker | None = None
+        self._oneoff_action = ""
+        self._building = False
         self._last_question = ""
-        self._last_action = ""
-        self._pending_resume: dict[str, Any] | None = None
-        self._current_worker: ServiceWorker | None = None
-        # The active chat session (会话). Empty until the first ask creates one (or a
-        # session is opened from the Chats list); each turn is appended to it.
+        # The active chat session (会话) — the server id of the visible slot.
         self.current_session_id = ""
         self._settings = QSettings("DBAide", "DBAide")
         self._tab_names = ("Ask", "SQL")
@@ -298,13 +312,28 @@ class MainWindow(QMainWindow):
         # Sessions are per-connection — drop the active session and clear the view so
         # one connection's conversation never bleeds into another. (Not fired during
         # bootstrap: set_connections blocks signals.)
-        self.current_session_id = ""
-        self._pending_resume = None
-        self.ask_tab.clear_conversation()
+        self._reset_all_slots()
         self.right.trace.clear_trace()
         conn = self.current_connection()
         if conn:
             self._refresh_connection_context(conn)
+
+    def _reset_all_slots(self) -> None:
+        """Cancel every in-flight run and drop all conversation slots — used when the
+        connection changes (sessions are per-connection)."""
+        for worker in list(self._runs.values()):
+            if not worker.is_cancelled:
+                worker.cancel()
+        self._runs.clear()
+        self._run_queue.clear()
+        self._pending_resume.clear()
+        self._slot_trace.clear()
+        self._slot_question.clear()
+        self._slot_session.clear()
+        self.ask_tab.reset_all()
+        self._active_key = ""
+        self.current_session_id = ""
+        self._refresh_run_status()
 
     def _database_changed(self, _text: str) -> None:
         database = self.current_database()
@@ -416,8 +445,10 @@ class MainWindow(QMainWindow):
         self.switch_tab("SQL")
 
     def submit_composer(self, question: str, policy: str) -> None:
-        if self._pending_resume:
-            self._submit_clarification(question)
+        key = self._active_key
+        # Active slot is awaiting a clarification reply → route there.
+        if key and key in self._pending_resume:
+            self._submit_clarification(key, question)
             return
         if not question:
             self.toast(_i18n_t("toast.enter_question"))
@@ -426,54 +457,61 @@ class MainWindow(QMainWindow):
         if not conn:
             self.toast(_i18n_t("toast.select_connection"))
             return
+        if key and key in self._runs:
+            self.toast(_i18n_t("toast.task_running"))
+            return
+        # A brand-new chat has no slot yet — mint one and make it active.
+        if not key:
+            key = self._new_slot_key()
+            self._active_key = key
+            self.current_session_id = ""
+            self.ask_tab.set_active(key)
         self._last_question = question
+        self._slot_question[key] = question
         database = self.current_database()
         self.composer.clear_input()
-        self.ask_tab.append_user(question, connection=conn, database=database, policy=policy)
+        self.ask_tab.append_user(key, question, connection=conn, database=database, policy=policy)
+        # Fresh trace for this turn; show it live since this slot is the active one.
+        self._slot_trace[key] = []
         self.right.trace.begin_live()
         self.right.focus_trace()
-        self.run_action("ask", {
+        self._start_ask(key, {
             "connection_name": conn,
             "question": question,
             "database": database,
             "execution_policy": policy,
             "show_trace": True,
-            "session_id": self.current_session_id,
+            "session_id": self._slot_session.get(key, ""),
         })
 
-    def _submit_clarification(self, reply: str) -> None:
+    def _submit_clarification(self, key: str, reply: str) -> None:
         reply = str(reply or "").strip()
         if not reply:
             self.toast(_i18n_t("toast.enter_reply"))
             return
-        if not self._pending_resume:
-            self.submit_composer(reply, self.composer.policy())
+        resume_state = self._pending_resume.get(key)
+        if not resume_state:
+            # No pause for this slot — treat as a fresh question on the active slot.
+            if key == self._active_key:
+                self.submit_composer(reply, self.composer.policy())
             return
         conn = self.current_connection()
         if not conn:
             self.toast(_i18n_t("toast.select_connection"))
             return
-        # CRITICAL: do not consume the pause state until we know the resume can
-        # actually start. If another action (a schema preview, a search, a refresh)
-        # is still in flight, run_action would reject this — and if we'd already
-        # hidden the bar and cleared _pending_resume, the reply would be lost and the
-        # user stuck with no way to answer. Bail early, keeping the bar and the
-        # pending state intact so they can submit again a moment later.
-        if self.running or self._current_worker is not None:
-            self.toast(_i18n_t("toast.task_running"))
-            return
         database = self.current_database()
         policy = self.composer.policy()
-        original_question = str(self._pending_resume.get("question") or self._last_question)
-        resume_state = self._pending_resume
-        self._pending_resume = None
-        self.composer.clear_input()
-        self.ask_tab.append_clarification_reply(reply)
-        self.ask_tab.append_activity(f"User replied: {reply[:80]}")
-        # Resume continues the SAME trace (don't begin_live, which would reset it) so
-        # the steps from before the clarification stay visible alongside the new ones.
-        self.right.focus_trace()
-        self.run_action("ask", {
+        original_question = str(resume_state.get("question") or self._slot_question.get(key, ""))
+        # Consume the pause: queueing inside _start_ask guarantees the reply is never
+        # lost even when every run slot is busy (it waits for a free slot).
+        self._pending_resume.pop(key, None)
+        if key == self._active_key:
+            self.composer.clear_input()
+        self.ask_tab.append_clarification_reply(key, reply)
+        self.ask_tab.append_activity(key, f"User replied: {reply[:80]}")
+        if key == self._active_key:
+            self.right.focus_trace()
+        self._start_ask(key, {
             "connection_name": conn,
             "question": original_question,
             "user_reply": reply,
@@ -481,9 +519,8 @@ class MainWindow(QMainWindow):
             "database": database,
             "execution_policy": policy,
             "show_trace": True,
-            "session_id": self.current_session_id,
+            "session_id": self._slot_session.get(key, ""),
         })
-        self._restore_composer_placeholder()
 
     def _restore_composer_placeholder(self) -> None:
         conn = self.current_connection()
@@ -604,6 +641,10 @@ class MainWindow(QMainWindow):
     def _settings_save_resources(self, payload: dict[str, Any]) -> None:
         try:
             self.service.dispatch("save_resource_defaults", payload)
+            # Apply the concurrency cap live; a higher cap can release queued runs.
+            self._max_runs = self.service.cfg.max_concurrent_runs()
+            self._drain_queue()
+            self._refresh_run_status()
             self.toast(_i18n_t("toast.resources_saved"))
         except Exception as exc:
             self.fail(exc)
@@ -752,49 +793,59 @@ class MainWindow(QMainWindow):
     # ── Chat sessions (会话) ──────────────────────────────────────────────────
 
     def new_session(self) -> None:
-        """Start a fresh chat thread: clear the conversation and trace; the next ask
-        creates the session server-side."""
-        if self.running:
-            self.toast("Finish or stop the current task first.")
-            return
+        """Open a fresh chat thread in its own slot. Other sessions keep running in
+        the background; we just switch the view to a new, empty conversation."""
+        key = self._new_slot_key()
+        self._active_key = key
         self.current_session_id = ""
-        self._pending_resume = None
-        self.ask_tab.clear_conversation()
+        self.ask_tab.set_active(key)
         self.ask_tab.set_has_connection(bool(self.current_connection()))
         self.right.trace.clear_trace()
         self.sidebar.chats.set_current("")
+        self._sync_active_ui()
         self.composer.input.setFocus()
 
-    def _reveal_turn_trace(self, events: object) -> None:
-        """A turn's status chip was clicked — reveal the agent trace in the right
-        panel. ``events`` is that turn's trace (show it) or None (still running →
-        the live trace is already there, just surface the panel)."""
-        if isinstance(events, list) and events and not self.running:
+    def _reveal_turn_trace(self, key: object, events: object = None) -> None:
+        """A turn's status chip was clicked — reveal that session's trace. ``events``
+        is the turn's persisted trace (or None while it's still running, in which case
+        the live/accumulated trace is already shown)."""
+        if isinstance(events, list) and events and str(key) not in self._runs:
             self.right.show_trace(events)
         self.right.focus_trace()
 
     def open_session(self, session_id: str) -> None:
-        """Load a saved session into the conversation and show its latest trace."""
+        """Switch to a saved session. If it's already loaded in a slot (e.g. running
+        in the background), just show it; otherwise load it from disk."""
         conn = self.current_connection()
         if not conn or not session_id:
             return
-        if self.running:
-            # Don't swap the conversation out from under an in-flight run; tell the
-            # user why nothing happened instead of silently ignoring the click.
-            self.toast("Finish or stop the current task first.")
-            self.sidebar.chats.set_current(self.current_session_id)  # keep selection on the active thread
+        # Already loaded (possibly mid-run in the background) → just bring it forward.
+        if self.ask_tab.has_slot(session_id):
+            self._activate_slot(session_id)
             return
 
         def on_loaded(data: dict[str, Any]) -> None:
+            sid = str(data.get("session_id") or session_id)
             turns = data.get("turns") or []
-            self.current_session_id = str(data.get("session_id") or session_id)
-            self._pending_resume = None
-            self.ask_tab.load_session(turns, connection=conn)
-            self.right.show_trace((turns[-1].get("trace") if turns else []) or [])
-            self.sidebar.chats.set_current(self.current_session_id)
+            self.ask_tab.load_session(sid, turns, connection=conn)
+            self._slot_session[sid] = sid
+            self._slot_trace[sid] = (turns[-1].get("trace") if turns else []) or []
+            self._activate_slot(sid)
             self.switch_tab("Ask")
 
         self._run_background("load_session", {"connection_name": conn, "session_id": session_id}, on_loaded)
+
+    def _activate_slot(self, key: str) -> None:
+        """Bring slot ``key`` to the front: show its conversation + trace and sync the
+        composer to whether it is idle / running / awaiting a reply."""
+        self._active_key = key
+        self.current_session_id = self._slot_session.get(key, "") or (key if not key.startswith("new:") else "")
+        self.ask_tab.set_has_connection(bool(self.current_connection()))
+        self.ask_tab.set_active(key)
+        events = self._slot_trace.get(key, [])
+        self.right.trace.show_events(events, live=key in self._runs)
+        self.sidebar.chats.set_current(self.current_session_id)
+        self._sync_active_ui()
 
     def rename_session(self, session_id: str, title: str) -> None:
         conn = self.current_connection()
@@ -818,12 +869,21 @@ class MainWindow(QMainWindow):
         except Exception as exc:  # noqa: BLE001
             self.toast(f"Delete failed: {exc}")
             return
-        # If the open session was deleted, fall back to an empty new thread.
-        if session_id == self.current_session_id:
-            self.current_session_id = ""
-            self.ask_tab.clear_conversation()
-            self.ask_tab.set_has_connection(bool(conn))
-            self.right.trace.clear_trace()
+        # Drop the slot for the deleted session (cancel its run if any).
+        if self.ask_tab.has_slot(session_id):
+            worker = self._runs.pop(session_id, None)
+            if worker and not worker.is_cancelled:
+                worker.cancel()
+            for d in (self._pending_resume, self._slot_question, self._slot_session, self._slot_trace):
+                d.pop(session_id, None)
+            was_active = session_id == self._active_key
+            self.ask_tab.discard_slot(session_id)
+            if was_active:
+                self._active_key = ""
+                self.current_session_id = ""
+                self.ask_tab.set_has_connection(bool(conn))
+                self.right.trace.clear_trace()
+                self._sync_active_ui()
         self._load_sessions(conn)
 
     def load_history(self, workflow_id: str) -> None:
@@ -860,71 +920,56 @@ class MainWindow(QMainWindow):
         except Exception as exc:
             self.toast(str(exc))
 
+    # ── One-off (non-conversation) actions ────────────────────────────────────
+    # build assets / run SQL / search / load history / preview / test connection.
+    # Only one runs at a time, but it runs *alongside* conversation runs.
+
     def run_action(self, action: str, payload: dict[str, Any]) -> None:
-        # Guard on the worker handle too, not just `running`: the stop_task escape
-        # hatch can clear `running` while the background worker is still in flight.
-        # Without this, a second worker could run concurrently on the shared
-        # DesktopService/adapters and corrupt state when the orphan finishes.
-        if self.running or self._current_worker is not None:
+        if self._oneoff_worker is not None:
             self.toast(_i18n_t("toast.task_running"))
             return
-        self._last_action = action
-        self.running = True
-        self.composer.set_running(True)
-        self.sql_tab.set_running(True)
-        self.topbar.set_global_status("Running", "running")
+        self._oneoff_action = action
+        if action == "build_assets":
+            self._building = True
+        if action == "execute_sql":
+            self.sql_tab.set_running(True)
         worker = ServiceWorker(self.service, action, payload)
-        worker.signals.progress.connect(self.on_progress)
-        worker.signals.done.connect(self.handle_result)
-        worker.signals.failed.connect(self.handle_failure)
-        self._current_worker = worker
+        worker.signals.progress.connect(self._on_oneoff_progress)
+        worker.signals.done.connect(self._on_oneoff_done)
+        worker.signals.failed.connect(self._on_oneoff_failed)
+        self._oneoff_worker = worker
+        self._sync_active_ui()
+        self._refresh_run_status()
         self.pool.start(worker)
 
-    def stop_task(self) -> None:
-        if self._current_worker and not self._current_worker.is_cancelled:
-            self._current_worker.cancel()
-            self.toast(_i18n_t("toast.cancelling"))
+    def _on_oneoff_progress(self, message: object) -> None:
+        # Only asset builds stream into the (active) trace panel.
+        if self._oneoff_action != "build_assets":
             return
-        # Already cancelled / no worker: reset the UI. The run_action guard keeps a
-        # new task from starting until the (possibly orphaned) worker truly finishes.
-        self.running = False
-        self.composer.set_running(False)
-        self.sql_tab.set_running(False)
-        self.right.trace.end_live()
-        self._restore_status_badge()
-
-    def on_progress(self, message: object) -> None:
-        # Ignore progress that arrives after the task finished, so the status bar
-        # and trace never show a stale "doing X" once we are idle again.
-        if not self.running:
-            return
-        label = progress_label(message if isinstance(message, dict) else str(message or ""))
-        self.statusbar.showMessage(label)
+        self.statusbar.showMessage(progress_label(message if isinstance(message, dict) else str(message or "")))
         if isinstance(message, dict):
-            if self._last_action == "ask":
-                self.ask_tab.append_activity_event(message)
             self.right.trace.append_live_event(message)
         else:
             text = str(message or "").strip()
             if text:
-                if self._last_action == "ask":
-                    self.ask_tab.append_activity(text)
                 self.right.trace.append_live(text)
 
-    def handle_result(self, action: str, result: Any) -> None:
-        self._current_worker = None
-        self.running = False
-        self.composer.set_running(False)
+    def _on_oneoff_done(self, action: str, result: Any) -> None:
+        self._oneoff_worker = None
+        self._oneoff_action = ""
+        self._building = False
         self.sql_tab.set_running(False)
-        self._restore_status_badge()
+        self._sync_active_ui()
+        self._refresh_run_status()
         if action == "build_assets":
             self.right.trace.end_live()
             stats = result.get("stats", {}) or {}
             self.ask_tab.append_note(
+                self._active_or_new_key(),
                 _i18n_t("note.assets_built"),
                 f"```json\n{json.dumps(stats, ensure_ascii=False, indent=2)}\n```",
             )
-            if not stats.get("estimated_queries"):  # a dry-run changes no assets
+            if not stats.get("estimated_queries"):
                 self.bus.emit(ASSETS_CHANGED, {"instance": self.current_connection()})
             self.switch_tab("Ask")
             if stats.get("estimated_queries"):
@@ -935,80 +980,219 @@ class MainWindow(QMainWindow):
                     + f" · {stats.get('total_queries', 0)} queries · peak {stats.get('peak_inflight', 0)}"
                 )
             return
-        if action == "ask":
-            self.right.trace.end_live()
-            # Track the chat session this turn belongs to (created lazily server-side).
-            self.current_session_id = str(result.get("session_id") or self.current_session_id)
-            if str(result.get("status") or "") == "wait_user":
-                self._pending_resume = result.get("resume_state")
-                self._last_question = str(result.get("question") or self._last_question)
-                self.ask_tab.append_result(result)
-                # Keep the rich live trace of the steps that led to the question;
-                # only fall back to the (sparser) persisted trace if nothing was
-                # captured live.
-                if self.right.trace.is_empty():
-                    self.right.show_trace(result.get("trace") or [])
-                self.composer.set_placeholder(_i18n_t("composer.placeholder.reply"))
-                self.toast(_i18n_t("toast.waiting_reply"))
-                return
-            self._pending_resume = None
-            if str(result.get("status") or "") == "cancelled":
-                if getattr(self.ask_tab, "_turn_open", False):
-                    self.ask_tab.finish_turn_error("**Cancelled**: Task stopped by user.")
-                self.toast(_i18n_t("toast.cancelled"))
-                return
-            self.ask_tab.append_result(result)
-            # Keep the rich live trace (finalized above); only fall back to the
-            # persisted trace if nothing was captured live, so the view doesn't
-            # jump from a detailed run to a sparser summary.
-            if self.right.trace.is_empty():
-                self.right.show_trace(result.get("trace") or [])
-            self.bus.emit(QUERY_COMPLETED, {"instance": self.current_connection()})
-            self._restore_composer_placeholder()
-            return
         if action == "search_assets":
             self.right.show_search_hits(self._last_question, result)
             return
-        if action == "preview_asset":
+        if action in ("preview_asset", "asset_markdown"):
             self.right.show_inspector(
-                markdown=result.get("markdown") or "",
-                doc=result.get("doc"),
-                focus=True,
+                markdown=result.get("markdown") or "", doc=result.get("doc"), focus=True,
             )
             return
         if action == "execute_sql":
             self.sql_tab.show_result(result)
             self.bus.emit(QUERY_COMPLETED, {"instance": self.current_connection()})
             return
-        if action == "asset_markdown":
-            self.right.show_inspector(
-                markdown=result.get("markdown") or "",
-                doc=result.get("doc"),
-                focus=True,
-            )
-            return
         if action == "load_history":
-            self.ask_tab.append_result(result)
-            self.right.show_trace(result.get("trace") or [])
+            key = self._active_or_new_key()
+            self.ask_tab.append_result(key, result)
+            self._slot_trace[key] = list(result.get("trace") or [])
+            if key == self._active_key:
+                self.right.show_trace(result.get("trace") or [])
             self.switch_tab("Ask")
             return
         if action == "test_connection":
             self.toast(str(result.get("message") or _i18n_t("toast.connection_ok")))
 
-    def handle_failure(self, exc: object) -> None:
-        self._current_worker = None
-        self.running = False
-        self.composer.set_running(False)
+    def _on_oneoff_failed(self, exc: object) -> None:
+        action = self._oneoff_action
+        self._oneoff_worker = None
+        self._oneoff_action = ""
+        self._building = False
         self.sql_tab.set_running(False)
         self.right.trace.end_live()
+        self._sync_active_ui()
+        self._refresh_run_status()
         if isinstance(exc, CancelledError):
-            if getattr(self.ask_tab, "_turn_open", False):
-                self.ask_tab.finish_turn_error("**Cancelled**: Task stopped by user.")
             self.toast(_i18n_t("toast.cancelled"))
-            self._restore_status_badge()
             return
-        self.fail(exc, modal=self._last_action not in ("ask", "preview_asset", "search_assets"))
-        self._restore_status_badge()
+        if action == "execute_sql":
+            self.sql_tab.show_error(str(exc))
+            self.toast(str(exc))
+            return
+        self.fail(exc, modal=action not in ("preview_asset", "search_assets"))
+
+    # ── Conversation runs (one per session, capped + queued) ──────────────────
+
+    def _new_slot_key(self) -> str:
+        self._new_counter += 1
+        return f"new:{self._new_counter}"
+
+    def _active_or_new_key(self) -> str:
+        """The active slot key, minting (and activating) a fresh one if there is none."""
+        if not self._active_key:
+            self._active_key = self._new_slot_key()
+            self.current_session_id = ""
+            self.ask_tab.set_active(self._active_key)
+        return self._active_key
+
+    def _start_ask(self, key: str, payload: dict[str, Any]) -> None:
+        if len(self._runs) >= self._max_runs:
+            self._run_queue.append((key, payload))   # waits for a free slot
+            self.toast(_i18n_t("toast.run_queued"))
+            self._sync_active_ui()
+            self._refresh_run_status()
+            return
+        self._launch_ask(key, payload)
+
+    def _launch_ask(self, key: str, payload: dict[str, Any]) -> None:
+        worker = ServiceWorker(self.service, "ask", payload)
+        worker.signals.progress.connect(lambda m, k=key: self._on_ask_progress(k, m))
+        worker.signals.done.connect(lambda _a, r, k=key: self._on_ask_done(k, r))
+        worker.signals.failed.connect(lambda e, k=key: self._on_ask_failed(k, e))
+        self._runs[key] = worker
+        self._sync_active_ui()
+        self._refresh_run_status()
+        self.pool.start(worker)
+
+    def _on_ask_progress(self, key: str, message: object) -> None:
+        if key not in self._runs:
+            return
+        if isinstance(message, dict):
+            self._slot_trace.setdefault(key, []).append(message)
+            self.ask_tab.append_activity_event(key, message)
+            if key == self._active_key:
+                self.statusbar.showMessage(progress_label(message))
+                self.right.trace.append_live_event(message)
+        else:
+            text = str(message or "").strip()
+            if text:
+                self.ask_tab.append_activity(key, text)
+                if key == self._active_key:
+                    self.statusbar.showMessage(progress_label(text))
+                    self.right.trace.append_live(text)
+
+    def _on_ask_done(self, key: str, result: Any) -> None:
+        self._runs.pop(key, None)
+        server_id = str(result.get("session_id") or self._slot_session.get(key) or "")
+        # A new chat's temp key becomes its server session_id once known.
+        if server_id and server_id != key and not self.ask_tab.has_slot(server_id):
+            self._migrate_slot(key, server_id)
+            key = server_id
+        self._slot_session[key] = server_id
+        if result.get("trace"):
+            self._slot_trace[key] = list(result.get("trace") or [])
+        status = str(result.get("status") or "")
+        if status == "wait_user":
+            self._pending_resume[key] = result.get("resume_state") or {}
+            self._slot_question[key] = str(result.get("question") or self._slot_question.get(key, ""))
+            self.ask_tab.append_result(key, result)
+            if key == self._active_key:
+                if self.right.trace.is_empty():
+                    self.right.show_trace(result.get("trace") or [])
+                self.toast(_i18n_t("toast.waiting_reply"))
+        elif status == "cancelled":
+            self._pending_resume.pop(key, None)
+            if self.ask_tab.turn_open(key):
+                self.ask_tab.finish_turn_error(key, "**Cancelled**: Task stopped by user.")
+            self.toast(_i18n_t("toast.cancelled"))
+        else:
+            self._pending_resume.pop(key, None)
+            self.ask_tab.append_result(key, result)
+            if key == self._active_key and self.right.trace.is_empty():
+                self.right.show_trace(result.get("trace") or [])
+            self.bus.emit(QUERY_COMPLETED, {"instance": self.current_connection()})
+        if key == self._active_key:
+            self.current_session_id = server_id or self.current_session_id
+            self.right.trace.end_live()
+        # A new session was persisted → refresh the Chats list so it appears.
+        if server_id:
+            self._load_sessions(self.current_connection())
+        self._drain_queue()
+        self._sync_active_ui()
+        self._refresh_run_status()
+
+    def _on_ask_failed(self, key: str, exc: object) -> None:
+        self._runs.pop(key, None)
+        self._pending_resume.pop(key, None)
+        if self.ask_tab.turn_open(key):
+            msg = ("**Cancelled**: Task stopped by user."
+                   if isinstance(exc, CancelledError) else f"**Error**: {exc}")
+            self.ask_tab.finish_turn_error(key, msg)
+        if key == self._active_key:
+            self.right.trace.end_live()
+        self.toast(_i18n_t("toast.cancelled") if isinstance(exc, CancelledError) else str(exc))
+        self._drain_queue()
+        self._sync_active_ui()
+        self._refresh_run_status()
+
+    def _migrate_slot(self, old: str, new: str) -> None:
+        self.ask_tab.remap(old, new)
+        for d in (self._pending_resume, self._slot_question, self._slot_session, self._slot_trace, self._runs):
+            if old in d:
+                d[new] = d.pop(old)
+        self._run_queue = [(new if k == old else k, p) for k, p in self._run_queue]
+        if self._active_key == old:
+            self._active_key = new
+
+    def _drain_queue(self) -> None:
+        while self._run_queue and len(self._runs) < self._max_runs:
+            key, payload = self._run_queue.pop(0)
+            if not self.ask_tab.has_slot(key):
+                continue
+            self._launch_ask(key, payload)
+
+    def stop_task(self) -> None:
+        key = self._active_key
+        worker = self._runs.get(key) if key else None
+        if worker and not worker.is_cancelled:
+            worker.cancel()
+            self.toast(_i18n_t("toast.cancelling"))
+            return
+        # Drop a still-queued active run.
+        if key and any(k == key for k, _ in self._run_queue):
+            self._run_queue = [(k, p) for k, p in self._run_queue if k != key]
+            if self.ask_tab.turn_open(key):
+                self.ask_tab.finish_turn_error(key, "**Cancelled**: Task stopped by user.")
+            self._sync_active_ui()
+            self._refresh_run_status()
+            return
+        if self._oneoff_worker and not self._oneoff_worker.is_cancelled:
+            self._oneoff_worker.cancel()
+            self.toast(_i18n_t("toast.cancelling"))
+            return
+        self.right.trace.end_live()
+        self._sync_active_ui()
+        self._refresh_run_status()
+
+    def _sync_active_ui(self) -> None:
+        """Reflect the *active* slot's run state in the composer + status."""
+        if not self.current_connection():
+            self.composer.set_disabled_no_connection(True)
+            return
+        self.composer.set_disabled_no_connection(False)
+        key = self._active_key
+        running = bool(key and key in self._runs)
+        queued = any(k == key for k, _ in self._run_queue)
+        waiting = bool(key and key in self._pending_resume)
+        busy = running or queued or self._building
+        self.composer.set_running(busy)
+        if not busy:
+            if waiting:
+                self.composer.set_placeholder(_i18n_t("composer.placeholder.reply"))
+            else:
+                self._restore_composer_placeholder()
+
+    def _refresh_run_status(self) -> None:
+        active = len(self._runs) + len(self._run_queue)
+        if self._building:
+            self.topbar.set_global_status("Building assets", "building")
+        elif active > 0:
+            self.topbar.set_global_status(_i18n_t("status.runs_active", n=active), "running")
+        else:
+            self._restore_status_badge()
+        running_ids = {(self._slot_session.get(k) or k) for k in self._runs}
+        running_ids |= {(self._slot_session.get(k) or k) for k, _ in self._run_queue}
+        self.sidebar.chats.set_running(running_ids)
 
     def _restore_status_badge(self) -> None:
         conn = self.current_connection()
@@ -1049,14 +1233,11 @@ class MainWindow(QMainWindow):
 
     def fail(self, exc: object, *, modal: bool = True) -> None:
         msg = f"**{type(exc).__name__}**: {exc}"
-        if getattr(self.ask_tab, "_turn_open", False):
-            self.ask_tab.finish_turn_error(msg)
-        elif self._last_action in ("ask", "preview_asset", "search_assets"):
-            self.ask_tab.append_note(_i18n_t("note.error"), msg)
+        key = self._active_or_new_key()
+        if self.ask_tab.turn_open(key):
+            self.ask_tab.finish_turn_error(key, msg)
         else:
-            self.ask_tab.append_note(_i18n_t("note.error"), msg)
-        if self._last_action == "execute_sql":
-            self.sql_tab.show_error(str(exc))
+            self.ask_tab.append_note(key, _i18n_t("note.error"), msg)
         if modal:
             QMessageBox.warning(self, "DBAide", str(exc))
         else:

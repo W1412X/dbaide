@@ -64,6 +64,9 @@ class _SessionRow(QWidget):
         layout.setContentsMargins(6, 8, 6, 8)
         layout.setSpacing(3)
         self._full_title = title
+        title_row = QHBoxLayout()
+        title_row.setContentsMargins(0, 0, 0, 0)
+        title_row.setSpacing(6)
         self._title = QLabel(title)
         self._title.setFont(_TITLE_FONT)
         self._title.setStyleSheet(f"color: {Theme.TEXT}; background: transparent;")
@@ -72,11 +75,27 @@ class _SessionRow(QWidget):
         self._title.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
         # Cap the visible title at two lines (a 3rd would just clip — rare for a title).
         self._title.setMaximumHeight(_TITLE_MAX_LINES * QFontMetrics(_TITLE_FONT).lineSpacing())
+        title_row.addWidget(self._title, 1)
+        # A small spinner shown while this session has an in-flight (or queued) run.
+        self._spinner = QLabel()
+        self._spinner.setFixedSize(14, 14)
+        self._spinner.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self._spinner.setStyleSheet("background: transparent;")
+        self._spinner.hide()
+        title_row.addWidget(self._spinner, 0, Qt.AlignmentFlag.AlignTop)
+        layout.addLayout(title_row)
         sub = QLabel(subtitle)
         sub.setFont(_SUB_FONT)
         sub.setStyleSheet(f"color: {Theme.MUTED}; background: transparent;")
-        layout.addWidget(self._title)
         layout.addWidget(sub)
+
+    def set_running(self, running: bool, *, angle: float = 0.0) -> None:
+        if running:
+            from dbaide.desktop.components.spinner import spinner_pixmap
+            self._spinner.setPixmap(spinner_pixmap(angle, size=13, color=Theme.BLUE))
+            self._spinner.show()
+        else:
+            self._spinner.hide()
 
     def title(self) -> str:
         return self._full_title
@@ -131,6 +150,37 @@ class SessionList(QWidget):
 
         self._current = ""
         self._empty: QListWidgetItem | None = None
+        # Session ids with an in-flight/queued run — their rows show a spinner driven
+        # by one shared animator (no per-row timers).
+        self._running_ids: set[str] = set()
+        from dbaide.desktop.components.spinner import BusyAnimator
+        self._busy = BusyAnimator(self._tick_spinners)
+
+    def set_running(self, ids: set[str]) -> None:
+        """Mark which session ids are currently running (spinner on their rows)."""
+        self._running_ids = set(ids or set())
+        self._apply_running()
+        if self._running_ids and not self._busy.active:
+            self._busy.start()
+        elif not self._running_ids and self._busy.active:
+            self._busy.stop()
+
+    def _apply_running(self) -> None:
+        for i in range(self.list.count()):
+            it = self.list.item(i)
+            w = self.list.itemWidget(it)
+            if isinstance(w, _SessionRow):
+                sid = str(it.data(_ID_ROLE) or "")
+                w.set_running(sid in self._running_ids, angle=self._busy.angle)
+
+    def _tick_spinners(self) -> None:
+        for i in range(self.list.count()):
+            it = self.list.item(i)
+            w = self.list.itemWidget(it)
+            if isinstance(w, _SessionRow):
+                sid = str(it.data(_ID_ROLE) or "")
+                if sid in self._running_ids:
+                    w.set_running(True, angle=self._busy.angle)
 
     def load(self, sessions: list[dict[str, Any]]) -> None:
         self.list.clear()
@@ -164,6 +214,7 @@ class SessionList(QWidget):
             item.setSizeHint(QSize(0, _SessionRow.height_for(title, content_width=content_w)))
             self.list.addItem(item)
             self.list.setItemWidget(item, row)
+        self._apply_running()  # restore spinners after a rebuild
 
     def resizeEvent(self, event) -> None:  # noqa: N802
         # Recompute row heights for the current width (load may run before layout,

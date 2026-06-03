@@ -153,6 +153,20 @@ class TracePanel(QWidget):
         self._detail.clear()
         self._render()
 
+    def show_events(self, events: list[dict[str, Any]], *, live: bool) -> None:
+        """Rebuild the view from a session's accumulated events. ``live=True`` leaves
+        the model un-finalized (the run is still going), so switching into a
+        still-running session shows its in-progress trace; ``live=False`` finalizes."""
+        model = TraceModel()
+        for event in events or []:
+            model.ingest(event)
+        if not live:
+            model.finalize()
+        self._model = model
+        self._selected_id = ""
+        self._detail.clear()
+        self._render()
+
     def append_live(self, message: str) -> None:
         if not message.strip():
             return

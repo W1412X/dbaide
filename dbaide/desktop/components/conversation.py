@@ -602,6 +602,11 @@ class ConversationView(QScrollArea):
             blocks.append("\n".join(parts))
         return ("\n\n" + "─" * 60 + "\n\n").join(blocks)
 
+    def has_open_turn(self) -> bool:
+        """True while a turn is mid-run (thinking / awaiting reply) — i.e. this
+        session has an in-flight conversation."""
+        return self._current_turn is not None
+
     def finish_turn_error(self, message: str) -> None:
         if self._current_turn:
             events = list((self._current_record or {}).get("events") or [])

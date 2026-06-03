@@ -88,15 +88,13 @@ def _wait_user_result():
     }
 
 
-def test_clarification_reply_not_lost_when_another_action_in_flight(qapp, tmp_path):
-    """Regression: replying to a clarification while another worker (e.g. a schema
-    preview / search / refresh) is still in flight must NOT consume the pause state.
+class _FakeWorker:
+    is_cancelled = False
+    def cancel(self):
+        self.is_cancelled = True
 
-    Previously _submit_clarification hid the bar and cleared _pending_resume *before*
-    run_action's busy-guard rejected the resume — losing the reply and stranding the
-    user with no options to click and no way to resume. The reply must survive so the
-    user can submit again once the other action finishes.
-    """
+
+def _make_window(tmp_path):
     import sqlite3
     from dbaide.assets import AssetStore
     from dbaide.config import ConfigManager
@@ -110,63 +108,52 @@ def test_clarification_reply_not_lost_when_another_action_in_flight(qapp, tmp_pa
     c.commit(); c.close()
     cfg = ConfigManager(path=tmp_path / "config.toml")
     cfg.upsert_connection(ConnectionConfig(name="local", type="sqlite", path=str(db)), make_default=True)
-    service = DesktopService(cfg, AssetStore(tmp_path / "assets"))
+    return MainWindow(DesktopService(cfg, AssetStore(tmp_path / "assets")))
 
-    win = MainWindow(service)
-    _drain(qapp)  # bootstrap selects the connection
 
-    # The agent paused for a clarification → the bar is shown, _pending_resume is set.
-    win.handle_result("ask", _wait_user_result())
-    assert win._pending_resume is not None
-    assert win.ask_tab.conversation._clarification_bar is not None
-    bar = win.ask_tab.conversation._clarification_bar
+def _arm_clarification(win, key="sessA"):
+    """Put the active slot into a wait-for-reply state (a clarification is pending)."""
+    win.ask_tab.ensure_slot(key)
+    win._active_key = key
+    win.ask_tab.set_active(key)
+    win._slot_session[key] = key
+    win._pending_resume[key] = {"question": "count paid orders by city"}
+    win._slot_question[key] = "count paid orders by city"
+    return key
 
-    # Now another action is in flight (a stray preview/search/refresh worker).
-    win.running = True
-    win._current_worker = object()
 
-    # The user clicks an option chip → submits the reply.
-    win._submit_clarification("UTC")
+def test_clarification_reply_queues_when_at_cap(qapp, tmp_path):
+    """A clarification reply submitted while every run slot is busy must be QUEUED,
+    never lost — it starts automatically when a slot frees."""
+    win = _make_window(tmp_path)
+    _drain(qapp)
+    key = _arm_clarification(win)
 
-    # The pause state and the bar must be preserved (reply not lost), so the user can
-    # answer again once the other action finishes — NOT stranded with no options.
-    assert win._pending_resume is not None, "resume state was wiped while busy — reply lost"
-    assert win.ask_tab.conversation._clarification_bar is bar, "bar was hidden while busy"
+    # Saturate the run cap with another (fake) in-flight run.
+    win._max_runs = 1
+    win._runs["other"] = _FakeWorker()
+
+    win._submit_clarification(key, "UTC")
+
+    # The reply became a queued run for this slot (not dropped).
+    assert any(k == key for k, _ in win._run_queue), "reply was lost instead of queued"
+    assert key not in win._pending_resume, "pause should be consumed once the reply is in the queue"
 
     win.deleteLater()
     qapp.processEvents()
 
 
-def test_clarification_reply_proceeds_when_idle(qapp, tmp_path):
-    """Happy path: with no other action in flight, submitting a clarification reply
-    consumes the pause state and starts the resume."""
-    import sqlite3
-    from dbaide.assets import AssetStore
-    from dbaide.config import ConfigManager
-    from dbaide.desktop.service import DesktopService
-    from dbaide.desktop.views.main_window import MainWindow
-    from dbaide.models import ConnectionConfig
-
-    db = tmp_path / "app.db"
-    c = sqlite3.connect(db)
-    c.executescript("CREATE TABLE t(id INTEGER PRIMARY KEY); INSERT INTO t VALUES (1);")
-    c.commit(); c.close()
-    cfg = ConfigManager(path=tmp_path / "config.toml")
-    cfg.upsert_connection(ConnectionConfig(name="local", type="sqlite", path=str(db)), make_default=True)
-    service = DesktopService(cfg, AssetStore(tmp_path / "assets"))
-
-    win = MainWindow(service)
+def test_clarification_reply_launches_when_idle(qapp, tmp_path):
+    """With a free slot, the reply launches the resume run immediately."""
+    win = _make_window(tmp_path)
     _drain(qapp)
+    key = _arm_clarification(win)
 
-    win.handle_result("ask", _wait_user_result())
-    assert win._pending_resume is not None
+    win._submit_clarification(key, "UTC")
+    # A worker was launched for this slot (resume in flight), pause consumed.
+    assert key in win._runs, "idle reply should launch the resume"
+    assert key not in win._pending_resume
 
-    # Idle (no worker) → the reply is accepted and the pause state is consumed.
-    win.running = False
-    win._current_worker = None
-    win._submit_clarification("UTC")
-    assert win._pending_resume is None, "idle reply should consume the pause state and resume"
-
-    _drain(qapp)  # let the resume worker finish so it doesn't outlive the test
+    _drain(qapp)  # let it finish so it doesn't outlive the test
     win.deleteLater()
     qapp.processEvents()
