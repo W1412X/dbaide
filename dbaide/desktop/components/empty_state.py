@@ -3,6 +3,7 @@ from __future__ import annotations
 from PyQt6.QtCore import Qt
 from PyQt6.QtWidgets import QLabel, QSizePolicy, QVBoxLayout, QWidget
 
+from dbaide.desktop.components.icons import svg_pixmap
 from dbaide.desktop.theme import Theme
 
 _COLUMN_WIDTH = 460
@@ -14,6 +15,8 @@ class EmptyState(QWidget):
         title: str,
         body: str,
         actions: list | None = None,
+        *,
+        icon: str = "database",
         parent=None,
     ) -> None:
         super().__init__(parent)
@@ -28,11 +31,23 @@ class EmptyState(QWidget):
         column.setFixedWidth(_COLUMN_WIDTH)
         col_layout = QVBoxLayout(column)
         col_layout.setContentsMargins(0, 0, 0, 0)
-        col_layout.setSpacing(10)
+        col_layout.setSpacing(8)
+        col_layout.setAlignment(Qt.AlignmentFlag.AlignHCenter)
+
+        # A soft icon tile leads the empty state (Codex/Cursor style) — gives the
+        # otherwise-bare column a calm focal point.
+        if icon:
+            tile = QLabel()
+            tile.setFixedSize(52, 52)
+            tile.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            tile.setPixmap(svg_pixmap(icon, color=Theme.TEXT_2, size=26))
+            tile.setStyleSheet(f"background: {Theme.PANEL_2}; border-radius: 14px;")
+            col_layout.addWidget(tile, alignment=Qt.AlignmentFlag.AlignHCenter)
+            col_layout.addSpacing(6)
 
         title_label = QLabel(title)
         title_label.setWordWrap(True)
-        title_label.setStyleSheet("font-size:20px;font-weight:800;")
+        title_label.setStyleSheet(f"color: {Theme.TEXT}; font-size:18px; font-weight:600;")
         title_label.setAlignment(Qt.AlignmentFlag.AlignHCenter)
 
         body_label = QLabel(body)
