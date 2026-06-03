@@ -34,6 +34,8 @@ class SqlTab(QWidget):
             f"QPlainTextEdit:focus {{ border: 1px solid {Theme.FOCUS}; }}"
         )
         self.editor.installEventFilter(self)  # ⌘↵ to run
+        from dbaide.desktop.components.sql_highlighter import SqlHighlighter
+        self._highlighter = SqlHighlighter(self.editor.document())
         layout.addWidget(self.editor, 2)
 
         # ── Run row: a quiet ⌘↵ hint on the left, the primary Run on the right
