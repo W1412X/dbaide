@@ -88,19 +88,19 @@ class WorkbenchView(QWidget):
         self.tabs.tabBar().setUsesScrollButtons(True)
         self.tabs.tabBar().setElideMode(Qt.TextElideMode.ElideRight)
         self.tabs.tabBar().setExpanding(False)
-        # In document mode the macOS-native tab bar paints its own (dark) base that the
-        # QSS `background` doesn't reliably override — it read as a dark strip in light
-        # mode. Force the bar + its pane/corner to the theme background via the palette
-        # (autofilled), which the native style does honour.
+        # In document mode the macOS-native tab bar paints its own base that the QSS
+        # `background` doesn't reliably override. Force the bar + pane to the content
+        # SURFACE via the palette (autofilled) so the whole tab area is one continuous
+        # surface — no stark near-black band above the editor, in either theme.
         from PyQt6.QtGui import QColor, QPalette
         for w in (self.tabs, self.tabs.tabBar()):
             w.setAutoFillBackground(True)
             pal = w.palette()
-            pal.setColor(QPalette.ColorRole.Window, QColor(Theme.BG))
+            pal.setColor(QPalette.ColorRole.Window, QColor(Theme.SURFACE))
             w.setPalette(pal)
         self.tabs.setStyleSheet(
             f"QTabWidget::pane {{ border: none; background: {Theme.SURFACE}; }}"
-            f"QTabWidget {{ background: {Theme.BG}; }}"
+            f"QTabWidget {{ background: {Theme.SURFACE}; }}"
         )
         layout.addWidget(self.tabs)
 
@@ -115,7 +115,7 @@ class WorkbenchView(QWidget):
         hist_btn = self._corner_icon("clock", t("tab.history"), self.focus_history)
         holder = QWidget()
         hl = QHBoxLayout(holder)
-        hl.setContentsMargins(4, 0, 8, 0)   # no vertical margin → fits the slim tab row
+        hl.setContentsMargins(4, 0, 2, 0)   # right≈flush so the icons line up with the editor strip
         hl.setSpacing(2)
         hl.addWidget(new_btn)
         hl.addWidget(hist_btn)
@@ -134,10 +134,12 @@ class WorkbenchView(QWidget):
         btn.setIconSize(QSize(14, 14))
         btn.setToolTip(tooltip)
         btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        btn.setFixedSize(22, 20)
+        # 26px wide to line up with the editor's right-edge action strip (Run/Explain/
+        # Format are 26px), so the corner icons and that strip read as one column.
+        btn.setFixedSize(26, 20)
         btn.setStyleSheet(
             f"QToolButton {{ background: transparent; border: none; border-radius: 5px;"
-            f" padding: 0; margin: 0; min-width: 22px; max-width: 22px;"
+            f" padding: 0; margin: 0; min-width: 26px; max-width: 26px;"
             f" min-height: 20px; max-height: 20px; }}"
             f"QToolButton:hover {{ background: {Theme.PANEL_2}; }}"
         )

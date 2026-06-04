@@ -515,10 +515,11 @@ QTabBar[segmented="true"]::tab:last {{
     border-bottom-right-radius: 8px;
 }}
 QTabBar[panelTabs="true"] {{
-    /* Theme the bar AREA itself (behind/around the tabs). Without this the native
-       macOS style paints it with the system appearance — a dark strip in light
-       mode. */
-    background: {T.BG};
+    /* Theme the bar AREA itself (behind/around the tabs). SURFACE (the content
+       surface) — not the near-black BG — so the bar blends with the editor/results
+       below instead of reading as a stark dark band. Also stops the native macOS
+       style painting a system-appearance strip. */
+    background: {T.SURFACE};
 }}
 QTabBar[panelTabs="true"]::tab {{
     background: transparent;
