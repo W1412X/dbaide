@@ -49,21 +49,36 @@ def test_pretty_value_json():
     assert _pretty_value({"k": "v"}).strip().startswith("{")
 
 
-def test_value_viewer_toggle_and_update(qapp):
+def test_full_cell_popup_pretty_prints_json(qapp):
+    """The inline value-viewer toggle was removed; double-clicking a cell now opens a
+    dialog with the full value, pretty-printing JSON."""
+    from dbaide.desktop.components import table as table_mod
+
     w = ResultTableWidget()
-    w.show()
     w.load(columns=["id", "meta"],
            rows=[{"id": 1, "meta": '{"x":1}'}, {"id": 2, "meta": "hi"}], row_count=2)
-    assert not w._viewer.isVisible()
-    w.value_toggle.setChecked(True)
-    assert w._viewer.isVisible()
-    w.table.setCurrentCell(0, 1)
-    qapp.processEvents()
-    assert w._viewer_label.text() == "meta"
-    assert '"x": 1' in w._viewer_text.toPlainText()
-    w.value_toggle.setChecked(False)
-    assert not w._viewer.isVisible()
-    w.close()
+    # The removed sidebar toggle/viewer no longer exist.
+    assert not hasattr(w, "value_toggle")
+    assert not hasattr(w, "_viewer")
+
+    captured = {}
+
+    class _FakeDialog:
+        def __init__(self, column, value, *, parent=None):
+            captured["column"] = column
+            captured["value"] = value
+
+        def exec(self):
+            return 0
+
+    orig = table_mod.CellValueDialog
+    table_mod.CellValueDialog = _FakeDialog
+    try:
+        w._show_full_cell(0, 1)
+    finally:
+        table_mod.CellValueDialog = orig
+    assert captured["column"] == "meta"
+    assert '"x": 1' in captured["value"]  # JSON pretty-printed in the popup
 
 
 def test_write_file(qapp, tmp_path):

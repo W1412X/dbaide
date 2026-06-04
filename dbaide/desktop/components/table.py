@@ -14,10 +14,8 @@ from PyQt6.QtWidgets import (
     QLabel,
     QPlainTextEdit,
     QPushButton,
-    QSplitter,
     QTableWidget,
     QTableWidgetItem,
-    QToolButton,
     QVBoxLayout,
     QWidget,
 )
@@ -50,21 +48,8 @@ class ResultTableWidget(QWidget):
         self.meta.setStyleSheet(f"color:{Theme.MUTED}; font-size:11px;")
         toolbar.addWidget(self.meta)
         toolbar.addStretch(1)
-        # Value-viewer toggle: a checkable button that reveals the inline panel
-        # showing the selected cell's full value (with JSON pretty-printing).
-        self.value_toggle = QToolButton()
-        self.value_toggle.setCheckable(True)
-        self.value_toggle.setIcon(svg_icon("panel-right", color=Theme.TEXT_2, size=15))
-        self.value_toggle.setToolTip(t("result.value_viewer"))
-        self.value_toggle.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.value_toggle.setFixedSize(26, 26)
-        self.value_toggle.setStyleSheet(
-            f"QToolButton {{ background: {Theme.PANEL_2}; border: none; border-radius: 7px; }}"
-            f"QToolButton:hover {{ background: {Theme.PANEL_3}; }}"
-            f"QToolButton:checked {{ background: {Theme.PANEL_3}; }}"
-        )
-        self.value_toggle.toggled.connect(self._toggle_value_viewer)
-        toolbar.addWidget(self.value_toggle)
+        # Double-clicking a cell opens its full value in a dialog, so the old inline
+        # value-viewer toggle is gone — only the Export menu remains here.
         self.export_menu = MenuButton(t("result.export"), max_width=96)
         self.export_menu.add_action(t("result.copy_csv"), self.copy_csv)
         self.export_menu.add_action(t("result.copy_json"), self.copy_json)
@@ -101,7 +86,6 @@ class ResultTableWidget(QWidget):
         # Long values are truncated for layout; double-click (or the tooltip) reveals
         # the full value.
         self.table.cellDoubleClicked.connect(self._show_full_cell)
-        self.table.itemSelectionChanged.connect(self._update_value_viewer)
         # Header right-click → auto-fit columns (kept off the click/double-click
         # gestures so it never collides with the data browser's sort-on-click).
         hh = self.table.horizontalHeader()
@@ -148,80 +132,7 @@ class ResultTableWidget(QWidget):
             """
         )
 
-        # Inline value viewer — hidden until toggled. Shows the selected cell's full
-        # value, pretty-printing JSON. Sits under the grid in a resizable splitter.
-        self._viewer = QWidget()
-        vlay = QVBoxLayout(self._viewer)
-        vlay.setContentsMargins(0, 6, 0, 0)
-        vlay.setSpacing(4)
-        vhead = QHBoxLayout()
-        vhead.setContentsMargins(2, 0, 2, 0)
-        self._viewer_label = QLabel("")
-        self._viewer_label.setStyleSheet(f"color: {Theme.MUTED}; font-size: 11px; font-weight: 600;")
-        vhead.addWidget(self._viewer_label)
-        vhead.addStretch(1)
-        self._viewer_copy = QToolButton()
-        self._viewer_copy.setIcon(svg_icon("copy", color=Theme.TEXT_2, size=14))
-        self._viewer_copy.setToolTip("Copy value")
-        self._viewer_copy.setCursor(Qt.CursorShape.PointingHandCursor)
-        self._viewer_copy.setFixedSize(26, 26)
-        self._viewer_copy.setStyleSheet(
-            f"QToolButton {{ background: transparent; border: none; border-radius: 6px; }}"
-            f"QToolButton:hover {{ background: {Theme.PANEL_3}; }}"
-        )
-        self._viewer_copy.clicked.connect(self._copy_value_viewer)
-        vhead.addWidget(self._viewer_copy)
-        vlay.addLayout(vhead)
-        self._viewer_text = QPlainTextEdit()
-        self._viewer_text.setReadOnly(True)
-        self._viewer_text.setFont(QFont("Menlo", 11))
-        self._viewer_text.setStyleSheet(
-            f"QPlainTextEdit {{ background: {Theme.CODE_BG}; border: 1px solid {Theme.BORDER_SOFT};"
-            f" border-radius: 8px; }}"
-        )
-        vlay.addWidget(self._viewer_text, 1)
-
-        self._split = QSplitter(Qt.Orientation.Vertical)
-        self._split.addWidget(self.table)
-        self._split.addWidget(self._viewer)
-        self._split.setStretchFactor(0, 3)
-        self._split.setStretchFactor(1, 1)
-        self._viewer.setVisible(False)
-        layout.addWidget(self._split)
-
-    def _toggle_value_viewer(self, on: bool) -> None:
-        self._viewer.setVisible(on)
-        if on:
-            if self._split.sizes()[1] == 0:
-                h = max(200, self._split.height())
-                self._split.setSizes([int(h * 0.7), int(h * 0.3)])
-            self._update_value_viewer()
-
-    def _current_cell(self) -> tuple[int, int] | None:
-        items = self.table.selectedItems()
-        if items:
-            return items[0].row(), items[0].column()
-        r, c = self.table.currentRow(), self.table.currentColumn()
-        return (r, c) if r >= 0 and c >= 0 else None
-
-    def _update_value_viewer(self) -> None:
-        if not self._viewer.isVisible():
-            return
-        cell = self._current_cell()
-        if cell is None:
-            self._viewer_label.setText("")
-            self._viewer_text.setPlainText("")
-            return
-        r, c = cell
-        if not (0 <= r < len(self._rows) and 0 <= c < len(self._columns)):
-            return
-        col = self._columns[c]
-        value = self._rows[r].get(col)
-        self._viewer_label.setText(col)
-        self._viewer_text.setPlainText(_pretty_value(value))
-
-    def _copy_value_viewer(self) -> None:
-        QApplication.clipboard().setText(self._viewer_text.toPlainText())
+        layout.addWidget(self.table)
 
     def load(
         self,
@@ -298,7 +209,8 @@ class ResultTableWidget(QWidget):
             return
         column = self._columns[col]
         value = self._rows[row].get(column)
-        CellValueDialog(column, _full_text(value), parent=self).exec()
+        # Pretty-print JSON values (the popup replaces the old inline value viewer).
+        CellValueDialog(column, _pretty_value(value), parent=self).exec()
 
     def set_table_name(self, name: str) -> None:
         """Hint used by 'Copy as INSERT' (e.g. the browsed table's name)."""

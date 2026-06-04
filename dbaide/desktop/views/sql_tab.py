@@ -2,9 +2,15 @@ from __future__ import annotations
 
 from PyQt6.QtCore import QEvent, QSize, Qt, pyqtSignal
 from PyQt6.QtGui import QFont
-from PyQt6.QtWidgets import QHBoxLayout, QLabel, QTabWidget, QTextBrowser, QVBoxLayout, QWidget
+from PyQt6.QtWidgets import (
+    QHBoxLayout,
+    QTabWidget,
+    QTextBrowser,
+    QToolButton,
+    QVBoxLayout,
+    QWidget,
+)
 
-from dbaide.desktop.components.base import compact_button
 from dbaide.desktop.components.icons import svg_icon
 from dbaide.desktop.components.sql_editor import SqlEditor
 from dbaide.desktop.components.inputs import configure_multiline_text_edit, configure_readonly_text_view
@@ -24,7 +30,10 @@ class SqlTab(QWidget):
         from dbaide.i18n import t
         self._t = t
 
-        # ── Editor ────────────────────────────────────────────────────────────
+        # ── Editor + a vertical strip of small action icons on its right edge ───
+        editor_row = QHBoxLayout()
+        editor_row.setContentsMargins(0, 0, 0, 0)
+        editor_row.setSpacing(6)
         self.editor = SqlEditor()
         self.editor.setPlaceholderText(t("sql.placeholder"))
         self.editor.setFont(QFont("Menlo", 11))
@@ -37,36 +46,31 @@ class SqlTab(QWidget):
         self.editor.installEventFilter(self)  # ⌘↵ to run
         from dbaide.desktop.components.sql_highlighter import SqlHighlighter
         self._highlighter = SqlHighlighter(self.editor.document())
-        layout.addWidget(self.editor, 2)
+        editor_row.addWidget(self.editor, 1)
 
-        # ── Run row: a quiet ⌘↵ hint on the left, the primary Run on the right
-        # (mirrors the chat composer's bottom-right send). ──────────────────────
-        run_row = QHBoxLayout()
-        run_row.setContentsMargins(2, 0, 2, 0)
-        run_row.setSpacing(6)
-        hint = QLabel(t("sql.run_hint"))
-        hint.setStyleSheet(f"color: {Theme.MUTED_2}; font-size: 11px; background: transparent;")
-        # Let the hint shrink (and clip) so it never crowds or overlaps the action
-        # buttons on a narrow editor pane — the buttons keep their full width.
-        from PyQt6.QtWidgets import QSizePolicy
-        hint.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
-        run_row.addWidget(hint, 1)
-        self.format_btn = compact_button(t("sql.format"), width=84)
-        self.format_btn.setToolTip(t("sql.format_tooltip"))
-        self.format_btn.clicked.connect(self._format)
-        run_row.addWidget(self.format_btn)
-        self.explain_btn = compact_button(t("sql.explain"), width=84)
-        self.explain_btn.setToolTip(t("sql.explain_tooltip"))
-        self.explain_btn.clicked.connect(self._explain)
-        run_row.addWidget(self.explain_btn)
-        self.run_btn = compact_button(t("sql.run"), primary=True, width=92)
-        self.run_btn.setIcon(svg_icon("play", color="#ffffff", size=13))
-        self.run_btn.setIconSize(QSize(13, 13))
-        self.run_btn.setToolTip(t("sql.run_tooltip"))
+        actions = QVBoxLayout()
+        actions.setContentsMargins(0, 0, 0, 0)
+        actions.setSpacing(6)
+        # Run is the accented primary action; Explain (execution plan) and Format are
+        # quiet secondary icons. ⌘↵ runs, ⌘⇧F formats (tooltips spell these out).
+        self.run_btn = self._icon_button("play", f"{t('sql.run')} · ⌘↵", primary=True)
         self.run_btn.clicked.connect(self._run)
-        run_row.addWidget(self.run_btn)
-        layout.addLayout(run_row)
-        self._busy = BusyAnimator(lambda: self.run_btn.setIcon(spinner_icon(self._busy.angle, color="#ffffff")))
+        actions.addWidget(self.run_btn)
+        self.explain_btn = self._icon_button("list-tree", t("sql.explain_tooltip"))
+        self.explain_btn.clicked.connect(self._explain)
+        actions.addWidget(self.explain_btn)
+        self.format_btn = self._icon_button("sparkles", f"{t('sql.format')} · ⌘⇧F")
+        self.format_btn.clicked.connect(self._format)
+        actions.addWidget(self.format_btn)
+        actions.addStretch(1)
+        editor_row.addLayout(actions)
+        # The editor auto-grows with its content (composer-style); give the row its
+        # natural height and let the results grid below take the remaining space, so
+        # there's no dead gap around a short query.
+        layout.addLayout(editor_row)
+        self._busy = BusyAnimator(
+            lambda: self.run_btn.setIcon(spinner_icon(self._busy.angle, color=Theme.ACCENT_TEXT, size=15))
+        )
 
         # ── Results ───────────────────────────────────────────────────────────
         self.tabs = QTabWidget()
@@ -84,6 +88,29 @@ class SqlTab(QWidget):
         self.tabs.addTab(self.result_table, t("sql.result"))
         self.tabs.addTab(self.messages, t("sql.messages"))
         layout.addWidget(self.tabs, 1)
+
+    def _icon_button(self, icon_name: str, tooltip: str, *, primary: bool = False) -> QToolButton:
+        """A small square icon button for the editor's right-edge action strip."""
+        btn = QToolButton()
+        color = Theme.ACCENT_TEXT if primary else Theme.TEXT_2
+        btn.setIcon(svg_icon(icon_name, color=color, size=15))
+        btn.setIconSize(QSize(15, 15))
+        btn.setToolTip(tooltip)
+        btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        btn.setFixedSize(30, 30)
+        if primary:
+            btn.setStyleSheet(
+                f"QToolButton {{ background: {Theme.ACCENT}; border: none; border-radius: 8px; }}"
+                f"QToolButton:hover {{ background: {Theme.ACCENT_HOVER}; }}"
+                f"QToolButton:disabled {{ background: {Theme.PANEL_2}; }}"
+            )
+        else:
+            btn.setStyleSheet(
+                f"QToolButton {{ background: {Theme.PANEL_2}; border: none; border-radius: 8px; }}"
+                f"QToolButton:hover {{ background: {Theme.PANEL_3}; }}"
+                f"QToolButton:disabled {{ background: {Theme.PANEL}; }}"
+            )
+        return btn
 
     def eventFilter(self, obj, event):  # noqa: N802 (Qt signature)
         if obj is self.editor and event.type() == QEvent.Type.KeyPress:
@@ -130,12 +157,12 @@ class SqlTab(QWidget):
 
     def set_running(self, running: bool) -> None:
         if running:
-            self.run_btn.setText(self._t("sql.running"))
+            self.run_btn.setToolTip(self._t("sql.running"))
             self._busy.start()
         else:
             self._busy.stop()
-            self.run_btn.setIcon(svg_icon("play", color="#ffffff", size=13))
-            self.run_btn.setText(self._t("sql.run"))
+            self.run_btn.setIcon(svg_icon("play", color=Theme.ACCENT_TEXT, size=15))
+            self.run_btn.setToolTip(f"{self._t('sql.run')} · ⌘↵")
         self.run_btn.setEnabled(not running)
         self.explain_btn.setEnabled(not running)
         self.format_btn.setEnabled(not running)

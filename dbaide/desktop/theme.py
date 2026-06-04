@@ -523,11 +523,11 @@ QTabBar[panelTabs="true"] {{
 QTabBar[panelTabs="true"]::tab {{
     background: transparent;
     color: {T.MUTED};
-    padding: 3px 10px;
+    padding: 1px 8px;
     border: none;
     margin: 0;
-    min-height: 24px;
-    max-height: 24px;
+    min-height: 21px;
+    max-height: 21px;
     font-size: 12px;
     font-weight: 500;
 }}

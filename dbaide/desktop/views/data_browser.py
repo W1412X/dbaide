@@ -130,10 +130,9 @@ class DataBrowser(QWidget):
 
         self.grid = ResultTableWidget()
         self.grid.meta.setVisible(False)  # the pager's range label is the source of truth here
-        # Fold the grid's value-viewer toggle + Export into this single pager row
-        # (no separate, sparse toolbar row above the table) — denser layout.
+        # Fold the grid's Export into this single pager row (no separate, sparse
+        # toolbar row above the table) — denser layout.
         self.grid.set_toolbar_visible(False)
-        bar.addWidget(self.grid.value_toggle)
         bar.addWidget(self.grid.export_menu)
         pl.addLayout(bar)
 
