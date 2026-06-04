@@ -260,6 +260,13 @@ def test_answer_reveal_respects_stream_toggle(qapp):
     v.begin_turn("q2")
     v.complete_turn(answer=long, ok=True)
     assert v._reveal is None                     # no reveal when disabled
+    # Restored/history turns (placeholder=False, as in load_session) never animate,
+    # even with streaming on.
+    v.set_stream_answers(True)
+    v._finalize_reveal()
+    v.begin_turn("q3", placeholder=False)
+    v.complete_turn(answer=long, ok=True)
+    assert v._reveal is None                     # history renders instantly
 
 
 def test_answer_chunks_stream_live_then_finalize(qapp):

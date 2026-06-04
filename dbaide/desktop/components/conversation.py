@@ -637,6 +637,7 @@ class ConversationView(QScrollArea):
         # events for the open turn (None until the first chunk arrives).
         self._live_answer: "_MarkdownBlock | None" = None
         self._live_answer_text = ""
+        self._current_live = True  # is the open turn a live run (vs restored history)?
 
     def set_stream_answers(self, enabled: bool) -> None:
         self._stream_answers = bool(enabled)
@@ -725,6 +726,9 @@ class ConversationView(QScrollArea):
         self._finalize_reveal()  # don't leave a prior answer half-revealed
         self._live_answer = None
         self._live_answer_text = ""
+        # Live run (placeholder) → the answer may animate in; a restored/history turn
+        # must render instantly (don't "type out" saved answers on session reload).
+        self._current_live = placeholder
         turn = TurnBlock()
         if user_text.strip():
             # Only surface the connection · db · policy caption when it changes from
@@ -856,7 +860,7 @@ class ConversationView(QScrollArea):
             # No live stream (streaming off, unsupported, or a deterministic answer):
             # optionally pseudo-reveal a non-trivial answer (toggleable; the full text
             # is already stored in the record above, so copy/export is unaffected).
-            stream = self._stream_answers and len(answer.strip()) > 60
+            stream = self._current_live and self._stream_answers and len(answer.strip()) > 60
             block = _MarkdownBlock(
                 "" if stream else answer, title="DBAide",
                 title_tooltip=f"workflow {workflow_id}" if workflow_id else "",
