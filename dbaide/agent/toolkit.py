@@ -14,6 +14,7 @@ from dbaide.agent.schema_context import (
     disclosed_schemas_for_tables,
     join_confidence_for_sql,
     merge_sql_context,
+    normalize_db_table,
     validation_feedback,
 )
 from dbaide.agent.join_validation import validate_join_relations
@@ -179,6 +180,10 @@ def build_tool_registry(orchestrator: AskOrchestrator) -> ToolRegistry:
         database = str(args.get("database") or orchestrator._loop_table_database or orchestrator._loop_database or "")
         if not table:
             return ToolResult(ok=False, error=_err("describe_table", "table is required"))
+        # Tolerate a db-qualified name like "platform.sys_user" (with empty database) —
+        # split it so the catalog lookup finds the real table instead of returning
+        # empty columns and sending the model into a re-describe loop.
+        database, table = normalize_db_table(table, database)
         columns = orchestrator.schema.describe_table(table, database=database)
         _remember_table_schema(orchestrator, table, database, columns)
         payload = [

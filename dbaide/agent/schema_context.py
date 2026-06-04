@@ -18,6 +18,27 @@ logger = logging.getLogger("dbaide.schema_context")
 MAX_DISCLOSED_TABLES = 4
 
 
+def normalize_db_table(table: str, database: str = "") -> tuple[str, str]:
+    """Split a db-qualified table name into (database, table).
+
+    The schema linker and the model often hand back a display name like
+    ``platform.sys_user`` in the *table* field with an empty database — describing a
+    table literally named "platform.sys_user" then finds nothing. When the table
+    carries a dot and no explicit database is given, treat the prefix as the database.
+    Quotes/backticks are stripped. Returns (database, table)."""
+    def _clean(s: str) -> str:
+        return str(s or "").strip().strip('`"[]').strip()
+
+    table = _clean(table)
+    database = _clean(database)
+    if not database and "." in table:
+        prefix, rest = table.split(".", 1)
+        prefix, rest = _clean(prefix), _clean(rest)
+        if prefix and rest:
+            return prefix, rest
+    return database, table
+
+
 def table_targets_from_hits(
     hits: list[SchemaHit],
     active_database: str,

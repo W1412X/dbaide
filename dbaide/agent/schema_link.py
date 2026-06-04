@@ -194,6 +194,11 @@ class SchemaLinker:
         if not table:
             return
         db = str(sel.get("database") or database or "").strip()
+        # The model often echoes the display name "db.table" into the table field with
+        # an empty database — split it so describe_table hits the real catalog entry
+        # (otherwise it confirms a table with zero columns and a misleading note).
+        from dbaide.agent.schema_context import normalize_db_table
+        db, table = normalize_db_table(table, db)
         try:
             cols = self.orch.schema.describe_table(table, database=db)  # existence (real catalog)
         except Exception:

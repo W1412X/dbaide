@@ -231,3 +231,11 @@ def test_trace_is_a_true_call_tree(tmp_path):
     assert any("database" in ch.title for ch in discover.children)
     # the join validation nests under "Map relations"
     assert relations.children and any(ch.agent == "join_validate" for ch in relations.children)
+
+
+def test_normalize_db_table_splits_qualified_name():
+    from dbaide.agent.schema_context import normalize_db_table
+    assert normalize_db_table("platform.sys_user", "") == ("platform", "sys_user")
+    assert normalize_db_table("sys_user", "platform") == ("platform", "sys_user")
+    assert normalize_db_table("`platform`.`sys_user`", "") == ("platform", "sys_user")
+    assert normalize_db_table("sys_user", "") == ("", "sys_user")
