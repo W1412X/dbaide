@@ -101,3 +101,49 @@ def test_dropped_when_no_ask_text():
 def test_malformed_payload_is_safe():
     assert SemanticClarifier(_Mock(None)).analyze("q", _disclosed()).is_empty()
     assert SemanticClarifier(_Mock("nope")).analyze("q", _disclosed()).is_empty()
+
+
+def test_fabricated_column_options_are_replaced_with_real_columns():
+    """The model hallucinates field names; a 'which column?' question's options must be
+    grounded to the REAL disclosed columns, dropping invented ones."""
+    mock = _Mock({"questions": [{
+        "ask": "Which column identifies a sane employee?",
+        "kind": "column",
+        "table": "orders",
+        # All fabricated — none of these exist in _disclosed().
+        "options": ["is_sane", "mental_state", "sanity_flag"],
+    }], "assumptions": []})
+    plan = SemanticClarifier(mock).analyze("how many sane employees", _disclosed())
+    opts = plan.questions[0]["options"]
+    # Fabricated names are gone; the user is offered the table's real columns instead.
+    assert opts == ["id", "created_at", "status", "refunded_at"]
+    assert "is_sane" not in opts and "sanity_flag" not in opts
+
+
+def test_partly_valid_column_options_keep_only_the_real_ones():
+    mock = _Mock({"questions": [{
+        "ask": "哪个字段表示订单状态？",            # Chinese "which field" → detected as column
+        "options": ["status", "order_status", "STATE"],  # only `status` is real
+    }], "assumptions": []})
+    plan = SemanticClarifier(mock).analyze("订单状态", _disclosed())
+    # Real one canonicalised + kept; fabricated ones dropped.
+    assert plan.questions[0]["options"] == ["status"]
+
+
+def test_column_option_with_table_prefix_and_case_is_canonicalised():
+    mock = _Mock({"questions": [{
+        "ask": "Which column?", "kind": "column",
+        "options": ["Orders.Created_At", "`STATUS`"],
+    }], "assumptions": []})
+    plan = SemanticClarifier(mock).analyze("q", _disclosed())
+    assert plan.questions[0]["options"] == ["created_at", "status"]
+
+
+def test_value_question_options_are_left_untouched():
+    """A value/timezone question is NOT a column question — its options must survive."""
+    mock = _Mock({"questions": [{
+        "ask": "Which timezone for 'last month'?", "kind": "value",
+        "options": ["UTC", "America/New_York"],
+    }], "assumptions": []})
+    plan = SemanticClarifier(mock).analyze("refund rate last month", _disclosed())
+    assert plan.questions[0]["options"] == ["UTC", "America/New_York"]
