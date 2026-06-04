@@ -20,12 +20,24 @@ mkdir -p dist
 case "$TARGET" in
   gui)
     python3 -m PyInstaller packaging/pyinstaller/dbaide-gui.spec --noconfirm --clean
+    if [[ "$(uname -s)" == "Darwin" && -d dist/DBAide.app ]]; then
+      chmod +x scripts/codesign_macos.sh
+      ./scripts/codesign_macos.sh dist/DBAide.app
+    fi
     echo ""
     echo "GUI bundle: $ROOT/dist/DBAide/"
-    echo "Run: dist/DBAide/DBAide"
+    if [[ -d dist/DBAide.app ]]; then
+      echo "Run: open dist/DBAide.app"
+    else
+      echo "Run: dist/DBAide/DBAide"
+    fi
     if [[ "$(uname -s)" == "Darwin" ]]; then
       echo "Optional DMG:"
-      echo "  hdiutil create -volname DBAide -srcfolder dist/DBAide -ov -format UDZO dist/DBAide-macOS.dmg"
+      if [[ -d dist/DBAide.app ]]; then
+        echo "  hdiutil create -volname DBAide -srcfolder dist/DBAide.app -ov -format UDZO dist/DBAide-macOS.dmg"
+      else
+        echo "  hdiutil create -volname DBAide -srcfolder dist/DBAide -ov -format UDZO dist/DBAide-macOS.dmg"
+      fi
     else
       echo "Optional archive:"
       echo "  (cd dist && tar -czf DBAide-linux-$(uname -m).tar.gz DBAide)"

@@ -6,6 +6,15 @@ All notable changes to DBAide are documented here. The format is loosely based o
 
 ## [Unreleased]
 
+## [0.0.3] — 2026-06-05
+
+### Fixed
+
+- **macOS desktop app launch** — CI and local builds now ad-hoc sign the `.app`
+  bundle (`scripts/codesign_macos.sh`) so PyInstaller packages open on macOS 15+
+  without silently exiting. Release workflow includes a macOS startup smoke test
+  before publishing the DMG.
+
 ## [0.0.2] — 2026-06-05
 
 ### Added — Workbench (a read-only database client)
@@ -69,6 +78,7 @@ and a PyQt6 desktop app, sharing one Python core.
   drag-to-Applications)**, **Windows (`.msi` wizard)**, and **Linux (`.tar.gz`)** —
   pushing a `v*` tag cuts a GitHub Release automatically.
 
-[Unreleased]: https://github.com/W1412X/dbaide/compare/v0.0.2...HEAD
+[Unreleased]: https://github.com/W1412X/dbaide/compare/v0.0.3...HEAD
+[0.0.3]: https://github.com/W1412X/dbaide/compare/v0.0.2...v0.0.3
 [0.0.2]: https://github.com/W1412X/dbaide/compare/v0.1.0...v0.0.2
 [0.1.0]: https://github.com/W1412X/dbaide/releases/tag/v0.1.0
