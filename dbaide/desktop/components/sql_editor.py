@@ -42,6 +42,7 @@ class SqlEditor(QPlainTextEdit):
         self._databases: list[str] = []
         self._tables: list[str] = []
         self._columns_by_table: dict[str, list[str]] = {}
+        self._tables_by_database: dict[str, list[str]] = {}
         self._all_columns: list[str] = []
         # A single QStringListModel holds the active completion words; we swap its
         # string list for the general vocabulary vs. a table's columns. (Plain string
@@ -96,6 +97,10 @@ class SqlEditor(QPlainTextEdit):
         self._columns_by_table = {
             str(t): [str(c) for c in (cols or [])]
             for t, cols in (schema.get("columns_by_table") or {}).items()
+        }
+        self._tables_by_database = {
+            str(d): [str(t) for t in (ts or [])]
+            for d, ts in (schema.get("tables_by_database") or {}).items()
         }
         self._all_columns = sorted({c for cols in self._columns_by_table.values() for c in cols})
         self._set_general_words()
@@ -230,17 +235,18 @@ class SqlEditor(QPlainTextEdit):
             return
         super().keyPressEvent(event)
 
-        # Context: are we completing columns of "<table>." ?
+        # Cascading context after a dot: "<table>." → that table's columns (also
+        # handles "<db>.<table>." since we look at the word before the last dot);
+        # "<db>." → that database's tables.
         tc = self.textCursor()
         before = tc.block().text()[: tc.positionInBlock()]
-        dot = _DOT_PREFIX.search(before)
-        dot_table = self._match_table(dot.group(1)) if dot else None
+        scoped_words, scoped_mode = self._scoped_words(before)
 
-        if dot_table is not None:
-            # Swap the model's words to that table's columns — completed even right
-            # after the dot (empty prefix).
-            self._mode = dot_table
-            self._model.setStringList(self._columns_by_table.get(dot_table, []))
+        if scoped_words is not None:
+            # Swap the model to the scoped words — completed even right after the dot
+            # (empty prefix).
+            self._mode = scoped_mode
+            self._model.setStringList(scoped_words)
             prefix = self._current_prefix()
             self._completer.setCompletionPrefix(prefix)
             popup.setCurrentIndex(self._completer.completionModel().index(0, 0))
@@ -267,6 +273,22 @@ class SqlEditor(QPlainTextEdit):
             return
         self._popup_at_cursor(popup)
 
+    def _scoped_words(self, before: str) -> tuple[list[str] | None, str]:
+        """Given the text before the cursor, return the cascading completion words:
+        `<table>.` (or `<db>.<table>.`) → that table's columns; `<db>.` → that
+        database's tables. Returns (None, "") when there's no dotted scope."""
+        dot = _DOT_PREFIX.search(before)
+        word = dot.group(1) if dot else None
+        if not word:
+            return None, ""
+        table = self._match_table(word)
+        if table is not None:
+            return self._columns_by_table.get(table, []), f"table:{table}"
+        db = self._match_database(word)
+        if db is not None:
+            return (self._tables_by_database.get(db) or self._tables), f"db:{db}"
+        return None, ""
+
     def _match_table(self, word: str) -> str | None:
         """Case-insensitive lookup of a table name (the part before a dot)."""
         if not word:
@@ -275,6 +297,16 @@ class SqlEditor(QPlainTextEdit):
         for t in self._tables:
             if t.lower() == low:
                 return t
+        return None
+
+    def _match_database(self, word: str) -> str | None:
+        """Case-insensitive lookup of a database name (the part before a dot)."""
+        if not word:
+            return None
+        low = word.lower()
+        for d in self._databases:
+            if d.lower() == low:
+                return d
         return None
 
     def _popup_at_cursor(self, popup) -> None:

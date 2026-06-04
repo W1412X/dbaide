@@ -131,3 +131,20 @@ def test_dot_prefix_regex(qapp):
     assert _DOT_PREFIX.search("SELECT * FROM orders WHERE orders.cit").group(1) == "orders"
     assert _DOT_PREFIX.search("o.").group(1) == "o"
     assert _DOT_PREFIX.search("plain") is None
+
+
+def test_cascading_completion_db_table_column(qapp):
+    """db. → that db's tables; table. (and db.table.) → that table's columns."""
+    from dbaide.desktop.components.sql_editor import SqlEditor
+    e = SqlEditor()
+    e.set_schema({
+        "databases": ["analysis", "platform"],
+        "tables": ["orders", "sys_user"],
+        "columns_by_table": {"orders": ["id", "amount"], "sys_user": ["user_id", "del_flag"]},
+        "tables_by_database": {"analysis": ["orders"], "platform": ["sys_user"]},
+    })
+    assert e._scoped_words("SELECT * FROM analysis.") == (["orders"], "db:analysis")
+    assert e._scoped_words("SELECT orders.")[0] == ["id", "amount"]
+    assert e._scoped_words("FROM analysis.orders.")[0] == ["id", "amount"]   # db.table. → cols
+    assert e._scoped_words("WHERE sys_user.del")[0] == ["user_id", "del_flag"]
+    assert e._scoped_words("SELECT id") == (None, "")                        # no dotted scope

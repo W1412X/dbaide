@@ -434,11 +434,13 @@ class MainWindow(QMainWindow):
         self.workbench.set_sql_schema(self._schema_completion())
 
     def _schema_completion(self) -> dict[str, Any]:
-        """Structured schema for context-aware SQL completion: database names,
-        table names, and columns per table (so `table.` completes its columns)."""
+        """Structured schema for context-aware SQL completion: database names, table
+        names, columns per table, and tables per database — so the editor can cascade
+        `db.` → its tables and `table.`/`db.table.` → its columns."""
         databases: list[str] = []
         tables: list[str] = []
         columns_by_table: dict[str, list[str]] = {}
+        tables_by_database: dict[str, list[str]] = {}
         for db in self.schema_rows:
             db_name = str(db.get("name") or "")
             if db_name:
@@ -448,13 +450,19 @@ class MainWindow(QMainWindow):
                 if not tname:
                     continue
                 tables.append(tname)
+                if db_name:
+                    tables_by_database.setdefault(db_name, [])
+                    if tname not in tables_by_database[db_name]:
+                        tables_by_database[db_name].append(tname)
                 cols = [str(c.get("name") or "") for c in table.get("children", []) if c.get("name")]
                 # Merge if the same table name appears in multiple databases.
                 columns_by_table.setdefault(tname, [])
                 for c in cols:
                     if c not in columns_by_table[tname]:
                         columns_by_table[tname].append(c)
-        return {"databases": databases, "tables": tables, "columns_by_table": columns_by_table}
+        return {"databases": databases, "tables": tables,
+                "columns_by_table": columns_by_table,
+                "tables_by_database": tables_by_database}
 
     def _apply_schema_error(self, name: str, message: str) -> None:
         # Don't wipe the current connection's schema because an old one failed.
