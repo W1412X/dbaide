@@ -200,15 +200,25 @@ class DataBrowser(QWidget):
             self._t("data.sorted_by", col=self._order_by, dir=self._order_dir.upper())
             if self._order_by else ""
         )
-        # Visual sort arrow on the active column header.
+        # Sort indicator: a clear up/down arrow (with a shaft) on the active column's
+        # header — not Qt's tiny native triangle.
         header = self.grid.table.horizontalHeader()
+        header.setSortIndicatorShown(False)
+        from PyQt6.QtGui import QIcon
+        table = self.grid.table
+        for i in range(len(self._columns)):
+            hi = table.horizontalHeaderItem(i)
+            if hi is not None:
+                hi.setIcon(QIcon())
         if self._order_by and self._order_by in self._columns:
-            header.setSortIndicatorShown(True)
-            order = (Qt.SortOrder.AscendingOrder if self._order_dir == "asc"
-                     else Qt.SortOrder.DescendingOrder)
-            header.setSortIndicator(self._columns.index(self._order_by), order)
-        else:
-            header.setSortIndicatorShown(False)
+            idx = self._columns.index(self._order_by)
+            hi = table.horizontalHeaderItem(idx)
+            if hi is not None:
+                arrow = "arrow-up" if self._order_dir == "asc" else "arrow-down"
+                hi.setIcon(svg_icon(arrow, color=Theme.TEXT_2, size=13))
+                # The header icon sits left of the text; widen the column so the name
+                # isn't elided to make room for it.
+                table.resizeColumnToContents(idx)
         self.set_running(False)
         self._prev.setEnabled(self._offset > 0)
         self._next.setEnabled(self._has_more)

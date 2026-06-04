@@ -35,6 +35,7 @@ _GLYPHS: dict[str, str] = {
     "x": '<path d="M18 6 6 18"/><path d="m6 6 12 12"/>',
     "send": '<path d="M22 2 11 13"/><path d="M22 2 15 22l-4-9-9-4Z"/>',
     "arrow-up": '<path d="m5 12 7-7 7 7"/><path d="M12 19V5"/>',
+    "arrow-down": '<path d="M12 5v14"/><path d="m19 12-7 7-7-7"/>',
     "search": '<circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/>',
     "chevron-down": '<path d="m6 9 6 6 6-6"/>',
     "chevron-up": '<path d="m18 15-6-6-6 6"/>',
