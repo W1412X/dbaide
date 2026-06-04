@@ -597,14 +597,12 @@ class MainWindow(QMainWindow):
         self._last_question = question
         self._slot_question[key] = question
         database = self.current_database()
-        # Pinned db/table context is injected into the model prompt but NOT shown in
-        # the visible user message (the displayed question stays the user's text).
+        # Pinned db/table context drives a *scoped* schema discovery (the agent
+        # prioritises these tables/databases and only broadens if they're
+        # insufficient) — passed as structured scope, NOT dumped into the prompt
+        # text, and shown as tags (not body text) on the user message.
         attachments = self.composer.attachments()
-        agent_question = question
-        if attachments:
-            ctx = self._build_attached_context(attachments)
-            if ctx:
-                agent_question = f"{ctx}\n\n[User question]\n{question}"
+        schema_scope = self._build_attached_scope(attachments) if attachments else {}
         self.composer.clear_attachments()
         self.composer.clear_input()
         self.ask_tab.append_user(key, question, connection=conn, database=database, policy=policy,
@@ -615,11 +613,12 @@ class MainWindow(QMainWindow):
         self.right.focus_trace()
         self._start_ask(key, {
             "connection_name": conn,
-            "question": agent_question,
+            "question": question,
             "database": database,
             "execution_policy": policy,
             "show_trace": True,
             "session_id": self._slot_session.get(key, ""),
+            "schema_scope": schema_scope,
         })
 
     def _submit_clarification(self, key: str, reply: str) -> None:
@@ -1104,25 +1103,23 @@ class MainWindow(QMainWindow):
         elif kind == "database":
             self.composer.add_attachment(kind="database", path=path, name=name, database=name)
 
-    def _build_attached_context(self, attachments: list[dict]) -> str:
-        """Fetch the asset doc for each attached db/table and assemble a context
-        preamble for the model. Read synchronously (local files, fast)."""
-        blocks: list[str] = []
+    def _build_attached_scope(self, attachments: list[dict]) -> dict[str, Any]:
+        """Turn composer attachments into a structured schema scope for the agent:
+        {"databases": [name, ...], "tables": [{"database": db, "table": t}, ...]}.
+        Paths are "connection.database[.table]"."""
+        databases: list[str] = []
+        tables: list[dict[str, str]] = []
         for att in attachments:
-            try:
-                res = self.service.dispatch("asset_markdown", {"path": att.get("path", "")})
-                md = str((res or {}).get("markdown") or "").strip()
-            except Exception:
-                md = ""
-            if md:
-                blocks.append(md)
-        if not blocks:
-            return ""
-        header = (
-            "[Attached schema context provided by the user. Use it to ground your "
-            "answer; do not repeat it back verbatim.]"
-        )
-        return header + "\n\n" + "\n\n---\n\n".join(blocks)
+            parts = str(att.get("path") or "").split(".")
+            kind = str(att.get("kind") or "")
+            if kind == "database" and len(parts) >= 2:
+                if parts[1] not in databases:
+                    databases.append(parts[1])
+            elif kind == "table" and len(parts) >= 3:
+                entry = {"database": parts[1], "table": parts[2]}
+                if entry not in tables:
+                    tables.append(entry)
+        return {"databases": databases, "tables": tables}
 
     def _generate_sql(self, node: dict[str, Any], kind: str) -> None:
         """Generate a starter statement for a table and open it in a new editor."""

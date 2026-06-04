@@ -422,6 +422,7 @@ class DesktopService:
             show_trace=bool(payload.get("show_trace", True)),
             resume_state=payload.get("resume_state"),
             user_reply=str(payload.get("user_reply") or ""),
+            schema_scope=payload.get("schema_scope") or {},
         )
         engine = WorkflowEngine(conn, self._safe_llm(), self.store, self.join_catalog)
         progress_cb = payload.get("progress")

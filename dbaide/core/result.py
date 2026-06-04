@@ -131,7 +131,7 @@ class WorkflowRequest:
     __slots__ = (
         "question", "connection_name", "database_scope", "mode",
         "execution_policy", "limit", "timeout_seconds", "model_name",
-        "show_trace", "resume_state", "user_reply",
+        "show_trace", "resume_state", "user_reply", "schema_scope",
     )
 
     def __init__(
@@ -148,6 +148,7 @@ class WorkflowRequest:
         show_trace: bool = False,
         resume_state: dict[str, Any] | None = None,
         user_reply: str = "",
+        schema_scope: dict[str, Any] | None = None,
     ) -> None:
         self.question = question
         self.connection_name = connection_name
@@ -160,6 +161,9 @@ class WorkflowRequest:
         self.show_trace = show_trace
         self.resume_state = resume_state
         self.user_reply = user_reply
+        # User-pinned schema (composer attachments): {"databases": [...],
+        # "tables": [{"database": ..., "table": ...}]}. Discovery prioritises this.
+        self.schema_scope = schema_scope or {}
 
 
 class QueryPlan:

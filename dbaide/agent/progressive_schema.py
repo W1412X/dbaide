@@ -65,18 +65,101 @@ class ProgressiveSchemaAgent:
         progress: ProgressFn | None = None,
         parent: str = "",
         column_detail: bool = True,
+        scope: dict[str, Any] | None = None,
     ) -> DiscoveryResult:
         # Assets first: navigate the offline docs by relevance (instance → database →
         # table). Only fall back to the live catalog when there are no assets — never
         # blind-list the whole database. ``column_detail=False`` returns just the
         # relevant tables (the "big direction") and skips the per-column LLM pass,
         # which the schema linker does in a single shot instead.
+        scope = scope or {}
+        scope_tables = scope.get("tables") or []
+        scope_dbs = scope.get("databases") or []
         if self.store.has_instance(self.instance):
+            # User pinned a db/table → prioritise that scope; only broaden to the full
+            # progressive crawl if the scope can't yield anything usable.
+            if scope_tables or scope_dbs:
+                scoped = self._discover_scoped(
+                    question, scope_tables, scope_dbs,
+                    progress=progress, parent=parent, column_detail=column_detail,
+                )
+                if scoped.hits:
+                    scoped.trace.insert(0, "Prioritised user-provided schema scope.")
+                    return scoped
+                result = DiscoveryResult(question=question)
+                result.trace.append("User scope yielded no assets — falling back to full discovery.")
+                self._emit_progress(progress, parent, "", "Scope empty — broadening to full discovery")
             return self._discover_from_assets(question, progress=progress, parent=parent, column_detail=column_detail)
         if schema_tools is not None:
             return self._discover_from_live(schema_tools, question, progress=progress, parent=parent)
         result = DiscoveryResult(question=question)
         result.trace.append("No offline assets — build assets first, or connect with live schema access.")
+        return result
+
+    def _find_table_database(self, table: str) -> str:
+        """Locate which database a bare table name lives in (first match)."""
+        if not table:
+            return ""
+        for db_doc in self.store.database_docs(self.instance):
+            db_name = str(db_doc.get("name") or "")
+            for td in self.store.table_docs(self.instance, db_name):
+                if str(td.get("name") or td.get("table") or "") == table:
+                    return db_name
+        return ""
+
+    def _discover_scoped(
+        self,
+        question: str,
+        scope_tables: list[dict[str, Any]],
+        scope_dbs: list[str],
+        *,
+        progress: ProgressFn | None = None,
+        parent: str = "",
+        column_detail: bool = True,
+    ) -> DiscoveryResult:
+        """Discover within the user-pinned scope: the provided tables (seeded
+        directly with their columns) plus a screening of the relevant databases
+        (provided databases + the databases of provided tables) for related/join
+        tables. Returns empty hits if the scope matches no assets (caller broadens)."""
+        target_dbs = {str(d) for d in scope_dbs if str(d).strip()}
+        norm_tables: list[tuple[str, str]] = []
+        for t in scope_tables:
+            tbl = str(t.get("table") or t.get("name") or "").strip()
+            if not tbl:
+                continue
+            db = str(t.get("database") or "").strip() or self._find_table_database(tbl)
+            if db:
+                target_dbs.add(db)
+            norm_tables.append((db, tbl))
+
+        self._emit_progress(
+            progress, parent, "", "Using user-provided schema scope",
+            detail=", ".join(sorted(target_dbs)) or "tables",
+        )
+        # Screen the in-scope databases for related tables (no LLM db filter — the
+        # user already chose the databases).
+        result = self._discover_from_assets(
+            question, progress=progress, parent=parent, column_detail=column_detail,
+            restrict_databases=target_dbs or None,
+        )
+        # Ensure every explicitly provided table is present and prioritised, with its
+        # columns seeded (the user picked it, so don't let screening drop it).
+        have = {(h.database, h.table) for h in result.hits if h.kind == "table"}
+        for db, tbl in norm_tables:
+            if not db or (db, tbl) in have:
+                continue
+            result.hits.insert(0, SchemaHit(
+                kind="table", path=f"{self.instance}.{db}.{tbl}", name=tbl,
+                database=db, table=tbl, reason="user-provided",
+            ))
+            for cdoc in self.store.column_docs(self.instance, db, tbl)[:48]:
+                cn = str(cdoc.get("name") or cdoc.get("column") or "")
+                if cn:
+                    result.hits.append(SchemaHit(
+                        kind="column", path=f"{self.instance}.{db}.{tbl}.{cn}", name=cn,
+                        database=db, table=tbl,
+                        summary=str(cdoc.get("semantic_summary") or cdoc.get("source_comment") or ""),
+                    ))
         return result
 
     def _discover_from_assets(
@@ -86,6 +169,7 @@ class ProgressiveSchemaAgent:
         progress: ProgressFn | None = None,
         parent: str = "",
         column_detail: bool = True,
+        restrict_databases: set[str] | None = None,
     ) -> DiscoveryResult:
         result = DiscoveryResult(question=question)
         if not self.store.has_instance(self.instance):
@@ -114,14 +198,18 @@ class ProgressiveSchemaAgent:
             for i, doc in enumerate(databases)
             if doc.get("name")
         ]
-        db_indices = self._filter_indices(
-            question,
-            level="database",
-            items=db_items,
-            context=f"connection={self.instance}",
-            progress=progress,
-            parent=parent,
-        )
+        if restrict_databases:
+            # Scope pinned by the user → use exactly those databases, no LLM filter.
+            db_indices = [it["index"] for it in db_items if it["name"] in restrict_databases]
+        else:
+            db_indices = self._filter_indices(
+                question,
+                level="database",
+                items=db_items,
+                context=f"connection={self.instance}",
+                progress=progress,
+                parent=parent,
+            )
         result.trace.append(f"LLM kept {len(db_indices)} database(s).")
         self._emit_progress(
             progress,

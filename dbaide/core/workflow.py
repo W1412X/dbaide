@@ -117,6 +117,8 @@ class WorkflowEngine:
                 progress(msg)
 
         assistant._orchestrator.progress = on_progress  # noqa: SLF001
+        # User-pinned schema scope (composer attachments) → discovery prioritises it.
+        assistant._orchestrator.schema_scope = request.schema_scope or {}  # noqa: SLF001
         try:
             response = assistant.ask(
                 request.question,

@@ -80,6 +80,8 @@ class AskOrchestrator:
         self.join_catalog = join_catalog or JoinCatalogStore()
         self.execution_policy = execution_policy
         self.progress = progress or (lambda _msg: None)
+        # User-pinned schema scope (set by the workflow from composer attachments).
+        self.schema_scope: dict[str, Any] = {}
 
         self.schema = SchemaTools(adapter, session.disclosure, instance=self.instance, assets=self.asset_store)
         self.profile = ProfileTools(adapter, session.disclosure, instance=self.instance, assets=self.asset_store)
@@ -315,6 +317,7 @@ class AskOrchestrator:
             progress=progress_cb,
             parent=parent,
             column_detail=column_detail,
+            scope=self.schema_scope,
         )
 
     def _pick_table(self, question: str, active_database: str) -> tuple[str, str]:
