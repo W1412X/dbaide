@@ -32,6 +32,8 @@ from dbaide.rendering.table import export_csv, export_insert, export_json, expor
 class ResultTableWidget(QWidget):
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
+        from dbaide.i18n import t
+        self._t = t
         self._columns: list[str] = []
         self._rows: list[dict[str, Any]] = []
         self._table_name = "table"  # used by "Copy as INSERT"
@@ -53,7 +55,7 @@ class ResultTableWidget(QWidget):
         self.value_toggle = QToolButton()
         self.value_toggle.setCheckable(True)
         self.value_toggle.setIcon(svg_icon("panel-right", color=Theme.TEXT_2, size=15))
-        self.value_toggle.setToolTip("Value viewer")
+        self.value_toggle.setToolTip(t("result.value_viewer"))
         self.value_toggle.setCursor(Qt.CursorShape.PointingHandCursor)
         self.value_toggle.setFixedSize(26, 26)
         self.value_toggle.setStyleSheet(
@@ -63,14 +65,14 @@ class ResultTableWidget(QWidget):
         )
         self.value_toggle.toggled.connect(self._toggle_value_viewer)
         toolbar.addWidget(self.value_toggle)
-        self.export_menu = MenuButton("Export ▾", max_width=96)
-        self.export_menu.add_action("Copy as CSV", self.copy_csv)
-        self.export_menu.add_action("Copy as JSON", self.copy_json)
-        self.export_menu.add_action("Copy as Markdown", self.copy_markdown)
-        self.export_menu.add_action("Copy as INSERT", self.copy_insert)
+        self.export_menu = MenuButton(t("result.export"), max_width=96)
+        self.export_menu.add_action(t("result.copy_csv"), self.copy_csv)
+        self.export_menu.add_action(t("result.copy_json"), self.copy_json)
+        self.export_menu.add_action(t("result.copy_markdown"), self.copy_markdown)
+        self.export_menu.add_action(t("result.copy_insert"), self.copy_insert)
         self.export_menu.add_separator()
-        self.export_menu.add_action("Save as CSV…", self.save_csv)
-        self.export_menu.add_action("Save as JSON…", self.save_json)
+        self.export_menu.add_action(t("result.save_csv"), self.save_csv)
+        self.export_menu.add_action(t("result.save_json"), self.save_json)
         toolbar.addWidget(self.export_menu)
         layout.addWidget(self._toolbar_widget)
         self.table = QTableWidget()
@@ -323,7 +325,7 @@ class ResultTableWidget(QWidget):
     def _save_to_file(self, content: str, ext: str, file_filter: str) -> None:
         from PyQt6.QtWidgets import QFileDialog
         suggested = f"{self._table_name}.{ext}"
-        path, _ = QFileDialog.getSaveFileName(self, "Export results", suggested, file_filter)
+        path, _ = QFileDialog.getSaveFileName(self, self._t("result.export_title"), suggested, file_filter)
         if path:
             self._write_file(path, content)
 
@@ -345,8 +347,8 @@ class ResultTableWidget(QWidget):
         from PyQt6.QtWidgets import QMenu
         menu = QMenu(self)
         _style_menu(menu)
-        menu.addAction("Copy cell", lambda: QApplication.clipboard().setText(self._cell_text(r, c)))
-        menu.addAction("Copy row (JSON)", lambda: QApplication.clipboard().setText(
+        menu.addAction(self._t("result.copy_cell"), lambda: QApplication.clipboard().setText(self._cell_text(r, c)))
+        menu.addAction(self._t("result.copy_row"), lambda: QApplication.clipboard().setText(
             export_json([self._rows[r]], self._columns) if 0 <= r < len(self._rows) else ""))
         # Context-specific extras (e.g. the data browser's "Open referenced row").
         if self._cell_actions_provider is not None:
@@ -379,9 +381,9 @@ class ResultTableWidget(QWidget):
         menu = QMenu(self)
         _style_menu(menu)
         if section >= 0:
-            menu.addAction("Auto-fit column",
+            menu.addAction(self._t("result.autofit_column"),
                            lambda: self.table.resizeColumnToContents(section))
-        menu.addAction("Auto-fit all columns", self.table.resizeColumnsToContents)
+        menu.addAction(self._t("result.autofit_all"), self.table.resizeColumnsToContents)
         menu.exec(hh.mapToGlobal(pos))
 
     def _copy_selection(self) -> None:

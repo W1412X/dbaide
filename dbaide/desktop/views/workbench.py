@@ -13,13 +13,32 @@ from __future__ import annotations
 
 from typing import Any
 
-from PyQt6.QtCore import pyqtSignal
+from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtGui import QFont
-from PyQt6.QtWidgets import QTabBar, QTabWidget, QToolButton, QVBoxLayout, QWidget
+from PyQt6.QtWidgets import (
+    QProxyStyle,
+    QStyle,
+    QTabBar,
+    QTabWidget,
+    QToolButton,
+    QVBoxLayout,
+    QWidget,
+)
 
 from dbaide.desktop.theme import Theme
 from dbaide.desktop.views.doc_tab import DocTab
 from dbaide.desktop.views.query_history import QueryHistoryPanel
+
+
+class _RightCloseTabStyle(QProxyStyle):
+    """Forces tab close buttons onto the right side. The native macOS style puts
+    them on the LEFT (Safari convention), which looks wrong for document tabs and
+    breaks our right-side pinning logic."""
+
+    def styleHint(self, hint, option=None, widget=None, returnData=None):  # noqa: N802
+        if hint == QStyle.StyleHint.SH_TabBar_CloseButtonPosition:
+            return QTabBar.ButtonPosition.RightSide.value
+        return super().styleHint(hint, option, widget, returnData)
 from dbaide.desktop.views.sql_tab import SqlTab
 from dbaide.desktop.views.table_document import TableDocument
 
@@ -50,7 +69,16 @@ class WorkbenchView(QWidget):
         self.tabs.setMovable(True)
         self.tabs.setTabsClosable(True)
         self.tabs.tabBar().setProperty("panelTabs", True)
+        # Force close buttons to the right (native macOS puts them left). No-arg
+        # QProxyStyle wraps the app's default style WITHOUT owning it (passing an
+        # existing style double-frees it on teardown → crash). Keep a Python ref so
+        # the style outlives the tab bar's use of it.
+        self._tab_close_style = _RightCloseTabStyle()
+        self.tabs.tabBar().setStyle(self._tab_close_style)
         self.tabs.tabCloseRequested.connect(self._on_close)
+        self.tabs.tabBar().setUsesScrollButtons(True)
+        self.tabs.tabBar().setElideMode(Qt.TextElideMode.ElideRight)
+        self.tabs.tabBar().setExpanding(False)
         layout.addWidget(self.tabs)
 
         # History is pinned (always present, not closeable).

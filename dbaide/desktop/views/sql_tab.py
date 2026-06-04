@@ -43,10 +43,14 @@ class SqlTab(QWidget):
         # (mirrors the chat composer's bottom-right send). ──────────────────────
         run_row = QHBoxLayout()
         run_row.setContentsMargins(2, 0, 2, 0)
+        run_row.setSpacing(6)
         hint = QLabel(t("sql.run_hint"))
         hint.setStyleSheet(f"color: {Theme.MUTED_2}; font-size: 11px; background: transparent;")
-        run_row.addWidget(hint)
-        run_row.addStretch(1)
+        # Let the hint shrink (and clip) so it never crowds or overlaps the action
+        # buttons on a narrow editor pane — the buttons keep their full width.
+        from PyQt6.QtWidgets import QSizePolicy
+        hint.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
+        run_row.addWidget(hint, 1)
         self.format_btn = compact_button(t("sql.format"), width=84)
         self.format_btn.setToolTip(t("sql.format_tooltip"))
         self.format_btn.clicked.connect(self._format)
