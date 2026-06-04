@@ -192,7 +192,7 @@ class _FilterSelectMock(LLMClient):
     def complete_json(self, messages, *, schema_hint=""):
         import re
         sysmsg = messages[0].content if messages else ""
-        if "You filter" in sysmsg:
+        if "relevant_indices" in sysmsg:   # discovery shortlist/filter step
             return {"relevant_indices": [int(m) for m in re.findall(r"\[(\d+)\]", messages[-1].content)]}
         if "schema linker" in sysmsg:
             return {"tables": [

@@ -35,7 +35,7 @@ class AgentMockLLM(LLMClient):
             return self._loop_decision(messages)
         if "Classify a database assistant" in system:
             return self._route(user)
-        if "You filter" in system:
+        if "relevant_indices" in system:   # the schema-discovery shortlist/filter step
             return self._filter(user)
         if "generate safe read-only SQL" in system:
             return self._sql(user)

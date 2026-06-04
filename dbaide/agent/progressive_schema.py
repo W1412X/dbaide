@@ -594,11 +594,15 @@ class ProgressiveSchemaAgent:
 
 def _filter_system(level: str) -> str:
     return (
-        f"You filter {level} objects for relevance to the user's question.\n"
+        f"You shortlist {level} objects that might be relevant to the user's question.\n"
         "Return JSON only: {\"relevant_indices\": [<index values from the batch>], \"reason\": \"...\"}\n"
         "Rules:\n"
-        "- Include ONLY objects clearly related to the question.\n"
-        "- Prefer precision over recall; empty array is OK.\n"
+        "- This is a RECALL step in a funnel — a LATER step picks the final minimal set, "
+        "so missing a relevant object here is far worse than including an extra one.\n"
+        "- INCLUDE every object that could plausibly be relevant: directly, or as a "
+        "join / lookup / reference / parent-child table, or by an ambiguous name. When "
+        "in doubt, INCLUDE it.\n"
+        "- Exclude only objects that are clearly unrelated to the question.\n"
         "- Use the 'index' field from each object; do not invent indices."
     )
 
