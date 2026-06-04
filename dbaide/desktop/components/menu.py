@@ -8,6 +8,12 @@ from dbaide.desktop.theme import Theme
 
 
 def _style_menu(menu: QMenu) -> None:
+    # Translucent + frameless so the rounded corners don't reveal the popup
+    # window's default (dark) backing — on macOS that backing + the native window
+    # shadow read as a "black border/shadow" around the menu in light mode.
+    menu.setWindowFlag(Qt.WindowType.FramelessWindowHint, True)
+    menu.setWindowFlag(Qt.WindowType.NoDropShadowWindowHint, True)
+    menu.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
     menu.setStyleSheet(
         f"""
         QMenu {{

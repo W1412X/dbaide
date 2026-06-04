@@ -150,3 +150,17 @@ class DropdownCombo(QComboBox):
 
     def current_value(self) -> str:
         return str(self.currentData() or "")
+
+    def showPopup(self) -> None:  # noqa: N802
+        super().showPopup()
+        # Make the popup window frameless + translucent so its rounded corners don't
+        # reveal the popup window's default (dark) backing, and so macOS doesn't draw
+        # a heavy native shadow — both read as a "black border/shadow" in light mode.
+        container = self.view().window()
+        if container is not None and not container.testAttribute(
+            Qt.WidgetAttribute.WA_TranslucentBackground
+        ):
+            container.setWindowFlag(Qt.WindowType.FramelessWindowHint, True)
+            container.setWindowFlag(Qt.WindowType.NoDropShadowWindowHint, True)
+            container.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
+            container.show()  # re-show once after the flag change (first open only)
