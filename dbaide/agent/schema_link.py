@@ -149,6 +149,14 @@ class SchemaLinker:
                 continue
             tdoc = self.orch.asset_store.table_doc(self.orch.instance, db, h.table)
             cols = [str(c.get("name")) for c in (tdoc.get("columns") if tdoc else [])][:40]
+            if not cols:
+                # Thin assets (built without column detail) would leave the linker
+                # judging table relevance and picking columns blind — fall back to the
+                # live catalog so it always sees the real columns.
+                try:
+                    cols = [c.name for c in self.orch.schema.describe_table(h.table, database=db)][:40]
+                except Exception:  # noqa: BLE001 — best-effort enrichment, never fatal
+                    cols = []
             seen[key] = {
                 "database": db, "table": h.table,
                 "summary": (h.summary or "")[:160], "columns": cols,
