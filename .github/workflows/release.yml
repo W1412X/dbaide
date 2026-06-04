@@ -78,22 +78,10 @@ jobs:
         if: runner.os == 'macOS'
         run: |
           set -euo pipefail
-          chmod +x scripts/codesign_macos.sh
+          chmod +x scripts/codesign_macos.sh scripts/smoke_test_macos.sh
           ./scripts/codesign_macos.sh dist/DBAide.app
           echo "bundle size:"; du -sh dist/DBAide.app
-          set +e
-          dist/DBAide.app/Contents/MacOS/DBAide >smoke.log 2>&1 &
-          pid=$!
-          sleep 15
-          if kill -0 "$pid" 2>/dev/null; then
-            kill "$pid" 2>/dev/null || true
-            wait "$pid" 2>/dev/null || true
-            echo "✓ healthy (still running after 15s)"
-            exit 0
-          fi
-          wait "$pid"; code=$?
-          echo "--- app output ---"; cat smoke.log; echo "--- exit: $code ---"
-          echo "✗ startup crash (exit $code)"; exit 1
+          ./scripts/smoke_test_macos.sh dist/DBAide.app
 
       - name: Package (macOS → drag-install .dmg)
         if: runner.os == 'macOS'
