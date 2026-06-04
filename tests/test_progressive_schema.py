@@ -50,3 +50,24 @@ def test_progressive_schema_requires_llm():
         from dbaide.llm import NullLLMClient
 
         ProgressiveSchemaAgent(NullLLMClient(), store, "missing")
+
+
+def test_single_database_skips_db_filter(tmp_path):
+    """A one-database connection should not spend an LLM call filtering databases."""
+    db = tmp_path / "industrial.db"
+    _make_industrial_db(db)
+    cfg = ConfigManager(tmp_path / "config.toml")
+    store = AssetStore(tmp_path / "assets")
+    service = DesktopService(cfg, store)
+    conn = ConnectionConfig(name="test", type="sqlite", path=str(db))
+    cfg.upsert_connection(conn, make_default=True)
+    service.build_assets({"name": "test", "profile_mode": "auto", "top_k": 10, "sample_limit": 20})
+
+    agent = ProgressiveSchemaAgent(AgentMockLLM(), store, "test")
+    levels: list[str] = []
+    real_filter = agent._filter_indices
+    agent._filter_indices = lambda *a, **k: (levels.append(k.get("level", "")) or real_filter(*a, **k))
+    discovery = agent.discover("我想知道和产线相关的表")
+    assert "database" not in levels          # db filter skipped (only one db)
+    assert "table" in levels                 # table filter still runs
+    assert "production_lines" in {h.name for h in discovery.hits if h.kind == "table"}

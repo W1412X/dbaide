@@ -201,6 +201,9 @@ class ProgressiveSchemaAgent:
         if restrict_databases:
             # Scope pinned by the user → use exactly those databases, no LLM filter.
             db_indices = [it["index"] for it in db_items if it["name"] in restrict_databases]
+        elif len(db_items) <= 1:
+            # One database → nothing to filter; skip the LLM round-trip entirely.
+            db_indices = [it["index"] for it in db_items]
         else:
             db_indices = self._filter_indices(
                 question,
@@ -354,10 +357,13 @@ class ProgressiveSchemaAgent:
             return result
 
         db_items = [{"index": i, "name": db, "summary": ""} for i, db in enumerate(databases)]
-        db_indices = self._filter_indices(
-            question, level="database", items=db_items, context=f"connection={self.instance}",
-            progress=progress, parent=parent,
-        )
+        if len(db_items) <= 1:
+            db_indices = [it["index"] for it in db_items]   # one db → no filter needed
+        else:
+            db_indices = self._filter_indices(
+                question, level="database", items=db_items, context=f"connection={self.instance}",
+                progress=progress, parent=parent,
+            )
         result.trace.append(f"LLM kept {len(db_indices)} database(s) from live catalog.")
 
         table_hits: list[SchemaHit] = []
