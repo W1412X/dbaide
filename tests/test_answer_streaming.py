@@ -88,6 +88,43 @@ def test_openai_client_complete_json_stream_emits_and_parses(monkeypatch):
     assert payload == {"action": "finish", "answer": "hi 你好"}  # and parsed
 
 
+def test_stream_propagates_callback_exception(monkeypatch):
+    """A cancellation raised by on_chunk during streaming must propagate — NOT be
+    swallowed into a wasteful non-stream re-request."""
+    import urllib.request
+
+    from dbaide.llm import LLMMessage, OpenAICompatibleClient
+    from dbaide.models import ModelConfig
+
+    client = OpenAICompatibleClient(ModelConfig(
+        provider="openai_compatible", base_url="http://x/v1", api_key="k", model="m"))
+
+    def fake_lines():
+        for piece in ["a", "b", "c"]:
+            yield (f'data: {json.dumps({"choices":[{"delta":{"content":piece}}]})}\n').encode()
+
+    class FakeResp:
+        def __enter__(self): return self
+        def __exit__(self, *a): return False
+        def __iter__(self): return fake_lines()
+
+    calls = {"text": 0}
+    monkeypatch.setattr(urllib.request, "urlopen", lambda req, timeout=0: FakeResp())
+    monkeypatch.setattr(client, "complete_text",
+                        lambda *a, **k: calls.__setitem__("text", calls["text"] + 1) or "full")
+
+    class Cancel(Exception):
+        pass
+
+    def boom(_delta):
+        raise Cancel()
+
+    import pytest
+    with pytest.raises(Cancel):
+        client.complete_text_stream([LLMMessage("user", "q")], on_chunk=boom)
+    assert calls["text"] == 0          # no fallback re-request happened
+
+
 def _chunks_collector():
     chunks: list[str] = []
 

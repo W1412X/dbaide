@@ -185,10 +185,13 @@ class OpenAICompatibleClient(LLMClient):
                     delta = (choices[0].get("delta") or {}).get("content")
                     if delta:
                         parts.append(str(delta))
-                        on_chunk(str(delta))
+                        on_chunk(str(delta))            # may raise (e.g. user cancel) → propagate
             if parts:
                 return "".join(parts)
-        except Exception as exc:  # noqa: BLE001 — fall back to a normal completion
+        # Only transport/parse failures fall back to a normal completion. Anything
+        # raised by on_chunk (cancellation, etc.) must propagate, not be swallowed into
+        # a wasteful re-request.
+        except (urllib.error.URLError, urllib.error.HTTPError, TimeoutError, OSError) as exc:
             logger.warning("llm_stream_failed, falling back to non-stream: %s", exc)
         # Fallback: a normal completion, emitted as a single chunk.
         text = self.complete_text(messages)
