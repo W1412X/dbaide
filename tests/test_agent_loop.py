@@ -84,6 +84,29 @@ def test_orchestrator_uses_loop_before_staged(tmp_path):
     assert response.answer
 
 
+def test_orchestrator_returns_honest_failure_no_staged_degrade(tmp_path):
+    """When the model can't produce a valid decision, the agent surfaces an honest
+    failure (with the reason) — it must NOT silently degrade to a staged pipeline."""
+    from dbaide.llm import LLMClient
+
+    class _BadLLM(LLMClient):
+        def complete_json(self, messages, *, schema_hint=""):
+            return {}  # never a valid action (and intent-decompose falls back to single)
+
+        def complete_text(self, messages):
+            return ""
+
+    db = tmp_path / "app.db"
+    make_db(db)
+    conn = ConnectionConfig(name="local", type="sqlite", path=str(db))
+    orch = AskOrchestrator(build_adapter(conn), Session(connection=conn), _BadLLM())
+    resp = orch.run("和产线相关的表")
+    blob = " ".join(resp.warnings)
+    assert "decision_invalid" in blob                  # the real reason is surfaced
+    assert "staged pipeline" not in blob               # no degradation happened
+    assert resp.result is None and not resp.sql        # no fabricated staged result
+
+
 def test_auto_get_relations_after_multi_describe(tmp_path):
     db = tmp_path / "multi.db"
     conn = sqlite3.connect(db)

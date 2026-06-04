@@ -27,6 +27,7 @@ from dbaide.joins import JoinCatalogStore
 from dbaide.assets import AssetStore
 from dbaide.core.errors import DBAideError, ErrorCode
 from dbaide.core.result import ExecutionPolicy, ValidationReport
+from dbaide.i18n import t as _i18n_t
 from dbaide.llm import LLMClient, LLMMessage, NullLLMClient
 from dbaide.models import AssistantResponse, ColumnInfo, TaskType
 from dbaide.session import Session
@@ -175,12 +176,18 @@ class AskOrchestrator:
         trace_parent: str = "",
     ) -> AssistantResponse:
         self.error_router.reset()
+        self._loop_fail_reason = ""  # fresh per run (never carry a stale reason)
         disclosures = list(self.session.disclosure.events)
 
-        try:
-            from dbaide.agent.loop import AskAgentLoop
+        from dbaide.agent.loop import AskAgentLoop
 
-            loop_response = AskAgentLoop(self, progress=self.progress).run(
+        # The tool loop is the single execution path. It recovers from bad model
+        # decisions by retrying within itself and, if it truly can't finish, returns an
+        # honest failure response — we deliberately do NOT degrade to a weaker staged
+        # pipeline. An unexpected exception is surfaced as a clean failure, not a silent
+        # downgrade.
+        try:
+            return AskAgentLoop(self, progress=self.progress).run(
                 question,
                 database=database,
                 execute=execute,
@@ -189,17 +196,14 @@ class AskOrchestrator:
                 user_reply=user_reply,
                 trace_parent=trace_parent,
             )
-            if loop_response is not None:
-                return loop_response
         except Exception as exc:
             logger.warning("agent_loop_failed: %s", exc, exc_info=True)
-            self._loop_fail_reason = self._loop_fail_reason or f"exception: {exc}"
-
-        logger.info("agent_loop_fallback_to_staged question=%s", question[:80])
-        staged = self._run_staged(question, database=database, execute=execute, disclosures=disclosures)
-        reason = (self._loop_fail_reason or "unknown").strip()
-        staged.warnings.append(f"Tool loop unavailable ({reason}); using staged pipeline.")
-        return staged
+            self._loop_fail_reason = f"exception: {exc}"
+            return AssistantResponse(
+                answer=_i18n_t("agent.loop_failed"),
+                disclosures=self._new_disclosures(disclosures),
+                warnings=[_i18n_t("agent.loop_failed_reason", reason=str(exc))],
+            )
 
     def _run_multi(self, question: str, intents, *, database: str, execute: bool) -> AssistantResponse:
         """Run independent sub-intents in turn and aggregate. Each sub-intent keeps a

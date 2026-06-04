@@ -91,8 +91,11 @@ class AskAgentLoop:
         resume_state: dict[str, Any] | None = None,
         user_reply: str = "",
         trace_parent: str = "",
-    ) -> AssistantResponse | None:
-        """Run the tool loop. Returns None to signal fallback to staged pipeline.
+    ) -> AssistantResponse:
+        """Run the tool loop — the single execution path (no staged fallback). Recovers
+        from a bad model decision by retrying within the loop (budget-bounded); if it
+        genuinely can't finish it returns an honest failure response rather than
+        degrading to a weaker pipeline.
 
         ``trace_parent`` nests this run's step nodes under a parent trace node (used
         when several sub-intents run in one turn, so each intent's steps group under
@@ -150,8 +153,7 @@ class AskAgentLoop:
                 decision = self._decide(state, transcript)
             except LoopDecisionError as exc:
                 logger.warning("loop_decision_failed: %s", exc)
-                self._fail(f"decision_invalid: {exc}")
-                return None
+                return self._build_failed_response(orch, f"decision_invalid: {exc}", disclosures_before or [])
 
             action = str(decision.get("action") or "").strip().lower()
             if action == "finish":
@@ -159,8 +161,12 @@ class AskAgentLoop:
                 if not answer or answer == "Query complete.":
                     answer = self._answer_from_state(orch)
                 if not answer:
-                    self._fail("finish_empty_answer")
-                    return None
+                    # Don't degrade — push back and let the model actually answer (or
+                    # call a tool to gather what it's missing). Budget-bounded retry.
+                    transcript.append("Error: you called finish with an empty answer. "
+                                      "Provide the markdown answer, or call a tool to get what you need.")
+                    runtime.consume_step()
+                    continue
                 self.progress(
                     progress_event(stage="loop", title="Agent loop finished", status="completed", kind="agent"),
                 )
@@ -168,8 +174,11 @@ class AskAgentLoop:
 
             if action != "call_tool":
                 logger.warning("loop_unknown_action: %s", action)
-                self._fail(f"unknown_action: {action}")
-                return None
+                # Retry rather than bail: tell the model the only valid actions.
+                transcript.append(f"Error: unknown action {action!r}. "
+                                  "Use action 'call_tool' (with a tool) or 'finish' (with an answer).")
+                runtime.consume_step()
+                continue
 
             tool_name = str(decision.get("tool") or "").strip()
             if tool_name not in self.registry._handlers:  # noqa: SLF001
@@ -281,11 +290,35 @@ class AskAgentLoop:
                 return self._build_response(orch, answer, disclosures_before or [])
 
         logger.warning("loop_budget_exhausted steps=%d", len(state.calls))
-        self._fail("step_budget_exhausted")
-        return None
+        return self._build_failed_response(orch, "step_budget_exhausted", disclosures_before or [])
 
     def _fail(self, reason: str) -> None:
         self.orchestrator._loop_fail_reason = reason
+
+    def _build_failed_response(
+        self, orch: AskOrchestrator, reason: str, disclosures_before: list[str],
+    ) -> AssistantResponse:
+        """Honest failure (no degrade): surface whatever real result/answer the loop did
+        produce, otherwise a clear 'couldn't complete' message — with the reason kept in
+        warnings for debugging. Marks the run failed in the trace."""
+        self._fail(reason)
+        self.progress(
+            progress_event(stage="loop", title="Agent loop stopped", status="failed",
+                           kind="agent", detail=reason),
+        )
+        from dbaide.i18n import t
+        answer = (orch._loop_answer or "").strip()
+        if not answer and orch._loop_query_result:
+            answer = self._answer_from_state(orch)
+        if not answer:
+            answer = t("agent.loop_failed")
+        return AssistantResponse(
+            answer=answer,
+            sql=orch._loop_sql or "",
+            result=orch._loop_query_result,
+            disclosures=orch.session.disclosure.events[len(disclosures_before):],
+            warnings=[t("agent.loop_failed_reason", reason=reason)],
+        )
 
     def _auto_get_relations_if_needed(
         self,

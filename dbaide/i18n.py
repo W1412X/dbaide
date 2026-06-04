@@ -102,6 +102,11 @@ _STRINGS: dict[str, dict[str, str]] = {
         "zh": "添加数据库/表作为上下文",
     },
     "composer.attach_menu": {"en": "Attach context", "zh": "添加上下文"},
+    "agent.loop_failed": {
+        "en": "I couldn't complete this request. Please try rephrasing it or run it again.",
+        "zh": "我没能完成这个请求，请换个说法或重试。",
+    },
+    "agent.loop_failed_reason": {"en": "Agent stopped: {reason}", "zh": "智能体已停止：{reason}"},
     "trace.title": {"en": "Agent trace", "zh": "智能体执行轨迹"},
     "trace.view": {"en": "View agent trace", "zh": "查看执行轨迹"},
     "trace.view_failed": {"en": "View agent trace · failed", "zh": "查看执行轨迹 · 失败"},
