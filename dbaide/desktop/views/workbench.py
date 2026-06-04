@@ -80,6 +80,20 @@ class WorkbenchView(QWidget):
         self.tabs.tabBar().setUsesScrollButtons(True)
         self.tabs.tabBar().setElideMode(Qt.TextElideMode.ElideRight)
         self.tabs.tabBar().setExpanding(False)
+        # In document mode the macOS-native tab bar paints its own (dark) base that the
+        # QSS `background` doesn't reliably override — it read as a dark strip in light
+        # mode. Force the bar + its pane/corner to the theme background via the palette
+        # (autofilled), which the native style does honour.
+        from PyQt6.QtGui import QColor, QPalette
+        for w in (self.tabs, self.tabs.tabBar()):
+            w.setAutoFillBackground(True)
+            pal = w.palette()
+            pal.setColor(QPalette.ColorRole.Window, QColor(Theme.BG))
+            w.setPalette(pal)
+        self.tabs.setStyleSheet(
+            f"QTabWidget::pane {{ border: none; background: {Theme.SURFACE}; }}"
+            f"QTabWidget {{ background: {Theme.BG}; }}"
+        )
         layout.addWidget(self.tabs)
 
         # History opens on demand from the corner icon (it no longer occupies a
