@@ -55,6 +55,16 @@ class SqlEditor(QPlainTextEdit):
         self._completer.setCaseSensitivity(Qt.CaseSensitivity.CaseInsensitive)
         self._completer.setWrapAround(False)
         self._completer.activated.connect(self._insert_completion)
+        # The completer popup is a top-level QListView that the global QSS doesn't
+        # paint — without this it falls back to the system palette and mismatches the
+        # theme (e.g. a dark popup in light mode). Style it to the current theme.
+        self._completer.popup().setStyleSheet(
+            f"QListView {{ background: {Theme.SURFACE}; color: {Theme.TEXT};"
+            f" border: 1px solid {Theme.BORDER}; border-radius: 8px; padding: 4px;"
+            f" outline: none; }}"
+            f"QListView::item {{ padding: 4px 8px; border-radius: 5px; }}"
+            f"QListView::item:selected {{ background: {Theme.PANEL_3}; color: {Theme.TEXT}; }}"
+        )
 
         # Line-number gutter + current-line highlight (Qt CodeEditor pattern).
         self._line_area = _LineNumberArea(self)
