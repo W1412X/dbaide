@@ -8,11 +8,13 @@ a full page returned") so it stays cheap on large tables — no COUNT(*).
 """
 from __future__ import annotations
 
+import re
 from typing import Any
 
-from PyQt6.QtCore import QSize, Qt, pyqtSignal
+from PyQt6.QtCore import QSize, Qt, QStringListModel, pyqtSignal
 from PyQt6.QtGui import QFont
 from PyQt6.QtWidgets import (
+    QCompleter,
     QHBoxLayout,
     QLabel,
     QLineEdit,
@@ -144,6 +146,22 @@ class DataBrowser(QWidget):
         self._filter.returnPressed.connect(self._on_filter)
         # leading magnifier-ish handled by placeholder; keep it simple/compact
         self._filter.setFixedHeight(26)
+        # Word-level completion of column names (and a few WHERE keywords) — a plain
+        # QLineEdit completer matches the whole line, so we drive the completer on the
+        # current word ourselves.
+        self._filter_model = QStringListModel(self)
+        self._filter_completer = QCompleter(self._filter_model, self)
+        self._filter_completer.setWidget(self._filter)
+        self._filter_completer.setCompletionMode(QCompleter.CompletionMode.PopupCompletion)
+        self._filter_completer.setCaseSensitivity(Qt.CaseSensitivity.CaseInsensitive)
+        self._filter_completer.popup().setStyleSheet(
+            f"QListView {{ background: {Theme.SURFACE}; color: {Theme.TEXT};"
+            f" border: 1px solid {Theme.BORDER}; border-radius: 8px; padding: 4px; outline: none; }}"
+            f"QListView::item {{ padding: 4px 8px; border-radius: 5px; }}"
+            f"QListView::item:selected {{ background: {Theme.PANEL_3}; color: {Theme.TEXT}; }}"
+        )
+        self._filter_completer.activated.connect(self._insert_filter_completion)
+        self._filter.textEdited.connect(self._on_filter_text)
         pl.addWidget(self._filter)
 
         # Sorting is an explicit, deliberate choice via the header right-click menu
@@ -182,6 +200,7 @@ class DataBrowser(QWidget):
 
     def show_result(self, result: dict[str, Any]) -> None:
         self._columns = list(result.get("columns") or [])
+        self._set_filter_completions()  # WHERE box now completes this table's columns
         rows = result.get("rows") or []
         self.grid.load(
             columns=self._columns,
@@ -352,6 +371,40 @@ class DataBrowser(QWidget):
         self._offset = 0
         self._reset_total()  # a different filter invalidates the previous total
         self._reload()
+
+    # ── filter (WHERE) completion ────────────────────────────────────────────--
+
+    _WORD = re.compile(r"[A-Za-z_][\w]*$")
+    _WHERE_KEYWORDS = ["AND", "OR", "NOT", "LIKE", "IN", "IS", "NULL", "BETWEEN"]
+
+    def _set_filter_completions(self) -> None:
+        self._filter_model.setStringList(list(self._columns) + self._WHERE_KEYWORDS)
+
+    def _filter_word(self) -> tuple[str, int]:
+        """The identifier word ending at the cursor in the filter box → (word, start)."""
+        left = self._filter.text()[: self._filter.cursorPosition()]
+        m = self._WORD.search(left)
+        return (m.group(0), m.start()) if m else ("", self._filter.cursorPosition())
+
+    def _on_filter_text(self, _text: str) -> None:
+        word, _start = self._filter_word()
+        popup = self._filter_completer.popup()
+        if len(word) < 1 or not self._columns:
+            popup.hide()
+            return
+        self._filter_completer.setCompletionPrefix(word)
+        if self._filter_completer.completionCount() == 0:
+            popup.hide()
+            return
+        popup.setCurrentIndex(self._filter_completer.completionModel().index(0, 0))
+        self._filter_completer.complete()
+
+    def _insert_filter_completion(self, completion: str) -> None:
+        _word, start = self._filter_word()
+        text = self._filter.text()
+        end = self._filter.cursorPosition()
+        self._filter.setText(text[:start] + completion + text[end:])
+        self._filter.setCursorPosition(start + len(completion))
 
     def _sort_actions(self, section: int):
         """Header right-click menu entries for column ``section``: Ascending /

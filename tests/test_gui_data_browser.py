@@ -171,3 +171,19 @@ def test_data_browser_shows_loading_state(qapp):
     assert db._loading is False
     assert db._prev.isEnabled() is True
     db.deleteLater()
+
+
+def test_filter_completes_column_words(qapp):
+    """The WHERE filter box completes column names word-by-word (not the whole line)."""
+    from dbaide.desktop.views.data_browser import DataBrowser
+    db = DataBrowser()
+    db.open_table("local", "main", "orders")
+    db.show_result({"columns": ["id", "amount", "status"], "rows": [], "row_count": 0, "offset": 0})
+    words = db._filter_model.stringList()
+    assert {"id", "amount", "status"} <= set(words) and "AND" in words
+    db._filter.setText("amount > 10 AND stat")
+    db._filter.setCursorPosition(len("amount > 10 AND stat"))
+    assert db._filter_word() == ("stat", 16)
+    db._insert_filter_completion("status")
+    assert db._filter.text() == "amount > 10 AND status"   # only the word is replaced
+    db.deleteLater()
