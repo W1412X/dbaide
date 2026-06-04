@@ -40,6 +40,14 @@ class _RightCloseTabStyle(QProxyStyle):
         if hint == QStyle.StyleHint.SH_TabBar_CloseButtonPosition:
             return QTabBar.ButtonPosition.RightSide.value
         return super().styleHint(hint, option, widget, returnData)
+
+    def pixelMetric(self, metric, option=None, widget=None):  # noqa: N802
+        # Pin the close-button indicator to one size — the native (macOS) metric is
+        # inconsistent, so close buttons rendered at slightly different sizes per tab.
+        if metric in (QStyle.PixelMetric.PM_TabCloseIndicatorWidth,
+                      QStyle.PixelMetric.PM_TabCloseIndicatorHeight):
+            return 16
+        return super().pixelMetric(metric, option, widget)
 from dbaide.desktop.views.sql_tab import SqlTab
 from dbaide.desktop.views.table_document import TableDocument
 

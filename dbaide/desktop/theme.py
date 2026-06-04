@@ -544,7 +544,9 @@ QTabBar[panelTabs="true"]::tab:hover:!selected {{
 QTabBar[panelTabs="true"]::close-button {{
     image: url({_CLOSE_ICON});
     subcontrol-position: right;
-    margin-left: 4px;
+    width: 16px;
+    height: 16px;
+    margin: 0 2px 0 4px;
     border-radius: 4px;
 }}
 QTabBar[panelTabs="true"]::close-button:hover {{
