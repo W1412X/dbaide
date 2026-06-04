@@ -215,6 +215,7 @@ class MainWindow(QMainWindow):
         self.workbench.explain_sql.connect(self._explain_from)
         self.workbench.browse_requested.connect(self._browse_from)
         self.workbench.count_requested.connect(self._count_from)
+        self.workbench.ddl_requested.connect(self._ddl_from)
         self.workbench.doc_closed.connect(self._on_doc_closed)
         self.workbench.navigate_table.connect(self._open_table_by_name)
         self.workbench.navigate_fk.connect(self._navigate_fk)
@@ -883,6 +884,14 @@ class MainWindow(QMainWindow):
     def _count_from(self, doc, payload: dict[str, Any]) -> None:
         self._active_data_doc = doc
         self.run_action("count_table", payload)
+
+    def _ddl_from(self, doc, payload: dict[str, Any]) -> None:
+        """Fetch the table's real CREATE TABLE DDL in the background and feed it to the
+        document's Structure panel (non-blocking; the generated skeleton shows until)."""
+        def on_loaded(result: dict[str, Any]) -> None:
+            if doc is not None and not sip.isdeleted(doc):
+                doc.show_ddl(str((result or {}).get("ddl") or ""))
+        self._run_background("table_ddl", payload, on_loaded)
 
     def _on_doc_closed(self, widget) -> None:
         if widget is self._active_sql_doc:

@@ -97,9 +97,9 @@ class StructurePanel(QWidget):
 
         ddl_row = QHBoxLayout()
         ddl_row.setContentsMargins(0, 0, 0, 0)
-        ddl_label = QLabel(t("structure.ddl"))
-        ddl_label.setStyleSheet(f"color: {Theme.MUTED}; font-size: 11px; font-weight: 600;")
-        ddl_row.addWidget(ddl_label)
+        self._ddl_label = QLabel(t("structure.ddl"))
+        self._ddl_label.setStyleSheet(f"color: {Theme.MUTED}; font-size: 11px; font-weight: 600;")
+        ddl_row.addWidget(self._ddl_label)
         ddl_row.addStretch(1)
         self._copy_ddl = QToolButton()
         self._copy_ddl.setIcon(svg_icon("copy", color=Theme.TEXT_2, size=13))
@@ -142,8 +142,19 @@ class StructurePanel(QWidget):
         self._cols.load(columns=["Column", "Type", "Key"], rows=rows, row_count=len(rows))
         self._relations.setText(self._relations_html(relations or {}))
         self._indexes.setText(self._indexes_text(indexes or []))
+        # Show a generated skeleton instantly; the real DDL from the database replaces
+        # it via set_ddl() once the (lazy) fetch returns.
         self._ddl.setPlainText(_generate_ddl(table, columns or []))
+        self._ddl_label.setText(self._t("structure.ddl"))
         self.stack.setCurrentIndex(1)
+
+    def set_ddl(self, ddl: str) -> None:
+        """Replace the generated skeleton with the database's real CREATE TABLE DDL."""
+        ddl = (ddl or "").strip()
+        if not ddl:
+            return
+        self._ddl.setPlainText(ddl)
+        self._ddl_label.setText(self._t("structure.ddl_real"))
 
     def _indexes_text(self, indexes: list[dict[str, Any]]) -> str:
         # Skip the primary-key index (already shown in the Key column).

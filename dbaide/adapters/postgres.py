@@ -120,6 +120,39 @@ class PostgresAdapter(DatabaseAdapter):
             for name, info in grouped.items()
         ]
 
+    def get_table_ddl(self, table: str, database: str = "") -> str:
+        """Postgres has no SHOW CREATE TABLE, so reconstruct a faithful CREATE TABLE
+        from the catalog: columns (type, NOT NULL, DEFAULT), the primary key, foreign
+        keys, and the non-PK indexes as CREATE INDEX statements."""
+        cols = self.describe_table(table, database=database)
+        if not cols:
+            return super().get_table_ddl(table, database=database)
+        q = lambda n: quote_identifier(str(n), self.dialect)  # noqa: E731
+        tq = _quote_table(table)
+        lines: list[str] = []
+        for c in cols:
+            seg = f"  {q(c.name)} {c.data_type or 'text'}"
+            if c.nullable is False:
+                seg += " NOT NULL"
+            if c.default is not None:
+                seg += f" DEFAULT {c.default}"
+            lines.append(seg)
+        pk_cols = [c.name for c in cols if c.primary_key]
+        if pk_cols:
+            lines.append(f"  PRIMARY KEY ({', '.join(q(c) for c in pk_cols)})")
+        for fk in self.foreign_keys(table, database=database):
+            if fk.column and fk.ref_table and fk.ref_column:
+                lines.append(
+                    f"  FOREIGN KEY ({q(fk.column)}) REFERENCES {q(fk.ref_table)} ({q(fk.ref_column)})"
+                )
+        ddl = f"CREATE TABLE {tq} (\n" + ",\n".join(lines) + "\n);"
+        for ix in self.indexes(table, database=database):
+            if ix.primary or not ix.columns:
+                continue  # the PK is already inline above
+            unique = "UNIQUE " if ix.unique else ""
+            ddl += f"\nCREATE {unique}INDEX {q(ix.name)} ON {tq} ({', '.join(q(c) for c in ix.columns)});"
+        return ddl
+
     def _execute_readonly_impl(self, sql: str, *, database: str = "", limit: int | None = None,
                                timeout_seconds: int = 10) -> QueryResult:
         bounded = append_limit(sql, limit)

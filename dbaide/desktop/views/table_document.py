@@ -19,6 +19,7 @@ from dbaide.desktop.views.structure_panel import StructurePanel
 class TableDocument(QWidget):
     query_requested = pyqtSignal(dict)
     count_requested = pyqtSignal(dict)
+    ddl_requested = pyqtSignal(dict)   # fetch the real CREATE TABLE DDL from the DB
     navigate_table = pyqtSignal(str)  # bubbled from the Structure panel's FK links
     navigate_fk = pyqtSignal(str, str, object)  # (ref_table, ref_column, value)
 
@@ -46,6 +47,7 @@ class TableDocument(QWidget):
         self._structure_index = self.tabs.addTab(self.structure, t("tab.structure"))
         self._data_index = self.tabs.addTab(self.data, t("tab.data"))
         self._data_loaded = False
+        self._ddl_loaded = False
         self.tabs.currentChanged.connect(self._on_subtab)
         layout.addWidget(self.tabs)
 
@@ -71,6 +73,18 @@ class TableDocument(QWidget):
         }
         self.data.set_foreign_keys(fk_map)
         self.tabs.setCurrentIndex(self._structure_index)
+        # Structure is the default tab → fetch the real CREATE TABLE DDL once (the
+        # generated skeleton is shown meanwhile). MainWindow runs it and calls show_ddl.
+        if not self._ddl_loaded:
+            self._ddl_loaded = True
+            self.ddl_requested.emit({
+                "connection_name": self.connection,
+                "database": self.database,
+                "table": self.table,
+            })
+
+    def show_ddl(self, ddl: str) -> None:
+        self.structure.set_ddl(ddl)
 
     def _on_subtab(self, index: int) -> None:
         if index == self._data_index:

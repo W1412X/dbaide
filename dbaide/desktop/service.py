@@ -149,6 +149,7 @@ class DesktopService:
             "execute_sql": self.execute_sql,
             "browse_table": self.browse_table,
             "count_table": self.count_table,
+            "table_ddl": self.table_ddl,
             "explain_sql": self.explain_sql,
             "list_history": self.list_history,
             "load_history": self.load_history,
@@ -579,6 +580,20 @@ class DesktopService:
         except (StopIteration, IndexError, TypeError, ValueError):
             count = 0
         return {"count": count, "table": table, "where": where}
+
+    def table_ddl(self, payload: dict[str, Any]) -> dict[str, Any]:
+        """The table's real CREATE TABLE DDL straight from the database — exact for
+        SQLite (sqlite_master) and MySQL (SHOW CREATE TABLE), reconstructed from the
+        catalog for Postgres. Falls back to a column-reconstruction if unavailable."""
+        conn = self.cfg.get_connection(str(payload.get("connection_name") or "") or None)
+        self._guard_busy(conn.name)
+        database = str(payload.get("database") or "")
+        table = str(payload.get("table") or "")
+        if not table:
+            raise ValueError("table is required")
+        adapter = build_adapter(conn, policy=self.cfg.policy_for(conn), caller="gui")
+        ddl = adapter.get_table_ddl(table, database=database)
+        return {"ddl": ddl, "table": table, "database": database}
 
     def explain_sql(self, payload: dict[str, Any]) -> dict[str, Any]:
         conn = self.cfg.get_connection(str(payload.get("connection_name") or "") or None)

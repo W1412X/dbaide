@@ -57,6 +57,7 @@ class WorkbenchView(QWidget):
     explain_sql = pyqtSignal(object, str)    # (SqlTab, sql) — show query plan
     browse_requested = pyqtSignal(object, dict)  # (TableDocument, payload)
     count_requested = pyqtSignal(object, dict)   # (TableDocument, count payload)
+    ddl_requested = pyqtSignal(object, dict)     # (TableDocument, ddl payload)
     doc_closed = pyqtSignal(object)          # the closed widget
     navigate_table = pyqtSignal(str)         # FK link → open a related table
     navigate_fk = pyqtSignal(str, str, object)  # data-cell FK → open referenced row
@@ -247,6 +248,7 @@ class WorkbenchView(QWidget):
         doc = TableDocument(connection, database, table)
         doc.query_requested.connect(lambda payload, d=doc: self.browse_requested.emit(d, payload))
         doc.count_requested.connect(lambda payload, d=doc: self.count_requested.emit(d, payload))
+        doc.ddl_requested.connect(lambda payload, d=doc: self.ddl_requested.emit(d, payload))
         doc.navigate_table.connect(self.navigate_table.emit)
         doc.navigate_fk.connect(self.navigate_fk.emit)
         index = self.tabs.addTab(doc, table)

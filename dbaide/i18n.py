@@ -62,6 +62,7 @@ _STRINGS: dict[str, dict[str, str]] = {
         "zh": "双击左侧结构树中的表即可查看其结构。",
     },
     "structure.ddl": {"en": "CREATE statement (generated)", "zh": "CREATE 语句(自动生成)"},
+    "structure.ddl_real": {"en": "CREATE statement", "zh": "CREATE 语句"},
     "structure.references": {"en": "References:", "zh": "外键引用："},
     "structure.referenced_by": {"en": "Referenced by:", "zh": "被引用："},
     "structure.indexes": {"en": "Indexes:", "zh": "索引："},

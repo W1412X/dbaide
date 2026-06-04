@@ -187,3 +187,45 @@ def test_filter_completes_column_words(qapp):
     db._insert_filter_completion("status")
     assert db._filter.text() == "amount > 10 AND status"   # only the word is replaced
     db.deleteLater()
+
+
+def test_table_ddl_service_returns_real_sqlite_ddl(qapp, tmp_path):
+    """The table_ddl action returns the database's actual CREATE statement (verbatim
+    from sqlite_master), not an auto-inferred one."""
+    db = tmp_path / "app.db"
+    c = sqlite3.connect(db)
+    c.execute("CREATE TABLE orders (\n  id INTEGER PRIMARY KEY,\n  amount REAL NOT NULL,\n  status TEXT DEFAULT 'new'\n)")
+    c.commit(); c.close()
+    from dbaide.assets import AssetStore
+    from dbaide.config import ConfigManager
+    from dbaide.desktop.service import DesktopService
+    from dbaide.models import ConnectionConfig
+    cfg = ConfigManager(path=tmp_path / "config.toml")
+    cfg.upsert_connection(ConnectionConfig(name="local", type="sqlite", path=str(db)), make_default=True)
+    svc = DesktopService(cfg, AssetStore(tmp_path / "assets"))
+    out = svc.dispatch("table_ddl", {"connection_name": "local", "table": "orders"})
+    assert "CREATE TABLE orders" in out["ddl"]
+    assert "amount REAL NOT NULL" in out["ddl"]      # real constraints preserved
+    assert "DEFAULT 'new'" in out["ddl"]
+
+
+def test_structure_panel_set_ddl_replaces_generated(qapp):
+    from dbaide.desktop.views.structure_panel import StructurePanel
+    sp = StructurePanel()
+    sp.show_table("orders", [{"name": "id", "data_type": "int", "primary_key": True}])
+    assert "(generated)" in sp._ddl_label.text() or "自动生成" in sp._ddl_label.text()
+    sp.set_ddl("CREATE TABLE orders (id INTEGER PRIMARY KEY, amount REAL NOT NULL);")
+    assert "amount REAL NOT NULL" in sp._ddl.toPlainText()   # real DDL shown
+    assert "generated" not in sp._ddl_label.text() and "自动生成" not in sp._ddl_label.text()
+
+
+def test_table_document_requests_ddl_on_open(qapp):
+    from dbaide.desktop.views.table_document import TableDocument
+    doc = TableDocument("conn", "main", "orders")
+    payloads = []
+    doc.ddl_requested.connect(payloads.append)
+    doc.open([{"name": "id", "data_type": "int", "primary_key": True}])
+    assert payloads and payloads[0]["table"] == "orders"
+    doc.show_ddl("CREATE TABLE orders (id INTEGER);")
+    assert "CREATE TABLE orders" in doc.structure._ddl.toPlainText()
+    doc.deleteLater()
