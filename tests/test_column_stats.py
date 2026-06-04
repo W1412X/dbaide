@@ -45,3 +45,19 @@ def test_llm_picks_metrics(tmp_path):
 def test_tool_registered_and_exposed_to_loop():
     from dbaide.agent.toolkit import LOOP_DECISION_TOOL_NAMES
     assert "column_stats" in LOOP_DECISION_TOOL_NAMES
+
+
+def test_explicit_top_values_honored_on_text_column(tmp_path):
+    """A char/text flag column must return top_values when explicitly asked — the
+    type whitelist only governs the default set, not explicit picks."""
+    pt = _tools(tmp_path)
+    stats = pt.column_stats("t", ["status"], metrics=["distinct_count", "top_values"])[0]["stats"]
+    assert stats["distinct_count"] == 2
+    vals = {tv["value"]: tv["count"] for tv in stats["top_values"]}
+    assert vals == {"paid": 2, "pending": 1}
+
+
+def test_unsupported_metric_gets_a_note(tmp_path):
+    pt = _tools(tmp_path)
+    stats = pt.column_stats("t", ["status"], metrics=["nonsense"])[0]["stats"]
+    assert "note" in stats and "nonsense" in stats["note"]

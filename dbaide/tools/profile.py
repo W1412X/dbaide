@@ -31,6 +31,12 @@ _AGG = {
     "empty_rate": "AVG(CASE WHEN {c} = '' THEN 1.0 ELSE 0.0 END)",
 }
 
+# Every metric the tool can actually compute (top_values is handled separately, not
+# via _AGG). Type defaults above only decide what's fetched when the caller picks
+# nothing — an EXPLICIT request is honoured for any supported metric, whatever the
+# column type (e.g. top_values on a char flag like del_flag='0'/'1').
+_ALL_METRICS = set(_AGG) | {"top_values"}
+
 
 class ProfileTools:
     def __init__(self, adapter: DatabaseAdapter, context: DisclosureContext, *, instance: str = "", assets: AssetStore | None = None) -> None:
@@ -99,9 +105,19 @@ class ProfileTools:
         out: list[dict[str, Any]] = []
         for col in wanted:
             kind = kind_from_type(col)
-            defaults, optional = _METRICS.get(kind, _METRICS["unknown"])
-            chosen = [m for m in picked if m in defaults or m in optional] if picked else list(defaults)
+            defaults, _optional = _METRICS.get(kind, _METRICS["unknown"])
+            # Explicit picks are honoured for ANY supported metric (the model knows
+            # what it needs — e.g. top_values on a char flag). Type defaults only
+            # apply when the caller picks nothing. Unsupported picks get a clear note
+            # so the model stops retrying instead of silently getting empty stats.
+            if picked:
+                chosen = [m for m in picked if m in _ALL_METRICS]
+                unsupported = [m for m in picked if m not in _ALL_METRICS]
+            else:
+                chosen, unsupported = list(defaults), []
             stats = self._compute_stats(table, col, chosen, database=database, top_k=top_k)
+            if unsupported:
+                stats["note"] = "unsupported metric(s) ignored: " + ", ".join(unsupported)
             out.append({"column": col.name, "data_type": col.data_type, "kind": kind, "stats": stats})
         return out
 
