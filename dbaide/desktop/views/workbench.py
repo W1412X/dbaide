@@ -89,13 +89,14 @@ class WorkbenchView(QWidget):
         self.tabs.tabBar().setUsesScrollButtons(True)
         self.tabs.tabBar().setElideMode(Qt.TextElideMode.ElideRight)
         self.tabs.tabBar().setExpanding(False)
-        # Paint the tab bar + pane the content SURFACE so the whole tab area is one
-        # continuous surface (no stark near-black band above the editor). A
-        # widget-local QTabBar background reliably fills the empty bar strip in
-        # documentMode; autoFillBackground must NOT be used here — it conflicts with
-        # the QSS background and leaves the strip transparent (the window BG shows).
-        self.tabs.tabBar().setStyleSheet(f"QTabBar {{ background: {Theme.SURFACE}; }}")
+        self.tabs.tabBar().setDrawBase(False)
+        self.tabs.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
+        # The tab bar itself must stay on the global panelTabs stylesheet. Setting
+        # a widget-local QTabBar stylesheet here makes Qt drop the app-level tab
+        # subcontrol rules, so document tabs fall back to native gray colors.
         self.tabs.setStyleSheet(
+            f"QTabWidget {{ background: {Theme.SURFACE}; }}"
+            f"QTabWidget::tab-bar {{ background: {Theme.SURFACE}; }}"
             f"QTabWidget::pane {{ border: none; background: {Theme.SURFACE}; }}"
         )
         layout.addWidget(self.tabs)

@@ -73,6 +73,23 @@ def test_data_browser_widget(qapp):
     assert "1" in w._range.text()
 
 
+def test_table_browser_content_uses_clean_margins(qapp):
+    from dbaide.desktop.views.data_browser import DataBrowser
+    from dbaide.desktop.views.structure_panel import StructurePanel
+
+    db = DataBrowser()
+    db.open_table("local", "main", "orders")
+    db_page_margins = db.stack.widget(1).layout().contentsMargins()
+    assert (db_page_margins.left(), db_page_margins.top(), db_page_margins.right()) == (16, 10, 16)
+    assert db.stack.widget(1).layout().spacing() == 10
+
+    sp = StructurePanel()
+    sp.show_table("orders", [{"name": "id", "data_type": "INTEGER"}])
+    sp_page_margins = sp.stack.widget(1).layout().contentsMargins()
+    assert (sp_page_margins.left(), sp_page_margins.top(), sp_page_margins.right()) == (16, 10, 16)
+    assert sp.stack.widget(1).layout().spacing() == 10
+
+
 def test_structure_panel(qapp):
     from dbaide.desktop.views.structure_panel import StructurePanel, _generate_ddl
     cols = [{"name": "id", "data_type": "INTEGER", "primary_key": True},

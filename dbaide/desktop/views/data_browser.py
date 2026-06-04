@@ -78,12 +78,12 @@ class DataBrowser(QWidget):
         # Data view.
         page = QWidget()
         pl = QVBoxLayout(page)
-        pl.setContentsMargins(0, 0, 0, 0)
-        pl.setSpacing(5)
+        pl.setContentsMargins(16, 10, 16, 0)
+        pl.setSpacing(10)
 
         # Toolbar row: table name · sort caption … page-size · ‹ range › · refresh
         bar = QHBoxLayout()
-        bar.setContentsMargins(2, 0, 2, 0)
+        bar.setContentsMargins(0, 0, 0, 0)
         bar.setSpacing(8)
         self._title = QLabel("")
         self._title.setFont(QFont("Inter", 13, QFont.Weight.DemiBold))

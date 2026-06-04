@@ -383,6 +383,12 @@ QTabWidget::pane {{
     background: {T.SURFACE};
     top: -1px;
 }}
+QTabWidget {{
+    background: {T.SURFACE};
+}}
+QTabWidget::tab-bar {{
+    background: {T.SURFACE};
+}}
 QTabBar::tab {{
     background: {T.PANEL};
     color: {T.MUTED};
@@ -524,23 +530,23 @@ QTabBar[panelTabs="true"] {{
 QTabBar[panelTabs="true"]::tab {{
     background: transparent;
     color: {T.MUTED};
-    padding: 1px 8px;
+    padding: 0 10px;
     border: none;
     margin: 0;
-    min-height: 21px;
-    max-height: 21px;
+    min-height: 24px;
+    max-height: 24px;
     font-size: 12px;
     font-weight: 500;
 }}
 QTabBar[panelTabs="true"]::tab:selected {{
     background: {T.PANEL_3};
     color: {T.TEXT};
-    border-radius: 6px;
+    border-radius: 3px;
 }}
 QTabBar[panelTabs="true"]::tab:hover:!selected {{
     color: {T.TEXT_2};
     background: {T.PANEL_2};
-    border-radius: 6px;
+    border-radius: 3px;
 }}
 QTabBar[panelTabs="true"]::close-button {{
     image: url({_CLOSE_ICON});

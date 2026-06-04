@@ -29,6 +29,40 @@ def test_starts_with_one_editor_no_history_tab(qapp):
     assert _titles(wb) == ["Query 1"]
 
 
+def test_workbench_tabbar_uses_global_panel_tab_theme(qapp):
+    wb = _wb(qapp)
+    assert wb.tabs.tabBar().property("panelTabs") is True
+    assert wb.tabs.tabBar().styleSheet() == ""
+    assert wb.tabs.tabBar().drawBase() is False
+
+
+def test_workbench_tab_rows_do_not_leak_native_background(qapp):
+    from PyQt6.QtCore import QPoint, Qt
+    from PyQt6.QtWidgets import QTabBar
+    from dbaide.desktop.theme import Theme, app_style, set_theme
+
+    qapp.setStyle("Fusion")
+    set_theme("dark")
+    qapp.setStyleSheet(app_style())
+    wb = _wb(qapp)
+    try:
+        wb.resize(1000, 640)
+        wb.show()
+        qapp.processEvents()
+
+        img = wb.grab().toImage()
+        bars = wb.findChildren(QTabBar)
+        result_bar = next(bar for bar in bars if bar.count() == 2)
+        pt = result_bar.mapTo(wb, QPoint(0, 0))
+        y = pt.y() + result_bar.height() // 2
+        x = pt.x() + result_bar.width() + 120
+        assert img.pixelColor(x, y).name() == Theme.SURFACE
+        assert wb.tabs.testAttribute(Qt.WidgetAttribute.WA_StyledBackground)
+    finally:
+        wb.close()
+        set_theme("dark")
+
+
 def test_new_sql_editor_increments(qapp):
     wb = _wb(qapp)
     wb.new_sql_editor()
@@ -51,6 +85,32 @@ def test_open_sql_reuses_empty_editor(qapp):
     assert "select 1" in ed.editor.toPlainText()
     wb.open_sql("select 2")                 # current not empty → new editor
     assert _titles(wb) == ["Query 1", "Query 2"]
+
+
+def test_sql_tab_keeps_editor_and_results_breathing_room(qapp):
+    from dbaide.desktop.views.sql_tab import SqlTab
+
+    tab = SqlTab()
+    try:
+        assert tab.layout().spacing() == 12
+    finally:
+        tab.deleteLater()
+        qapp.processEvents()
+
+
+def test_sql_tab_actions_are_bottom_up(qapp):
+    from dbaide.desktop.views.sql_tab import SqlTab
+
+    tab = SqlTab()
+    try:
+        actions = tab.run_btn.parentWidget().layout().itemAt(0).layout().itemAt(1).layout()
+        assert actions.itemAt(0).spacerItem() is not None
+        assert actions.itemAt(1).widget() is tab.format_btn
+        assert actions.itemAt(2).widget() is tab.explain_btn
+        assert actions.itemAt(3).widget() is tab.run_btn
+    finally:
+        tab.deleteLater()
+        qapp.processEvents()
 
 
 def test_close_table_and_editor(qapp):
@@ -136,6 +196,7 @@ def test_table_document_opens_structure_without_query(qapp):
     doc.query_requested.connect(lambda p: fired.append(p))
     doc.open([{"name": "id", "data_type": "INTEGER", "primary_key": True}])
     assert doc.tabs.currentIndex() == doc._structure_index
+    assert doc.tabs.tabBar().drawBase() is False
     assert doc._data_loaded is False
     assert fired == []  # opening a table must NOT auto-query
 

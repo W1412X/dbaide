@@ -66,8 +66,8 @@ class StructurePanel(QWidget):
 
         page = QWidget()
         pl = QVBoxLayout(page)
-        pl.setContentsMargins(0, 0, 0, 0)
-        pl.setSpacing(8)
+        pl.setContentsMargins(16, 10, 16, 0)
+        pl.setSpacing(10)
         self._title = QLabel("")
         self._title.setFont(QFont("Inter", 13, QFont.Weight.DemiBold))
         pl.addWidget(self._title)

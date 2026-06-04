@@ -26,7 +26,7 @@ class SqlTab(QWidget):
         super().__init__(parent)
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(8)
+        layout.setSpacing(12)
         from dbaide.i18n import t
         self._t = t
 
@@ -52,17 +52,18 @@ class SqlTab(QWidget):
         actions.setContentsMargins(0, 0, 0, 0)
         actions.setSpacing(6)
         # Run is the accented primary action; Explain (execution plan) and Format are
-        # quiet secondary icons. ⌘↵ runs, ⌘⇧F formats (tooltips spell these out).
+        # quiet secondary icons. The group is bottom-aligned so it does not crowd the
+        # workbench corner controls above the editor.
         self.run_btn = self._icon_button("play", f"{t('sql.run')} · ⌘↵", primary=True)
         self.run_btn.clicked.connect(self._run)
-        actions.addWidget(self.run_btn)
         self.explain_btn = self._icon_button("list-tree", t("sql.explain_tooltip"))
         self.explain_btn.clicked.connect(self._explain)
-        actions.addWidget(self.explain_btn)
         self.format_btn = self._icon_button("sparkles", f"{t('sql.format')} · ⌘⇧F")
         self.format_btn.clicked.connect(self._format)
-        actions.addWidget(self.format_btn)
         actions.addStretch(1)
+        actions.addWidget(self.format_btn)
+        actions.addWidget(self.explain_btn)
+        actions.addWidget(self.run_btn)
         editor_row.addLayout(actions)
         # The editor auto-grows with its content (composer-style); give the row its
         # natural height and let the results grid below take the remaining space, so
@@ -75,7 +76,11 @@ class SqlTab(QWidget):
         # ── Results ───────────────────────────────────────────────────────────
         self.tabs = QTabWidget()
         self.tabs.tabBar().setProperty("panelTabs", True)  # quiet, rounded tabs
+        self.tabs.tabBar().setDrawBase(False)
+        self.tabs.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
         self.tabs.setStyleSheet(
+            f"QTabWidget {{ background: {Theme.SURFACE}; }}"
+            f"QTabWidget::tab-bar {{ background: {Theme.SURFACE}; }}"
             f"QTabWidget::pane {{ border: 1px solid {Theme.BORDER_SOFT}; border-radius: 10px;"
             f" top: -1px; background: {Theme.SURFACE}; }}"
         )
