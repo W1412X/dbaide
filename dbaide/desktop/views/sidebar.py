@@ -5,9 +5,11 @@ from typing import Any
 from PyQt6.QtCore import QSize, Qt, pyqtSignal
 from PyQt6.QtWidgets import (
     QFrame,
+    QHeaderView,
     QLineEdit,
     QSizePolicy,
     QSplitter,
+    QToolButton,
     QTreeWidget,
     QTreeWidgetItem,
     QVBoxLayout,
@@ -73,12 +75,22 @@ class Sidebar(QWidget):
         schema_layout.addWidget(self.search)
         self.tree = QTreeWidget()
         self.tree.setHeaderHidden(True)
+        # Column 0 = the schema name (stretches); column 1 = a small "view doc" icon
+        # button per row. Clicking the row opens its DATA; the icon opens the DOC.
+        self.tree.setColumnCount(2)
+        header = self.tree.header()
+        header.setStretchLastSection(False)
+        header.setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
+        header.setSectionResizeMode(1, QHeaderView.ResizeMode.Fixed)
+        header.resizeSection(1, 28)
         self.tree.setIndentation(16)
         self.tree.setAnimated(True)
         # Borderless tree that blends into the sidebar — interactivity comes from the
         # row hover/selection (global style), not a boxed frame.
         self.tree.setStyleSheet("QTreeWidget { background: transparent; border: none; }")
-        self.tree.itemSelectionChanged.connect(self._selection_changed)
+        # Single click on a row opens its data (the common case); double-click does the
+        # same. The per-row doc icon (column 1) opens the offline doc instead.
+        self.tree.itemClicked.connect(self._row_activated)
         self.tree.itemDoubleClicked.connect(self._double_clicked)
         self.tree.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.tree.customContextMenuRequested.connect(self._context_menu)
@@ -150,6 +162,36 @@ class Sidebar(QWidget):
                     table_item.addChild(col_item)
             self.tree.addTopLevelItem(db_item)
             db_item.setExpanded(True)
+        # Add the per-row "view doc" icon to databases and tables (the levels that have
+        # an offline doc; columns are covered by their table's doc). Done after the tree
+        # is built so the item widgets attach to live items.
+        self._attach_doc_buttons()
+
+    def _attach_doc_buttons(self) -> None:
+        from dbaide.i18n import t
+        stack = [self.tree.topLevelItem(i) for i in range(self.tree.topLevelItemCount())]
+        while stack:
+            item = stack.pop()
+            if item is None:
+                continue
+            data = item.data(0, Qt.ItemDataRole.UserRole)
+            if isinstance(data, dict) and data.get("path") and data.get("kind") in ("database", "table"):
+                self.tree.setItemWidget(item, 1, self._doc_button(data, t("schema.view_doc")))
+            stack.extend(item.child(i) for i in range(item.childCount()))
+
+    def _doc_button(self, data: dict[str, Any], tooltip: str) -> QToolButton:
+        btn = QToolButton()
+        btn.setIcon(svg_icon("file-text", color=Theme.MUTED, size=14))
+        btn.setIconSize(QSize(14, 14))
+        btn.setToolTip(tooltip)
+        btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        btn.setFixedSize(22, 22)
+        btn.setStyleSheet(
+            f"QToolButton {{ background: transparent; border: none; border-radius: 5px; }}"
+            f"QToolButton:hover {{ background: {Theme.PANEL_2}; }}"
+        )
+        btn.clicked.connect(lambda _checked=False, d=data: self.schema_preview.emit(d))
+        return btn
 
     def _filter_tree(self, text: str) -> None:
         needle = text.strip().lower()
@@ -181,18 +223,16 @@ class Sidebar(QWidget):
         if query:
             self.semantic_search_requested.emit(query)
 
-    def _selection_changed(self) -> None:
-        items = self.tree.selectedItems()
-        if not items:
-            return
-        data = items[0].data(0, Qt.ItemDataRole.UserRole)
-        if isinstance(data, dict) and data.get("path"):
-            self.schema_preview.emit(data)
-
-    def _double_clicked(self, item: QTreeWidgetItem, _column: int) -> None:
+    def _row_activated(self, item: QTreeWidgetItem, _column: int) -> None:
+        # Single click opens the row's data (tables → data browser; db/column fall back
+        # to their doc inside open_schema_asset). The doc icon is the explicit doc path.
         data = item.data(0, Qt.ItemDataRole.UserRole)
         if isinstance(data, dict) and data.get("path"):
             self.schema_selected.emit(data)
+
+    def _double_clicked(self, item: QTreeWidgetItem, _column: int) -> None:
+        # Same as a single click (kept for muscle memory).
+        self._row_activated(item, _column)
 
     def _context_menu(self, pos) -> None:
         item = self.tree.itemAt(pos)
@@ -209,6 +249,9 @@ class Sidebar(QWidget):
         _style_menu(menu)
         if kind == "table":
             menu.addAction(t("schema.open_data"), lambda: self.schema_selected.emit(data))
+        if kind in ("database", "table") and data.get("path"):
+            menu.addAction(t("schema.view_doc"), lambda: self.schema_preview.emit(data))
+        if kind == "table":
             gen = menu.addMenu(t("schema.generate_sql"))
             _style_menu(gen)
             for gkind, key in (

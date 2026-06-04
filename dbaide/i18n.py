@@ -200,6 +200,7 @@ _STRINGS: dict[str, dict[str, str]] = {
     "toast.db_scope": {"en": "Database scope: {scope}", "zh": "数据库范围：{scope}"},
     "toast.table_not_found": {"en": "Table not found: {table}", "zh": "未找到表：{table}"},
     "schema.open_data": {"en": "Open data", "zh": "打开数据"},
+    "schema.view_doc": {"en": "View doc", "zh": "查看文档"},
     "schema.generate_sql": {"en": "Generate SQL", "zh": "生成 SQL"},
     "schema.gen_select_star": {"en": "SELECT *", "zh": "SELECT *"},
     "schema.gen_select_columns": {"en": "SELECT columns", "zh": "SELECT 列"},

@@ -62,6 +62,10 @@ _GLYPHS: dict[str, str] = {
     # Execution plan (a small query tree).
     "list-tree": ('<path d="M21 12h-8"/><path d="M21 6H8"/><path d="M21 18h-8"/>'
                   '<path d="M3 6v4c0 1.1.9 2 2 2h3"/><path d="M3 10v6c0 1.1.9 2 2 2h3"/>'),
+    # Document / offline doc (file with text lines).
+    "file-text": ('<path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z"/>'
+                  '<path d="M14 2v4a2 2 0 0 0 2 2h4"/><path d="M16 13H8"/><path d="M16 17H8"/>'
+                  '<path d="M10 9H8"/>'),
 }
 
 _TEMPLATE = (
