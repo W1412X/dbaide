@@ -14,7 +14,6 @@ from __future__ import annotations
 from typing import Any
 
 from PyQt6.QtCore import QSize, Qt, pyqtSignal
-from PyQt6.QtGui import QFont
 from PyQt6.QtWidgets import (
     QHBoxLayout,
     QProxyStyle,
@@ -83,39 +82,45 @@ class WorkbenchView(QWidget):
         self.tabs.tabBar().setExpanding(False)
         layout.addWidget(self.tabs)
 
-        # History is pinned (always present, not closeable).
+        # History opens on demand from the corner icon (it no longer occupies a
+        # permanent tab — that just cluttered the bar). The panel widget is owned by
+        # MainWindow and reused.
         self.history_panel = history_panel
-        self._history_index = self.tabs.addTab(history_panel, t("tab.history"))
-        self._pin(self._history_index)
 
-        # Top-right corner → open a new SQL editor. A labelled "+ New SQL" pill (rather
-        # than a bare "+") makes the action self-explanatory. The QTabWidget clips its
-        # corner widget to the tab-bar height, so the pill is sized to sit IN that row
-        # (a taller button gets cut off at the top/bottom).
-        add_btn = QToolButton()
-        add_btn.setText(t("workbench.new_sql"))
-        add_btn.setIcon(svg_icon("plus", color=Theme.TEXT_2, size=12))
-        add_btn.setIconSize(QSize(12, 12))
-        add_btn.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextBesideIcon)
-        add_btn.setToolTip(t("workbench.new_query"))
-        add_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        add_btn.setFont(QFont("Inter", 11, QFont.Weight.DemiBold))
-        add_btn.setFixedHeight(20)
-        add_btn.setStyleSheet(
-            f"QToolButton {{ border: 1px solid {Theme.BORDER_SOFT}; background: {Theme.PANEL_2};"
-            f" color: {Theme.TEXT_2}; border-radius: 6px; padding: 0 9px; }}"
-            f"QToolButton:hover {{ background: {Theme.PANEL_3}; color: {Theme.TEXT}; }}"
-        )
-        add_btn.clicked.connect(lambda: self.new_sql_editor())
+        # Top-right corner: a "+" (new SQL editor) icon and, to its right, a clock
+        # (query history) icon — both compact, sized to sit in the slim tab row.
+        new_btn = self._corner_icon("plus", t("workbench.new_query"), lambda: self.new_sql_editor())
+        hist_btn = self._corner_icon("clock", t("tab.history"), self.focus_history)
         holder = QWidget()
         hl = QHBoxLayout(holder)
-        hl.setContentsMargins(6, 0, 8, 0)   # no vertical margin → fits the slim tab row
-        hl.addWidget(add_btn)
+        hl.setContentsMargins(4, 0, 8, 0)   # no vertical margin → fits the slim tab row
+        hl.setSpacing(2)
+        hl.addWidget(new_btn)
+        hl.addWidget(hist_btn)
         self.tabs.setCornerWidget(holder, Qt.Corner.TopRightCorner)
         self.tabs.currentChanged.connect(self._on_workbench_tab_changed)
 
         # Start on a single empty SQL editor (DBeaver opens an editor by default).
         self.new_sql_editor()
+
+    def _corner_icon(self, icon_name: str, tooltip: str, on_click) -> QToolButton:
+        """A compact icon button for the tab-bar corner. Overrides the global
+        QToolButton box (padding/min-max-height) so the icon isn't squeezed and the
+        button fits the slim tab row."""
+        btn = QToolButton()
+        btn.setIcon(svg_icon(icon_name, color=Theme.TEXT_2, size=14))
+        btn.setIconSize(QSize(14, 14))
+        btn.setToolTip(tooltip)
+        btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        btn.setFixedSize(22, 20)
+        btn.setStyleSheet(
+            f"QToolButton {{ background: transparent; border: none; border-radius: 5px;"
+            f" padding: 0; margin: 0; min-width: 22px; max-width: 22px;"
+            f" min-height: 20px; max-height: 20px; }}"
+            f"QToolButton:hover {{ background: {Theme.PANEL_2}; }}"
+        )
+        btn.clicked.connect(lambda _checked=False: on_click())
+        return btn
 
     # ── pinning / closing ──────────────────────────────────────────────────────
 
@@ -246,7 +251,15 @@ class WorkbenchView(QWidget):
                 return
 
     def focus_history(self) -> None:
-        self.tabs.setCurrentWidget(self.history_panel)
+        """Open the query-history tab (adding it on demand) and bring it forward.
+        Once open it's pinned (un-closeable) via the _on_close guard; the corner
+        clock icon re-focuses it."""
+        idx = self.tabs.indexOf(self.history_panel)
+        if idx < 0:
+            from dbaide.i18n import t
+            idx = self.tabs.addTab(self.history_panel, t("tab.history"))
+            self._pin(idx)
+        self.tabs.setCurrentIndex(idx)
 
     # ── Doc tabs (asset markdown viewer) ────────────────────────────────────────
 

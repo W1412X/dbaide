@@ -23,15 +23,16 @@ def _titles(wb):
     return [wb.tabs.tabText(i) for i in range(wb.tabs.count())]
 
 
-def test_starts_with_history_and_one_editor(qapp):
+def test_starts_with_one_editor_no_history_tab(qapp):
+    # History is now opened on demand from the corner clock icon, not a startup tab.
     wb = _wb(qapp)
-    assert _titles(wb) == ["History", "Query 1"]
+    assert _titles(wb) == ["Query 1"]
 
 
 def test_new_sql_editor_increments(qapp):
     wb = _wb(qapp)
     wb.new_sql_editor()
-    assert _titles(wb) == ["History", "Query 1", "Query 2"]
+    assert _titles(wb) == ["Query 1", "Query 2"]
 
 
 def test_open_table_dedupes(qapp):
@@ -46,10 +47,10 @@ def test_open_table_dedupes(qapp):
 def test_open_sql_reuses_empty_editor(qapp):
     wb = _wb(qapp)
     ed = wb.open_sql("select 1")            # Query 1 is empty → reused
-    assert _titles(wb) == ["History", "Query 1"]
+    assert _titles(wb) == ["Query 1"]
     assert "select 1" in ed.editor.toPlainText()
     wb.open_sql("select 2")                 # current not empty → new editor
-    assert _titles(wb) == ["History", "Query 1", "Query 2"]
+    assert _titles(wb) == ["Query 1", "Query 2"]
 
 
 def test_close_table_and_editor(qapp):
@@ -60,10 +61,16 @@ def test_close_table_and_editor(qapp):
     assert "orders" not in _titles(wb)
 
 
-def test_history_is_pinned(qapp):
+def test_history_opens_on_demand_and_is_pinned(qapp):
     wb = _wb(qapp)
-    wb._on_close(0)  # try to close History
+    assert "History" not in _titles(wb)        # not a startup tab anymore
+    wb.focus_history()                          # corner clock icon opens it
     assert "History" in _titles(wb)
+    idx = next(i for i in range(wb.tabs.count()) if wb.tabs.tabText(i) == "History")
+    wb._on_close(idx)                           # once open it's pinned → close is a no-op
+    assert "History" in _titles(wb)
+    wb.focus_history()                          # re-focus doesn't duplicate it
+    assert _titles(wb).count("History") == 1
 
 
 def test_completions_apply_to_all_editors(qapp):
@@ -204,7 +211,7 @@ def test_close_table_docs_keeps_editors(qapp):
     wb.close_table_docs()
     after = [wb.tabs.tabText(i) for i in range(wb.tabs.count())]
     assert "orders" not in after and "users" not in after
-    assert "History" in after and any(t.startswith("Query") for t in after)
+    assert any(t.startswith("Query") for t in after)   # SQL editors are kept
 
 
 def test_structure_copy_ddl(qapp):
