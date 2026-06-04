@@ -56,17 +56,65 @@ def test_typed_reply_submits(qapp):
     assert fired == []
 
 
-def test_append_clarification_detects_multi_and_always_has_input(qapp):
-    from dbaide.desktop.components.conversation import ConversationView
+def test_append_clarification_multi_uses_stepper(qapp):
+    from dbaide.desktop.components.conversation import (
+        ConversationView,
+        _ClarificationBar,
+        _ClarificationStepper,
+    )
     conv = ConversationView()
     conv.begin_turn("q")
-    multi_q = "Confirm:\n**1. Which timezone?**\n**2. Which status?**"
-    bar = conv.append_clarification(question=multi_q, options=["UTC"])
-    assert bar is not None and bar._direct is False        # multi → chips fill input
-    # open question (no options) still yields a usable input bar
+    # Structured multi-question → a one-at-a-time stepper.
+    bar = conv.append_clarification(
+        question="Confirm:\n**1. Which timezone?**\n**2. Which status?**",
+        options=["UTC"],
+        questions=[
+            {"ask": "Which timezone?", "options": ["UTC", "Asia/Shanghai"]},
+            {"ask": "Which status?", "options": ["delivered", "returned"]},
+        ],
+    )
+    assert isinstance(bar, _ClarificationStepper)
+    # A single structured question → the direct bar (chips submit immediately).
     conv.begin_turn("q2")
-    bar2 = conv.append_clarification(question="**1. Which timezone?**", options=[])
-    assert bar2 is not None and bar2._direct is True
+    bar2 = conv.append_clarification(
+        question="Which timezone?", options=[],
+        questions=[{"ask": "Which timezone?", "options": ["UTC"]}],
+    )
+    assert isinstance(bar2, _ClarificationBar) and bar2._direct is True
+    # No structured questions at all → still a usable direct bar.
+    conv.begin_turn("q3")
+    bar3 = conv.append_clarification(question="Which timezone?", options=[])
+    assert isinstance(bar3, _ClarificationBar) and bar3._direct is True
+
+
+def test_clarification_stepper_steps_and_assembles(qapp):
+    from dbaide.desktop.components.conversation import _ClarificationStepper
+    stepper = _ClarificationStepper([
+        {"ask": "Which timezone?", "options": ["UTC", "Asia/Shanghai"]},
+        {"ask": "Which status?", "options": ["delivered", "returned"]},
+    ])
+    got = []
+    stepper.submitted.connect(got.append)
+    # First question: picking a chip advances without submitting yet.
+    assert stepper._idx == 0
+    stepper._answer("Asia/Shanghai")
+    assert got == [] and stepper._idx == 1               # advanced, not submitted
+    # Last question: answering assembles a numbered reply and submits.
+    stepper._answer("delivered")
+    assert got == ["1. Asia/Shanghai\n2. delivered"]
+
+
+def test_clarification_stepper_back_preserves_answer(qapp):
+    from dbaide.desktop.components.conversation import _ClarificationStepper
+    stepper = _ClarificationStepper([
+        {"ask": "Which timezone?", "options": ["UTC"]},
+        {"ask": "Which status?", "options": ["delivered"]},
+    ])
+    stepper._input.setText("UTC")
+    stepper._on_next()
+    assert stepper._idx == 1
+    stepper._on_back()
+    assert stepper._idx == 0 and stepper._input.text() == "UTC"  # answer restored
 
 
 def _drain(qapp):

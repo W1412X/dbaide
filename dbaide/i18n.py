@@ -97,6 +97,12 @@ _STRINGS: dict[str, dict[str, str]] = {
         "zh": "添加数据库/表作为上下文",
     },
     "composer.attach_menu": {"en": "Attach context", "zh": "添加上下文"},
+    "clarify.title": {"en": "Clarification needed", "zh": "需要澄清"},
+    "clarify.progress": {"en": "Question {current} / {total}", "zh": "问题 {current} / {total}"},
+    "clarify.next": {"en": "Next", "zh": "下一题"},
+    "clarify.finish": {"en": "Finish", "zh": "完成"},
+    "clarify.back": {"en": "Back", "zh": "上一题"},
+    "clarify.type_answer": {"en": "Type your answer…", "zh": "输入你的回答…"},
     "composer.attach_none": {
         "en": "No schema — build assets first",
         "zh": "暂无结构 — 请先构建资产",

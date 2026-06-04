@@ -361,7 +361,7 @@ class AskAgentLoop:
             "- Only fall back to manual describe_table/get_relations if resolve_schema is insufficient or validate_sql reports a missing table/column.\n"
             "- get_relations already includes sample evidence; do not call validate_joins unless user explicitly asks to re-check joins.\n"
             "- Saved joins (user catalog) are loaded automatically inside get_relations — no join CRUD during queries.\n"
-            "- If schema is ambiguous or multiple valid interpretations exist, call ask_user with optional options before guessing.\n"
+            "- If schema is ambiguous or multiple valid interpretations exist, call ask_user before guessing — and GROUND it in the schema: when the uncertainty is which column/table/value, pass the actual candidate column names, table names, or observed values (from the resolved schema you already have) as `options` so the user just picks one. Never ask an open 'which field?' question when the candidates are already in the schema; leave options empty only when the answer is genuinely outside the schema (e.g. a timezone).\n"
             "- ask_user pauses the run until the user replies; the next user message resumes the same workflow.\n"
             "- If validate_sql reports unknown tables/columns, describe_table then retry generate_sql.\n"
             "- describe_table returns the table's full structure (columns, types, indexes, FKs) plus a small sample — the table is the lowest pre-built level; there are no per-column docs.\n"
@@ -458,6 +458,7 @@ class AskAgentLoop:
             status="wait_user",
             pending_question=question,
             pending_options=options,
+            pending_questions=list(orch._loop_pending_questions),
             resume_state=snapshot,
         )
 

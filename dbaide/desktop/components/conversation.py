@@ -364,6 +364,131 @@ class _ClarificationBar(QFrame):
         self.submitted.connect(callback)
 
 
+class _ClarificationStepper(QFrame):
+    """Multi-question clarification answered ONE question at a time. Each step shows
+    a single question, its option chips, and a free-text input; picking an option
+    (or typing + Next) records the answer and advances. After the last question the
+    answers are assembled into a single numbered reply and submitted — so the agent
+    still asks several things at once, but the user answers them sequentially."""
+
+    submitted = pyqtSignal(str)
+
+    def __init__(self, questions: list[dict], parent=None) -> None:
+        super().__init__(parent)
+        from dbaide.i18n import t
+        self._t = t
+        self._questions = questions
+        self._idx = 0
+        self._answers: list[str] = []
+        self.setObjectName("clarificationBar")
+        self.setStyleSheet(
+            f"QFrame#clarificationBar {{ background: {Theme.PANEL};"
+            f" border: 1px solid {Theme.BORDER_SOFT}; border-radius: 10px; }}"
+        )
+        self._outer = QVBoxLayout(self)
+        self._outer.setContentsMargins(12, 10, 12, 12)
+        self._outer.setSpacing(8)
+
+        self._progress = QLabel("")
+        self._progress.setStyleSheet(f"color: {Theme.MUTED}; font-size: 11px; font-weight: 600;")
+        self._outer.addWidget(self._progress)
+        self._ask = QLabel("")
+        self._ask.setWordWrap(True)
+        self._ask.setStyleSheet(f"color: {Theme.TEXT}; font-size: 13px;")
+        self._outer.addWidget(self._ask)
+
+        from dbaide.desktop.components.flow_layout import FlowLayout
+        self._chips_host = QWidget()
+        self._chips_host.setStyleSheet("background: transparent;")
+        self._chips = FlowLayout(self._chips_host, spacing=6)
+        self._outer.addWidget(self._chips_host)
+
+        row = QHBoxLayout()
+        row.setContentsMargins(0, 0, 0, 0)
+        row.setSpacing(8)
+        self._back = compact_button(t("clarify.back"), width=64)
+        self._back.clicked.connect(self._on_back)
+        row.addWidget(self._back)
+        self._input = QLineEdit()
+        self._input.setFixedHeight(26)
+        self._input.returnPressed.connect(self._on_next)
+        row.addWidget(self._input, 1)
+        self._next = compact_button("", primary=True, width=84)
+        self._next.clicked.connect(self._on_next)
+        row.addWidget(self._next)
+        self._outer.addLayout(row)
+
+        self._render()
+
+    def _render(self) -> None:
+        q = self._questions[self._idx]
+        total = len(self._questions)
+        self._progress.setText(self._t("clarify.progress", current=self._idx + 1, total=total))
+        self._ask.setText(str(q.get("ask") or ""))
+        # rebuild chips for this question's options
+        while self._chips.count():
+            item = self._chips.takeAt(0)
+            w = item.widget()
+            if w is not None:
+                w.setParent(None)
+                w.deleteLater()
+        opts = [str(o) for o in (q.get("options") or []) if str(o).strip()]
+        self._chips_host.setVisible(bool(opts))
+        for opt in opts:
+            btn = AgentButton(opt)
+            btn.setFixedHeight(26)
+            btn.setMaximumWidth(360)
+            btn.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Fixed)
+            btn.setToolTip(opt)
+            btn.clicked.connect(lambda _c=False, v=opt: self._answer(v))
+            self._chips.addWidget(btn)
+        # restore any previously-entered answer for this step
+        self._input.setText(self._answers[self._idx] if self._idx < len(self._answers) else "")
+        self._input.setPlaceholderText(self._t("clarify.type_answer"))
+        self._back.setVisible(self._idx > 0)
+        last = self._idx == total - 1
+        self._next.setText(self._t("clarify.finish") if last else self._t("clarify.next"))
+        self._input.setFocus()
+
+    def _record_current(self, value: str) -> None:
+        if self._idx < len(self._answers):
+            self._answers[self._idx] = value
+        else:
+            self._answers.append(value)
+
+    def _answer(self, value: str) -> None:
+        # An option chip both fills and advances.
+        self._record_current(value)
+        self._advance()
+
+    def _on_next(self) -> None:
+        value = self._input.text().strip()
+        if not value:
+            return  # require an answer (the agent re-asks anything left open anyway)
+        self._record_current(value)
+        self._advance()
+
+    def _on_back(self) -> None:
+        if self._idx > 0:
+            self._idx -= 1
+            self._render()
+
+    def _advance(self) -> None:
+        if self._idx < len(self._questions) - 1:
+            self._idx += 1
+            self._render()
+            return
+        # Assemble a numbered reply mapping each question to its answer.
+        lines = []
+        for i, q in enumerate(self._questions):
+            ans = self._answers[i] if i < len(self._answers) else ""
+            lines.append(f"{i + 1}. {ans}")
+        self.submitted.emit("\n".join(lines))
+
+    def connect_option(self, callback) -> None:
+        self.submitted.connect(callback)
+
+
 class TurnBlock(QFrame):
     """One complete Q&A turn in a single scroll block."""
 
@@ -525,24 +650,35 @@ class ConversationView(QScrollArea):
             self._current_record["events"].append(event)
         self._scroll_bottom()
 
-    def append_clarification(self, *, question: str, options: list[str]) -> _ClarificationBar | None:
+    def append_clarification(self, *, question: str, options: list[str],
+                             questions: list[dict] | None = None):
         if self._current_turn is None:
             self.begin_turn("")
         turn = self._current_turn
         assert turn is not None
         turn.status.set_waiting()
-        # Options are presented as the chip bar below — don't also bullet them in the
-        # body (the question text already conveys the choices).
-        turn.append_content(_MarkdownBlock(f"**Clarification needed**\n\n{question}", title="DBAide"))
-        # If the prompt poses several numbered questions, a single chip only answers
-        # one — so chips fill the input (assemble all answers) rather than submit.
-        multi = sum(1 for i in range(1, 10) if f"**{i}." in question) >= 2
-        # Always offer the bar (its input box handles open questions with no options).
-        bar = _ClarificationBar(options, allow_direct_submit=not multi)
+        structured = [q for q in (questions or []) if str(q.get("ask") or "").strip()]
+        if len(structured) > 1:
+            # Several questions → step through them one at a time. A compact header
+            # replaces the full numbered blob (each question is shown per step).
+            turn.append_content(_MarkdownBlock(
+                f"**{self._tr('clarify.title')}**", title="DBAide"))
+            bar = _ClarificationStepper(structured)
+        else:
+            # Single question → the question text + its option chips, submit directly.
+            turn.append_content(_MarkdownBlock(f"**{self._tr('clarify.title')}**\n\n{question}", title="DBAide"))
+            single_opts = (structured[0].get("options") if structured else None) or options
+            bar = _ClarificationBar([str(o) for o in single_opts if str(o).strip()],
+                                    allow_direct_submit=True)
         turn.append_content(bar)
         self._clarification_bar = bar
         self._scroll_bottom()
         return bar
+
+    @staticmethod
+    def _tr(key: str) -> str:
+        from dbaide.i18n import t
+        return t(key)
 
     def append_clarification_reply(self, text: str) -> None:
         if self._current_turn is None:

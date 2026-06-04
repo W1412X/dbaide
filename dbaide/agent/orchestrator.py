@@ -123,6 +123,7 @@ class AskOrchestrator:
         self._loop_sql_feedback = ""
         self._loop_pending_question = ""
         self._loop_pending_options = []
+        self._loop_pending_questions: list[dict[str, Any]] = []
         self._loop_fail_reason = ""
         # Business-criteria (口径) clarification: confirmed criteria injected into SQL,
         # and the questions currently awaiting a user reply (paired with it on resume).

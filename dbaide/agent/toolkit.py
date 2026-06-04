@@ -114,6 +114,9 @@ def build_tool_registry(orchestrator: AskOrchestrator) -> ToolRegistry:
         if resolved.pending_question:
             orchestrator._loop_pending_question = resolved.pending_question
             orchestrator._loop_pending_options = list(resolved.pending_options)
+            orchestrator._loop_pending_questions = [
+                {"ask": resolved.pending_question, "options": list(resolved.pending_options)}
+            ]
             return ToolResult(ok=True, data={
                 "pending": True, "question": resolved.pending_question,
                 "options": resolved.pending_options,
@@ -369,6 +372,11 @@ def build_tool_registry(orchestrator: AskOrchestrator) -> ToolRegistry:
         orchestrator._loop_clarify_questions = rendered
         orchestrator._loop_pending_question = rendered
         orchestrator._loop_pending_options = plan.first_options()
+        # Structured per-question list so the UI can step through them one at a time.
+        orchestrator._loop_pending_questions = [
+            {"ask": str(q.get("ask") or ""), "options": list(q.get("options") or [])}
+            for q in plan.questions
+        ]
         return ToolResult(ok=True, data={
             "pending": True, "question": rendered, "options": plan.first_options(),
         })
@@ -642,6 +650,7 @@ def build_tool_registry(orchestrator: AskOrchestrator) -> ToolRegistry:
             options = [str(item).strip() for item in options_raw if str(item).strip()]
         orchestrator._loop_pending_question = question
         orchestrator._loop_pending_options = options
+        orchestrator._loop_pending_questions = [{"ask": question, "options": options}]
         return ToolResult(
             ok=True,
             data={"pending": True, "question": question, "options": options},

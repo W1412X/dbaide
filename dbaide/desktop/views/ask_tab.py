@@ -176,8 +176,9 @@ class AskTab(QWidget):
     def show_clarification(self, key: str, result: dict[str, Any]) -> None:
         question = str(result.get("pending_question") or result.get("answer_markdown") or "")
         options = [str(item) for item in (result.get("pending_options") or []) if str(item).strip()]
+        questions = [q for q in (result.get("pending_questions") or []) if isinstance(q, dict)]
         view = self.ensure_slot(key)
-        bar = view.append_clarification(question=question, options=options)
+        bar = view.append_clarification(question=question, options=options, questions=questions)
         if bar is not None:
             bar.connect_option(lambda reply, k=key: self.clarification_choice.emit(k, reply))
 

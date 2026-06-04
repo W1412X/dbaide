@@ -122,4 +122,5 @@ def restore_loop_state(orchestrator: Any, snapshot: dict[str, Any]) -> tuple[lis
     orchestrator._loop_query_result = None
     orchestrator._loop_pending_question = ""
     orchestrator._loop_pending_options = []
+    orchestrator._loop_pending_questions = []
     return transcript, execute_allowed

@@ -142,6 +142,7 @@ class WorkflowEngine:
             result.warnings = response.warnings or []
             result.pending_question = response.pending_question
             result.pending_options = list(response.pending_options or [])
+            result.pending_questions = list(getattr(response, "pending_questions", []) or [])
             result.resume_state = response.resume_state
             result.next_actions = [
                 NextAction(

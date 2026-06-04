@@ -39,7 +39,7 @@ class WorkflowResult:
         "validation_report", "execution_result",
         "assumptions", "warnings", "errors", "next_actions",
         "trace", "created_at", "completed_at",
-        "pending_question", "pending_options", "resume_state",
+        "pending_question", "pending_options", "pending_questions", "resume_state",
     )
 
     def __init__(
@@ -92,6 +92,7 @@ class WorkflowResult:
         self.completed_at = completed_at
         self.pending_question = pending_question
         self.pending_options = pending_options or []
+        self.pending_questions: list[dict[str, Any]] = []
         self.resume_state = resume_state
 
     def to_dict(self) -> dict[str, Any]:
@@ -121,6 +122,7 @@ class WorkflowResult:
             "completed_at": self.completed_at,
             "pending_question": self.pending_question,
             "pending_options": self.pending_options,
+            "pending_questions": self.pending_questions,
             "resume_state": self.resume_state,
         }
 
