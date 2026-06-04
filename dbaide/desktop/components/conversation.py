@@ -21,12 +21,50 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 
+from PyQt6.QtCore import QSize
+
 from dbaide.agent.progress_events import conversation_trace_step, phase_for
 from dbaide.desktop.components.base import AgentButton, compact_button
+from dbaide.desktop.components.icons import svg_icon
 from dbaide.desktop.components.inputs import configure_readonly_text_view, configure_wrapped_label
 from dbaide.desktop.components.spinner import BusyAnimator, spinner_icon
 from dbaide.desktop.theme import Theme
 from dbaide.rendering.markdown import render_markdown_safe
+
+
+class _AttachmentTags(QWidget):
+    """Read-only, right-aligned row of attached db/table context tags shown above a
+    user message (the schema itself is sent to the model, not echoed as text)."""
+
+    def __init__(self, attachments: list[dict], parent=None) -> None:
+        super().__init__(parent)
+        lay = QHBoxLayout(self)
+        lay.setContentsMargins(0, 2, 0, 2)
+        lay.setSpacing(6)
+        lay.addStretch(1)
+        for att in attachments:
+            kind = str(att.get("kind") or "table")
+            name = str(att.get("name") or "")
+            tag = QWidget()
+            tag.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
+            tl = QHBoxLayout(tag)
+            tl.setContentsMargins(8, 2, 9, 2)
+            tl.setSpacing(5)
+            icon = QLabel()
+            icon.setPixmap(svg_icon("database" if kind == "database" else "table",
+                                    color=Theme.BLUE, size=12).pixmap(QSize(12, 12)))
+            icon.setFixedSize(12, 12)
+            icon.setStyleSheet("background: transparent;")
+            tl.addWidget(icon)
+            lbl = QLabel(name)
+            lbl.setStyleSheet(f"color: {Theme.TEXT_2}; font-size: 11px; background: transparent;")
+            tl.addWidget(lbl)
+            tag.setStyleSheet(
+                f"background: {Theme.PANEL_2}; border: 1px solid {Theme.BORDER_SOFT};"
+                f" border-radius: 11px;"
+            )
+            tag.setFixedHeight(22)
+            lay.addWidget(tag)
 
 
 class _Bubble(QFrame):
@@ -359,7 +397,7 @@ class TurnBlock(QFrame):
         self._content_host.hide()
         self._layout.addWidget(self._content_host)
 
-    def set_user(self, text: str, *, meta: str = "") -> None:
+    def set_user(self, text: str, *, meta: str = "", attachments: list[dict] | None = None) -> None:
         self._header.show()
         if meta:
             meta_label = QLabel(meta)
@@ -367,6 +405,11 @@ class TurnBlock(QFrame):
             meta_label.setFont(QFont("Inter", 10))
             meta_label.setStyleSheet(f"color: {Theme.MUTED_2}; background: transparent;")
             self._header_layout.addWidget(meta_label)
+        # Attached schema context shows as compact, right-aligned tags above the
+        # bubble (GPT-style) — the schema itself is sent to the model, not echoed
+        # into the visible message text.
+        if attachments:
+            self._header_layout.addWidget(_AttachmentTags(attachments))
         self._header_layout.addWidget(_Bubble(text, align_right=True))
 
     def append_content(self, widget: QWidget) -> None:
@@ -434,7 +477,8 @@ class ConversationView(QScrollArea):
             if widget is not None:
                 widget.setMinimumWidth(content_w)
 
-    def begin_turn(self, user_text: str, *, meta: str = "", placeholder: bool = True) -> None:
+    def begin_turn(self, user_text: str, *, meta: str = "", placeholder: bool = True,
+                   attachments: list[dict] | None = None) -> None:
         turn = TurnBlock()
         if user_text.strip():
             # Only surface the connection · db · policy caption when it changes from
@@ -443,7 +487,7 @@ class ConversationView(QScrollArea):
             show_meta = meta if (meta and meta != self._last_meta) else ""
             if meta:
                 self._last_meta = meta
-            turn.set_user(user_text, meta=show_meta)
+            turn.set_user(user_text, meta=show_meta, attachments=attachments)
         self._insert_turn(turn)
         self._current_turn = turn
         self._current_record = {"question": user_text, "events": [], "answer": ""}

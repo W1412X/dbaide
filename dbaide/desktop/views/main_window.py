@@ -607,7 +607,8 @@ class MainWindow(QMainWindow):
                 agent_question = f"{ctx}\n\n[User question]\n{question}"
         self.composer.clear_attachments()
         self.composer.clear_input()
-        self.ask_tab.append_user(key, question, connection=conn, database=database, policy=policy)
+        self.ask_tab.append_user(key, question, connection=conn, database=database, policy=policy,
+                                 attachments=attachments)
         # Fresh trace for this turn; show it live since this slot is the active one.
         self._slot_trace[key] = []
         self.right.trace.begin_live()

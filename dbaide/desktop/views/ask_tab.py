@@ -142,14 +142,17 @@ class AskTab(QWidget):
 
     # ── keyed conversation operations ─────────────────────────────────────────
 
-    def begin_turn(self, key: str, question: str, *, connection: str, database: str, policy: str) -> None:
+    def begin_turn(self, key: str, question: str, *, connection: str, database: str, policy: str,
+                   attachments: list[dict] | None = None) -> None:
         policy_label = POLICY_LABELS.get(policy, policy)
         meta = " · ".join(x for x in (connection, database or "auto", policy_label) if x)
         self._hint_shown = True
-        self.ensure_slot(key).begin_turn(question, meta=meta)
+        self.ensure_slot(key).begin_turn(question, meta=meta, attachments=attachments)
 
-    def append_user(self, key: str, question: str, *, connection: str, database: str, policy: str) -> None:
-        self.begin_turn(key, question, connection=connection, database=database, policy=policy)
+    def append_user(self, key: str, question: str, *, connection: str, database: str, policy: str,
+                    attachments: list[dict] | None = None) -> None:
+        self.begin_turn(key, question, connection=connection, database=database, policy=policy,
+                        attachments=attachments)
 
     def append_activity(self, key: str, message: str) -> None:
         view = self._views.get(key)

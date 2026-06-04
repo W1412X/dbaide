@@ -266,34 +266,48 @@ class ComposerWidget(Panel):
 
 
 class _ContextChip(QWidget):
-    """A small removable chip showing an attached db/table context."""
+    """A removable chip showing an attached db/table context — icon · name · ✕.
+
+    The ✕ is a clear, always-visible button with a hover highlight (not a faint
+    glyph), so removing an attachment is obvious.
+    """
 
     removed = pyqtSignal(str)  # path
 
     def __init__(self, kind: str, name: str, path: str, parent=None) -> None:
+        from PyQt6.QtWidgets import QToolButton
         super().__init__(parent)
         self._path = path
+        # Needed so the QWidget actually paints its stylesheet pill background/border
+        # (a plain QWidget ignores them without this attribute).
+        self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
         lay = QHBoxLayout(self)
-        lay.setContentsMargins(8, 0, 4, 0)
-        lay.setSpacing(4)
+        lay.setContentsMargins(9, 0, 5, 0)
+        lay.setSpacing(5)
         icon = "database" if kind == "database" else "table"
         icon_lbl = QLabel()
-        icon_lbl.setPixmap(svg_icon(icon, color=Theme.TEXT_2, size=12).pixmap(QSize(12, 12)))
-        icon_lbl.setFixedSize(12, 12)
+        icon_lbl.setPixmap(svg_icon(icon, color=Theme.BLUE, size=13).pixmap(QSize(13, 13)))
+        icon_lbl.setFixedSize(13, 13)
+        icon_lbl.setStyleSheet("background: transparent;")
         lay.addWidget(icon_lbl)
         text = QLabel(name)
-        text.setStyleSheet(f"color: {Theme.TEXT_2}; font-size: 11px; background: transparent;")
+        text.setStyleSheet(f"color: {Theme.TEXT}; font-size: 12px; background: transparent;")
+        text.setToolTip(f"{kind}: {path}")
         lay.addWidget(text)
-        close = compact_button("✕", width=18)
-        close.setFixedSize(16, 16)
+        close = QToolButton()
+        close.setIcon(svg_icon("x", color=Theme.TEXT_2, size=12))
+        close.setIconSize(QSize(12, 12))
+        close.setCursor(Qt.CursorShape.PointingHandCursor)
+        close.setToolTip("Remove")
+        close.setFixedSize(18, 18)
         close.setStyleSheet(
-            f"QPushButton {{ background: transparent; border: none; color: {Theme.MUTED};"
-            f" font-size: 10px; }} QPushButton:hover {{ color: {Theme.TEXT}; }}"
+            f"QToolButton {{ background: transparent; border: none; border-radius: 9px; }}"
+            f"QToolButton:hover {{ background: {Theme.PANEL_3}; }}"
         )
         close.clicked.connect(lambda: self.removed.emit(self._path))
         lay.addWidget(close)
-        self.setFixedHeight(22)
+        self.setFixedHeight(26)
         self.setStyleSheet(
-            f"background: {Theme.PANEL_2}; border: 1px solid {Theme.BORDER_SOFT};"
-            f" border-radius: 6px;"
+            f"background: {Theme.PANEL_2}; border: 1px solid {Theme.BORDER};"
+            f" border-radius: 13px;"
         )
