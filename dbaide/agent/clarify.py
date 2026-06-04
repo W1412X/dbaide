@@ -101,115 +101,6 @@ def _values_digest(observed_values: dict[str, list[str]] | None) -> str:
     return "\n".join(lines)
 
 
-# Cap how many columns/tables we offer when falling back to the full real list.
-_MAX_FALLBACK = 40
-
-# Keywords that mark a question as asking *which column/table* — used to ground its
-# options against the real schema even when the model omits the explicit `kind` tag.
-_COLUMN_HINTS = ("column", "field", "字段", "哪列", "哪个列", "哪一列", "哪些列", "哪个字段")
-_TABLE_HINTS = ("which table", "哪张表", "哪个表", "哪些表")
-
-
-def _strip_ident(text: str) -> str:
-    return str(text).strip().strip('`"[]').strip()
-
-
-def _is_column_question(ask: str, kind: str) -> bool:
-    k = (kind or "").strip().lower()
-    if k in ("column", "columns", "field", "fields"):
-        return True
-    if k:  # an explicit non-column kind → trust it
-        return False
-    low = ask.lower()
-    return any(h in low for h in _COLUMN_HINTS)
-
-
-def _is_table_question(ask: str, kind: str) -> bool:
-    k = (kind or "").strip().lower()
-    if k in ("table", "tables"):
-        return True
-    if k:
-        return False
-    low = ask.lower()
-    return any(h in low for h in _TABLE_HINTS)
-
-
-def _ground_questions(
-    questions: list[dict[str, Any]],
-    disclosed: list[tuple[str, str, list[ColumnInfo]]],
-) -> list[dict[str, Any]]:
-    """Replace fabricated column/table options with the REAL ones from the resolved
-    schema. The model is asked to ground its options, but it still hallucinates field
-    names — so for any 'which column/table?' question we intersect its options with the
-    actual schema (canonicalising case/`quotes`/table-prefixes) and, if nothing real
-    survives, fall back to the table's real column list. Value/other questions are left
-    untouched (their options are legitimately free text / observed values)."""
-    # Build lookup maps from the real disclosed schema.
-    union_cols: list[str] = []
-    union_map: dict[str, str] = {}                       # lower name → canonical name
-    by_table: dict[str, tuple[list[str], dict[str, str]]] = {}
-    table_canon: dict[str, str] = {}                     # lower table → canonical label
-    all_tables: list[str] = []
-    for db, table, columns in disclosed:
-        canon_t = f"{db}.{table}" if db else table
-        if canon_t not in all_tables:
-            all_tables.append(canon_t)
-        table_canon[table.lower()] = canon_t
-        table_canon[canon_t.lower()] = canon_t
-        cols: list[str] = []
-        cmap: dict[str, str] = {}
-        for c in columns:
-            low = c.name.lower()
-            cmap[low] = c.name
-            cols.append(c.name)
-            if low not in union_map:
-                union_map[low] = c.name
-                union_cols.append(c.name)
-        by_table[table.lower()] = (cols, cmap)
-        by_table[canon_t.lower()] = (cols, cmap)
-
-    def cols_for(table_hint: str) -> tuple[list[str], dict[str, str]]:
-        if table_hint:
-            entry = by_table.get(_strip_ident(table_hint).lower())
-            if entry:
-                return entry
-        return union_cols, union_map
-
-    def match_col(option: str, cmap: dict[str, str]) -> str | None:
-        key = _strip_ident(option).lower()
-        if "." in key:                                   # "orders.status" → "status"
-            key = key.split(".")[-1]
-        return cmap.get(key)
-
-    grounded: list[dict[str, Any]] = []
-    for q in questions:
-        ask = str(q.get("ask") or "")
-        kind = str(q.get("kind") or "")
-        table_hint = str(q.get("table") or "")
-        raw_opts = [str(o) for o in (q.get("options") or []) if str(o).strip()]
-        if _is_table_question(ask, kind):
-            real = []
-            for o in raw_opts:
-                canon = table_canon.get(_strip_ident(o).lower())
-                if canon and canon not in real:
-                    real.append(canon)
-            options = real or all_tables[:_MAX_FALLBACK]
-        elif _is_column_question(ask, kind):
-            cols, cmap = cols_for(table_hint)
-            real = []
-            for o in raw_opts:
-                canon = match_col(o, cmap)
-                if canon and canon not in real:
-                    real.append(canon)
-            # Nothing the model offered actually exists → offer the real columns so the
-            # user still picks from genuine fields instead of fabricated ones.
-            options = real or cols[:_MAX_FALLBACK]
-        else:
-            options = raw_opts
-        grounded.append({"ask": ask, "options": options})
-    return grounded
-
-
 class SemanticClarifier:
     """Surfaces every genuinely-uncertain interpretation for a question + schema."""
 
@@ -243,19 +134,19 @@ class SemanticClarifier:
             "HARD CONSTRAINTS:\n"
             "- Do NOT invent a default that presumes a business fact (never assume a timezone, a "
             "status value, a region, or which table — ask instead).\n"
-            "- GROUND EVERY QUESTION IN THE SCHEMA YOU WERE GIVEN. The resolved schema and observed "
-            "values below ARE the candidate set. For a 'which column/field?' question, every option "
-            "MUST be an EXACT column name copied verbatim from the schema below — never invent or "
-            "guess a name, never reword it. For a 'which table?' question, options must be exact "
-            "table names. For a value question, options must be the observed values shown below.\n"
-            "- For EACH question also return: `kind` — one of \"column\", \"table\", \"value\", or "
-            "\"other\" — and `table`, the exact table name the question is about (when applicable). "
-            "These let the options be verified against the real schema.\n"
+            "- GROUND EVERY QUESTION STRICTLY IN THE SCHEMA AND VALUES BELOW. The columns, tables, "
+            "and observed values shown below are the COMPLETE candidate set for these tables — you "
+            "have everything you need, so do not guess at or invent names. For a 'which "
+            "column/field?' question, every option MUST be a column name copied EXACTLY (verbatim, "
+            "same spelling/case) from the schema below — never a made-up or reworded name. For a "
+            "'which table?' question, options must be exact table names from below. For a value "
+            "question, options must be the observed values shown below. If the real candidates are "
+            "in the schema, you MUST list them as options (most-likely first) rather than asking an "
+            "open question; only leave 'options' empty when the answer genuinely is NOT in the "
+            "schema/values (e.g. a timezone or an external business rule).\n"
             "- Example: for 'how many sane employees', do NOT ask an open 'which field indicates "
-            "sane?' — ask 'Which column identifies a sane employee?' with kind=\"column\", "
-            "table=\"employees\", and options = the real employees columns (e.g. status, "
-            "mental_state, is_active). Leave 'options' empty ONLY when the answer is genuinely NOT "
-            "in the schema/values (e.g. a timezone).\n"
+            "sane?' — ask 'Which column identifies a sane employee?' with options taken verbatim "
+            "from the employees columns listed below (e.g. status, is_active …).\n"
             "- Only raise points that are genuinely uncertain AND would change the result; skip "
             "what is already unambiguous. If everything is clear, return no questions.\n"
             "- 'assumptions' may contain ONLY facts that are CERTAIN from the schema/values "
@@ -275,14 +166,13 @@ class SemanticClarifier:
             f"Resolved schema (only these tables/columns are in play):\n{_schema_digest(disclosed)}\n"
             + (f"\n{_values_digest(observed_values)}\n" if observed_values else "")
             + confirmed_block
-            + '\nReturn {"questions":[{"ask":"...","kind":"column|table|value|other",'
-            '"table":"...","options":["..."]}], "assumptions":["..."]}. '
+            + '\nReturn {"questions":[{"ask":"...","options":["..."]}], "assumptions":["..."]}. '
             "Empty questions means every interpretation is already unambiguous."
         )
         try:
             payload = self.llm.complete_json(
                 [LLMMessage("system", system), LLMMessage("user", user)],
-                schema_hint='{"questions":[{"ask","kind","table","options"}],"assumptions":[]}',
+                schema_hint='{"questions":[{"ask","options"}],"assumptions":[]}',
             )
         except Exception:
             return ClarificationPlan()
@@ -297,13 +187,7 @@ class SemanticClarifier:
                 continue
             questions.append({
                 "ask": ask,
-                "kind": str(q.get("kind") or ""),
-                "table": str(q.get("table") or ""),
                 "options": [str(o) for o in (q.get("options") or []) if str(o).strip()],
             })
-        # Deterministically ground column/table options against the REAL schema — the
-        # model still hallucinates field names even when told not to, so we verify them
-        # against the disclosed columns rather than trusting the LLM's options.
-        questions = _ground_questions(questions, disclosed)
         assumptions = [str(a).strip() for a in (payload.get("assumptions") or []) if str(a).strip()]
         return ClarificationPlan(questions=questions, assumptions=assumptions)

@@ -60,6 +60,21 @@ def _orch(tmp_path):
     return orch
 
 
+def test_clarify_sees_full_table_columns(tmp_path):
+    """The clarifier must see EVERY column of the relevant tables (not just the
+    resolved-schema's reduced set), so it grounds 'which column?' questions in real
+    fields instead of guessing."""
+    from dbaide.agent.toolkit import _expand_to_full_columns
+    from dbaide.models import ColumnInfo
+
+    orch = _orch(tmp_path)
+    # The resolved schema would hand clarification only the one column it needs.
+    reduced = [("main", "orders", [ColumnInfo(name="amount", data_type="REAL")])]
+    full = _expand_to_full_columns(orch, reduced)
+    names = {c.name for c in full[0][2]}
+    assert names >= {"id", "amount", "status", "created_at"}  # the whole table
+
+
 def test_clarify_pauses_then_criteria_reach_sql(tmp_path):
     orch = _orch(tmp_path)
     captured = {}

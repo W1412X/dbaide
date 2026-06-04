@@ -353,6 +353,11 @@ def build_tool_registry(orchestrator: AskOrchestrator) -> ToolRegistry:
         if not disclosed:
             # Nothing resolved yet — resolve the schema first; don't block.
             return ToolResult(ok=True, data={"clear": True, "note": "no schema resolved yet"})
+        # Clarification must see the COMPLETE column list of the relevant tables. The
+        # resolved schema keeps only the minimal-necessary columns, which would force
+        # the model to ask about a "which column?" candidate it can't actually see —
+        # the cause of fabricated field names. Expand each table to its full columns.
+        disclosed = _expand_to_full_columns(orchestrator, disclosed)
         observed = _sample_observed_values(orchestrator, disclosed)
         try:
             plan = SemanticClarifier(orchestrator.llm).analyze(
@@ -839,6 +844,31 @@ def _find_schema_columns(orchestrator: AskOrchestrator, table: str, database: st
         if schema_key == table or schema_key.endswith(f".{table}"):
             return columns
     return None
+
+
+def _expand_to_full_columns(
+    orchestrator: AskOrchestrator,
+    disclosed: list[tuple[str, str, list[ColumnInfo]]],
+) -> list[tuple[str, str, list[ColumnInfo]]]:
+    """Return the disclosed tables with their FULL column lists. The resolved schema
+    carries only the minimal-necessary columns; clarification needs to see every
+    column of the relevant tables so it grounds 'which column?' questions in the real
+    fields instead of guessing. Falls back to the given columns if a describe fails."""
+    full: list[tuple[str, str, list[ColumnInfo]]] = []
+    for db, table, columns in disclosed:
+        cols = _find_schema_columns(orchestrator, table, db)
+        if not cols:
+            try:
+                cols = orchestrator.schema.describe_table(table, database=db)
+                _remember_table_schema(orchestrator, table, db, cols)
+            except Exception:  # noqa: BLE001 — grounding is best-effort, never fatal
+                cols = None
+        # Prefer whichever list has more columns (the full one), never fewer.
+        if cols and len(cols) >= len(columns):
+            full.append((db, table, cols))
+        else:
+            full.append((db, table, columns))
+    return full
 
 
 def _collect_disclosed_schemas(
