@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+from concurrent.futures import ThreadPoolExecutor
 from typing import TYPE_CHECKING, Any
 
 from dbaide.core.errors import DBAideError, ErrorCode
@@ -777,48 +778,65 @@ def _sample_observed_values(
     max_columns: int = 6,
     sample_rows: int = 300,
     max_distinct: int = 30,
+    max_candidates: int = 12,
 ) -> dict[str, list[str]]:
     """Best-effort: the real distinct values of low-cardinality text columns in the
     resolved schema, so the clarifier asks about ACTUAL value encodings (e.g. which
     `delivery_status` means "妥投") instead of guessing one. Bounded and never fatal:
     reads a small sample (not a full DISTINCT scan), caps columns/rows, swallows
-    errors, and is skipped when execution isn't allowed."""
+    errors, and is skipped when execution isn't allowed.
+
+    The per-column sample reads run CONCURRENTLY (bounded) — they're independent
+    SELECT … LIMIT probes, so doing them sequentially just stacked latency before
+    every clarification."""
     if not getattr(orchestrator, "_loop_execute_allowed", False):
         return {}
-    out: dict[str, list[str]] = {}
-    sampled = 0
+    candidates: list[tuple[str, str, str]] = []  # (db, table, column)
     for db, table, columns in disclosed:
         for col in columns:
-            if sampled >= max_columns:
-                return out
             dtype = (getattr(col, "data_type", "") or "").lower()
             name = getattr(col, "name", "")
             if not name or not name.replace("_", "").isalnum():
                 continue  # only plain identifiers (no quoting headaches across dialects)
             if not any(k in dtype for k in _CATEGORICAL_TYPES):
                 continue
-            qualified = f"{db}.{table}" if db else table
-            try:
-                result = orchestrator.query.execute_sql(
-                    f"SELECT {name} FROM {qualified} LIMIT {sample_rows}",
-                    database=db, limit=sample_rows,
-                )
-            except Exception:  # noqa: BLE001 — grounding is optional
+            candidates.append((db, table, name))
+            if len(candidates) >= max_candidates:
+                break
+        if len(candidates) >= max_candidates:
+            break
+    if not candidates:
+        return {}
+
+    def _probe(item: tuple[str, str, str]) -> tuple[str, list[str] | None]:
+        db, table, name = item
+        qualified = f"{db}.{table}" if db else table
+        try:
+            result = orchestrator.query.execute_sql(
+                f"SELECT {name} FROM {qualified} LIMIT {sample_rows}",
+                database=db, limit=sample_rows,
+            )
+        except Exception:  # noqa: BLE001 — grounding is optional
+            return f"{table}.{name}", None
+        seen: list[str] = []
+        for row in getattr(result, "rows", []) or []:
+            v = row.get(name) if isinstance(row, dict) else None
+            if v is None:
                 continue
-            seen: list[str] = []
-            for row in getattr(result, "rows", []) or []:
-                v = row.get(name) if isinstance(row, dict) else None
-                if v is None:
-                    continue
-                s = str(v)
-                if s not in seen:
-                    seen.append(s)
-                if len(seen) > max_distinct:
-                    break
-            # Only useful when it's genuinely low-cardinality (an encoding, not free text).
-            if 0 < len(seen) <= max_distinct:
-                out[f"{table}.{name}"] = seen
-                sampled += 1
+            s = str(v)
+            if s not in seen:
+                seen.append(s)
+            if len(seen) > max_distinct:
+                break
+        # Only useful when it's genuinely low-cardinality (an encoding, not free text).
+        return f"{table}.{name}", (seen if 0 < len(seen) <= max_distinct else None)
+
+    out: dict[str, list[str]] = {}
+    workers = min(4, len(candidates))  # modest — don't spray connections at the DB
+    with ThreadPoolExecutor(max_workers=workers) as pool:
+        for key, seen in pool.map(_probe, candidates):  # map preserves candidate order
+            if seen is not None and len(out) < max_columns:
+                out[key] = seen
     return out
 
 

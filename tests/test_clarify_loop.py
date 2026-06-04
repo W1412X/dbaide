@@ -99,3 +99,19 @@ def test_clarify_pauses_then_criteria_reach_sql(tmp_path):
     crit = " ".join(captured.get("criteria") or [])
     assert "America/New_York" in crit          # the user's answer is applied
     assert "Excluding refunded orders" in crit  # the clarifier's stated assumption too
+
+
+def test_observed_values_sampled(tmp_path):
+    """Categorical (text) columns get their real values sampled; numeric ones don't.
+    (Sampling now runs concurrently — behaviour must be unchanged.)"""
+    from dbaide.agent.toolkit import _sample_observed_values
+    from dbaide.models import ColumnInfo
+    orch = _orch(tmp_path)
+    orch._loop_execute_allowed = True
+    disclosed = [("main", "orders", [
+        ColumnInfo(name="status", data_type="TEXT"),
+        ColumnInfo(name="amount", data_type="REAL"),
+    ])]
+    out = _sample_observed_values(orch, disclosed)
+    assert out.get("orders.status") == ["paid"]   # text column → real values sampled
+    assert "orders.amount" not in out              # numeric → not a categorical probe
