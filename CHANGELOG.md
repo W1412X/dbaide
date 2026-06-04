@@ -6,6 +6,8 @@ All notable changes to DBAide are documented here. The format is loosely based o
 
 ## [Unreleased]
 
+## [0.0.2] — 2026-06-05
+
 ### Added — Workbench (a read-only database client)
 
 The desktop app gains an **Assistant / Workbench** mode switch. The Workbench is a
@@ -67,5 +69,6 @@ and a PyQt6 desktop app, sharing one Python core.
   drag-to-Applications)**, **Windows (`.msi` wizard)**, and **Linux (`.tar.gz`)** —
   pushing a `v*` tag cuts a GitHub Release automatically.
 
-[Unreleased]: https://github.com/W1412X/dbaide/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/W1412X/dbaide/compare/v0.0.2...HEAD
+[0.0.2]: https://github.com/W1412X/dbaide/compare/v0.1.0...v0.0.2
 [0.1.0]: https://github.com/W1412X/dbaide/releases/tag/v0.1.0
