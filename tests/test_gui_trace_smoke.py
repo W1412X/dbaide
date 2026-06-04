@@ -262,6 +262,23 @@ def test_answer_reveal_respects_stream_toggle(qapp):
     assert v._reveal is None                     # no reveal when disabled
 
 
+def test_answer_chunks_stream_live_then_finalize(qapp):
+    """True token-streaming: answer_chunk events fill a live block during the run;
+    complete_turn snaps it to the authoritative text with no extra block and no
+    pseudo-reveal (the live stream already showed it)."""
+    from dbaide.desktop.components.conversation import ConversationView
+    v = ConversationView()
+    v.begin_turn("how many paid orders")
+    v.append_answer_chunk("42 paid")
+    assert v._live_answer is not None            # block created on first chunk
+    v.append_answer_chunk(" orders")
+    assert v._live_answer_text == "42 paid orders"
+    v.complete_turn(answer="42 paid orders", ok=True)
+    assert v._live_answer is None                # live state cleared
+    assert v._reveal is None                     # no pseudo-reveal when streamed live
+    assert v._turns[-1]["answer"] == "42 paid orders"  # full text stored for copy
+
+
 def test_config_stream_answers_default_on(tmp_path):
     from dbaide.config import ConfigManager
     cfg = ConfigManager(path=tmp_path / "config.toml")

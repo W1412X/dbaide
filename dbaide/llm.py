@@ -7,7 +7,7 @@ import time
 import urllib.error
 import urllib.request
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Callable
 
 from .models import ModelConfig
 
@@ -26,6 +26,25 @@ class LLMClient:
 
     def complete_text(self, messages: list[LLMMessage]) -> str:
         raise NotImplementedError
+
+    def supports_streaming(self) -> bool:
+        return False
+
+    def complete_json_stream(self, messages: list[LLMMessage], *, schema_hint: str = "",
+                             on_text_chunk: "Callable[[str], None] | None" = None) -> dict[str, Any]:
+        """Like complete_json, but streams raw text deltas to ``on_text_chunk`` (for a
+        caller that wants to surface a field live). Base fallback: no streaming."""
+        return self.complete_json(messages, schema_hint=schema_hint)
+
+    def complete_text_stream(self, messages: list[LLMMessage],
+                             on_chunk: "Callable[[str], None]") -> str:
+        """Stream the completion, calling ``on_chunk`` with each text delta; returns
+        the full text. Base fallback: do a normal completion and emit it as one chunk
+        (so callers can always use this API)."""
+        text = self.complete_text(messages)
+        if text:
+            on_chunk(text)
+        return text
 
 
 class NullLLMClient(LLMClient):
@@ -114,6 +133,59 @@ class OpenAICompatibleClient(LLMClient):
                     continue
                 raise last_exc from exc
         raise last_exc or RuntimeError("LLM call failed after retries")
+
+    def supports_streaming(self) -> bool:
+        return True
+
+    def complete_text_stream(self, messages: list[LLMMessage],
+                             on_chunk: "Callable[[str], None]") -> str:
+        """Stream the chat completion via SSE (``stream: true``), emitting each content
+        delta through ``on_chunk`` and returning the accumulated text. Any streaming
+        failure falls back to a normal (non-streamed) completion so the answer is never
+        lost."""
+        payload = {
+            "model": self.cfg.model,
+            "messages": [{"role": m.role, "content": m.content} for m in messages],
+            "temperature": 0,
+            "stream": True,
+        }
+        req = urllib.request.Request(
+            f"{self.base_url}/chat/completions",
+            data=json.dumps(payload).encode("utf-8"),
+            headers={"Content-Type": "application/json", "Authorization": f"Bearer {self.api_key}"},
+            method="POST",
+        )
+        timeout = max(1, int(self.cfg.timeout_seconds))
+        parts: list[str] = []
+        try:
+            with urllib.request.urlopen(req, timeout=timeout) as resp:
+                for raw in resp:                         # SSE: one "data: {...}" per line
+                    line = raw.decode("utf-8", errors="replace").strip()
+                    if not line or not line.startswith("data:"):
+                        continue
+                    data = line[5:].strip()
+                    if data == "[DONE]":
+                        break
+                    try:
+                        obj = json.loads(data)
+                    except ValueError:
+                        continue
+                    choices = obj.get("choices") or []
+                    if not choices:
+                        continue
+                    delta = (choices[0].get("delta") or {}).get("content")
+                    if delta:
+                        parts.append(str(delta))
+                        on_chunk(str(delta))
+            if parts:
+                return "".join(parts)
+        except Exception as exc:  # noqa: BLE001 — fall back to a normal completion
+            logger.warning("llm_stream_failed, falling back to non-stream: %s", exc)
+        # Fallback: a normal completion, emitted as a single chunk.
+        text = self.complete_text(messages)
+        if text and not parts:
+            on_chunk(text)
+        return text or "".join(parts)
 
     def _parse_json_object(self, text: str) -> dict[str, Any]:
         stripped = text.strip()

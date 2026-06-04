@@ -102,6 +102,11 @@ class WorkflowEngine:
         def on_progress(msg: str | dict[str, Any]) -> None:
             if cancel_check:
                 cancel_check()
+            # Streamed answer slices are UI-only — never persisted to the trace.
+            if isinstance(msg, dict) and msg.get("kind") == "answer_chunk":
+                if progress:
+                    progress(msg)
+                return
             label = progress_label(msg)
             if isinstance(msg, dict):
                 # Stash the full progress event in metadata so the persisted trace
@@ -125,6 +130,8 @@ class WorkflowEngine:
         assistant._orchestrator.progress = on_progress  # noqa: SLF001
         # User-pinned schema scope (composer attachments) → discovery prioritises it.
         assistant._orchestrator.schema_scope = request.schema_scope or {}  # noqa: SLF001
+        # Stream the final answer token-by-token when the user enabled it.
+        assistant._orchestrator.stream_answers = bool(request.stream_answers)  # noqa: SLF001
         try:
             response = assistant.ask(
                 request.question,

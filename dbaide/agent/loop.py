@@ -7,6 +7,7 @@ import logging
 from dataclasses import dataclass, field
 from typing import Any, Callable
 
+from dbaide.agent.answer_stream import JsonFieldStreamer
 from dbaide.agent.loop_state import dump_loop_state, restore_loop_state
 from dbaide.agent.progress_events import brief_tool_summary, from_trace_event, progress_event, progress_label
 from dbaide.agent.schema_context import disclosed_table_keys
@@ -359,6 +360,12 @@ class AskAgentLoop:
         )
         return result
 
+    def _emit_answer_chunk(self, text: str) -> None:
+        """Forward a streamed slice of the final answer to the UI. Tagged so the UI
+        routes it to the answer block, not the trace."""
+        if text:
+            self.progress({"kind": "answer_chunk", "text": text})
+
     def _decide(self, state: LoopState, transcript: list[str]) -> dict[str, Any]:
         tools = loop_tool_specs(self.registry)
         tool_lines = "\n".join(f"- {s.name}: {s.description}" for s in tools)
@@ -434,10 +441,20 @@ class AskAgentLoop:
             messages = [LLMMessage("system", system), LLMMessage("user", user)]
             if last_error:
                 messages.append(LLMMessage("user", f"Previous decision invalid: {last_error}. Try again."))
-            payload = self.orchestrator.llm.complete_json(
-                messages,
-                schema_hint='Return {"action":"call_tool|finish","tool":"...","args":{},"thought":"...","answer":"..."}',
-            )
+            schema_hint = ('Return {"action":"call_tool|finish","tool":"...","args":{},'
+                           '"thought":"...","answer":"..."}')
+            orch = self.orchestrator
+            if getattr(orch, "stream_answers", False) and orch.llm.supports_streaming():
+                # Stream the decision; surface only the "answer" field's tokens live so
+                # the FINAL answer arrives token-by-token (intermediate call_tool
+                # decisions have no answer field → nothing streams). The full JSON is
+                # still parsed below, so the answer is authoritative regardless.
+                streamer = JsonFieldStreamer(self._emit_answer_chunk, field="answer")
+                payload = orch.llm.complete_json_stream(
+                    messages, schema_hint=schema_hint, on_text_chunk=streamer.feed
+                )
+            else:
+                payload = orch.llm.complete_json(messages, schema_hint=schema_hint)
             if not isinstance(payload, dict) or not payload.get("action"):
                 last_error = "missing action field"
                 continue

@@ -633,9 +633,32 @@ class ConversationView(QScrollArea):
         self._clarification_bar: _ClarificationBar | None = None
         self._stream_answers = True
         self._reveal: tuple | None = None  # (timer, block, full_text) of an in-flight reveal
+        # True token-streaming: the answer block being filled live by answer_chunk
+        # events for the open turn (None until the first chunk arrives).
+        self._live_answer: "_MarkdownBlock | None" = None
+        self._live_answer_text = ""
 
     def set_stream_answers(self, enabled: bool) -> None:
         self._stream_answers = bool(enabled)
+
+    def append_answer_chunk(self, text: str) -> None:
+        """Append a streamed slice of the final answer to the open turn, creating the
+        answer block on the first chunk. This is real token-streaming (the model is
+        still generating); ``complete_turn`` later snaps it to the authoritative text."""
+        if not text or self._current_turn is None:
+            return
+        self._finalize_reveal()  # a live stream supersedes any pseudo-reveal
+        if self._live_answer is None:
+            self._live_answer = _MarkdownBlock("", title="DBAide")
+            self._live_answer_text = ""
+            self._current_turn.append_content(self._live_answer)
+        self._live_answer_text += text
+        try:
+            self._live_answer.set_markdown(self._live_answer_text)
+        except RuntimeError:
+            self._live_answer = None
+            return
+        self._scroll_bottom()
 
     def _reveal_markdown(self, block: "_MarkdownBlock", full: str) -> None:
         """Progressively reveal the answer (typewriter-ish), bounded to a short total
@@ -700,6 +723,8 @@ class ConversationView(QScrollArea):
     def begin_turn(self, user_text: str, *, meta: str = "", placeholder: bool = True,
                    attachments: list[dict] | None = None) -> None:
         self._finalize_reveal()  # don't leave a prior answer half-revealed
+        self._live_answer = None
+        self._live_answer_text = ""
         turn = TurnBlock()
         if user_text.strip():
             # Only surface the connection · db · policy caption when it changes from
@@ -818,9 +843,19 @@ class ConversationView(QScrollArea):
 
         # Clean author label — just "DBAide" (the internal workflow id is noise in the
         # message header, Codex-style; keep it reachable as a tooltip and in the trace).
-        if answer.strip():
-            # Progressively reveal a non-trivial answer (toggleable; the full text is
-            # already stored in the record above, so copy/export is unaffected).
+        if self._live_answer is not None:
+            # The answer already token-streamed in live → just snap it to the
+            # authoritative text (it may differ slightly from what streamed).
+            try:
+                self._live_answer.set_markdown(answer or self._live_answer_text)
+            except RuntimeError:
+                pass
+            self._live_answer = None
+            self._live_answer_text = ""
+        elif answer.strip():
+            # No live stream (streaming off, unsupported, or a deterministic answer):
+            # optionally pseudo-reveal a non-trivial answer (toggleable; the full text
+            # is already stored in the record above, so copy/export is unaffected).
             stream = self._stream_answers and len(answer.strip()) > 60
             block = _MarkdownBlock(
                 "" if stream else answer, title="DBAide",

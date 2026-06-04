@@ -83,6 +83,8 @@ class AskOrchestrator:
         self.progress = progress or (lambda _msg: None)
         # User-pinned schema scope (set by the workflow from composer attachments).
         self.schema_scope: dict[str, Any] = {}
+        # Stream the final answer token-by-token (set by the workflow from config).
+        self.stream_answers: bool = False
 
         self.schema = SchemaTools(adapter, session.disclosure, instance=self.instance, assets=self.asset_store)
         self.profile = ProfileTools(adapter, session.disclosure, instance=self.instance, assets=self.asset_store)

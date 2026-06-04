@@ -133,7 +133,7 @@ class WorkflowRequest:
     __slots__ = (
         "question", "connection_name", "database_scope", "mode",
         "execution_policy", "limit", "timeout_seconds", "model_name",
-        "show_trace", "resume_state", "user_reply", "schema_scope",
+        "show_trace", "resume_state", "user_reply", "schema_scope", "stream_answers",
     )
 
     def __init__(
@@ -151,6 +151,7 @@ class WorkflowRequest:
         resume_state: dict[str, Any] | None = None,
         user_reply: str = "",
         schema_scope: dict[str, Any] | None = None,
+        stream_answers: bool = False,
     ) -> None:
         self.question = question
         self.connection_name = connection_name
@@ -166,6 +167,8 @@ class WorkflowRequest:
         # User-pinned schema (composer attachments): {"databases": [...],
         # "tables": [{"database": ..., "table": ...}]}. Discovery prioritises this.
         self.schema_scope = schema_scope or {}
+        # Stream the final answer token-by-token to the UI (config-driven).
+        self.stream_answers = bool(stream_answers)
 
 
 class QueryPlan:

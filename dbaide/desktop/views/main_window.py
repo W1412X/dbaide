@@ -1420,6 +1420,10 @@ class MainWindow(QMainWindow):
         if key not in self._runs:
             return
         if isinstance(message, dict):
+            if message.get("kind") == "answer_chunk":
+                # Streamed slice of the final answer → into the answer block, not trace.
+                self.ask_tab.append_answer_chunk(key, str(message.get("text") or ""))
+                return
             self._slot_trace.setdefault(key, []).append(message)
             self.ask_tab.append_activity_event(key, message)
             if key == self._active_key:

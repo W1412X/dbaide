@@ -159,6 +159,11 @@ class AskTab(QWidget):
         if view is not None and view.has_open_turn():
             view.append_trace(message)
 
+    def append_answer_chunk(self, key: str, text: str) -> None:
+        view = self._views.get(key)
+        if view is not None and view.has_open_turn():
+            view.append_answer_chunk(text)
+
     def append_activity_event(self, key: str, event: dict) -> None:
         view = self._views.get(key)
         if view is not None and view.has_open_turn():
