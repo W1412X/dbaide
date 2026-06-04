@@ -181,14 +181,21 @@ class Sidebar(QWidget):
 
     def _doc_button(self, data: dict[str, Any], tooltip: str) -> QToolButton:
         btn = QToolButton()
-        btn.setIcon(svg_icon("file-text", color=Theme.MUTED, size=14))
-        btn.setIconSize(QSize(14, 14))
+        # TEXT_2 (not MUTED) so the icon is clearly visible at rest — a muted-grey
+        # stroke icon at the row's edge reads as "nothing there". Brightens on hover.
+        btn.setIcon(svg_icon("file-text", color=Theme.TEXT_2, size=15))
+        btn.setIconSize(QSize(15, 15))
         btn.setToolTip(tooltip)
         btn.setCursor(Qt.CursorShape.PointingHandCursor)
         btn.setFixedSize(22, 22)
+        # Override the GLOBAL QToolButton rule (padding:0 10px; min/max-height:26px;
+        # border) — otherwise the 10px side padding squeezes the 15px icon down to a
+        # ~2px dot, which is exactly why the icon looked like it wasn't showing.
         btn.setStyleSheet(
-            f"QToolButton {{ background: transparent; border: none; border-radius: 5px; }}"
-            f"QToolButton:hover {{ background: {Theme.PANEL_2}; }}"
+            f"QToolButton {{ background: transparent; border: none; border-radius: 5px;"
+            f" padding: 0; margin: 0; min-width: 0; max-width: 22px;"
+            f" min-height: 0; max-height: 22px; color: {Theme.TEXT_2}; }}"
+            f"QToolButton:hover {{ background: {Theme.PANEL_3}; }}"
         )
         btn.clicked.connect(lambda _checked=False, d=data: self.schema_preview.emit(d))
         return btn
