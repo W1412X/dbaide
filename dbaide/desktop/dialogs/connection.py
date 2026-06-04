@@ -15,7 +15,7 @@ from PyQt6.QtWidgets import (
 )
 
 from dbaide.desktop.components.base import compact_button
-from dbaide.desktop.components.inputs import FORM_INNER_LABEL_RULES, configure_form, form_label
+from dbaide.desktop.components.inputs import FORM_INNER_LABEL_RULES, Combo, configure_form, form_label
 from dbaide.desktop.theme import Theme
 
 
@@ -41,7 +41,7 @@ class ConnectionForm(QWidget):
 
         self.name = QLineEdit()
         self.name.setFixedHeight(26)
-        self.type_select = QComboBox()
+        self.type_select = Combo()
         self.type_select.setFixedHeight(26)
         self.type_select.addItems(["sqlite", "mysql", "postgres"])
         self.type_select.setCurrentText(conn_type)
@@ -61,7 +61,7 @@ class ConnectionForm(QWidget):
         self.password = QLineEdit()
         self.password.setFixedHeight(26)
         self.password.setEchoMode(QLineEdit.EchoMode.Password)
-        self.load_profile = QComboBox()
+        self.load_profile = Combo()
         self.load_profile.setFixedHeight(26)
         self.load_profile.addItems(["production", "staging", "dev"])
         self.load_profile.setToolTip(

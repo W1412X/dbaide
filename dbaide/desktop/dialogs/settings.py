@@ -20,7 +20,7 @@ from PyQt6.QtWidgets import (
 )
 
 from dbaide.desktop.components.base import compact_button
-from dbaide.desktop.components.inputs import FORM_INNER_LABEL_RULES, configure_form, form_label
+from dbaide.desktop.components.inputs import Combo, FORM_INNER_LABEL_RULES, configure_form, form_label
 from dbaide.desktop.components.menu import MenuButton
 from dbaide.desktop.dialogs.connection import ConnectionForm
 from dbaide.desktop.theme import app_style, Theme
@@ -62,7 +62,7 @@ class ModelForm(QWidget):
         configure_form(form)
         self.profile_name = QLineEdit()
         self.profile_name.setFixedHeight(26)
-        self.provider = QComboBox()
+        self.provider = Combo()
         self.provider.setFixedHeight(26)
         self.provider.addItems(["none", "openai_compatible"])
         self.base_url = QLineEdit()
@@ -382,7 +382,8 @@ class SettingsDialog(QDialog):
         self.resource_saved.emit({"values": values})
 
     def _build_general_page(self) -> QWidget:
-        from PyQt6.QtWidgets import QComboBox, QFormLayout
+        from PyQt6.QtWidgets import QFormLayout
+        from dbaide.desktop.components.inputs import Combo
         from dbaide.i18n import LANGUAGE_NAMES, t
 
         page = QWidget()
@@ -395,7 +396,7 @@ class SettingsDialog(QDialog):
         card_layout.setContentsMargins(16, 16, 16, 16)
         form = QFormLayout()
         form.setSpacing(10)
-        self.language_select = QComboBox()
+        self.language_select = Combo()
         for code in ("en", "zh"):
             self.language_select.addItem(LANGUAGE_NAMES[code], code)
         idx = max(0, self.language_select.findData(self._language))
@@ -405,7 +406,7 @@ class SettingsDialog(QDialog):
         )
         form.addRow(t("settings.language"), self.language_select)
 
-        self.theme_select = QComboBox()
+        self.theme_select = Combo()
         self.theme_select.addItem(t("settings.theme.dark"), "dark")
         self.theme_select.addItem(t("settings.theme.light"), "light")
         idx_t = max(0, self.theme_select.findData(self._theme))
