@@ -76,7 +76,7 @@ class DataBrowser(QWidget):
         page = QWidget()
         pl = QVBoxLayout(page)
         pl.setContentsMargins(0, 0, 0, 0)
-        pl.setSpacing(8)
+        pl.setSpacing(5)
 
         # Toolbar row: table name · sort caption … page-size · ‹ range › · refresh
         bar = QHBoxLayout()
@@ -127,6 +127,14 @@ class DataBrowser(QWidget):
         self._refresh = IconToolButton(svg_icon("refresh", color=Theme.TEXT_2), t("data.refresh"))
         self._refresh.clicked.connect(self._reload)
         bar.addWidget(self._refresh)
+
+        self.grid = ResultTableWidget()
+        self.grid.meta.setVisible(False)  # the pager's range label is the source of truth here
+        # Fold the grid's value-viewer toggle + Export into this single pager row
+        # (no separate, sparse toolbar row above the table) — denser layout.
+        self.grid.set_toolbar_visible(False)
+        bar.addWidget(self.grid.value_toggle)
+        bar.addWidget(self.grid.export_menu)
         pl.addLayout(bar)
 
         # Filter row: a raw WHERE clause (read-only, validated server-side).
@@ -138,8 +146,6 @@ class DataBrowser(QWidget):
         self._filter.setFixedHeight(26)
         pl.addWidget(self._filter)
 
-        self.grid = ResultTableWidget()
-        self.grid.meta.setVisible(False)  # the pager's range label is the source of truth here
         # Sorting: clicking a column header re-queries ORDER BY that column.
         self.grid.table.horizontalHeader().setSectionsClickable(True)
         self.grid.table.horizontalHeader().sectionClicked.connect(self._on_sort)

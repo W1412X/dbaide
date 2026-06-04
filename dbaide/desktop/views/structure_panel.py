@@ -73,6 +73,7 @@ class StructurePanel(QWidget):
         pl.addWidget(self._title)
         self._cols = ResultTableWidget()
         self._cols.meta.setVisible(False)
+        self._cols.set_toolbar_visible(False)  # no value-viewer/export for a schema list
         pl.addWidget(self._cols, 1)
 
         # Relations — outgoing/incoming foreign keys, with clickable related tables.

@@ -296,12 +296,6 @@ _STRINGS: dict[str, dict[str, str]] = {
     "session.minutes_ago": {"en": "{n}m ago", "zh": "{n} 分钟前"},
     "session.hours_ago": {"en": "{n}h ago", "zh": "{n} 小时前"},
     "session.days_ago": {"en": "{n}d ago", "zh": "{n} 天前"},
-    # TableDocument Ask AI button
-    "doc.ask_ai": {"en": "Ask AI…", "zh": "AI 分析…"},
-    "doc.ask_ai_tooltip": {
-        "en": "Switch to Assistant and ask AI about this table",
-        "zh": "切换到助手并用 AI 分析此表",
-    },
     # TopBar quick-action buttons
     "toolbar.new_query": {"en": "New Query", "zh": "新建查询"},
     "toolbar.build": {"en": "Build Assets", "zh": "构建资产"},

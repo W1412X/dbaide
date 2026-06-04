@@ -38,8 +38,12 @@ class ResultTableWidget(QWidget):
         self._cell_actions_provider = None  # optional (row, col) -> [(label, fn)]
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(6)
-        toolbar = QHBoxLayout()
+        layout.setSpacing(4)
+        # Toolbar lives in its own widget so callers can hide it wholesale (e.g. the
+        # Structure columns grid, which needs no value-viewer/export row).
+        self._toolbar_widget = QWidget()
+        toolbar = QHBoxLayout(self._toolbar_widget)
+        toolbar.setContentsMargins(0, 0, 0, 0)
         self.meta = QLabel()
         self.meta.setStyleSheet(f"color:{Theme.MUTED}; font-size:11px;")
         toolbar.addWidget(self.meta)
@@ -51,7 +55,7 @@ class ResultTableWidget(QWidget):
         self.value_toggle.setIcon(svg_icon("panel-right", color=Theme.TEXT_2, size=15))
         self.value_toggle.setToolTip("Value viewer")
         self.value_toggle.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.value_toggle.setFixedSize(30, 30)
+        self.value_toggle.setFixedSize(26, 26)
         self.value_toggle.setStyleSheet(
             f"QToolButton {{ background: {Theme.PANEL_2}; border: none; border-radius: 7px; }}"
             f"QToolButton:hover {{ background: {Theme.PANEL_3}; }}"
@@ -68,7 +72,7 @@ class ResultTableWidget(QWidget):
         self.export_menu.add_action("Save as CSV…", self.save_csv)
         self.export_menu.add_action("Save as JSON…", self.save_json)
         toolbar.addWidget(self.export_menu)
-        layout.addLayout(toolbar)
+        layout.addWidget(self._toolbar_widget)
         self.table = QTableWidget()
         # Right-click a cell → copy the cell value or the whole row.
         self.table.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
@@ -356,6 +360,11 @@ class ResultTableWidget(QWidget):
     def set_cell_actions_provider(self, provider) -> None:
         """Provide extra right-click actions: (row, col) -> [(label, callable)]."""
         self._cell_actions_provider = provider
+
+    def set_toolbar_visible(self, visible: bool) -> None:
+        """Show/hide the value-viewer + export toolbar row (hidden for read-only
+        schema grids that don't need it)."""
+        self._toolbar_widget.setVisible(visible)
 
     def _cell_text(self, row: int, col: int) -> str:
         if 0 <= row < len(self._rows) and 0 <= col < len(self._columns):

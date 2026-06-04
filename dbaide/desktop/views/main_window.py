@@ -247,7 +247,6 @@ class MainWindow(QMainWindow):
         self.workbench.doc_closed.connect(self._on_doc_closed)
         self.workbench.navigate_table.connect(self._open_table_by_name)
         self.workbench.navigate_fk.connect(self._navigate_fk)
-        self.workbench.ask_ai_requested.connect(self._on_ask_ai_about_table)
         self.stack.addWidget(self.ask_tab)    # mode 0 — Assistant
         self.stack.addWidget(self.workbench)  # mode 1 — Workbench
         center_layout.addWidget(self.stack, 1)
@@ -1148,12 +1147,6 @@ class MainWindow(QMainWindow):
             self.open_schema_asset(node)
         else:
             self.toast(_i18n_t("toast.table_not_found", table=table))
-
-    def _on_ask_ai_about_table(self, table_name: str, schema_summary: str) -> None:
-        """Switch to Assistant mode and pre-fill the composer with context about the table."""
-        self.tabbar.setCurrentIndex(0)
-        context = f"Table `{table_name}`:\n{schema_summary}"
-        self.composer.set_context_hint(context)
 
     def _navigate_fk(self, ref_table: str, ref_column: str, value: object) -> None:
         """Open the referenced table filtered to the clicked FK value (data-cell
