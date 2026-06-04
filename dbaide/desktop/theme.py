@@ -199,6 +199,7 @@ def app_style() -> str:
     font-family: Inter, -apple-system, BlinkMacSystemFont, "Segoe UI";
     color: {T.TEXT};
     font-size: 13px;
+    outline: none;  /* kill the native focus ring/box that reads as an extra border */
 }}
 QMainWindow, QWidget#root {{
     background: {T.BG};
@@ -352,6 +353,10 @@ QTextEdit, QTextBrowser, QPlainTextEdit, QListWidget, QTreeWidget, QTableWidget 
     border: 1px solid {T.BORDER_SOFT};
     border-radius: 8px;
     selection-background-color: {T.PANEL_3};
+    outline: none;  /* no native focus ring/box on item views */
+}}
+QListView, QTreeView, QTableView, QAbstractItemView {{
+    outline: none;
 }}
 QScrollArea {{
     background: transparent;
@@ -508,6 +513,12 @@ QTabBar[segmented="true"]::tab:first {{
 QTabBar[segmented="true"]::tab:last {{
     border-top-right-radius: 8px;
     border-bottom-right-radius: 8px;
+}}
+QTabBar[panelTabs="true"] {{
+    /* Theme the bar AREA itself (behind/around the tabs). Without this the native
+       macOS style paints it with the system appearance — a dark strip in light
+       mode. */
+    background: {T.BG};
 }}
 QTabBar[panelTabs="true"]::tab {{
     background: transparent;
