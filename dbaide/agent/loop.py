@@ -406,7 +406,7 @@ class AskAgentLoop:
             "- ask_user pauses the run until the user replies; the next user message resumes the same workflow.\n"
             "- If validate_sql reports unknown tables/columns, describe_table then retry generate_sql.\n"
             "- describe_table returns the table's full structure (columns, types, indexes, FKs) plus a small sample — the table is the lowest pre-built level; there are no per-column docs.\n"
-            "- For a column's value ranges / null rate / distinct / length, call column_stats (pick only the metrics you need); for a whole-table overview omit columns. To learn the actual values of a flag/status column (e.g. which del_flag value means active), use column_stats with metrics=[\"top_values\"].\n"
+            "- For a column's value ranges / null rate / distinct / length, call column_stats (pick only the metrics you need); for a whole-table overview omit columns. To learn a column's actual values (e.g. which status/flag value means what), use column_stats with metrics=[\"top_values\"].\n"
             "- Do NOT repeat the same tool call with the same args. If a tool didn't give you what you need (empty/unchanged result, or a `note` that something isn't available), change approach — and if you still can't determine a value's business meaning, ask_user (or clarify_semantics) ONCE rather than profiling again.\n"
             "- Profile questions: discover_schema → describe_table → column_stats → finish\n"
             "- SQL explain: validate_sql or explain_sql as needed → finish\n"
