@@ -26,9 +26,9 @@ def qapp():
 
 
 def test_trace_panel_live_then_finalize(qapp):
-    from dbaide.desktop.components.trace import TracePanel
+    from dbaide.desktop.components.trace import InlineTrace
 
-    panel = TracePanel()
+    panel = InlineTrace()
     panel.begin_live()
     panel.append_live_event(progress_event(stage="loop", title="started", status="running", kind="agent"))
     panel.append_live_event(progress_event(stage="discover_schema", title="Calling", status="running", kind="tool", step=1))
@@ -48,27 +48,28 @@ def test_trace_panel_live_then_finalize(qapp):
     assert step1.childCount() == 2
 
 
-def test_trace_panel_click_shows_detail(qapp):
-    from dbaide.desktop.components.trace import TracePanel
+def test_trace_detail_dialog_shows_step(qapp):
+    from PyQt6.QtCore import Qt
+    from dbaide.desktop.components.trace import InlineTrace, TraceDetailDialog
 
-    panel = TracePanel()
+    panel = InlineTrace()
     panel.begin_live()
     panel.append_live_event(progress_event(stage="execute_sql", title="ran query", detail="SELECT 1",
                                             status="completed", kind="tool", step=1, duration_ms=7))
     panel.end_live()  # flush the coalesced render
-    tree = panel._tree
-    step = tree.topLevelItem(1)
-    panel._on_click(step, 1)
-    text = panel._detail.toPlainText()
+    step = panel._tree.topLevelItem(1)
+    data = step.data(0, Qt.ItemDataRole.UserRole)
+    dlg = TraceDetailDialog(data)
+    text = dlg._body.toPlainText()
     assert "execute_sql" in text
     assert "SELECT 1" in text
     assert "7 ms" in text
 
 
 def test_trace_panel_load_persisted_events(qapp):
-    from dbaide.desktop.components.trace import TracePanel
+    from dbaide.desktop.components.trace import InlineTrace
 
-    panel = TracePanel()
+    panel = InlineTrace()
     panel.load_events([
         {"stage": "workflow_started", "title": "s", "status": "completed", "kind": "agent", "timestamp": 1.0},
         {"stage": "execute_sql", "title": "ran", "status": "completed", "kind": "tool", "timestamp": 2.0, "duration_ms": 5},
@@ -160,8 +161,8 @@ def test_main_window_constructs_and_bus_wired(qapp, tmp_path):
 
 
 def test_copy_text_exports_structured_trace_with_sql(qapp):
-    from dbaide.desktop.components.trace import TracePanel
-    panel = TracePanel()
+    from dbaide.desktop.components.trace import InlineTrace
+    panel = InlineTrace()
     panel.begin_live()
     panel.append_live_event(progress_event(stage="decision", title="count paid", status="completed", kind="decision"))
     panel.append_live_event(progress_event(stage="resolve_schema", title="resolve_schema done", status="completed",
@@ -176,7 +177,39 @@ def test_copy_text_exports_structured_trace_with_sql(qapp):
     assert "orders(id, amount)" in text          # detail included
     assert "SELECT COUNT(*)" in text and "WHERE status='paid'" in text  # full SQL, multi-line
     # empty trace → empty export
-    assert TracePanel().copy_text() == ""
+    assert InlineTrace().copy_text() == ""
+
+
+def test_turn_inline_trace_toggles(qapp):
+    """Clicking a completed turn's chip expands an inline trace; clicking again hides
+    it. The trace is built lazily (no InlineTrace until first expand)."""
+    from dbaide.desktop.components.conversation import ConversationView
+    from dbaide.desktop.components.trace import InlineTrace
+
+    conv = ConversationView()
+    conv.begin_turn("count paid orders")
+    # stream a couple of live events into the open turn
+    conv.append_trace_event({"stage": "execute_sql", "title": "Calling", "status": "running",
+                             "kind": "tool", "step": 1})
+    conv.complete_turn(
+        answer="3 paid orders.",
+        trace_events=[{"stage": "execute_sql", "title": "execute_sql done", "status": "completed",
+                       "kind": "tool", "step": 1, "sql": "SELECT COUNT(*) FROM orders", "duration_ms": 4}],
+        ok=True,
+    )
+    turn = conv._turns[-1]
+    assert turn  # record exists
+    # The most recently completed TurnBlock is reachable via the layout; grab it.
+    block = conv._layout.itemAt(conv._layout.count() - 1).widget()
+    assert block._trace_box is None             # lazy — not built until expanded
+    block._toggle_trace()                        # expand
+    assert isinstance(block._trace_box, InlineTrace)
+    assert block._trace_box.isHidden() is False
+    assert not block._trace_box.is_empty()
+    assert block.status._expanded is True
+    block._toggle_trace()                        # collapse
+    assert block._trace_box.isHidden() is True
+    assert block.status._expanded is False
 
 
 def test_conversation_copy_exports_all_turns(qapp):

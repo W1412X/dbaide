@@ -7,9 +7,12 @@ from PyQt6.QtCore import Qt, QSize, QTimer
 from PyQt6.QtGui import QColor, QFont
 from PyQt6.QtWidgets import (
     QApplication,
+    QDialog,
+    QFrame,
+    QHBoxLayout,
     QHeaderView,
     QLabel,
-    QSplitter,
+    QPushButton,
     QTextBrowser,
     QToolButton,
     QTreeWidget,
@@ -42,78 +45,65 @@ _GLYPH = {
 _NODE_ROLE = Qt.ItemDataRole.UserRole
 
 
-class TracePanel(QWidget):
-    """Execution-tree view of a run: a live summary on top, the tool/sub-agent tree
-    in the middle (parallel work shown as sibling nodes), and a detail pane below
-    that shows everything about whichever node you click."""
+class InlineTrace(QFrame):
+    """Collapsible, per-turn execution trace shown inline in the conversation (there
+    is no side panel). A compact header carries a copy-trace action; below it the
+    tool/sub-agent tree (parallel work as sibling nodes). Clicking any step opens a
+    popup with its full detail — the tree itself stays lean and scannable."""
 
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
+        self.setObjectName("inlineTrace")
+        self.setStyleSheet(
+            f"QFrame#inlineTrace {{ background: {Theme.PANEL}; border: 1px solid {Theme.BORDER_SOFT};"
+            f" border-radius: 10px; }}"
+        )
+        self.setMaximumHeight(340)
+        from dbaide.i18n import t
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(0)
+        layout.setContentsMargins(10, 8, 10, 10)
+        layout.setSpacing(6)
 
-        split = QSplitter(Qt.Orientation.Vertical)
+        header = QHBoxLayout()
+        header.setContentsMargins(0, 0, 0, 0)
+        header.setSpacing(6)
+        title = QLabel(t("trace.title"))
+        title.setStyleSheet(f"color: {Theme.MUTED}; font-size: 11px; font-weight: 600; background: transparent;")
+        header.addWidget(title)
+        header.addStretch(1)
+        self._copy_btn = QToolButton()
+        self._copy_btn.setIcon(svg_icon("copy", color=Theme.TEXT_2, size=15))
+        self._copy_btn.setIconSize(QSize(15, 15))
+        self._copy_btn.setToolTip(t("trace.copy"))
+        self._copy_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._copy_btn.setFixedSize(26, 26)
+        self._copy_btn.setStyleSheet(
+            f"QToolButton {{ background: transparent; border: none; border-radius: 7px; }}"
+            f"QToolButton:hover {{ background: {Theme.PANEL_2}; }}"
+        )
+        self._copy_btn.clicked.connect(self._copy_all)
+        header.addWidget(self._copy_btn)
+        layout.addLayout(header)
+
         self._tree = QTreeWidget()
         self._tree.setColumnCount(3)
         self._tree.setHeaderHidden(True)
         self._tree.header().setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
         self._tree.header().setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
         self._tree.header().setSectionResizeMode(2, QHeaderView.ResizeMode.ResizeToContents)
-        # The title column (1) is the one that should absorb free width; without
-        # this the last column stretches and the title elides at its sizeHint.
         self._tree.header().setStretchLastSection(False)
         self._tree.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
-        # Word-wrap OFF on purpose: with ElideRight, Qt would otherwise elide each
-        # row at its *sizeHint* width (truncating early and wasting horizontal space)
-        # instead of at the real allocated width. Rows stay one line and elide only
-        # at the panel edge; the full text of any step is one click away in the detail
-        # pane below.
+        # Word-wrap OFF on purpose: rows stay one line and elide at the panel edge;
+        # the full text of any step is one click away in the detail popup.
         self._tree.setWordWrap(False)
         self._tree.setUniformRowHeights(False)
         self._tree.setIndentation(14)
-        # The tree stays concise and scannable (elide long lines); the full text of
-        # any step — result, SQL, args — is one click away in the detail pane below.
         self._tree.setTextElideMode(Qt.TextElideMode.ElideRight)
         self._tree.setFont(QFont("Inter", 11))
         self._tree.setExpandsOnDoubleClick(False)
-        # Borderless — it lives inside the bordered panel; its own box would just be a
-        # redundant frame-in-a-frame. The splitter handle separates it from the detail.
         self._tree.setStyleSheet("QTreeWidget { background: transparent; border: none; }")
         self._tree.itemClicked.connect(self._on_click)
-
-        # Detail pane: a formatted (HTML) view whose top-right corner carries a small
-        # "Copy raw" action overlaid on the text (no dedicated header band — that read
-        # as an empty strip with a lone floating button).
-        self._detail = QTextBrowser()
-        self._detail.setFont(QFont("Inter", 11))
-        configure_readonly_text_view(self._detail)
-        self._detail.setPlaceholderText("Click a step to inspect it.")
-        self._detail.setMinimumHeight(96)
-        self._detail.setStyleSheet("QTextBrowser { background: transparent; border: none; }")
-        self._detail.viewport().installEventFilter(self)
-
-        self._copy_raw_btn = QToolButton(self._detail)
-        self._copy_raw_btn.setIcon(svg_icon("copy", color=Theme.TEXT_2, size=16))
-        self._copy_raw_btn.setIconSize(QSize(16, 16))
-        self._copy_raw_btn.setToolTip("Copy raw event JSON")
-        self._copy_raw_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        self._copy_raw_btn.setFixedSize(28, 28)
-        # Soft button: a visible fill (no border) so it's clearly a control, not an
-        # invisible hotspot; brightens on hover.
-        self._copy_raw_btn.setStyleSheet(
-            f"QToolButton {{ background:{Theme.PANEL_2}; border: none; border-radius: 7px; }}"
-            f"QToolButton:hover {{ background:{Theme.PANEL_3}; }}"
-        )
-        self._copy_raw_btn.clicked.connect(self._copy_raw)
-        self._copy_raw_btn.setVisible(False)
-        self._raw_text = ""  # original event JSON for the current node (for Copy raw)
-
-        split.addWidget(self._tree)
-        split.addWidget(self._detail)
-        split.setStretchFactor(0, 3)
-        split.setStretchFactor(1, 1)
-        layout.addWidget(split)
+        layout.addWidget(self._tree, 1)
 
         self._model: TraceModel | None = None
         self._selected_id: str = ""
@@ -128,35 +118,11 @@ class TracePanel(QWidget):
         self._render_timer.setInterval(60)
         self._render_timer.timeout.connect(self._render)
 
-    def eventFilter(self, obj, event):  # noqa: N802 (Qt signature)
-        if obj is self._detail.viewport() and event.type() == event.Type.Resize:
-            self._place_copy_btn()
-        return super().eventFilter(obj, event)
+    # ── Public API ────────────────────────────────────────────────────────────
 
-    def _place_copy_btn(self) -> None:
-        vp = self._detail.viewport()
-        self._copy_raw_btn.move(vp.width() - self._copy_raw_btn.width() - 6, 6)
-
-    # ── Public API (preserved for callers) ───────────────────────────────────
-
-    def load_events(self, events: list[dict[str, Any]]) -> None:
-        model = TraceModel()
-        for event in events or []:
-            model.ingest(event)
-        model.finalize()
-        self._model = model
-        self._render()
-
-    def begin_live(self) -> None:
-        self._model = TraceModel()
-        self._selected_id = ""
-        self._detail.clear()
-        self._render()
-
-    def show_events(self, events: list[dict[str, Any]], *, live: bool) -> None:
-        """Rebuild the view from a session's accumulated events. ``live=True`` leaves
-        the model un-finalized (the run is still going), so switching into a
-        still-running session shows its in-progress trace; ``live=False`` finalizes."""
+    def set_events(self, events: list[dict[str, Any]], *, live: bool = False) -> None:
+        """Rebuild from a list of events. ``live=True`` leaves the model un-finalized
+        (the run is still going); ``live=False`` finalizes it."""
         model = TraceModel()
         for event in events or []:
             model.ingest(event)
@@ -164,20 +130,16 @@ class TracePanel(QWidget):
             model.finalize()
         self._model = model
         self._selected_id = ""
-        self._detail.clear()
         self._render()
 
-    def append_live(self, message: str) -> None:
-        if not message.strip():
-            return
-        text = message.strip()
-        if text.startswith("[assets]"):
-            self.append_live_event(
-                {"stage": "build_assets", "title": text.replace("[assets]", "", 1).strip(),
-                 "status": "running", "kind": "info"}
-            )
-        else:
-            self.append_live_event({"stage": "agent", "title": text, "status": "running", "kind": "info"})
+    # Back-compat alias used by some callers/tests.
+    def load_events(self, events: list[dict[str, Any]]) -> None:
+        self.set_events(events, live=False)
+
+    def begin_live(self) -> None:
+        self._model = TraceModel()
+        self._selected_id = ""
+        self._render()
 
     def append_live_event(self, event: dict[str, Any]) -> None:
         if self._model is None:
@@ -199,18 +161,24 @@ class TracePanel(QWidget):
         self._running_items = []
         self._busy.stop()
         self._tree.clear()
-        self._detail.clear()
 
     def is_empty(self) -> bool:
         return self._model is None or not self._model.steps
 
     def copy_text(self) -> str:
-        """Readable, structured export of the current run (steps + SQL, nothing
-        elided). Shared with the whole-conversation copy."""
+        """Readable, structured export of this run (steps + SQL, nothing elided)."""
         from dbaide.agent.trace_model import render_trace_text
         return render_trace_text(self._model) if self._model is not None else ""
 
     # ── Rendering ─────────────────────────────────────────────────────────────
+
+    def _copy_all(self) -> None:
+        text = self.copy_text()
+        if not text:
+            return
+        QApplication.clipboard().setText(text)
+        self._copy_btn.setIcon(svg_icon("check", color=Theme.GREEN, size=15))
+        QTimer.singleShot(1200, lambda: self._copy_btn.setIcon(svg_icon("copy", color=Theme.TEXT_2, size=15)))
 
     def _render(self) -> None:
         self._tree.clear()
@@ -232,11 +200,6 @@ class TracePanel(QWidget):
             last = self._add_node(self._tree, node, depth=0)
 
         self._tree.scrollToItem(last)
-        # Re-show the previously selected node's detail (don't lose it on live re-render).
-        if self._selected_id:
-            data = self._find_node_data(self._selected_id)
-            if data is not None:
-                self._show_detail(data)
         # Spin while anything is still running; stop once everything has resolved.
         if self._running_items:
             self._busy.start()
@@ -253,10 +216,9 @@ class TracePanel(QWidget):
 
     def _add_node(self, parent, node: TraceNode, *, depth: int) -> QTreeWidgetItem:
         """Render one node and all its descendants. Styling is driven by depth and
-        node_type (not by a 2-level tool/substep split), so the tree nests without
-        limit: top-level steps read boldest, deeper sub-tasks progressively muted."""
+        node_type, so the tree nests without limit: top-level steps read boldest,
+        deeper sub-tasks progressively muted."""
         running = node.status == "running"
-        # Running rows get a spinning-ring icon (set below); others a status glyph.
         glyph = "" if running else _GLYPH.get(node.status, "·")
         indicator = f"{glyph} {node.step}".strip() if (depth == 0 and node.step) else glyph
         head = _node_head(node)
@@ -289,8 +251,7 @@ class TracePanel(QWidget):
             parent.addChild(item)
 
         # Top-level steps carry their headline (thought + one-line result) inline;
-        # deeper sub-steps stay single-line and reveal their detail on click — keeps
-        # the tree scannable without losing anything (it's all in the detail pane).
+        # deeper sub-steps stay single-line and reveal their detail on click.
         if depth == 0:
             if node.thought:
                 self._add_leaf(item, f"“{node.thought}”", muted=True)
@@ -305,49 +266,77 @@ class TracePanel(QWidget):
         return item
 
     def _add_leaf(self, parent: QTreeWidgetItem, text: str, *, muted: bool = True) -> None:
-        # Generous budget — the leaf wraps (ElideNone), so detail is shown, not cut.
         leaf = QTreeWidgetItem(["", text[:600], ""])
         leaf.setForeground(1, _muted() if muted else _bright())
         leaf.setFirstColumnSpanned(True)
         parent.addChild(leaf)
 
-    def _find_node_data(self, node_id: str) -> dict | None:
-        stack = [self._tree.topLevelItem(i) for i in range(self._tree.topLevelItemCount())]
-        while stack:
-            item = stack.pop()
-            if item is None:
-                continue
-            data = item.data(0, _NODE_ROLE)
-            if isinstance(data, dict) and data.get("node_id") == node_id:
-                return data
-            stack.extend(item.child(i) for i in range(item.childCount()))
-        return None
-
     def _on_click(self, item: QTreeWidgetItem, _column: int) -> None:
         data = item.data(0, _NODE_ROLE)
-        if not isinstance(data, dict):
+        if not isinstance(data, dict) or data.get("__summary__"):
             return
         self._selected_id = str(data.get("node_id") or "")
-        self._show_detail(data)
+        dialog = TraceDetailDialog(data, parent=self.window())
+        dialog.show()
+        dialog.raise_()
+        dialog.activateWindow()
 
-    def _show_detail(self, data: dict) -> None:
+
+class TraceDetailDialog(QDialog):
+    """Popup showing the full detail of a single trace step, with a copy-raw action.
+    Replaces the old always-on detail pane — detail is now one click away, on demand."""
+
+    def __init__(self, data: dict, *, parent=None) -> None:
+        super().__init__(parent)
+        from dbaide.i18n import t
+        title = str(data.get("title") or data.get("phase") or data.get("stage") or "step")
+        self.setWindowTitle(title)
+        self.setModal(False)
+        self.resize(560, 420)
+        self.setMinimumSize(360, 240)
+        self.setStyleSheet(f"QDialog {{ background: {Theme.BG}; }}")
+
         raw = data.get("raw") if isinstance(data.get("raw"), dict) else {}
         try:
             self._raw_text = json.dumps(raw, ensure_ascii=False, indent=2, default=str) if raw else ""
         except (TypeError, ValueError):
             self._raw_text = str(raw)
-        show_copy = bool(self._raw_text) and not data.get("__summary__")
-        self._detail.setHtml(_detail_html(data))
-        if show_copy:
-            self._place_copy_btn()
-            self._copy_raw_btn.raise_()
-        self._copy_raw_btn.setVisible(show_copy)
 
-    def _copy_raw(self) -> None:
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(16, 16, 16, 12)
+        layout.setSpacing(10)
+
+        self._body = QTextBrowser()
+        self._body.setFont(QFont("Inter", 11))
+        configure_readonly_text_view(self._body)
+        self._body.setStyleSheet("QTextBrowser { background: transparent; border: none; }")
+        self._body.setHtml(_detail_html(data))
+        layout.addWidget(self._body, 1)
+
+        row = QHBoxLayout()
+        row.setContentsMargins(0, 0, 0, 0)
+        row.addStretch(1)
+        if self._raw_text:
+            self._copy_raw = QPushButton(t("trace.copy_raw"))
+            self._copy_raw.setCursor(Qt.CursorShape.PointingHandCursor)
+            self._copy_raw.clicked.connect(self._do_copy_raw)
+            row.addWidget(self._copy_raw)
+        close = QPushButton(t("dialog.close"))
+        close.setCursor(Qt.CursorShape.PointingHandCursor)
+        close.clicked.connect(self.close)
+        row.addWidget(close)
+        layout.addLayout(row)
+
+    def _do_copy_raw(self) -> None:
         if self._raw_text:
             QApplication.clipboard().setText(self._raw_text)
-            self._copy_raw_btn.setIcon(svg_icon("check", color=Theme.GREEN, size=16))
-            QTimer.singleShot(1200, lambda: self._copy_raw_btn.setIcon(svg_icon("copy", color=Theme.TEXT_2, size=16)))
+            self._copy_raw.setText("✓")
+            QTimer.singleShot(1200, lambda: self._copy_raw.setText(_copy_raw_label()))
+
+
+def _copy_raw_label() -> str:
+    from dbaide.i18n import t
+    return t("trace.copy_raw")
 
 
 def _esc(text: str) -> str:
@@ -363,10 +352,7 @@ def _detail_html(data: dict) -> str:
     raw = data.get("raw") if isinstance(data.get("raw"), dict) else {}
     parts: list[str] = []
     title = str(data.get("title") or data.get("phase") or data.get("stage") or "step")
-    # Right padding on the top two rows clears the floating Copy-raw button (overlaid
-    # in the detail's top-right corner) so its tail text isn't covered.
-    parts.append(f"<div style='color:{Theme.TEXT}; font-size:13px; font-weight:600;"
-                 f" margin-right:38px;'>{_esc(title)}</div>")
+    parts.append(f"<div style='color:{Theme.TEXT}; font-size:13px; font-weight:600;'>{_esc(title)}</div>")
 
     # Keep the chip row lean: skip phase/stage/agent values that just echo the
     # title (or each other), so it carries information rather than noise.
@@ -389,7 +375,7 @@ def _detail_html(data: dict) -> str:
         f"<span style='color:{Theme.TEXT_2};'>{_esc(v)}</span></span>"
         for k, v in chips
     )
-    parts.append(f"<div style='font-size:11px; margin:4px 0 8px; margin-right:38px;'>{chip_html}</div>")
+    parts.append(f"<div style='font-size:11px; margin:4px 0 8px;'>{chip_html}</div>")
 
     if node_type == "sql":
         facts = []
@@ -458,8 +444,7 @@ def _depth_color(depth: int) -> QColor:
 
 def _secondary_text(node: TraceNode) -> str:
     """The useful one-line summary for a tool step: its result detail, or a
-    non-boilerplate title. Returns '' when there's nothing worth a second line
-    (the loop's "Calling X" / "X done" frames carry no information)."""
+    non-boilerplate title. Returns '' when there's nothing worth a second line."""
     detail = (node.detail or "").strip()
     if detail:
         return " ".join(detail.split())

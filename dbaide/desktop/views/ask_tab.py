@@ -25,7 +25,6 @@ class AskTab(QWidget):
     open_sql = pyqtSignal(str)
     empty_action = pyqtSignal(str)
     clarification_choice = pyqtSignal(str, str)   # (slot key, reply)
-    trace_requested = pyqtSignal(str, object)     # (slot key, events|None)
 
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
@@ -66,7 +65,6 @@ class AskTab(QWidget):
         if view is None:
             view = ConversationView()
             view.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
-            view.trace_requested.connect(lambda ev, k=key: self.trace_requested.emit(k, ev))
             self._views[key] = view
             self.stack.addWidget(view)
             if self._has_conn and not self._hint_shown:
@@ -99,12 +97,6 @@ class AskTab(QWidget):
             self.stack.removeWidget(existing)
             existing.deleteLater()
         self._views[new_key] = view
-        # Re-point the view's trace_requested closure at the new key.
-        try:
-            view.trace_requested.disconnect()
-        except TypeError:
-            pass
-        view.trace_requested.connect(lambda ev, k=new_key: self.trace_requested.emit(k, ev))
         if self._active == old_key:
             self._active = new_key
 

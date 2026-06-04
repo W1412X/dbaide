@@ -12,8 +12,7 @@ from PyQt6.QtWidgets import (
 )
 
 from dbaide.desktop.components.base import StatusBadge
-from dbaide.desktop.components.icon_button import IconToolButton
-from dbaide.desktop.components.icons import more_icon, panel_icon, svg_icon
+from dbaide.desktop.components.icons import more_icon, svg_icon
 from dbaide.desktop.components.inputs import DropdownCombo
 from dbaide.desktop.components.menu import MenuButton
 from dbaide.desktop.theme import Theme
@@ -85,7 +84,8 @@ class TopBar(QWidget):
     refresh = pyqtSignal()
     build_assets = pyqtSignal()
     settings = pyqtSignal()
-    toggle_panel = pyqtSignal()
+    joins_requested = pyqtSignal()
+    copy_conversation_requested = pyqtSignal()
     new_query_requested = pyqtSignal()
     new_conn_requested = pyqtSignal()
 
@@ -145,16 +145,14 @@ class TopBar(QWidget):
         self.status = StatusBadge("Idle", "idle")
         row.addWidget(self.status)
 
-        self.panel_toggle = IconToolButton(panel_icon(color=Theme.TEXT_2), t("topbar.settings"))
-        self.panel_toggle.setToolTip("Toggle activity panel")
-        self.panel_toggle.clicked.connect(self.toggle_panel.emit)
-        row.addWidget(self.panel_toggle)
-
         self.menu = MenuButton(
             icon=more_icon(color=Theme.TEXT_2), tooltip=t("topbar.settings"), icon_only=True
         )
         self.menu.add_action(t("topbar.build"), self.build_assets.emit)
         self.menu.add_action(t("topbar.refresh"), self.refresh.emit)
+        self.menu.add_separator()
+        self.menu.add_action(t("menu.joins"), self.joins_requested.emit)
+        self.menu.add_action(t("panel.copy_conversation"), self.copy_conversation_requested.emit)
         self.menu.add_separator()
         self.menu.add_action(t("topbar.settings") + "…", self.settings.emit)
         row.addWidget(self.menu)

@@ -44,7 +44,8 @@ def _tab_label(tab_id: str) -> str:
         "Workbench": _i18n_t("mode.workbench"),
     }.get(tab_id, tab_id)
 from dbaide.desktop.views.ask_tab import AskTab
-from dbaide.desktop.views.right_panel import RightPanel
+from dbaide.desktop.dialogs.joins import JoinsDialog
+from dbaide.desktop.views.joins_tab import JoinsTab
 from dbaide.desktop.views.sidebar import Sidebar
 from dbaide.desktop.views.workbench import WorkbenchView
 from dbaide.desktop.views.query_history import QueryHistoryPanel
@@ -93,11 +94,6 @@ class MainWindow(QMainWindow):
         self.setMinimumSize(1000, 720)
         self.setStyleSheet(app_style())
         self._build()
-        # The activity panel (Trace/Inspector) is available in both modes — in
-        # Workbench it shows Inspector (asset docs), in Assistant it shows Trace.
-        # Remember the user's show/hide preference across both modes.
-        self._panel_pref = str(self._settings.value("panel_visible", "true")).lower() != "false"
-        self._apply_panel_visibility()
         self._install_shortcuts()
         self._wire_bus()
         self.refresh_all()
@@ -122,31 +118,6 @@ class MainWindow(QMainWindow):
     def _current_mode(self) -> str:
         idx = self.tabbar.currentIndex()
         return self._tab_names[idx] if 0 <= idx < len(self._tab_names) else "Assistant"
-
-    def _toggle_panel(self) -> None:
-        self._panel_pref = not self._panel_pref
-        self._settings.setValue("panel_visible", "true" if self._panel_pref else "false")
-        self._apply_panel_visibility()
-
-    def _show_panel(self) -> None:
-        self._panel_pref = True
-        self._settings.setValue("panel_visible", "true")
-        self._apply_panel_visibility()
-
-    def _apply_panel_visibility(self) -> None:
-        # Panel is available in ALL modes; only respect the user's show/hide pref.
-        self.right.setVisible(self._panel_pref)
-        # Panel toggle is always visible
-        self.topbar.panel_toggle.setVisible(True)
-        # When showing, guarantee a real width — a previously-collapsed splitter can
-        # leave the panel at 0px so setVisible(True) alone would keep it invisible.
-        if self._panel_pref and hasattr(self, "body_splitter"):
-            sizes = self.body_splitter.sizes()
-            if len(sizes) == 3 and sizes[2] < 120:
-                panel_w = 360
-                sizes[2] = panel_w
-                sizes[1] = max(420, sizes[1] - panel_w)
-                self.body_splitter.setSizes(sizes)
 
     def _wire_bus(self) -> None:
         """Central map of data-change events → who re-fetches. Components react to
@@ -183,7 +154,8 @@ class MainWindow(QMainWindow):
         self.topbar.refresh.connect(self.refresh_all)
         self.topbar.build_assets.connect(self.build_assets)
         self.topbar.settings.connect(lambda: self.open_settings("connections"))
-        self.topbar.toggle_panel.connect(self._toggle_panel)
+        self.topbar.joins_requested.connect(self.open_joins)
+        self.topbar.copy_conversation_requested.connect(self.copy_conversation)
         self.topbar.new_query_requested.connect(self._shortcut_new_query)
         self.topbar.new_conn_requested.connect(lambda: self.open_settings("connections"))
         layout.addWidget(self.topbar)
@@ -228,7 +200,6 @@ class MainWindow(QMainWindow):
         self.ask_tab.empty_action.connect(self._empty_action)
         self.ask_tab.open_sql.connect(self.open_sql)
         self.ask_tab.clarification_choice.connect(self._submit_clarification)
-        self.ask_tab.trace_requested.connect(self._reveal_turn_trace)
         self.query_history_store = QueryHistoryStore()
         self.history_panel = QueryHistoryPanel()
         self.history_panel.sql_selected.connect(self._on_history_select)
@@ -258,31 +229,19 @@ class MainWindow(QMainWindow):
         self.composer.attach_requested.connect(self._show_attach_menu)
         center_layout.addWidget(self.composer)
 
-        self.right = RightPanel()
-        self.right.copy_trace_requested.connect(self.copy_trace)
-        self.right.copy_conversation_requested.connect(self.copy_conversation)
-        self.right.clear_trace_requested.connect(self.right.clear_all)
-        # "Clear conversation" starts a fresh thread (resets the active session) so
-        # the cleared view and the persisted session stay in sync.
-        self.right.clear_conversation_requested.connect(self.new_session)
-        self.right.history_selected.connect(self.load_history)
-        self.right.history_preview.connect(self.preview_history)
-        self.right.history_delete.connect(self.delete_history)
-        self.right.joins_refresh_requested.connect(self.refresh_joins)
-        self.right.joins_add_requested.connect(self._add_join)
-        self.right.joins_update_requested.connect(self._update_join)
-        self.right.joins_delete_requested.connect(self._delete_join)
-        self.right.reveal_requested.connect(self._show_panel)
+        # The Joins manager (a niche feature) opens on demand from the topbar menu —
+        # it no longer lives in a permanent side panel. The trace is now shown inline
+        # in each conversation turn (click the "View agent trace" chip), so there is
+        # no right-hand activity panel at all.
+        self.joins = JoinsTab()
+        self._joins_dialog: JoinsDialog | None = None
 
         body.addWidget(self.sidebar)
         body.addWidget(center)
-        body.addWidget(self.right)
         body.setCollapsible(0, False)
         body.setCollapsible(1, False)
-        body.setCollapsible(2, True)
         body.setStretchFactor(0, 0)
         body.setStretchFactor(1, 1)
-        body.setStretchFactor(2, 0)
         self._apply_splitter_sizes(body)
         body.splitterMoved.connect(self._save_splitter_sizes)
         layout.addWidget(body, 1)
@@ -357,7 +316,7 @@ class MainWindow(QMainWindow):
         self.toast(str(exc))
 
     def _default_splitter_sizes(self) -> list[int]:
-        return [280, 780, 360]
+        return [280, 1100]
 
     def _apply_splitter_sizes(self, splitter: QSplitter) -> None:
         defaults = self._default_splitter_sizes()
@@ -366,7 +325,7 @@ class MainWindow(QMainWindow):
         if saved_sizes:
             try:
                 parsed = [int(x) for x in saved_sizes]
-                if len(parsed) == 3 and parsed[0] >= 180 and parsed[1] >= 420:
+                if len(parsed) == 2 and parsed[0] >= 180 and parsed[1] >= 420:
                     sizes = parsed
             except (TypeError, ValueError):
                 pass
@@ -374,9 +333,7 @@ class MainWindow(QMainWindow):
 
     def _save_splitter_sizes(self, *_args) -> None:
         sizes = self.body_splitter.sizes()
-        # Only persist a layout where the right panel has a real width — never save a
-        # collapsed (0px) panel, or it would stay invisible after the next launch.
-        if len(sizes) == 3 and sizes[0] >= 180 and sizes[1] >= 420 and sizes[2] >= 120:
+        if len(sizes) == 2 and sizes[0] >= 180 and sizes[1] >= 420:
             self._settings.setValue("splitter_sizes", sizes)
 
     def current_connection(self) -> str:
@@ -389,12 +346,6 @@ class MainWindow(QMainWindow):
         if 0 <= index < self.stack.count():
             self.stack.setCurrentIndex(index)
             self.composer.setVisible(self._tab_names[index] == "Assistant")
-            self._apply_panel_visibility()
-            # Default the right panel to the contextually appropriate tab per mode.
-            if self._tab_names[index] == "Workbench":
-                self.right._switch_tab(self.right._TAB_INSPECTOR)
-            else:
-                self.right._switch_tab(self.right._TAB_TRACE)
 
     def switch_tab(self, name: str) -> None:
         """Route the old per-tab names to the new Assistant/Workbench modes."""
@@ -412,7 +363,6 @@ class MainWindow(QMainWindow):
         # one connection's conversation never bleeds into another. (Not fired during
         # bootstrap: set_connections blocks signals.)
         self._reset_all_slots()
-        self.right.trace.clear_trace()
         # Table viewers show the old connection's data — close them. SQL editors are
         # portable text and stay; History re-loads for the new connection below.
         self.workbench.close_table_docs()
@@ -515,23 +465,33 @@ class MainWindow(QMainWindow):
         self.topbar.set_databases([])
         self.toast(f"Schema load failed: {message}")
 
-    def _load_history(self, name: str) -> None:
-        def on_loaded(entries: Any) -> None:
-            # Drop stale responses for a connection the user already switched away from.
-            if name == self.current_connection():
-                self.right.load_history(entries)
-        self._run_background("list_history", {"connection_name": name}, on_loaded)
-
     def refresh_joins(self) -> None:
         conn = self.current_connection()
         if not conn:
-            self.right.show_joins([])
+            self.joins.load([])
             return
         try:
             result = self.service.dispatch("list_joins", {"connection_name": conn})
-            self.right.show_joins(result.get("joins") or [])
+            self.joins.load(result.get("joins") or [])
         except Exception as exc:
             self.toast(str(exc))
+
+    def open_joins(self) -> None:
+        """Open the on-demand Joins manager (relocated here from the old side panel)."""
+        if not self.current_connection():
+            self.toast(_i18n_t("toast.select_connection"))
+            return
+        if self._joins_dialog is None:
+            dialog = JoinsDialog(self.joins, parent=self)
+            dialog.refresh_requested.connect(self.refresh_joins)
+            dialog.add_requested.connect(self._add_join)
+            dialog.update_requested.connect(self._update_join)
+            dialog.delete_requested.connect(self._delete_join)
+            self._joins_dialog = dialog
+        self.refresh_joins()
+        self._joins_dialog.show()
+        self._joins_dialog.raise_()
+        self._joins_dialog.activateWindow()
 
     def _add_join(self, payload: dict[str, Any]) -> None:
         conn = self.current_connection()
@@ -606,10 +566,8 @@ class MainWindow(QMainWindow):
         self.composer.clear_input()
         self.ask_tab.append_user(key, question, connection=conn, database=database, policy=policy,
                                  attachments=attachments)
-        # Fresh trace for this turn; show it live since this slot is the active one.
+        # Fresh trace for this turn (streamed inline into the turn's status chip).
         self._slot_trace[key] = []
-        self.right.trace.begin_live()
-        self.right.focus_trace()
         self._start_ask(key, {
             "connection_name": conn,
             "question": question,
@@ -645,8 +603,6 @@ class MainWindow(QMainWindow):
             self.composer.clear_input()
         self.ask_tab.append_clarification_reply(key, reply)
         self.ask_tab.append_activity(key, f"User replied: {reply[:80]}")
-        if key == self._active_key:
-            self.right.focus_trace()
         self._start_ask(key, {
             "connection_name": conn,
             "question": original_question,
@@ -709,8 +665,6 @@ class MainWindow(QMainWindow):
     def _start_build_assets(self, conn: str, databases: list[str], options: dict[str, Any] | None = None) -> None:
         self.topbar.set_asset_status("building")
         self.topbar.set_global_status("Building assets", "building")
-        self.right.trace.begin_live()
-        self.right.focus_trace()
         payload: dict[str, Any] = {"name": conn}
         if databases:
             payload["databases"] = databases
@@ -987,32 +941,28 @@ class MainWindow(QMainWindow):
         self.open_schema_asset(data)
 
     def _show_asset(self, action: str, path: str) -> None:
-        # Asset preview is a read-only file read — run it in the background so it
-        # never flips the global status to "running" and works even while a query
-        # is in flight (you can inspect tables mid-run).
+        # Asset preview now opens as a Workbench DocTab (the old Inspector panel is
+        # gone). Read the doc in the background so it never flips the global status to
+        # "running" and works even while a query is in flight.
+        if not path:
+            return
+        self.tabbar.setCurrentIndex(1)  # Workbench
+        title = path.split(".")[-1] if path else path
+        self.workbench.open_doc(path, title, "")
+
         def on_loaded(res: dict[str, Any]) -> None:
-            markdown = res.get("markdown") or ""
-            self.right.show_inspector(
-                markdown=markdown, doc=res.get("doc"), focus=True,
-            )
-            # Also update any open DocTab for this path
-            self.workbench.update_doc(path, markdown)
+            self.workbench.update_doc(path, res.get("markdown") or "")
         self._run_background(action, {"path": path}, on_loaded)
 
     def preview_schema(self, data: dict[str, Any]) -> None:
         path = str(data.get("path") or "")
         if not path:
             return
-        # Always load into the right panel Inspector
         self._show_asset("preview_asset", path)
-        # In Workbench mode, also open a (lazy) DocTab
-        if self._current_mode() == "Workbench":
-            title = path.split(".")[-1] if path else path
-            self.workbench.open_doc(path, title, "")
 
     def open_schema_asset(self, data: dict[str, Any]) -> None:
         # Double-clicking a table opens its data in the Data browser; other nodes
-        # (databases, columns) fall back to the asset preview in the right panel.
+        # (databases, columns) fall back to the asset preview in a Workbench DocTab.
         path = str(data.get("path") or "")
         if str(data.get("kind") or "") == "table":
             parts = path.split(".") if path else []
@@ -1190,18 +1140,9 @@ class MainWindow(QMainWindow):
         self.current_session_id = ""
         self.ask_tab.set_active(key)
         self.ask_tab.set_has_connection(bool(self.current_connection()))
-        self.right.trace.clear_trace()
         self.sidebar.chats.set_current("")
         self._sync_active_ui()
         self.composer.input.setFocus()
-
-    def _reveal_turn_trace(self, key: object, events: object = None) -> None:
-        """A turn's status chip was clicked — reveal that session's trace. ``events``
-        is the turn's persisted trace (or None while it's still running, in which case
-        the live/accumulated trace is already shown)."""
-        if isinstance(events, list) and events and str(key) not in self._runs:
-            self.right.show_trace(events)
-        self.right.focus_trace()
 
     def open_session(self, session_id: str) -> None:
         """Switch to a saved session. If it's already loaded in a slot (e.g. running
@@ -1226,14 +1167,13 @@ class MainWindow(QMainWindow):
         self._run_background("load_session", {"connection_name": conn, "session_id": session_id}, on_loaded)
 
     def _activate_slot(self, key: str) -> None:
-        """Bring slot ``key`` to the front: show its conversation + trace and sync the
-        composer to whether it is idle / running / awaiting a reply."""
+        """Bring slot ``key`` to the front: show its conversation and sync the
+        composer to whether it is idle / running / awaiting a reply. (Each turn's
+        trace travels inline with the conversation, so there's nothing else to swap.)"""
         self._active_key = key
         self.current_session_id = self._slot_session.get(key, "") or (key if not key.startswith("new:") else "")
         self.ask_tab.set_has_connection(bool(self.current_connection()))
         self.ask_tab.set_active(key)
-        events = self._slot_trace.get(key, [])
-        self.right.trace.show_events(events, live=key in self._runs)
         self._sync_chat_selection()
         self._sync_active_ui()
 
@@ -1272,46 +1212,11 @@ class MainWindow(QMainWindow):
                 self._active_key = ""
                 self.current_session_id = ""
                 self.ask_tab.set_has_connection(bool(conn))
-                self.right.trace.clear_trace()
                 self._sync_active_ui()
         self._load_sessions(conn)
 
-    def load_history(self, workflow_id: str) -> None:
-        conn = self.current_connection()
-        self.run_action("load_history", {"connection_name": conn, "workflow_id": workflow_id})
-        self.switch_tab("Ask")
-
-    def preview_history(self, workflow_id: str) -> None:
-        conn = self.current_connection()
-        if not conn or not workflow_id:
-            return
-        try:
-            entry = self.service.dispatch("load_history", {
-                "connection_name": conn,
-                "workflow_id": workflow_id,
-            })
-            self.right.show_trace(entry.get("trace") or [])
-            self.right.focus_trace()
-            self.toast(f"Preview: {workflow_id}")
-        except Exception as exc:
-            self.toast(str(exc))
-
-    def delete_history(self, workflow_id: str) -> None:
-        conn = self.current_connection()
-        if not conn or not workflow_id:
-            return
-        try:
-            self.service.dispatch("delete_history", {
-                "connection_name": conn,
-                "workflow_id": workflow_id,
-            })
-            self._load_history(conn)
-            self.toast(f"Deleted: {workflow_id}")
-        except Exception as exc:
-            self.toast(str(exc))
-
     # ── One-off (non-conversation) actions ────────────────────────────────────
-    # build assets / run SQL / search / load history / preview / test connection.
+    # build assets / run SQL / search / test connection.
     # Only one runs at a time, but it runs *alongside* conversation runs.
 
     def run_action(self, action: str, payload: dict[str, Any]) -> None:
@@ -1337,16 +1242,11 @@ class MainWindow(QMainWindow):
         self.pool.start(worker)
 
     def _on_oneoff_progress(self, message: object) -> None:
-        # Only asset builds stream into the (active) trace panel.
+        # Asset builds surface their progress in the status bar (the detailed trace
+        # panel is gone — conversation runs now carry their trace inline).
         if self._oneoff_action != "build_assets":
             return
         self.statusbar.showMessage(progress_label(message if isinstance(message, dict) else str(message or "")))
-        if isinstance(message, dict):
-            self.right.trace.append_live_event(message)
-        else:
-            text = str(message or "").strip()
-            if text:
-                self.right.trace.append_live(text)
 
     def _on_oneoff_done(self, action: str, result: Any) -> None:
         self._oneoff_worker = None
@@ -1361,7 +1261,6 @@ class MainWindow(QMainWindow):
         self._sync_active_ui()
         self._refresh_run_status()
         if action == "build_assets":
-            self.right.trace.end_live()
             stats = result.get("stats", {}) or {}
             self.ask_tab.append_note(
                 self._active_or_new_key(),
@@ -1380,12 +1279,11 @@ class MainWindow(QMainWindow):
                 )
             return
         if action == "search_assets":
-            self.right.show_search_hits(self._last_question, result)
-            return
-        if action in ("preview_asset", "asset_markdown"):
-            self.right.show_inspector(
-                markdown=result.get("markdown") or "", doc=result.get("doc"), focus=True,
-            )
+            key = self._active_or_new_key()
+            self.ask_tab.set_active(key)
+            self._active_key = key
+            self.ask_tab.append_search_hits(key, self._last_question, result or [])
+            self.switch_tab("Ask")
             return
         if action == "execute_sql":
             if sql_doc is not None:
@@ -1409,14 +1307,6 @@ class MainWindow(QMainWindow):
             if sql_doc is not None:
                 sql_doc.show_result(result)
             return
-        if action == "load_history":
-            key = self._active_or_new_key()
-            self.ask_tab.append_result(key, result)
-            self._slot_trace[key] = list(result.get("trace") or [])
-            if key == self._active_key:
-                self.right.show_trace(result.get("trace") or [])
-            self.switch_tab("Ask")
-            return
         if action == "test_connection":
             self.toast(str(result.get("message") or _i18n_t("toast.connection_ok")))
 
@@ -1431,7 +1321,6 @@ class MainWindow(QMainWindow):
             sql_doc.set_running(False)
         if data_doc is not None:
             data_doc.set_running(False)
-        self.right.trace.end_live()
         self._sync_active_ui()
         self._refresh_run_status()
         if isinstance(exc, CancelledError):
@@ -1506,14 +1395,12 @@ class MainWindow(QMainWindow):
             self.ask_tab.append_activity_event(key, message)
             if key == self._active_key:
                 self.statusbar.showMessage(progress_label(message))
-                self.right.trace.append_live_event(message)
         else:
             text = str(message or "").strip()
             if text:
                 self.ask_tab.append_activity(key, text)
                 if key == self._active_key:
                     self.statusbar.showMessage(progress_label(text))
-                    self.right.trace.append_live(text)
 
     def _on_ask_done(self, key: str, result: Any) -> None:
         self._runs.pop(key, None)
@@ -1531,8 +1418,6 @@ class MainWindow(QMainWindow):
             self._slot_question[key] = str(result.get("question") or self._slot_question.get(key, ""))
             self.ask_tab.append_result(key, result)
             if key == self._active_key:
-                if self.right.trace.is_empty():
-                    self.right.show_trace(result.get("trace") or [])
                 self.toast(_i18n_t("toast.waiting_reply"))
         elif status == "cancelled":
             self._pending_resume.pop(key, None)
@@ -1542,12 +1427,9 @@ class MainWindow(QMainWindow):
         else:
             self._pending_resume.pop(key, None)
             self.ask_tab.append_result(key, result)
-            if key == self._active_key and self.right.trace.is_empty():
-                self.right.show_trace(result.get("trace") or [])
             self.bus.emit(QUERY_COMPLETED, {"instance": self.current_connection()})
         if key == self._active_key:
             self.current_session_id = server_id or self.current_session_id
-            self.right.trace.end_live()
         # A new session was persisted → refresh the Chats list so it appears.
         if server_id:
             self._load_sessions(self.current_connection())
@@ -1562,8 +1444,6 @@ class MainWindow(QMainWindow):
             msg = ("**Cancelled**: Task stopped by user."
                    if isinstance(exc, CancelledError) else f"**Error**: {exc}")
             self.ask_tab.finish_turn_error(key, msg)
-        if key == self._active_key:
-            self.right.trace.end_live()
         self.toast(_i18n_t("toast.cancelled") if isinstance(exc, CancelledError) else str(exc))
         self._drain_queue()
         self._sync_active_ui()
@@ -1604,7 +1484,6 @@ class MainWindow(QMainWindow):
             self._oneoff_worker.cancel()
             self.toast(_i18n_t("toast.cancelling"))
             return
-        self.right.trace.end_live()
         self._sync_active_ui()
         self._refresh_run_status()
 
@@ -1667,14 +1546,6 @@ class MainWindow(QMainWindow):
                 asset_status = c.get("asset_status") or "missing"
                 break
         self.topbar.set_asset_status(asset_status)
-
-    def copy_trace(self) -> None:
-        text = self.right.trace.copy_text()
-        if not text.strip():
-            self.toast(_i18n_t("toast.trace_empty"))
-            return
-        QApplication.clipboard().setText(text)
-        self.toast(_i18n_t("toast.trace_copied"))
 
     def copy_conversation(self) -> None:
         text = self.ask_tab.copy_text()

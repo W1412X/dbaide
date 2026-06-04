@@ -28,6 +28,7 @@ from dbaide.desktop.components.base import AgentButton, compact_button
 from dbaide.desktop.components.icons import svg_icon
 from dbaide.desktop.components.inputs import configure_readonly_text_view, configure_wrapped_label
 from dbaide.desktop.components.spinner import BusyAnimator, spinner_icon
+from dbaide.desktop.components.trace import InlineTrace
 from dbaide.desktop.theme import Theme
 from dbaide.rendering.markdown import render_markdown_safe
 
@@ -122,11 +123,11 @@ class _Bubble(QFrame):
 class _ThinkingIndicator(QPushButton):
     """Per-turn status chip. While the agent runs it shows a spinner + the current
     phase ("Thinking…", then phase labels); when done it collapses to a muted
-    "View agent trace · N steps" link. Clicking it reveals the full trace in the
-    right panel (it carries no trace detail itself). Emits ``opened`` with the
-    turn's events (or None while still running → just reveal the live trace)."""
+    "View agent trace ›" link. Clicking it expands the run's trace inline, right
+    below the chip (a chevron reflects the expand/collapse state). Emits
+    ``toggled_trace`` so the owning turn shows/hides its inline trace."""
 
-    opened = pyqtSignal(object)
+    toggled_trace = pyqtSignal()
 
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
@@ -140,6 +141,7 @@ class _ThinkingIndicator(QPushButton):
         self._events: list[dict[str, Any]] = []
         self._ok = True
         self._step_count = 0
+        self._expanded = False
         self._busy = BusyAnimator(self._tick)
         self.clicked.connect(self._on_click)
         self._sync()
@@ -180,10 +182,14 @@ class _ThinkingIndicator(QPushButton):
 
     # ── internals ──────────────────────────────────────────────────────────--
 
+    def set_expanded(self, expanded: bool) -> None:
+        self._expanded = expanded
+        self._sync()
+
     def _on_click(self) -> None:
-        # While running the live trace is already in the right panel — just reveal
-        # it (None). When done, hand over this turn's events to show.
-        self.opened.emit(None if self._running else self._events)
+        # Toggle the turn's inline trace (works live or after completion — the
+        # owning turn decides what events to show).
+        self.toggled_trace.emit()
 
     def _tick(self) -> None:
         self.setIcon(spinner_icon(self._busy.angle, color=Theme.BLUE))
@@ -206,9 +212,10 @@ class _ThinkingIndicator(QPushButton):
                 self.hide()  # nothing to reveal — don't show a hollow chip
                 return
             color = Theme.MUTED if self._ok else Theme.RED
-            # No step count here — the right panel is the source of truth for that
-            # (and its filtered count differs from the raw event count).
-            self.setText(("View agent trace ›" if self._ok else "View agent trace · failed ›"))
+            from dbaide.i18n import t
+            base = t("trace.view") if self._ok else t("trace.view_failed")
+            caret = " ⌄" if self._expanded else " ›"
+            self.setText(base + caret)
             self.show()
         self.setStyleSheet(
             f"""
@@ -511,9 +518,16 @@ class TurnBlock(QFrame):
         self._layout.addWidget(self._header)
 
         # Lightweight per-turn status (spinner while thinking, then a "view trace"
-        # link). The detailed trace lives in the right panel — not inline.
+        # link). Clicking it expands this turn's trace inline, just below the chip.
         self.status = _ThinkingIndicator()
+        self.status.toggled_trace.connect(self._toggle_trace)
         self._layout.addWidget(self.status, 0, Qt.AlignmentFlag.AlignLeft)
+
+        # The inline trace is created lazily on first expand (most turns are never
+        # expanded — no point building a tree widget for each).
+        self._events: list[dict[str, Any]] = []
+        self._trace_box: InlineTrace | None = None
+        self._trace_final = False
 
         self._content_host = QWidget()
         self._content_host.setStyleSheet("background: transparent;")
@@ -543,16 +557,48 @@ class TurnBlock(QFrame):
         self._content_host.show()
         self._content.addWidget(widget)
 
+    # ── inline trace ───────────────────────────────────────────────────────────
+
+    def _trace_open(self) -> bool:
+        # Explicit show/hide state — independent of ancestor visibility (isVisible()
+        # is False whenever the conversation isn't on screen, which would break the
+        # toggle and live-feed checks).
+        return self._trace_box is not None and not self._trace_box.isHidden()
+
+    def add_live_event(self, event: dict[str, Any]) -> None:
+        """Accumulate a streamed event; feed the inline trace if it's open."""
+        self._events.append(event)
+        if self._trace_open():
+            self._trace_box.append_live_event(event)
+
+    def set_trace(self, events: list[dict[str, Any]]) -> None:
+        """Final, authoritative trace for this turn (from the persisted result)."""
+        self._events = list(events or [])
+        self._trace_final = True
+        if self._trace_open():
+            self._trace_box.set_events(self._events, live=False)
+
+    def _toggle_trace(self) -> None:
+        if self._trace_box is None:
+            self._trace_box = InlineTrace()
+            # Place it directly under the status chip (index of status + 1).
+            idx = self._layout.indexOf(self.status)
+            self._layout.insertWidget(idx + 1, self._trace_box)
+            self._trace_box.hide()
+        if self._trace_open():
+            self._trace_box.hide()
+            self.status.set_expanded(False)
+        else:
+            self._trace_box.set_events(self._events, live=not self._trace_final)
+            self._trace_box.show()
+            self.status.set_expanded(True)
+
 
 class ConversationView(QScrollArea):
     _H_MARGIN = 20
     # Cap the conversation to a comfortable reading column and center it on wide
     # viewports, rather than letting turns stretch edge-to-edge (AI-IDE style).
     _MAX_CONTENT_W = 860
-
-    # Emitted when a turn's status chip is clicked: the turn's trace events to show
-    # in the right panel, or None (still running → just reveal the live trace).
-    trace_requested = pyqtSignal(object)
 
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
@@ -619,7 +665,6 @@ class ConversationView(QScrollArea):
         self._current_turn = turn
         self._current_record = {"question": user_text, "events": [], "answer": ""}
         self._turns.append(self._current_record)
-        turn.status.opened.connect(self.trace_requested)
         # placeholder=True: a live run → spin immediately. placeholder=False: a
         # restored turn → stays idle until complete_turn sets its "view trace" link.
         if placeholder:
@@ -648,6 +693,7 @@ class ConversationView(QScrollArea):
             self._current_turn.status.set_phase(phase)
         if self._current_record is not None:
             self._current_record["events"].append(event)
+        self._current_turn.add_live_event(event)
         self._scroll_bottom()
 
     def append_clarification(self, *, question: str, options: list[str],
@@ -718,6 +764,9 @@ class ConversationView(QScrollArea):
                 self._current_record["events"] = list(trace_events)
             self._current_record["answer"] = answer
         turn.status.set_done(ok=ok, step_count=len(events), events=events)
+        # Hand the authoritative trace to the turn so its inline view (if/when the
+        # user expands the chip) shows the finalized run, not just what streamed.
+        turn.set_trace(events)
 
         # Clean author label — just "DBAide" (the internal workflow id is noise in the
         # message header, Codex-style; keep it reachable as a tooltip and in the trace).
