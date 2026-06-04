@@ -36,6 +36,7 @@ class ResultTableWidget(QWidget):
         self._rows: list[dict[str, Any]] = []
         self._table_name = "table"  # used by "Copy as INSERT"
         self._cell_actions_provider = None  # optional (row, col) -> [(label, fn)]
+        self._header_actions_provider = None  # optional (section) -> [(label, fn)]
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(4)
@@ -285,6 +286,11 @@ class ResultTableWidget(QWidget):
             return _full_text(self._rows[row].get(self._columns[col]))
         return ""
 
+    def set_header_actions_provider(self, provider) -> None:
+        """Provide extra header right-click actions: (section) -> [(label, callable)].
+        Used by the data browser to offer ascending/descending sort on a column."""
+        self._header_actions_provider = provider
+
     def _header_menu(self, pos) -> None:
         from dbaide.desktop.components.menu import _style_menu
         from PyQt6.QtWidgets import QMenu
@@ -292,6 +298,11 @@ class ResultTableWidget(QWidget):
         section = hh.logicalIndexAt(pos)
         menu = QMenu(self)
         _style_menu(menu)
+        # Context-specific actions first (e.g. the data browser's sort options).
+        if section >= 0 and self._header_actions_provider is not None:
+            for label, fn in (self._header_actions_provider(section) or []):
+                menu.addAction(label, fn)
+            menu.addSeparator()
         if section >= 0:
             menu.addAction(self._t("result.autofit_column"),
                            lambda: self.table.resizeColumnToContents(section))

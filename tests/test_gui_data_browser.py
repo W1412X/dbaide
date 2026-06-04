@@ -137,21 +137,26 @@ def test_browse_filtered_sets_identity_and_where(qapp):
     assert w._filter.text() == '"id" = 3'
 
 
-def test_data_browser_sort_cycles_asc_desc_none(qapp):
-    """Clicking the same column header cycles ascending → descending → unsorted."""
+def test_data_browser_sort_via_header_menu(qapp):
+    """Sorting is an explicit right-click choice (Ascending/Descending/Clear), not a
+    click-to-sort. The provider exposes those actions and they set the sort state."""
     from dbaide.desktop.views.data_browser import DataBrowser
     db = DataBrowser()
     db.open_table("local", "main", "t")   # one initial reload (sets _loading True)
     db._columns = ["id", "name"]
     db._loading = False
-    db._on_sort(1)
-    assert (db._order_by, db._order_dir) == ("name", "asc")
-    db._loading = False
-    db._on_sort(1)
+    # Header click no longer sorts.
+    assert db.grid.table.horizontalHeader().sectionsClickable() is False
+    # The provider offers asc + desc for an unsorted column (no Clear yet).
+    actions = db._sort_actions(1)
+    assert len(actions) == 2
+    db._apply_sort("name", "desc")
     assert (db._order_by, db._order_dir) == ("name", "desc")
     db._loading = False
-    db._on_sort(1)
-    assert (db._order_by, db._order_dir) == ("", "asc")   # third click clears the sort
+    # Now the active column also offers Clear.
+    assert len(db._sort_actions(1)) == 3
+    db._clear_sort()
+    assert (db._order_by, db._order_dir) == ("", "asc")
     db.deleteLater()
 
 

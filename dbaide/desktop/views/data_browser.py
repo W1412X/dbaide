@@ -146,9 +146,11 @@ class DataBrowser(QWidget):
         self._filter.setFixedHeight(26)
         pl.addWidget(self._filter)
 
-        # Sorting: clicking a column header re-queries ORDER BY that column.
-        self.grid.table.horizontalHeader().setSectionsClickable(True)
-        self.grid.table.horizontalHeader().sectionClicked.connect(self._on_sort)
+        # Sorting is an explicit, deliberate choice via the header right-click menu
+        # (Ascending / Descending / Clear), not an accidental click — the active sort
+        # shows an up/down arrow on the column.
+        self.grid.table.horizontalHeader().setSectionsClickable(False)
+        self.grid.set_header_actions_provider(self._sort_actions)
         self.grid.set_cell_actions_provider(self._fk_cell_actions)
         pl.addWidget(self.grid, 1)
         self.stack.addWidget(page)
@@ -341,19 +343,30 @@ class DataBrowser(QWidget):
         self._reset_total()  # a different filter invalidates the previous total
         self._reload()
 
-    def _on_sort(self, index: int) -> None:
-        if not (0 <= index < len(self._columns)) or self._loading:
+    def _sort_actions(self, section: int):
+        """Header right-click menu entries for column ``section``: Ascending /
+        Descending, plus Clear when that column is the active sort."""
+        if not (0 <= section < len(self._columns)):
+            return []
+        col = self._columns[section]
+        actions = [
+            (self._t("data.sort_asc"), lambda c=col: self._apply_sort(c, "asc")),
+            (self._t("data.sort_desc"), lambda c=col: self._apply_sort(c, "desc")),
+        ]
+        if self._order_by == col:
+            actions.append((self._t("data.sort_clear"), self._clear_sort))
+        return actions
+
+    def _apply_sort(self, col: str, direction: str) -> None:
+        if self._loading:
             return
-        col = self._columns[index]
-        # Three-state cycle on repeated clicks of the same column: ascending →
-        # descending → unsorted (natural order). Clicking a different column starts
-        # it ascending. This matches how database clients behave and lets the user
-        # actually clear a sort, instead of being stuck toggling asc/desc forever.
-        if col != self._order_by:
-            self._order_by, self._order_dir = col, "asc"
-        elif self._order_dir == "asc":
-            self._order_dir = "desc"
-        else:
-            self._order_by, self._order_dir = "", "asc"
+        self._order_by, self._order_dir = col, direction
+        self._offset = 0
+        self._reload()
+
+    def _clear_sort(self) -> None:
+        if self._loading:
+            return
+        self._order_by, self._order_dir = "", "asc"
         self._offset = 0
         self._reload()

@@ -88,29 +88,30 @@ class WorkbenchView(QWidget):
         self._history_index = self.tabs.addTab(history_panel, t("tab.history"))
         self._pin(self._history_index)
 
-        # Top-right corner → open a new SQL editor. A labelled "+ SQL" pill (rather
-        # than a bare "+") makes the action self-explanatory, and a small holder gives
-        # it breathing room from the window edge / aligns it with the tab row.
+        # Top-right corner → open a new SQL editor. A labelled "+ New SQL" pill (rather
+        # than a bare "+") makes the action self-explanatory. The QTabWidget clips its
+        # corner widget to the tab-bar height, so the pill is sized to sit IN that row
+        # (a taller button gets cut off at the top/bottom).
         add_btn = QToolButton()
         add_btn.setText(t("workbench.new_sql"))
-        add_btn.setIcon(svg_icon("plus", color=Theme.TEXT_2, size=14))
-        add_btn.setIconSize(QSize(14, 14))
+        add_btn.setIcon(svg_icon("plus", color=Theme.TEXT_2, size=12))
+        add_btn.setIconSize(QSize(12, 12))
         add_btn.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextBesideIcon)
         add_btn.setToolTip(t("workbench.new_query"))
         add_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        add_btn.setFont(QFont("Inter", 12, QFont.Weight.DemiBold))
-        add_btn.setFixedHeight(24)
+        add_btn.setFont(QFont("Inter", 11, QFont.Weight.DemiBold))
+        add_btn.setFixedHeight(20)
         add_btn.setStyleSheet(
             f"QToolButton {{ border: 1px solid {Theme.BORDER_SOFT}; background: {Theme.PANEL_2};"
-            f" color: {Theme.TEXT_2}; border-radius: 7px; padding: 0 10px; }}"
+            f" color: {Theme.TEXT_2}; border-radius: 6px; padding: 0 9px; }}"
             f"QToolButton:hover {{ background: {Theme.PANEL_3}; color: {Theme.TEXT}; }}"
         )
         add_btn.clicked.connect(lambda: self.new_sql_editor())
         holder = QWidget()
         hl = QHBoxLayout(holder)
-        hl.setContentsMargins(6, 3, 8, 3)
+        hl.setContentsMargins(6, 0, 8, 0)   # no vertical margin → fits the slim tab row
         hl.addWidget(add_btn)
-        self.tabs.setCornerWidget(holder)
+        self.tabs.setCornerWidget(holder, Qt.Corner.TopRightCorner)
         self.tabs.currentChanged.connect(self._on_workbench_tab_changed)
 
         # Start on a single empty SQL editor (DBeaver opens an editor by default).
