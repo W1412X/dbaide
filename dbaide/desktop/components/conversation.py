@@ -595,10 +595,12 @@ class TurnBlock(QFrame):
 
 
 class ConversationView(QScrollArea):
-    _H_MARGIN = 20
-    # Cap the conversation to a comfortable reading column and center it on wide
-    # viewports, rather than letting turns stretch edge-to-edge (AI-IDE style).
-    _MAX_CONTENT_W = 860
+    _H_MARGIN = 28
+    # The conversation uses (almost) the full width with a comfortable margin; the
+    # cap only kicks in on very wide windows to keep long answers readable, so on a
+    # normal window the user bubble hugs the right and replies sit at a modest left
+    # margin (instead of a narrowly centred column with big empty side gutters).
+    _MAX_CONTENT_W = 1080
 
     def __init__(self, parent=None) -> None:
         super().__init__(parent)

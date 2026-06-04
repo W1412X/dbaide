@@ -135,3 +135,34 @@ def test_browse_filtered_sets_identity_and_where(qapp):
     assert payloads
     assert payloads[0]["table"] == "users" and payloads[0]["where"] == '"id" = 3'
     assert w._filter.text() == '"id" = 3'
+
+
+def test_data_browser_sort_cycles_asc_desc_none(qapp):
+    """Clicking the same column header cycles ascending → descending → unsorted."""
+    from dbaide.desktop.views.data_browser import DataBrowser
+    db = DataBrowser()
+    db.open_table("local", "main", "t")   # one initial reload (sets _loading True)
+    db._columns = ["id", "name"]
+    db._loading = False
+    db._on_sort(1)
+    assert (db._order_by, db._order_dir) == ("name", "asc")
+    db._loading = False
+    db._on_sort(1)
+    assert (db._order_by, db._order_dir) == ("name", "desc")
+    db._loading = False
+    db._on_sort(1)
+    assert (db._order_by, db._order_dir) == ("", "asc")   # third click clears the sort
+    db.deleteLater()
+
+
+def test_data_browser_shows_loading_state(qapp):
+    from dbaide.desktop.views.data_browser import DataBrowser
+    db = DataBrowser()
+    db.set_running(True)
+    assert db._loading is True
+    assert ("Loading" in db._range.text()) or ("加载" in db._range.text())
+    assert db._prev.isEnabled() is False          # controls locked while loading
+    db.set_running(False)
+    assert db._loading is False
+    assert db._prev.isEnabled() is True
+    db.deleteLater()

@@ -13,9 +13,10 @@ from __future__ import annotations
 
 from typing import Any
 
-from PyQt6.QtCore import Qt, pyqtSignal
+from PyQt6.QtCore import QSize, Qt, pyqtSignal
 from PyQt6.QtGui import QFont
 from PyQt6.QtWidgets import (
+    QHBoxLayout,
     QProxyStyle,
     QStyle,
     QTabBar,
@@ -25,6 +26,7 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 
+from dbaide.desktop.components.icons import svg_icon
 from dbaide.desktop.theme import Theme
 from dbaide.desktop.views.doc_tab import DocTab
 from dbaide.desktop.views.query_history import QueryHistoryPanel
@@ -86,17 +88,29 @@ class WorkbenchView(QWidget):
         self._history_index = self.tabs.addTab(history_panel, t("tab.history"))
         self._pin(self._history_index)
 
-        # "+" corner → new SQL editor.
+        # Top-right corner → open a new SQL editor. A labelled "+ SQL" pill (rather
+        # than a bare "+") makes the action self-explanatory, and a small holder gives
+        # it breathing room from the window edge / aligns it with the tab row.
         add_btn = QToolButton()
-        add_btn.setText("+")
+        add_btn.setText(t("workbench.new_sql"))
+        add_btn.setIcon(svg_icon("plus", color=Theme.TEXT_2, size=14))
+        add_btn.setIconSize(QSize(14, 14))
+        add_btn.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextBesideIcon)
         add_btn.setToolTip(t("workbench.new_query"))
-        add_btn.setFont(QFont("Inter", 15))
+        add_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        add_btn.setFont(QFont("Inter", 12, QFont.Weight.DemiBold))
+        add_btn.setFixedHeight(24)
         add_btn.setStyleSheet(
-            f"QToolButton {{ border: none; background: transparent; color: {Theme.TEXT_2};"
-            f" padding: 0 10px; }} QToolButton:hover {{ color: {Theme.TEXT}; }}"
+            f"QToolButton {{ border: 1px solid {Theme.BORDER_SOFT}; background: {Theme.PANEL_2};"
+            f" color: {Theme.TEXT_2}; border-radius: 7px; padding: 0 10px; }}"
+            f"QToolButton:hover {{ background: {Theme.PANEL_3}; color: {Theme.TEXT}; }}"
         )
         add_btn.clicked.connect(lambda: self.new_sql_editor())
-        self.tabs.setCornerWidget(add_btn)
+        holder = QWidget()
+        hl = QHBoxLayout(holder)
+        hl.setContentsMargins(6, 3, 8, 3)
+        hl.addWidget(add_btn)
+        self.tabs.setCornerWidget(holder)
         self.tabs.currentChanged.connect(self._on_workbench_tab_changed)
 
         # Start on a single empty SQL editor (DBeaver opens an editor by default).

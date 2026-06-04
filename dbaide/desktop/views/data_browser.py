@@ -25,6 +25,7 @@ from PyQt6.QtWidgets import (
 from dbaide.desktop.components.icon_button import IconToolButton
 from dbaide.desktop.components.icons import svg_icon
 from dbaide.desktop.components.menu import PillSelect
+from dbaide.desktop.components.spinner import BusyAnimator, spinner_icon
 from dbaide.desktop.components.table import ResultTableWidget
 from dbaide.desktop.theme import Theme
 
@@ -153,6 +154,11 @@ class DataBrowser(QWidget):
         self.stack.addWidget(page)
 
         outer.addWidget(self.stack)
+        # While a page is loading, the Refresh icon spins and the range reads
+        # "Loading…" — a quiet, friendly sign that the DB is being queried.
+        self._busy = BusyAnimator(
+            lambda: self._refresh.setIcon(spinner_icon(self._busy.angle, color=Theme.TEXT_2, size=15))
+        )
         self._set_controls_enabled(True)
 
     # ── public API ────────────────────────────────────────────────────────────
@@ -207,6 +213,12 @@ class DataBrowser(QWidget):
 
     def set_running(self, running: bool) -> None:
         self._loading = running
+        if running:
+            self._range.setText(self._t("data.loading"))
+            self._busy.start()
+        else:
+            self._busy.stop()
+            self._refresh.setIcon(svg_icon("refresh", color=Theme.TEXT_2, size=15))
         self._set_controls_enabled(not running)
 
     def browse_filtered(self, connection: str, database: str, table: str, where: str) -> None:
@@ -333,9 +345,15 @@ class DataBrowser(QWidget):
         if not (0 <= index < len(self._columns)) or self._loading:
             return
         col = self._columns[index]
-        if col == self._order_by:
-            self._order_dir = "desc" if self._order_dir == "asc" else "asc"
-        else:
+        # Three-state cycle on repeated clicks of the same column: ascending →
+        # descending → unsorted (natural order). Clicking a different column starts
+        # it ascending. This matches how database clients behave and lets the user
+        # actually clear a sort, instead of being stuck toggling asc/desc forever.
+        if col != self._order_by:
             self._order_by, self._order_dir = col, "asc"
+        elif self._order_dir == "asc":
+            self._order_dir = "desc"
+        else:
+            self._order_by, self._order_dir = "", "asc"
         self._offset = 0
         self._reload()
