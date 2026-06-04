@@ -130,6 +130,13 @@ class ResultTableWidget(QWidget):
                 border-bottom: 1px solid {Theme.BORDER_SOFT};
                 font-weight: 400;
             }}
+            /* Top-left corner (row-gutter × column-header intersection). Unstyled it
+               falls back to a light native-grey box that clashes with the dark header. */
+            QTableCornerButton::section {{
+                background: {Theme.SURFACE};
+                border: none;
+                border-bottom: 1px solid {Theme.BORDER};
+            }}
             """
         )
 
