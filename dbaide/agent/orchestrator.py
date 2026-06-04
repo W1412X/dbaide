@@ -126,6 +126,10 @@ class AskOrchestrator:
         self._loop_pending_options = []
         self._loop_pending_questions: list[dict[str, Any]] = []
         self._loop_fail_reason = ""
+        # The pinned scope (attachments) prioritises the FIRST discovery only; a later
+        # discovery in the same run broadens, so a wrong/insufficient pin can't trap
+        # the agent into searching only the attached scope forever.
+        self._scope_used = False
         # Business-criteria (口径) clarification: confirmed criteria injected into SQL,
         # and the questions currently awaiting a user reply (paired with it on resume).
         self._loop_clarifications: list[str] = []
@@ -316,13 +320,19 @@ class AskOrchestrator:
     def _discover(self, question: str, *, parent: str = "", column_detail: bool = True):
         agent = ProgressiveSchemaAgent(self.llm, self.asset_store, self.instance)
         progress_cb = self.progress if parent else None
+        # Prioritise the user's pinned scope on the first discovery; broaden afterwards
+        # so the agent can recover if the pinned tables don't actually answer the
+        # question (a permanently-scoped run would otherwise never see the right table).
+        scope = self.schema_scope if (self.schema_scope and not getattr(self, "_scope_used", False)) else {}
+        if scope:
+            self._scope_used = True
         return agent.discover(
             question,
             schema_tools=self.schema,
             progress=progress_cb,
             parent=parent,
             column_detail=column_detail,
-            scope=self.schema_scope,
+            scope=scope,
         )
 
     def _pick_table(self, question: str, active_database: str) -> tuple[str, str]:

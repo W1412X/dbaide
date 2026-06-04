@@ -76,3 +76,41 @@ def test_build_attached_scope(qapp_unused=None):
     ])
     assert scope["databases"] == ["main"]
     assert scope["tables"] == [{"database": "main", "table": "orders"}]
+
+
+def test_scope_applies_to_first_discovery_then_broadens(tmp_path, monkeypatch):
+    """The pinned scope prioritises only the FIRST discovery; a later discovery in the
+    same run broadens, so a wrong/insufficient pin can't trap the agent."""
+    from dbaide.adapters import build_adapter
+    from dbaide.agent import orchestrator as orch_mod
+    from dbaide.agent.orchestrator import AskOrchestrator
+    from dbaide.agent.progressive_schema import DiscoveryResult
+    from dbaide.llm import NullLLMClient
+    from dbaide.models import ConnectionConfig
+    from dbaide.session import Session
+
+    db = tmp_path / "s.db"
+    c = sqlite3.connect(db)
+    c.execute("CREATE TABLE t(id INTEGER PRIMARY KEY)")
+    c.commit(); c.close()
+    conn = ConnectionConfig(name="s", type="sqlite", path=str(db))
+    orch = AskOrchestrator(build_adapter(conn), Session(connection=conn), NullLLMClient())
+
+    captured: list[dict] = []
+
+    class _FakeAgent:
+        def __init__(self, *a, **k):
+            pass
+
+        def discover(self, q, *, schema_tools=None, progress=None, parent="",
+                     column_detail=True, scope=None):
+            captured.append(dict(scope or {}))
+            return DiscoveryResult(question=q, hits=[])
+
+    monkeypatch.setattr(orch_mod, "ProgressiveSchemaAgent", _FakeAgent)
+    orch._reset_loop_state("q", "", True)
+    orch.schema_scope = {"databases": ["platform"], "tables": []}
+    orch._discover("q")
+    orch._discover("q")
+    assert captured[0] == {"databases": ["platform"], "tables": []}  # first: scoped
+    assert captured[1] == {}                                          # second: broadened
