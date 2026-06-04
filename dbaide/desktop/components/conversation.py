@@ -595,12 +595,12 @@ class TurnBlock(QFrame):
 
 
 class ConversationView(QScrollArea):
+    # A FIXED side margin at every window size — the gap to the edges stays the same
+    # whether the window is small or fullscreen. (A centred max-width column would
+    # instead grow the side gutters as the window widens, which reads as the spacing
+    # "ballooning" on large/fullscreen windows.) User bubbles still cap their own
+    # width and hug the right; only the assistant's text uses the full column.
     _H_MARGIN = 28
-    # The conversation uses (almost) the full width with a comfortable margin; the
-    # cap only kicks in on very wide windows to keep long answers readable, so on a
-    # normal window the user bubble hugs the right and replies sit at a modest left
-    # margin (instead of a narrowly centred column with big empty side gutters).
-    _MAX_CONTENT_W = 1080
 
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
@@ -641,11 +641,11 @@ class ConversationView(QScrollArea):
         if viewport_w <= 0:
             return
         self._root.setMinimumWidth(viewport_w)
-        # Center a capped content column when the viewport is wider than it needs.
-        inner = min(self._MAX_CONTENT_W, viewport_w - self._H_MARGIN * 2)
-        side = max(self._H_MARGIN, (viewport_w - inner) // 2)
+        # Constant side margins regardless of width (no centred cap) → the spacing to
+        # the edges never changes as the window resizes.
+        side = self._H_MARGIN
         self._layout.setContentsMargins(side, 16, side, 24)
-        content_w = max(200, inner)
+        content_w = max(200, viewport_w - side * 2)
         for index in range(self._layout.count()):
             item = self._layout.itemAt(index)
             widget = item.widget() if item is not None else None
