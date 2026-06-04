@@ -57,6 +57,37 @@ def _orch(tmp_path, progress):
                            asset_store=store, join_catalog=jc, progress=progress)
 
 
+def test_openai_client_complete_json_stream_emits_and_parses(monkeypatch):
+    """The REAL client must stream raw deltas to on_text_chunk AND parse the JSON.
+    (Regression: the client previously inherited a non-streaming complete_json_stream,
+    so on_text_chunk never fired against a live model.)"""
+    import urllib.request
+
+    from dbaide.llm import LLMMessage, OpenAICompatibleClient
+    from dbaide.models import ModelConfig
+
+    client = OpenAICompatibleClient(ModelConfig(
+        provider="openai_compatible", base_url="http://x/v1", api_key="k", model="m"))
+    body = '{"action":"finish","answer":"hi 你好"}'
+
+    def fake_lines():
+        for i in range(0, len(body), 6):
+            yield (f'data: {json.dumps({"choices":[{"delta":{"content":body[i:i+6]}}]})}\n').encode()
+        yield b"data: [DONE]\n"
+
+    class FakeResp:
+        def __enter__(self): return self
+        def __exit__(self, *a): return False
+        def __iter__(self): return fake_lines()
+
+    monkeypatch.setattr(urllib.request, "urlopen", lambda req, timeout=0: FakeResp())
+    seen: list[str] = []
+    payload = client.complete_json_stream(
+        [LLMMessage("user", "q")], schema_hint="Return JSON", on_text_chunk=seen.append)
+    assert "".join(seen) == body          # raw deltas streamed through
+    assert payload == {"action": "finish", "answer": "hi 你好"}  # and parsed
+
+
 def _chunks_collector():
     chunks: list[str] = []
 

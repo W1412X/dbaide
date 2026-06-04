@@ -137,6 +137,15 @@ class OpenAICompatibleClient(LLMClient):
     def supports_streaming(self) -> bool:
         return True
 
+    def complete_json_stream(self, messages: list[LLMMessage], *, schema_hint: str = "",
+                             on_text_chunk: "Callable[[str], None] | None" = None) -> dict[str, Any]:
+        """Stream the completion (forwarding raw text deltas to ``on_text_chunk``) and
+        parse the accumulated text as a JSON object — same contract as complete_json,
+        but lets a caller surface a field live."""
+        msgs = messages + ([LLMMessage("system", schema_hint)] if schema_hint else [])
+        text = self.complete_text_stream(msgs, on_chunk=on_text_chunk or (lambda _d: None))
+        return self._parse_json_object(text)
+
     def complete_text_stream(self, messages: list[LLMMessage],
                              on_chunk: "Callable[[str], None]") -> str:
         """Stream the chat completion via SSE (``stream: true``), emitting each content
