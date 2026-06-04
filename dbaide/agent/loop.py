@@ -220,6 +220,14 @@ class AskAgentLoop:
                 step=step_no,
             )
             done_event = self._ns_step(done_event)
+            # Carry the tool's INPUT (full args, not the truncated 'Calling' preview)
+            # and OUTPUT (full result summary) so a copied trace fully describes the
+            # step — the running 'Calling' frame is overwritten by this 'done' frame,
+            # so anything not put here is lost from the persisted trace.
+            if args:
+                done_event["args"] = args
+            if summary and summary != done_detail:
+                done_event["output"] = summary
             if executed_sql:
                 done_event["sql"] = executed_sql
                 # Carry the SQL facts so the typed SQL step can show rows/db on click.
@@ -440,15 +448,22 @@ class AskAgentLoop:
             lines.extend(f"- {item}" for item in options)
         answer = "\n".join(lines)
         snapshot = dump_loop_state(orch, transcript=transcript, execute_allowed=state.execute_allowed)
-        self.progress(
-            progress_event(
-                stage="ask_user",
-                title="Waiting for user clarification",
-                status="waiting",
-                kind="user",
-                detail=question,
-            ),
+        wait_event = progress_event(
+            stage="ask_user",
+            title="Waiting for user clarification",
+            status="waiting",
+            kind="user",
+            detail=question,
         )
+        # Record the exact clarification so a copied trace shows what was asked and the
+        # candidate options the user chose between (previously absent from copies).
+        wait_event["question"] = question
+        if options:
+            wait_event["options"] = options
+        structured = list(orch._loop_pending_questions)
+        if structured:
+            wait_event["questions"] = structured
+        self.progress(wait_event)
         return AssistantResponse(
             answer=answer,
             sql=orch._loop_sql or "",

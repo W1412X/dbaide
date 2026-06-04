@@ -17,6 +17,7 @@ step index / stage / parent. Pure Python (no Qt) so it is fully unit-testable.
 
 from __future__ import annotations
 
+import json
 import time
 from dataclasses import dataclass, field
 
@@ -100,6 +101,13 @@ class TraceModel:
     def ingest(self, event: dict, *, now: float | None = None) -> None:
         if not isinstance(event, dict):
             return
+        # Persisted trace events (TraceEvent.to_dict) carry the original rich progress
+        # event under `metadata` (args, options, clarification questions, sql, …). Merge
+        # it back so the node keeps full detail; the persisted top-level fields still win
+        # for the display columns they own.
+        meta = event.get("metadata")
+        if isinstance(meta, dict) and meta:
+            event = {**meta, **{k: v for k, v in event.items() if k != "metadata"}}
         ts = float(event.get("timestamp") or 0.0) or (now if now is not None else time.time())
         if self._first_ts == 0.0:
             self._first_ts = ts
@@ -274,31 +282,93 @@ def _fmt_ms(ms: float) -> str:
     return f"{ms / 1000:.1f}s" if ms >= 1000 else f"{ms:.0f}ms"
 
 
+def _as_text(value: object) -> str:
+    if isinstance(value, (dict, list)):
+        try:
+            return json.dumps(value, ensure_ascii=False, indent=2, default=str)
+        except (TypeError, ValueError):
+            return str(value)
+    return str(value)
+
+
 def render_trace_text(model: "TraceModel") -> str:
-    """Readable, structured plain-text export of a run: every step indented by depth
-    with status, duration, thought, detail and the exact (multi-line) SQL. Pure (no
+    """Verbose, structured plain-text export of a run — meant to fully describe the
+    agent's execution for debugging: every step indented by depth with its status,
+    duration, thought, the tool's INPUT args, its OUTPUT/result, the exact multi-line
+    SQL (with row count / database), and any clarification question + options. Pure (no
     Qt) so it's reusable for single-run copy and whole-conversation copy."""
     if model is None or not model.steps:
         return ""
     lines: list[str] = [model.summary_line(), ""]
 
+    def kv(indent: str, label: str, value: object) -> None:
+        text = _as_text(value).strip()
+        if not text:
+            return
+        if "\n" in text:
+            lines.append(f"{indent}    {label}:")
+            for ln in text.splitlines():
+                lines.append(f"{indent}      {ln}")
+        else:
+            lines.append(f"{indent}    {label}: {text}")
+
     def walk(node: "TraceNode", depth: int) -> None:
         indent = "  " * depth
         glyph = _GLYPHS.get(node.status, "·")
         dur = f"  [{_fmt_ms(node.duration_ms)}]" if node.duration_ms else ""
+        status_note = f"  ({node.status})" if node.status in ("failed", "waiting", "running") else ""
         head = _node_head(node)
-        lines.append(f"{indent}{glyph} {head}{dur}")
-        if node.thought:
-            lines.append(f"{indent}    thought: {node.thought}")
+        lines.append(f"{indent}{glyph} {head}{status_note}{dur}")
         raw = node.raw if isinstance(node.raw, dict) else {}
+
+        if node.thought:
+            kv(indent, "thought", node.thought)
+        # Tool INPUT.
+        if raw.get("args"):
+            kv(indent, "args", raw.get("args"))
+
+        # Clarification: the question being asked + the candidate options, and the
+        # full structured per-question list when present (this is the bit that was
+        # missing from copies before).
+        question = str(raw.get("question") or "").strip()
+        is_ask = raw.get("stage") == "ask_user" or bool(raw.get("options")) or bool(raw.get("questions"))
+        if not question and is_ask:
+            question = (node.detail or "").strip()
+        if question and is_ask:
+            kv(indent, "question", question)
+        questions = raw.get("questions")
+        if isinstance(questions, list) and questions:
+            lines.append(f"{indent}    questions:")
+            for i, q in enumerate(questions, 1):
+                if isinstance(q, dict):
+                    ask = str(q.get("ask") or "").strip()
+                    opts = [str(o) for o in (q.get("options") or []) if str(o).strip()]
+                    suffix = f"  [{' | '.join(opts)}]" if opts else ""
+                    lines.append(f"{indent}      {i}. {ask}{suffix}")
+        options = raw.get("options")
+        if isinstance(options, list) and options:
+            lines.append(f"{indent}    options:")
+            for opt in options:
+                lines.append(f"{indent}      - {opt}")
+
+        # Tool OUTPUT — exact SQL (with facts) takes precedence; else the result detail.
         sql = str(raw.get("sql") or "").strip()
         if sql:
-            for ln in sql.splitlines():
-                lines.append(f"{indent}    {ln}")
-        else:
+            facts = []
+            if raw.get("row_count") not in (None, ""):
+                facts.append(f"{raw.get('row_count')} rows")
+            if raw.get("database"):
+                facts.append(f"db={raw.get('database')}")
+            if facts:
+                kv(indent, "result", " · ".join(facts))
+            kv(indent, "sql", sql)
+        elif not is_ask:  # clarification nodes already printed their question/options
+            output = str(raw.get("output") or "").strip()
             detail = (node.detail or "").strip()
-            if detail and detail not in head:
-                lines.append(f"{indent}    {detail}")
+            shown = output or detail
+            if shown and shown not in head and shown != question:
+                kv(indent, "output" if output else "detail", shown)
+
         for child in node.children:
             walk(child, depth + 1)
 

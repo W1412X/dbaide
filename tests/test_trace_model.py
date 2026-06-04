@@ -224,3 +224,43 @@ def test_execute_step_carries_sql_for_audit():
     # non-SQL tools carry nothing
     assert _executed_sql("describe_table", _Orch(), _Res()) == ""
     assert "execute_sql" in _SQL_TOOLS and "explain_sql" in _SQL_TOOLS
+
+
+def test_render_trace_text_includes_args_output_and_clarification():
+    """A copied trace must fully describe execution: tool input args, output, and the
+    clarification question + options (previously missing)."""
+    from dbaide.agent.trace_model import render_trace_text
+    model = TraceModel()
+    _feed(model, [
+        {"stage": "resolve_schema", "title": "resolve_schema done", "status": "completed",
+         "kind": "tool", "step": 1, "node_id": "step:1",
+         "args": {"question": "paid orders"}, "output": "orders(id, amount, status)", "duration_ms": 9},
+        {"stage": "ask_user", "title": "Waiting for user clarification", "status": "waiting",
+         "kind": "user", "question": "Which timezone?",
+         "options": ["UTC", "America/New_York"],
+         "questions": [{"ask": "Which timezone?", "options": ["UTC", "America/New_York"]}]},
+    ])
+    model.finalize()
+    text = render_trace_text(model)
+    assert "args:" in text and '"question": "paid orders"' in text   # INPUT captured
+    assert "output: orders(id, amount, status)" in text               # OUTPUT captured
+    assert "question: Which timezone?" in text                        # clarification ask
+    assert "- UTC" in text and "- America/New_York" in text           # its options
+    assert "1. Which timezone?" in text                               # structured questions
+
+
+def test_render_trace_text_recovers_detail_from_persisted_metadata():
+    """Persisted trace events keep the rich event under `metadata`; the renderer must
+    recover args/options from it (so reloaded sessions copy just as fully)."""
+    from dbaide.agent.trace_model import render_events_text
+    persisted = [{
+        "stage": "ask_user", "title": "Waiting for user clarification",
+        "summary": "Which timezone?", "status": "completed", "kind": "user",
+        "metadata": {
+            "stage": "ask_user", "title": "Waiting for user clarification", "status": "waiting",
+            "kind": "user", "question": "Which timezone?", "options": ["UTC", "Asia/Shanghai"],
+        },
+    }]
+    text = render_events_text(persisted)
+    assert "question: Which timezone?" in text
+    assert "- UTC" in text and "- Asia/Shanghai" in text

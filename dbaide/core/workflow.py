@@ -104,12 +104,18 @@ class WorkflowEngine:
                 cancel_check()
             label = progress_label(msg)
             if isinstance(msg, dict):
+                # Stash the full progress event in metadata so the persisted trace
+                # keeps every detail (args, options, clarification questions, sql, …)
+                # for a complete copy/export — the summary alone is lossy.
                 self._trace(
                     result,
                     str(msg.get("stage") or "agent_progress"),
                     label,
                     str(msg.get("kind") or "agent"),
                     summary=str(msg.get("detail") or label)[:120],
+                    status=str(msg.get("status") or "completed"),
+                    duration_ms=float(msg.get("duration_ms") or 0),
+                    metadata=dict(msg),
                 )
             else:
                 self._trace(result, "agent_progress", msg, "agent", summary=label[:120])
@@ -265,6 +271,9 @@ class WorkflowEngine:
         level: TraceLevel = TraceLevel.INFO,
         summary: str = "",
         output: str = "",
+        status: str = "completed",
+        duration_ms: float = 0.0,
+        metadata: dict[str, Any] | None = None,
     ) -> None:
         event = TraceEvent(
             workflow_id=result.workflow_id,
@@ -276,7 +285,9 @@ class WorkflowEngine:
             title=title,
             summary=summary,
             output_preview=output[:500],
-            status="completed",
+            duration_ms=duration_ms,
+            status=status,
+            metadata=metadata or {},
         )
         result.trace.append(event)
         logger.debug("trace: %s - %s", stage, title)
