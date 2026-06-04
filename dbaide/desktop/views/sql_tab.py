@@ -90,23 +90,29 @@ class SqlTab(QWidget):
         layout.addWidget(self.tabs, 1)
 
     def _icon_button(self, icon_name: str, tooltip: str, *, primary: bool = False) -> QToolButton:
-        """A small square icon button for the editor's right-edge action strip."""
+        """A small square icon button for the editor's right-edge action strip.
+
+        The global QToolButton rule (padding:0 10px; min/max-height:26px; border)
+        otherwise distorts these into 30×26 rects and squeezes the icon, so the box
+        size is pinned explicitly here."""
         btn = QToolButton()
         color = Theme.ACCENT_TEXT if primary else Theme.TEXT_2
-        btn.setIcon(svg_icon(icon_name, color=color, size=15))
-        btn.setIconSize(QSize(15, 15))
+        btn.setIcon(svg_icon(icon_name, color=color, size=14))
+        btn.setIconSize(QSize(14, 14))
         btn.setToolTip(tooltip)
         btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        btn.setFixedSize(30, 30)
+        btn.setFixedSize(26, 26)
+        box = ("padding: 0; margin: 0; min-width: 26px; max-width: 26px;"
+               " min-height: 26px; max-height: 26px; border: none; border-radius: 7px;")
         if primary:
             btn.setStyleSheet(
-                f"QToolButton {{ background: {Theme.ACCENT}; border: none; border-radius: 8px; }}"
+                f"QToolButton {{ background: {Theme.ACCENT}; {box} }}"
                 f"QToolButton:hover {{ background: {Theme.ACCENT_HOVER}; }}"
                 f"QToolButton:disabled {{ background: {Theme.PANEL_2}; }}"
             )
         else:
             btn.setStyleSheet(
-                f"QToolButton {{ background: {Theme.PANEL_2}; border: none; border-radius: 8px; }}"
+                f"QToolButton {{ background: {Theme.PANEL_2}; {box} }}"
                 f"QToolButton:hover {{ background: {Theme.PANEL_3}; }}"
                 f"QToolButton:disabled {{ background: {Theme.PANEL}; }}"
             )
