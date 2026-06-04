@@ -88,19 +88,14 @@ class WorkbenchView(QWidget):
         self.tabs.tabBar().setUsesScrollButtons(True)
         self.tabs.tabBar().setElideMode(Qt.TextElideMode.ElideRight)
         self.tabs.tabBar().setExpanding(False)
-        # In document mode the macOS-native tab bar paints its own base that the QSS
-        # `background` doesn't reliably override. Force the bar + pane to the content
-        # SURFACE via the palette (autofilled) so the whole tab area is one continuous
-        # surface — no stark near-black band above the editor, in either theme.
-        from PyQt6.QtGui import QColor, QPalette
-        for w in (self.tabs, self.tabs.tabBar()):
-            w.setAutoFillBackground(True)
-            pal = w.palette()
-            pal.setColor(QPalette.ColorRole.Window, QColor(Theme.SURFACE))
-            w.setPalette(pal)
+        # Paint the tab bar + pane the content SURFACE so the whole tab area is one
+        # continuous surface (no stark near-black band above the editor). A
+        # widget-local QTabBar background reliably fills the empty bar strip in
+        # documentMode; autoFillBackground must NOT be used here — it conflicts with
+        # the QSS background and leaves the strip transparent (the window BG shows).
+        self.tabs.tabBar().setStyleSheet(f"QTabBar {{ background: {Theme.SURFACE}; }}")
         self.tabs.setStyleSheet(
             f"QTabWidget::pane {{ border: none; background: {Theme.SURFACE}; }}"
-            f"QTabWidget {{ background: {Theme.SURFACE}; }}"
         )
         layout.addWidget(self.tabs)
 
