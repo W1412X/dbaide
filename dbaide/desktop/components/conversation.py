@@ -46,22 +46,24 @@ class _AttachmentTags(QWidget):
             kind = str(att.get("kind") or "table")
             name = str(att.get("name") or "")
             tag = QWidget()
+            tag.setObjectName("msgTag")
             tag.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
             tl = QHBoxLayout(tag)
             tl.setContentsMargins(8, 2, 9, 2)
             tl.setSpacing(5)
             icon = QLabel()
             icon.setPixmap(svg_icon("database" if kind == "database" else "table",
-                                    color=Theme.BLUE, size=12).pixmap(QSize(12, 12)))
-            icon.setFixedSize(12, 12)
-            icon.setStyleSheet("background: transparent;")
+                                    color=Theme.BLUE, size=14).pixmap(QSize(14, 14)))
+            icon.setFixedSize(14, 14)
             tl.addWidget(icon)
             lbl = QLabel(name)
-            lbl.setStyleSheet(f"color: {Theme.TEXT_2}; font-size: 11px; background: transparent;")
+            lbl.setStyleSheet(f"color: {Theme.TEXT_2}; font-size: 11px;")
             tl.addWidget(lbl)
+            # Scope to #msgTag so the border doesn't cascade onto the icon/label.
             tag.setStyleSheet(
-                f"background: {Theme.PANEL_2}; border: 1px solid {Theme.BORDER_SOFT};"
-                f" border-radius: 11px;"
+                f"QWidget#msgTag {{ background: {Theme.PANEL_2};"
+                f" border: 1px solid {Theme.BORDER_SOFT}; border-radius: 11px; }}"
+                f"QWidget#msgTag QLabel {{ background: transparent; border: none; }}"
             )
             tag.setFixedHeight(22)
             lay.addWidget(tag)

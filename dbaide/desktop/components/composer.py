@@ -278,36 +278,45 @@ class _ContextChip(QWidget):
         from PyQt6.QtWidgets import QToolButton
         super().__init__(parent)
         self._path = path
-        # Needed so the QWidget actually paints its stylesheet pill background/border
-        # (a plain QWidget ignores them without this attribute).
+        self.setObjectName("ctxChip")
         self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
         lay = QHBoxLayout(self)
-        lay.setContentsMargins(9, 0, 5, 0)
+        lay.setContentsMargins(8, 0, 4, 0)
         lay.setSpacing(5)
         icon = "database" if kind == "database" else "table"
         icon_lbl = QLabel()
-        icon_lbl.setPixmap(svg_icon(icon, color=Theme.BLUE, size=13).pixmap(QSize(13, 13)))
-        icon_lbl.setFixedSize(13, 13)
-        icon_lbl.setStyleSheet("background: transparent;")
+        # 16px viewBox-based glyphs clip at very small sizes — render at 15 so the
+        # database/table outline shows in full.
+        icon_lbl.setPixmap(svg_icon(icon, color=Theme.BLUE, size=15).pixmap(QSize(15, 15)))
+        icon_lbl.setFixedSize(15, 15)
         lay.addWidget(icon_lbl)
         text = QLabel(name)
-        text.setStyleSheet(f"color: {Theme.TEXT}; font-size: 12px; background: transparent;")
+        text.setStyleSheet(f"color: {Theme.TEXT}; font-size: 12px;")
         text.setToolTip(f"{kind}: {path}")
         lay.addWidget(text)
         close = QToolButton()
-        close.setIcon(svg_icon("x", color=Theme.TEXT_2, size=12))
-        close.setIconSize(QSize(12, 12))
+        close.setObjectName("ctxChipClose")
+        close.setText("✕")  # a text glyph renders reliably (svg icon on a transparent
+        close.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextOnly)  # button did not)
         close.setCursor(Qt.CursorShape.PointingHandCursor)
         close.setToolTip("Remove")
         close.setFixedSize(18, 18)
-        close.setStyleSheet(
-            f"QToolButton {{ background: transparent; border: none; border-radius: 9px; }}"
-            f"QToolButton:hover {{ background: {Theme.PANEL_3}; }}"
-        )
         close.clicked.connect(lambda: self.removed.emit(self._path))
         lay.addWidget(close)
         self.setFixedHeight(26)
+        # Scope the pill styling to the chip itself (#ctxChip) so the border/
+        # background does NOT cascade onto the child icon/label/button — an unscoped
+        # rule leaks the border, producing a "double box" and hiding the ✕.
         self.setStyleSheet(
-            f"background: {Theme.PANEL_2}; border: 1px solid {Theme.BORDER};"
-            f" border-radius: 13px;"
+            f"QWidget#ctxChip {{ background: {Theme.PANEL_2};"
+            f" border: 1px solid {Theme.BORDER}; border-radius: 13px; }}"
+            f"QWidget#ctxChip QLabel {{ background: transparent; border: none; }}"
+            # padding:0 / min-width:0 are essential — the global QToolButton rule
+            # sets `padding: 0 10px; min-height: 26px`, which on an 18px button leaves
+            # no room for the ✕ glyph (so it silently doesn't paint).
+            f"QToolButton#ctxChipClose {{ background: transparent; border: none;"
+            f" border-radius: 9px; color: {Theme.MUTED}; font-size: 13px;"
+            f" padding: 0; min-width: 0; min-height: 0; }}"
+            f"QToolButton#ctxChipClose:hover {{ background: {Theme.PANEL_3};"
+            f" color: {Theme.TEXT}; }}"
         )
