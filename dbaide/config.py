@@ -226,6 +226,20 @@ class ConfigManager:
             ui["theme"] = name
         self.save()
 
+    # ── UI: stream the assistant's answer (progressive reveal) ────────────────
+
+    def stream_answers(self) -> bool:
+        """Whether to reveal the assistant's answer progressively (default True)."""
+        ui = self._data.get("ui") or {}
+        val = ui.get("stream_answers") if isinstance(ui, dict) else None
+        return True if val is None else bool(val)
+
+    def set_stream_answers(self, enabled: bool) -> None:
+        ui = self._data.setdefault("ui", {})
+        if isinstance(ui, dict):
+            ui["stream_answers"] = bool(enabled)
+        self.save()
+
     def policy_for(self, connection: "ConnectionConfig"):
         """Resolve the effective ResourcePolicy for a connection.
 

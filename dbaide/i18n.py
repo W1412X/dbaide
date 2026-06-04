@@ -136,6 +136,8 @@ _STRINGS: dict[str, dict[str, str]] = {
     "settings.general": {"en": "General", "zh": "通用"},
     "settings.back": {"en": "← Back", "zh": "← 返回"},
     "settings.theme": {"en": "Theme", "zh": "主题"},
+    "settings.stream_answers": {"en": "Answers", "zh": "回答"},
+    "settings.stream_answers.label": {"en": "Reveal answers progressively", "zh": "逐步显示回答"},
     "settings.theme.light": {"en": "Light", "zh": "浅色"},
     "settings.theme.dark": {"en": "Dark", "zh": "深色"},
     "settings.language": {"en": "Language", "zh": "语言"},

@@ -197,6 +197,7 @@ class MainWindow(QMainWindow):
         # Assistant mode = the AI conversation; Workbench mode = the database client
         # (SQL editor + data browser). The two are deliberately separate surfaces.
         self.ask_tab = AskTab()
+        self.ask_tab.set_stream_answers(self.service.cfg.stream_answers())
         self.ask_tab.empty_action.connect(self._empty_action)
         self.ask_tab.open_sql.connect(self.open_sql)
         self.ask_tab.clarification_choice.connect(self._submit_clarification)
@@ -705,6 +706,7 @@ class MainWindow(QMainWindow):
             default_model=str(self.bootstrap.get("default_model") or "default"),
             resource_defaults=resource_defaults,
             language=get_language(),
+            stream_answers=self.service.cfg.stream_answers(),
             parent=self,
             initial_page=page,
         )
@@ -717,7 +719,17 @@ class MainWindow(QMainWindow):
         dialog.resource_saved.connect(self._settings_save_resources)
         dialog.language_changed.connect(self._change_language)
         dialog.theme_changed.connect(self._change_theme)
+        dialog.stream_answers_changed.connect(self._change_stream_answers)
         dialog.exec()
+
+    def _change_stream_answers(self, enabled: bool) -> None:
+        # Applies live (no restart) — the conversation reads it at display time.
+        try:
+            self.service.cfg.set_stream_answers(bool(enabled))
+        except Exception as exc:  # noqa: BLE001
+            self.toast(str(exc))
+            return
+        self.ask_tab.set_stream_answers(bool(enabled))
 
     def _change_theme(self, theme: str) -> None:
         from dbaide.desktop.theme import current_theme_name

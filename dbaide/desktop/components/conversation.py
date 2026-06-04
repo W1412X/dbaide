@@ -284,6 +284,11 @@ class _MarkdownBlock(QFrame):
         self._body.document().documentLayout().documentSizeChanged.connect(self._sync_body_height)
         self._sync_body_height()
 
+    def set_markdown(self, markdown: str) -> None:
+        """Re-render the body (used by the progressive answer reveal)."""
+        self._body.setHtml(render_markdown_safe(markdown or ""))
+        self._sync_body_height()
+
     def resizeEvent(self, event) -> None:  # noqa: N802
         super().resizeEvent(event)
         self._sync_body_height()
@@ -626,6 +631,46 @@ class ConversationView(QScrollArea):
         self._turns: list[dict[str, Any]] = []
         self._current_record: dict[str, Any] | None = None
         self._clarification_bar: _ClarificationBar | None = None
+        self._stream_answers = True
+        self._reveal: tuple | None = None  # (timer, block, full_text) of an in-flight reveal
+
+    def set_stream_answers(self, enabled: bool) -> None:
+        self._stream_answers = bool(enabled)
+
+    def _reveal_markdown(self, block: "_MarkdownBlock", full: str) -> None:
+        """Progressively reveal the answer (typewriter-ish), bounded to a short total
+        duration regardless of length, so it reads as 'arriving' without delaying."""
+        from PyQt6.QtCore import QTimer
+        self._finalize_reveal()
+        state = {"pos": 0}
+        step = max(2, len(full) // 50)  # ~50 ticks whatever the length
+        timer = QTimer(self)
+
+        def tick() -> None:
+            state["pos"] = min(len(full), state["pos"] + step)
+            try:
+                block.set_markdown(full[: state["pos"]])
+            except RuntimeError:
+                timer.stop(); self._reveal = None; return
+            self._scroll_bottom()
+            if state["pos"] >= len(full):
+                timer.stop()
+                self._reveal = None
+
+        timer.timeout.connect(tick)
+        self._reveal = (timer, block, full)
+        timer.start(18)
+
+    def _finalize_reveal(self) -> None:
+        """Snap any in-flight reveal to its full text (e.g. when a new turn starts)."""
+        if self._reveal is not None:
+            timer, block, full = self._reveal
+            timer.stop()
+            try:
+                block.set_markdown(full)
+            except RuntimeError:
+                pass
+            self._reveal = None
 
     def showEvent(self, event) -> None:  # noqa: N802
         super().showEvent(event)
@@ -654,6 +699,7 @@ class ConversationView(QScrollArea):
 
     def begin_turn(self, user_text: str, *, meta: str = "", placeholder: bool = True,
                    attachments: list[dict] | None = None) -> None:
+        self._finalize_reveal()  # don't leave a prior answer half-revealed
         turn = TurnBlock()
         if user_text.strip():
             # Only surface the connection · db · policy caption when it changes from
@@ -773,10 +819,16 @@ class ConversationView(QScrollArea):
         # Clean author label — just "DBAide" (the internal workflow id is noise in the
         # message header, Codex-style; keep it reachable as a tooltip and in the trace).
         if answer.strip():
-            turn.append_content(_MarkdownBlock(
-                answer, title="DBAide",
+            # Progressively reveal a non-trivial answer (toggleable; the full text is
+            # already stored in the record above, so copy/export is unaffected).
+            stream = self._stream_answers and len(answer.strip()) > 60
+            block = _MarkdownBlock(
+                "" if stream else answer, title="DBAide",
                 title_tooltip=f"workflow {workflow_id}" if workflow_id else "",
-            ))
+            )
+            turn.append_content(block)
+            if stream:
+                self._reveal_markdown(block, answer)
         if sql.strip() and "```sql" not in answer:
             turn.append_content(_MarkdownBlock(f"```sql\n{sql}\n```", title="SQL"))
         if actions_widget is not None:

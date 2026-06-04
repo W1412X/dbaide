@@ -56,6 +56,13 @@ class AskTab(QWidget):
         self._active: str = ""
         self._has_conn = False
         self._hint_shown = False
+        self._stream_answers = True
+
+    def set_stream_answers(self, enabled: bool) -> None:
+        """Toggle the progressive answer reveal for all conversation slots (live)."""
+        self._stream_answers = bool(enabled)
+        for view in self._views.values():
+            view.set_stream_answers(self._stream_answers)
 
     # ── slot lifecycle ────────────────────────────────────────────────────────
 
@@ -65,6 +72,7 @@ class AskTab(QWidget):
         if view is None:
             view = ConversationView()
             view.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+            view.set_stream_answers(self._stream_answers)
             self._views[key] = view
             self.stack.addWidget(view)
             if self._has_conn and not self._hint_shown:

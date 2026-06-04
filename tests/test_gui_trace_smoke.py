@@ -241,3 +241,30 @@ def test_conversation_copy_exports_all_turns(qapp):
     assert "3 paid orders." in text and "id, amount, status." in text  # both answers
     conv.clear()
     assert conv.copy_text() == ""
+
+
+def test_answer_reveal_respects_stream_toggle(qapp):
+    """With streaming on, a long answer reveals progressively (full text still stored
+    for copy); with it off, the answer shows immediately."""
+    from dbaide.desktop.components.conversation import ConversationView
+    long = "这是一个较长的回答,用于触发逐步显示效果。" * 4
+    v = ConversationView()
+    v.set_stream_answers(True)
+    v.begin_turn("q")
+    v.complete_turn(answer=long, ok=True)
+    assert v._reveal is not None                 # reveal in flight
+    assert v._turns[-1]["answer"] == long        # full text stored → copy unaffected
+    v._finalize_reveal()
+    assert v._reveal is None
+    v.set_stream_answers(False)
+    v.begin_turn("q2")
+    v.complete_turn(answer=long, ok=True)
+    assert v._reveal is None                     # no reveal when disabled
+
+
+def test_config_stream_answers_default_on(tmp_path):
+    from dbaide.config import ConfigManager
+    cfg = ConfigManager(path=tmp_path / "config.toml")
+    assert cfg.stream_answers() is True          # default on
+    cfg.set_stream_answers(False)
+    assert ConfigManager(path=tmp_path / "config.toml").stream_answers() is False  # persisted

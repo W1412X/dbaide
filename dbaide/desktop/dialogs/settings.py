@@ -128,6 +128,7 @@ class SettingsDialog(QDialog):
     resource_saved = pyqtSignal(dict)
     language_changed = pyqtSignal(str)
     theme_changed = pyqtSignal(str)
+    stream_answers_changed = pyqtSignal(bool)
 
     # Numeric resource knobs shown on the Resources page: (key, min, max).
     # The display label comes from i18n ("res.<key>").
@@ -155,12 +156,14 @@ class SettingsDialog(QDialog):
         default_model: str = "",
         resource_defaults: dict | None = None,
         language: str = "en",
+        stream_answers: bool = True,
         parent=None,
         initial_page: str = "connections",
     ) -> None:
         super().__init__(parent)
         from dbaide.i18n import t as _t
         self._language = language
+        self._stream_answers = bool(stream_answers)
         from dbaide.desktop.theme import current_theme_name
         self._theme = current_theme_name()
         self.setWindowTitle(_t("settings.title"))
@@ -416,6 +419,12 @@ class SettingsDialog(QDialog):
             lambda _i: self.theme_changed.emit(self.theme_select.currentData())
         )
         form.addRow(t("settings.theme"), self.theme_select)
+
+        from PyQt6.QtWidgets import QCheckBox
+        self.stream_answers_check = QCheckBox(t("settings.stream_answers.label"))
+        self.stream_answers_check.setChecked(self._stream_answers)
+        self.stream_answers_check.toggled.connect(self.stream_answers_changed.emit)
+        form.addRow(t("settings.stream_answers"), self.stream_answers_check)
 
         card_layout.addLayout(form)
         layout.addWidget(card)
