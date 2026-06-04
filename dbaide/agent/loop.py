@@ -416,9 +416,16 @@ class AskAgentLoop:
         )
 
         history = "\n\n".join(transcript[-8:]) if transcript else "(no tool calls yet)"
+        # Surface the user's pinned schema (composer attachments) so the model knows
+        # which tables were explicitly attached and can resolve_schema on them directly
+        # instead of re-discovering the whole database.
+        pins = _pinned_scope_labels(getattr(self.orchestrator, "schema_scope", None))
+        pin_line = (f"User-attached schema (prefer these; resolve_schema on them directly, "
+                    f"no broad discovery needed): {', '.join(pins)}\n\n") if pins else ""
         user = (
             f"User question:\n{state.question}\n\n"
             f"Database scope: {state.database or '(any)'}\n\n"
+            f"{pin_line}"
             f"Tool history:\n{history}"
         )
 
@@ -527,6 +534,24 @@ class AskAgentLoop:
         if event.actor in {"tool", "runtime"}:
             return
         self.progress(from_trace_event(event))
+
+
+def _pinned_scope_labels(scope: dict | None) -> list[str]:
+    """Human-readable labels for the user's pinned schema scope (composer attachments):
+    'db.table' for tables, 'db.*' for whole databases. Empty when nothing is pinned."""
+    if not isinstance(scope, dict) or not scope:
+        return []
+    labels: list[str] = []
+    for t in scope.get("tables") or []:
+        db = str((t or {}).get("database") or "").strip()
+        tbl = str((t or {}).get("table") or "").strip()
+        if tbl:
+            labels.append(f"{db}.{tbl}" if db else tbl)
+    for db in scope.get("databases") or []:
+        db = str(db or "").strip()
+        if db:
+            labels.append(f"{db}.*")
+    return labels
 
 
 def _summarize_tool_result(tool: str, result: ToolResult) -> str:
