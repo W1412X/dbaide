@@ -243,36 +243,22 @@ def test_conversation_copy_exports_all_turns(qapp):
     assert conv.copy_text() == ""
 
 
-def test_answer_reveal_respects_stream_toggle(qapp):
-    """With streaming on, a long answer reveals progressively (full text still stored
-    for copy); with it off, the answer shows immediately."""
+def test_answer_without_stream_renders_immediately(qapp):
+    """No live chunks (model can't stream / streaming off) → the full answer renders at
+    once, with no front-end simulation. The full text is stored for copy."""
     from dbaide.desktop.components.conversation import ConversationView
-    long = "这是一个较长的回答,用于触发逐步显示效果。" * 4
+    long = "这是一个较长的回答,用于验证一次性整段渲染。" * 4
     v = ConversationView()
-    v.set_stream_answers(True)
     v.begin_turn("q")
     v.complete_turn(answer=long, ok=True)
-    assert v._reveal is not None                 # reveal in flight
+    assert v._live_answer is None                # no live block, no simulation
     assert v._turns[-1]["answer"] == long        # full text stored → copy unaffected
-    v._finalize_reveal()
-    assert v._reveal is None
-    v.set_stream_answers(False)
-    v.begin_turn("q2")
-    v.complete_turn(answer=long, ok=True)
-    assert v._reveal is None                     # no reveal when disabled
-    # Restored/history turns (placeholder=False, as in load_session) never animate,
-    # even with streaming on.
-    v.set_stream_answers(True)
-    v._finalize_reveal()
-    v.begin_turn("q3", placeholder=False)
-    v.complete_turn(answer=long, ok=True)
-    assert v._reveal is None                     # history renders instantly
+    assert long in v.copy_text()                 # complete answer rendered/exportable
 
 
 def test_answer_chunks_stream_live_then_finalize(qapp):
     """True token-streaming: answer_chunk events fill a live block during the run;
-    complete_turn snaps it to the authoritative text with no extra block and no
-    pseudo-reveal (the live stream already showed it)."""
+    complete_turn snaps it to the authoritative text with no extra block."""
     from dbaide.desktop.components.conversation import ConversationView
     v = ConversationView()
     v.begin_turn("how many paid orders")
@@ -282,7 +268,6 @@ def test_answer_chunks_stream_live_then_finalize(qapp):
     assert v._live_answer_text == "42 paid orders"
     v.complete_turn(answer="42 paid orders", ok=True)
     assert v._live_answer is None                # live state cleared
-    assert v._reveal is None                     # no pseudo-reveal when streamed live
     assert v._turns[-1]["answer"] == "42 paid orders"  # full text stored for copy
 
 

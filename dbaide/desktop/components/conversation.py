@@ -631,16 +631,12 @@ class ConversationView(QScrollArea):
         self._turns: list[dict[str, Any]] = []
         self._current_record: dict[str, Any] | None = None
         self._clarification_bar: _ClarificationBar | None = None
-        self._stream_answers = True
-        self._reveal: tuple | None = None  # (timer, block, full_text) of an in-flight reveal
         # True token-streaming: the answer block being filled live by answer_chunk
-        # events for the open turn (None until the first chunk arrives).
+        # events for the open turn (None until the first chunk arrives). There is no
+        # front-end simulation — if the model can't stream, the answer simply renders
+        # once at complete_turn.
         self._live_answer: "_MarkdownBlock | None" = None
         self._live_answer_text = ""
-        self._current_live = True  # is the open turn a live run (vs restored history)?
-
-    def set_stream_answers(self, enabled: bool) -> None:
-        self._stream_answers = bool(enabled)
 
     def append_answer_chunk(self, text: str) -> None:
         """Append a streamed slice of the final answer to the open turn, creating the
@@ -648,7 +644,6 @@ class ConversationView(QScrollArea):
         still generating); ``complete_turn`` later snaps it to the authoritative text."""
         if not text or self._current_turn is None:
             return
-        self._finalize_reveal()  # a live stream supersedes any pseudo-reveal
         if self._live_answer is None:
             self._live_answer = _MarkdownBlock("", title="DBAide")
             self._live_answer_text = ""
@@ -660,41 +655,6 @@ class ConversationView(QScrollArea):
             self._live_answer = None
             return
         self._scroll_bottom()
-
-    def _reveal_markdown(self, block: "_MarkdownBlock", full: str) -> None:
-        """Progressively reveal the answer (typewriter-ish), bounded to a short total
-        duration regardless of length, so it reads as 'arriving' without delaying."""
-        from PyQt6.QtCore import QTimer
-        self._finalize_reveal()
-        state = {"pos": 0}
-        step = max(2, len(full) // 50)  # ~50 ticks whatever the length
-        timer = QTimer(self)
-
-        def tick() -> None:
-            state["pos"] = min(len(full), state["pos"] + step)
-            try:
-                block.set_markdown(full[: state["pos"]])
-            except RuntimeError:
-                timer.stop(); self._reveal = None; return
-            self._scroll_bottom()
-            if state["pos"] >= len(full):
-                timer.stop()
-                self._reveal = None
-
-        timer.timeout.connect(tick)
-        self._reveal = (timer, block, full)
-        timer.start(18)
-
-    def _finalize_reveal(self) -> None:
-        """Snap any in-flight reveal to its full text (e.g. when a new turn starts)."""
-        if self._reveal is not None:
-            timer, block, full = self._reveal
-            timer.stop()
-            try:
-                block.set_markdown(full)
-            except RuntimeError:
-                pass
-            self._reveal = None
 
     def showEvent(self, event) -> None:  # noqa: N802
         super().showEvent(event)
@@ -723,12 +683,8 @@ class ConversationView(QScrollArea):
 
     def begin_turn(self, user_text: str, *, meta: str = "", placeholder: bool = True,
                    attachments: list[dict] | None = None) -> None:
-        self._finalize_reveal()  # don't leave a prior answer half-revealed
         self._live_answer = None
         self._live_answer_text = ""
-        # Live run (placeholder) → the answer may animate in; a restored/history turn
-        # must render instantly (don't "type out" saved answers on session reload).
-        self._current_live = placeholder
         turn = TurnBlock()
         if user_text.strip():
             # Only surface the connection · db · policy caption when it changes from
@@ -858,16 +814,11 @@ class ConversationView(QScrollArea):
             self._live_answer_text = ""
         elif answer.strip():
             # No live stream (streaming off, unsupported, or a deterministic answer):
-            # optionally pseudo-reveal a non-trivial answer (toggleable; the full text
-            # is already stored in the record above, so copy/export is unaffected).
-            stream = self._current_live and self._stream_answers and len(answer.strip()) > 60
-            block = _MarkdownBlock(
-                "" if stream else answer, title="DBAide",
+            # render the full answer at once — no front-end simulation.
+            turn.append_content(_MarkdownBlock(
+                answer, title="DBAide",
                 title_tooltip=f"workflow {workflow_id}" if workflow_id else "",
-            )
-            turn.append_content(block)
-            if stream:
-                self._reveal_markdown(block, answer)
+            ))
         if sql.strip() and "```sql" not in answer:
             turn.append_content(_MarkdownBlock(f"```sql\n{sql}\n```", title="SQL"))
         if actions_widget is not None:
