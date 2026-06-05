@@ -421,18 +421,30 @@ class DesktopService:
 
             new_snap: dict[str, dict[str, dict]] = {}
             failed: set[tuple[str, str]] = set()
+            work: list[tuple[str, Any]] = []
             for db in live_db_names:
                 try:
                     tinfos = adapter.list_tables(database=db)
                 except Exception:  # noqa: BLE001 — unreachable db: leave it untouched
                     continue
-                tables: dict[str, dict] = {}
-                for ti in tinfos:
-                    try:
-                        tables[ti.name] = self._project_table_doc(summarizer, adapter, instance, db, ti)
-                    except Exception:  # noqa: BLE001 — can't describe now: don't treat as dropped
-                        failed.add((db, ti.name))
-                new_snap[db] = tables
+                new_snap[db] = {}
+                work.extend((db, ti) for ti in tinfos)
+            # Project per-table metadata concurrently — a sync of a many-table instance
+            # must not be latency-bound on sequential round-trips. Bound the pool by the
+            # same policy.build_max_workers the builder uses, so DB load stays capped.
+            # Futures resolve here in the main thread, so new_snap needs no locking.
+            if work:
+                from concurrent.futures import ThreadPoolExecutor, as_completed
+                workers = max(1, int(getattr(policy, "build_max_workers", 1)))
+                with ThreadPoolExecutor(max_workers=workers) as pool:
+                    futs = {pool.submit(self._project_table_doc, summarizer, adapter, instance, db, ti):
+                            (db, ti) for (db, ti) in work}
+                    for fut in as_completed(futs):
+                        db, ti = futs[fut]
+                        try:
+                            new_snap[db][ti.name] = fut.result()
+                        except Exception:  # noqa: BLE001 — can't describe now: don't treat as dropped
+                            failed.add((db, ti.name))
 
             considered = set(new_snap) | set(gone_dbs)
             old_snap: dict[str, dict[str, dict]] = {}
@@ -721,7 +733,6 @@ class DesktopService:
 
     def validate_sql(self, payload: dict[str, Any]) -> dict[str, Any]:
         conn = self.cfg.get_connection(str(payload.get("connection_name") or "") or None)
-        database = str(payload.get("database") or "")
         sql = str(payload.get("sql") or "")
         tools = self._query_tools(conn)
         validation = tools.validate_sql(sql, add_limit=True)
