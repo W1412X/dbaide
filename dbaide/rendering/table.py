@@ -52,16 +52,24 @@ def export_csv(rows: list[dict[str, Any]], columns: list[str] | None = None) -> 
     return output.getvalue()
 
 
+def _md_escape(text: str) -> str:
+    """Make a value safe inside a Markdown table cell: escape the column separator and
+    collapse newlines (either would otherwise break the table — a raw `|` splits the
+    row into extra columns, a newline ends the row early)."""
+    return (str(text).replace("\\", "\\\\").replace("|", "\\|")
+            .replace("\r\n", "<br>").replace("\n", "<br>").replace("\r", "<br>"))
+
+
 def export_markdown_table(rows: list[dict[str, Any]], columns: list[str] | None = None) -> str:
     """Export query result rows as Markdown table."""
     if not rows:
         return "(empty)"
     cols = columns or list(rows[0].keys())
     lines = []
-    lines.append("| " + " | ".join(cols) + " |")
+    lines.append("| " + " | ".join(_md_escape(c) for c in cols) + " |")
     lines.append("| " + " | ".join("---" for _ in cols) + " |")
     for row in rows:
-        values = [_format_cell(row.get(c)) for c in cols]
+        values = [_md_escape(_format_cell(row.get(c))) for c in cols]
         lines.append("| " + " | ".join(values) + " |")
     return "\n".join(lines)
 
