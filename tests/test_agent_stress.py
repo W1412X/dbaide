@@ -395,6 +395,40 @@ def test_multi_intent_runs_each_and_aggregates(_connections):
     assert "FROM orders" in (resp.sql or "")
 
 
+class _MultiIntentPauseMock(_StressMock):
+    """First sub-intent (data) is ambiguous and pauses; the second (schema) must still
+    run after the reply resumes the WHOLE plan."""
+    def complete_json(self, messages, *, schema_hint=""):
+        system = messages[0].content if messages else ""
+        if "decompose a database-assistant question" in system:
+            return {"intents": [
+                {"type": "data_query", "text": "统计订单数量"},
+                {"type": "schema_explore", "text": "这个库有哪些表？"},
+            ]}
+        return super().complete_json(messages, schema_hint=schema_hint)
+
+
+def test_multi_intent_pause_in_first_resumes_whole_plan(_connections):
+    """When a sub-intent pauses mid-plan, the reply resumes the ENTIRE plan: the paused
+    intent finishes AND the not-yet-run intents still execute (no silent dropping)."""
+    cfg = _connections["shop"]
+    ref: dict = {}
+    mock = _MultiIntentPauseMock(ref, ambiguous=True)  # ambiguity pauses the data intent
+    orch = AskOrchestrator(build_adapter(cfg), Session(connection=cfg), mock,
+                           execution_policy=ExecutionPolicy.SAFE_AUTO)
+    ref["orch"] = orch
+
+    paused = orch.run("统计订单数量，以及有哪些表", execute=True)
+    assert paused.status == "wait_user" and paused.pending_question
+    assert isinstance(paused.resume_state, dict) and "multi" in paused.resume_state  # plan carried
+
+    resumed = orch.run("统计订单数量，以及有哪些表", resume_state=paused.resume_state, user_reply="orders")
+    assert getattr(resumed, "status", "completed") != "wait_user"
+    sections = [ln for ln in (resumed.answer or "").splitlines() if ln.startswith("## ")]
+    assert len(sections) == 2                  # BOTH intents present after resume (none dropped)
+    assert resumed.result is not None          # the resumed data intent produced its result
+
+
 def test_clarify_pause_then_resume_completes(_connections):
     """An ambiguous data query pauses for clarification, and the user's reply resumes
     the SAME workflow through to an executed result (no stall, no stale 'partial')."""
