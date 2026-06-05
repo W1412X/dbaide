@@ -31,6 +31,22 @@ class AssetStore:
             return True
         return False
 
+    def delete_table(self, instance: str, database: str, table: str) -> bool:
+        """Delete one table's doc dir (used when a refresh finds it dropped)."""
+        path = self.table_dir(instance, database, table)
+        if path.exists():
+            shutil.rmtree(path, ignore_errors=True)
+            return True
+        return False
+
+    def delete_database(self, instance: str, database: str) -> bool:
+        """Delete one database's doc dir (used when a refresh finds it dropped)."""
+        path = self.database_dir(instance, database)
+        if path.exists():
+            shutil.rmtree(path, ignore_errors=True)
+            return True
+        return False
+
     def database_dir(self, instance: str, database: str) -> Path:
         return self.instance_dir(instance) / "databases" / safe_name(database)
 

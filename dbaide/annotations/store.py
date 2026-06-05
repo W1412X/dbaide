@@ -135,6 +135,35 @@ class AnnotationStore:
         safe = str(instance or "").replace("/", "_").replace("\\", "_").strip() or "default"
         return self.base_dir / "instances" / safe / "annotations.json"
 
+    def delete_under(self, instance: str, *, database: str = "", table: str = "", column: str = "") -> int:
+        """Cascade-delete notes for an object that no longer exists in the catalog:
+        a column, a whole table (its note + all its column notes), or a whole database
+        (every db/table/column note under it). Returns the number removed.
+
+        A database-agnostic note (empty ``database``) is treated as belonging to a
+        matching table/column under any database, but is NOT swept by a database
+        removal (it isn't scoped to that database)."""
+        db_l, tbl_l, col_l = _norm(database), _norm(table), _norm(column)
+        records = self._load(instance)
+
+        def is_target(r: dict[str, Any]) -> bool:
+            rdb, rtbl, rcol = _norm(r.get("database")), _norm(r.get("table")), _norm(r.get("column"))
+            scope = _norm(r.get("scope"))
+            db_ok = (not database) or rdb in ("", db_l)
+            if column:
+                return scope == "column" and rtbl == tbl_l and rcol == col_l and db_ok
+            if table:
+                return scope in ("table", "column") and rtbl == tbl_l and db_ok
+            if database:
+                return rdb == db_l  # only notes explicitly scoped to this database
+            return False
+
+        kept = [r for r in records if not is_target(r)]
+        removed = len(records) - len(kept)
+        if removed:
+            self._save(instance, kept)
+        return removed
+
     def purge_instance(self, instance: str) -> bool:
         """Delete all user notes for a connection (used when it is removed)."""
         import shutil

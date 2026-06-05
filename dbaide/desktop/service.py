@@ -137,6 +137,7 @@ class DesktopService:
             "bootstrap": self.bootstrap,
             "build_assets": self.build_assets,
             "project_instance": self.project_instance,
+            "refresh_instance": self.refresh_instance,
             "enrich_table": self.enrich_table,
             "list_databases": self.list_databases,
             "schema_tree": self.schema_tree,
@@ -363,6 +364,152 @@ class DesktopService:
         finally:
             self._end_build(conn.name)
         return {"stats": _to_dict(stats)}
+
+    def _project_table_doc(self, summarizer, adapter, instance: str, database: str, table_info) -> dict[str, Any]:
+        """Build ONE table's base doc (catalog-only) in memory — no write, no LLM, no
+        sampling. Used by refresh to compute the live snapshot and write base docs."""
+        cols = adapter.describe_table(table_info.name, database=database)
+        fks = adapter.foreign_keys(table_info.name, database=database)
+        try:
+            idxs = adapter.indexes(table_info.name, database=database)
+        except Exception:  # noqa: BLE001 — indexes are best-effort
+            idxs = []
+        try:
+            ddl = adapter.get_table_ddl(table_info.name, database=database)
+        except Exception:  # noqa: BLE001
+            ddl = ""
+        return summarizer.table_doc(
+            instance=instance, database=database, table=table_info,
+            columns=cols, foreign_keys=fks, indexes=idxs, ddl=ddl, sample_rows=[],
+        )
+
+    # Structural fields a refresh overwrites from the live catalog; everything else
+    # in a table doc (description, sample_rows, profiles, …) is enrichment and kept.
+    _STRUCT_FIELDS = ("columns", "indexes", "foreign_keys", "source_comment",
+                      "ddl", "table_type", "row_count", "row_count_exact")
+
+    def refresh_instance(self, payload: dict[str, Any]) -> dict[str, Any]:
+        """Re-sync the base layer with the live catalog and react to changes.
+
+        - new table/db → write its base doc;
+        - dropped table/db → delete its docs AND cascade-delete its user notes;
+        - structural change → update base fields, KEEP enrichment but mark it stale,
+          and cascade-delete notes of any dropped columns;
+        - unreachable database / un-describable table → left untouched (never deleted
+          on uncertainty). User notes for surviving objects are always preserved.
+        """
+        from dbaide.assets.diff import diff_catalog, table_fingerprint
+        from dbaide.assets.summarizer import AssetSummarizer
+        from dbaide.llm import NullLLMClient
+
+        conn = self.cfg.get_connection(str(payload.get("name") or payload.get("connection_name") or "") or None)
+        instance = conn.name
+        # Never projected yet → a refresh is just the initial base projection.
+        if self.store.instance_doc(instance) is None:
+            return self.project_instance({"name": instance})
+
+        policy = self.cfg.policy_for(conn)
+        adapter = build_adapter(conn, policy=policy, caller="build")
+        summarizer = AssetSummarizer(NullLLMClient())
+        self._begin_build(instance)
+        try:
+            live_db_names = list(adapter.list_databases())  # raises → refresh aborts (no deletes)
+            store_db_names = [str(d.get("name") or "") for d in self.store.database_docs(instance) if d.get("name")]
+            gone_dbs = [d for d in store_db_names if d not in set(live_db_names)]
+
+            new_snap: dict[str, dict[str, dict]] = {}
+            failed: set[tuple[str, str]] = set()
+            for db in live_db_names:
+                try:
+                    tinfos = adapter.list_tables(database=db)
+                except Exception:  # noqa: BLE001 — unreachable db: leave it untouched
+                    continue
+                tables: dict[str, dict] = {}
+                for ti in tinfos:
+                    try:
+                        tables[ti.name] = self._project_table_doc(summarizer, adapter, instance, db, ti)
+                    except Exception:  # noqa: BLE001 — can't describe now: don't treat as dropped
+                        failed.add((db, ti.name))
+                new_snap[db] = tables
+
+            considered = set(new_snap) | set(gone_dbs)
+            old_snap: dict[str, dict[str, dict]] = {}
+            for db in considered:
+                stored = {str(td.get("name") or td.get("table") or ""): td
+                          for td in self.store.table_docs(instance, db)}
+                for (fdb, ft) in failed:
+                    if fdb == db:
+                        stored.pop(ft, None)  # exclude transiently-undescribable tables from the diff
+                old_snap[db] = stored
+
+            diff = diff_catalog(old_snap, new_snap)
+
+            # ── apply ────────────────────────────────────────────────────────────
+            for db in diff.removed_dbs:
+                self.store.delete_database(instance, db)
+                self.annotations.delete_under(instance, database=db)
+            for (db, table) in diff.removed_tables:
+                self.store.delete_table(instance, db, table)
+                self.annotations.delete_under(instance, database=db, table=table)
+            for (db, table, col) in diff.removed_columns:
+                self.annotations.delete_under(instance, database=db, table=table, column=col)
+            for (db, table) in diff.added_tables:
+                self.store.write_json(self.store.table_dir(instance, db, table) / "table.json",
+                                      new_snap[db][table])
+            for (db, table) in diff.changed_tables:
+                stored = self.store.table_doc(instance, db, table) or {}
+                base = new_snap[db][table]
+                for k in self._STRUCT_FIELDS:
+                    stored[k] = base.get(k)
+                stored["base_fingerprint"] = table_fingerprint(base)
+                if stored.get("sample_rows") or stored.get("enriched_at"):
+                    stored["enrichment_stale"] = True  # structure moved under the enrichment
+                self.store.write_json(self.store.table_dir(instance, db, table) / "table.json", stored)
+
+            # ── rewrite rollups for affected databases + the instance ────────────
+            touched = {db for (db, _t) in diff.added_tables} | {db for (db, _t) in diff.changed_tables} \
+                | {db for (db, _t) in diff.removed_tables} | set(diff.added_dbs)
+            for db in touched:
+                if db in new_snap:
+                    self._rewrite_db_rollup(summarizer, instance, db, sorted(new_snap[db]))
+            self._rewrite_instance_rollup(summarizer, instance, sorted(live_db_names))
+            return {"instance": instance, "summary": diff.summary(),
+                    "added_tables": len(diff.added_tables), "removed_tables": len(diff.removed_tables),
+                    "changed_tables": len(diff.changed_tables), "removed_dbs": len(diff.removed_dbs),
+                    "added_dbs": len(diff.added_dbs)}
+        finally:
+            self._end_build(instance)
+
+    def _rewrite_db_rollup(self, summarizer, instance: str, database: str, table_names: list[str]) -> None:
+        docs = [d for d in (self.store.table_doc(instance, database, t) for t in table_names) if d]
+        self.store.write_json(self.store.database_dir(instance, database) / "tables.json",
+                              {"instance": instance, "database": database, "tables": docs})
+        ddoc = summarizer.database_doc(instance=instance, database=database, tables=docs)
+        ddoc["table_count"] = len(docs)
+        self.store.write_json(self.store.database_dir(instance, database) / "database.json", ddoc)
+
+    def _rewrite_instance_rollup(self, summarizer, instance: str, db_names: list[str]) -> None:
+        db_docs: list[dict[str, Any]] = []
+        for db in db_names:
+            d = self.store._read_optional(self.store.database_dir(instance, db) / "database.json")
+            if isinstance(d, dict):
+                db_docs.append(d)
+        self.store.write_json(self.store.instance_dir(instance) / "databases.json", {
+            "instance": instance,
+            "databases": [{"name": d.get("name"), "description": d.get("description"),
+                           "table_count": d.get("table_count")} for d in db_docs],
+        })
+        idoc = summarizer.instance_doc(instance=instance, databases=db_docs)
+        existing = self.store.instance_doc(instance) or {}
+        idoc["built_at"] = existing.get("built_at")
+        conn_type = existing.get("connection_type")
+        if not conn_type:
+            try:
+                conn_type = self.cfg.get_connection(instance).type
+            except Exception:  # noqa: BLE001
+                conn_type = ""
+        idoc["connection_type"] = conn_type
+        self.store.write_json(self.store.instance_dir(instance) / "instance.json", idoc)
 
     def enrich_table(self, payload: dict[str, Any]) -> dict[str, Any]:
         """Enrich ONE table's document — LLM summary + sample rows + profiling — from
