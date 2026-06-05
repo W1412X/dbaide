@@ -69,6 +69,7 @@ class _StressMock(LLMClient):
 
     def _link(self, user: str) -> dict[str, Any]:
         section = user.split("Candidate tables:\n", 1)[-1]
+        question = user.split("Question:", 1)[-1].strip().split("\n", 1)[0] if "Question:" in user else ""
         tables = []
         for m in re.finditer(r'^-\s+([^\s.]+)\.("[^"]+"|[^\s\[]+)\s*\[([^\]]*)\]', section, re.MULTILINE):
             db, tbl, cols = m.group(1), m.group(2).strip('"'), m.group(3)
@@ -76,7 +77,10 @@ class _StressMock(LLMClient):
             tables.append({"database": db, "table": tbl, "columns": col_names, "reason": "stress"})
         if self.ambiguous and len(tables) >= 2:
             return {"ask": {"question": "Which table?", "options": [t["table"] for t in tables[:3]]}}
-        return {"tables": tables[:1], "sufficient": bool(tables), "missing": "", "ask": None}
+        # Join intent → keep two tables so the multi-table generate_sql + join-inference
+        # path runs (single-table questions keep just one).
+        n = 2 if (any(k in question for k in ("每个", "关联", "join")) and len(tables) >= 2) else 1
+        return {"tables": tables[:n], "sufficient": bool(tables), "missing": "", "ask": None}
 
     def _sql(self, user: str) -> dict[str, Any]:
         m = re.search(r'^Table:\s*("[^"]+"|\S+)', user, re.MULTILINE) or \
@@ -136,6 +140,7 @@ _QUESTIONS = [
     ("data", "统计订单数量"),
     ("data", "一共有多少行"),
     ("data", "查询最近的数据"),
+    ("data", "统计每个用户的订单数"),   # join intent → multi-table generate + join inference
 ]
 _POLICIES = [ExecutionPolicy.SAFE_AUTO, ExecutionPolicy.SQL_ONLY]
 _NO_EXEC = {ExecutionPolicy.SQL_ONLY, ExecutionPolicy.INSPECT_ONLY}
@@ -189,6 +194,22 @@ def test_agent_flow_matrix(_connections, sname, qkind, question, policy):
     # Executing data queries should actually return rows.
     if qkind == "data" and policy not in _NO_EXEC and not waiting:
         assert resp.result is not None, "executing data query produced no result"
+
+
+def test_join_question_exercises_multi_table_path(_connections):
+    """A join-intent question resolves TWO tables and runs join inference (the
+    declared FK), so the multi-table generate_sql branch is actually exercised."""
+    cfg = _connections["shop"]
+    ref: dict = {}
+    mock = _StressMock(ref)
+    orch = AskOrchestrator(build_adapter(cfg), Session(connection=cfg), mock,
+                           execution_policy=ExecutionPolicy.SAFE_AUTO)
+    ref["orch"] = orch
+    resp = AskAgentLoop(orch).run("统计每个用户的订单数", execute=True)
+    assert orch.run_state.resolved_schema is not None
+    assert len(orch.run_state.resolved_schema.tables) == 2     # two tables resolved
+    assert len(orch.run_state.relations or []) >= 1            # FK inferred between them
+    assert resp.result is not None
 
 
 def test_clarify_pause_then_resume_completes(_connections):
