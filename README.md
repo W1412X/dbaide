@@ -72,8 +72,9 @@ dbaide-gui
 ```
 
 Add a connection from **Settings → Connections**, then ask in natural language. The
-agent's steps stream into the **Trace** panel on the right; generated SQL can be opened
-in the **Workbench** to tweak and re-run.
+final answer **streams in token-by-token**, and every turn carries the agent's steps
+inline — click **View agent trace** under a turn to expand the discovery, SQL, and
+execution it ran. Generated SQL can be opened in the **Workbench** to tweak and re-run.
 
 ### Workbench — the database client
 

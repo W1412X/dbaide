@@ -6,6 +6,24 @@ All notable changes to DBAide are documented here. The format is loosely based o
 
 ## [Unreleased]
 
+### Added
+
+- **Streaming answers** — the assistant's final answer now streams in token-by-token
+  over SSE as the model writes it, so the first words appear immediately. Only the
+  final answer streams; intermediate tool steps don't. Toggle in **Settings → General**
+  ("Reveal answers progressively", default on); when off, or when the model can't
+  stream, the answer renders once it's ready. No front-end simulation — what you see
+  is the real generation.
+
+### Fixed
+
+- **Agent no longer aborts on valid multi-line answers** — a finish answer whose
+  markdown contained a real newline made strict JSON parsing fail (`Invalid control
+  character`) and killed the run at the last step. Parsing now tolerates control
+  characters in strings, and a malformed decision is retried instead of crashing.
+- **Cancellation during answer streaming** — cancelling mid-stream now stops
+  immediately instead of being swallowed into a wasteful non-stream re-request.
+
 ## [0.0.3] — 2026-06-05
 
 ### Fixed

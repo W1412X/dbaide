@@ -126,22 +126,25 @@ def populate(win: MainWindow) -> None:
         "selected_sql": "SELECT u.city, COUNT(*) AS users, SUM(o.amount) AS total\nFROM users u JOIN orders o ON o.user_id = u.id\nWHERE o.status = 'paid' GROUP BY u.city ORDER BY total DESC",
         "trace": events, "workflow_id": "wf_8a21",
     })
-    win.right.show_trace(events)
-    win.right.focus_trace()
     app = QApplication.instance()
     app.processEvents()
-    # Select a rich node so the detail pane renders populated (execute_sql → SQL).
-    tree = win.right.trace._tree
-    for i in range(tree.topLevelItemCount()):
-        it = tree.topLevelItem(i)
-        data = it.data(0, 0x0100)  # Qt.ItemDataRole.UserRole
-        if isinstance(data, dict) and data.get("node_type") == "sql":
-            win.right.trace._on_click(it, 1)
-            break
+    # The trace is now inline in the turn — expand the most recent turn's "View agent
+    # trace" chip so the screenshot shows the agent's steps under the answer.
+    view = ask.view(key)
+    if view is not None:
+        for i in range(view._layout.count() - 1, -1, -1):
+            item = view._layout.itemAt(i)
+            w = item.widget() if item is not None else None
+            if w is not None and hasattr(w, "_toggle_trace"):
+                w._toggle_trace()
+                break
     app.processEvents()
-    # SQL tab populated too.
-    win.sql_tab.set_sql("SELECT u.city, COUNT(*) AS users, SUM(o.amount) AS total\nFROM users u\nJOIN orders o ON o.user_id = u.id\nWHERE o.status = 'paid'\nGROUP BY u.city\nORDER BY total DESC;")
-    win.sql_tab.show_result({
+    # Populate a Workbench SQL editor with the same query + result.
+    ed = win.workbench.open_sql(
+        "SELECT u.city, COUNT(*) AS users, SUM(o.amount) AS total\n"
+        "FROM users u\nJOIN orders o ON o.user_id = u.id\n"
+        "WHERE o.status = 'paid'\nGROUP BY u.city\nORDER BY total DESC;")
+    ed.show_result({
         "columns": ["city", "users", "total"],
         "rows": [{"city": "Tokyo", "users": 10, "total": 1234.5},
                  {"city": "NYC", "users": 10, "total": 1100.0},
@@ -170,14 +173,13 @@ def main() -> int:
     grab(win.topbar, "topbar")
     grab(win.sidebar, "sidebar")
     grab(win.composer, "composer")
-    grab(win.right, "right_panel")
     grab(win.ask_tab, "ask_tab")
-    # Workbench (SQL editor)
-    win.switch_tab("SQL")
+    # Workbench (SQL editor + result grid)
+    win.switch_tab("Workbench")
     for _ in range(4):
         app.processEvents()
     grab(win, "window_sql")
-    grab(win.sql_tab, "sql_tab")
+    grab(win.workbench, "workbench")
     print(f"shots → {OUT} (tag={TAG})")
     return 0
 
