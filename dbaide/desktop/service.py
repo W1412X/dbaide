@@ -701,19 +701,7 @@ class DesktopService:
         in_session_id = str(payload.get("session_id") or "")
         policy = self._policy(str(payload.get("execution_policy") or payload.get("policy") or "safe_auto"))
         database = str(payload.get("database") or "")
-        request = WorkflowRequest(
-            question=str(payload.get("question") or ""),
-            connection_name=conn.name,
-            database_scope=[database] if database else [],
-            execution_policy=policy,
-            limit=int(payload.get("limit") or 100),
-            timeout_seconds=int(payload.get("timeout_seconds") or 10),
-            show_trace=bool(payload.get("show_trace", True)),
-            resume_state=payload.get("resume_state"),
-            user_reply=str(payload.get("user_reply") or ""),
-            schema_scope=payload.get("schema_scope") or {},
-            stream_answers=bool(payload.get("stream_answers", self.cfg.stream_answers())),
-        )
+        request = self._build_request(payload, connection_name=conn.name, policy=policy, database=database)
         engine = WorkflowEngine(conn, self._safe_llm(), self.store, self.join_catalog)
         progress_cb = payload.get("progress")
         cancel_check = payload.get("cancel_check")
@@ -738,6 +726,24 @@ class DesktopService:
         # turn — the turn is appended once the question actually resolves.
         payload["session_id"] = self._record_session_turn(conn.name, in_session_id, request, result, database)
         return payload
+
+    def _build_request(self, payload: dict[str, Any], *, connection_name: str,
+                       policy: ExecutionPolicy, database: str) -> WorkflowRequest:
+        """Assemble the WorkflowRequest from a GUI ask payload (defaults applied here so
+        ask() reads as request → run → record)."""
+        return WorkflowRequest(
+            question=str(payload.get("question") or ""),
+            connection_name=connection_name,
+            database_scope=[database] if database else [],
+            execution_policy=policy,
+            limit=int(payload.get("limit") or 100),
+            timeout_seconds=int(payload.get("timeout_seconds") or 10),
+            show_trace=bool(payload.get("show_trace", True)),
+            resume_state=payload.get("resume_state"),
+            user_reply=str(payload.get("user_reply") or ""),
+            schema_scope=payload.get("schema_scope") or {},
+            stream_answers=bool(payload.get("stream_answers", self.cfg.stream_answers())),
+        )
 
     def _record_session_turn(self, conn_name, session_id, request, result, database) -> str:
         session_id = str(session_id or "")
