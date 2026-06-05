@@ -101,3 +101,23 @@ def test_refresh_marks_enrichment_stale_on_structural_change(tmp_path, monkeypat
     doc = store.table_doc("s", "main", "t")
     assert doc.get("enrichment_stale") is True
     assert "extra" in {col["name"] for col in doc["columns"]}
+
+    # The tree surfaces the status so the UI can mark it.
+    trow = next(t for d in svc.dispatch("schema_tree", {"name": "s"}) for t in d["children"] if t["name"] == "t")
+    assert trow["stale"] is True
+
+
+def test_schema_tree_status_flags(tmp_path, monkeypatch):
+    db = tmp_path / "s.db"
+    c = sqlite3.connect(db)
+    c.executescript("CREATE TABLE a (id INTEGER PRIMARY KEY); CREATE TABLE b (id INTEGER PRIMARY KEY);"
+                    "INSERT INTO b VALUES (1);")
+    c.commit(); c.close()
+    svc = _service(tmp_path, monkeypatch)
+    svc.dispatch("save_connection", {"name": "s", "type": "sqlite", "path": str(db)})
+    svc.dispatch("project_instance", {"name": "s"})        # both base
+    svc.dispatch("enrich_table", {"name": "s", "database": "main", "table": "b"})  # b enriched
+
+    rows = {t["name"]: t for d in svc.dispatch("schema_tree", {"name": "s"}) for t in d["children"]}
+    assert rows["a"]["enriched"] is False and rows["a"]["stale"] is False  # base only
+    assert rows["b"]["enriched"] is True and rows["b"]["stale"] is False    # enriched

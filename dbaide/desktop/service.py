@@ -585,6 +585,10 @@ class DesktopService:
                     "foreign_keys": outgoing,
                     "referenced_by": referenced_by.get(table, []),
                     "indexes": table_doc.get("indexes") or [],
+                    # Enrichment status for the tree: base = catalog-only (structure),
+                    # enriched = has samples/summary, stale = structure moved under it.
+                    "enriched": bool(table_doc.get("sample_rows")) or bool(table_doc.get("enriched_at")),
+                    "stale": bool(table_doc.get("enrichment_stale")),
                     "children": [],
                 }
                 for col_doc in self.store.column_docs(name, db_name, table):

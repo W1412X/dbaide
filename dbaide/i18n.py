@@ -213,6 +213,15 @@ _STRINGS: dict[str, dict[str, str]] = {
     "schema.open_data": {"en": "Open data", "zh": "打开数据"},
     "schema.view_doc": {"en": "View doc", "zh": "查看文档"},
     "schema.enrich": {"en": "Enrich doc (summary + sample + profile)", "zh": "补充文档（摘要 + 采样 + 画像）"},
+    "schema.status_base": {
+        "en": "Structure only (from the catalog). Right-click → Enrich for summary/samples.",
+        "zh": "仅结构（来自 catalog）。右键 → 补充文档 可加摘要/采样。",
+    },
+    "schema.status_enriched": {"en": "Enriched (summary + samples)", "zh": "已补充（摘要 + 采样）"},
+    "schema.status_stale": {
+        "en": "Enrichment is stale — the table's structure changed. Re-enrich to refresh it.",
+        "zh": "补充内容已过期——表结构已变更。重新补充以刷新。",
+    },
     "toast.enriching": {"en": "Enriching {target}…", "zh": "正在补充 {target} 的文档…"},
     "toast.enriched": {"en": "Enriched {target}", "zh": "{target} 文档已补充"},
     "toast.enrich_failed": {"en": "Enrich failed: {error}", "zh": "补充失败：{error}"},

@@ -3,6 +3,7 @@ from __future__ import annotations
 from typing import Any
 
 from PyQt6.QtCore import QSize, Qt, pyqtSignal
+from PyQt6.QtGui import QColor
 from PyQt6.QtWidgets import (
     QFrame,
     QHBoxLayout,
@@ -135,11 +136,9 @@ class Sidebar(QWidget):
         self._render(rows)
 
     def _render(self, rows: list[dict[str, Any]]) -> None:
+        from dbaide.i18n import t as _t
         self.tree.clear()
         if not rows:
-            from dbaide.desktop.theme import Theme
-            from PyQt6.QtGui import QColor
-            from dbaide.i18n import t as _t
             item = QTreeWidgetItem([_t("schema.no_assets")])
             item.setToolTip(0, _t("schema.no_assets_hint"))
             item.setForeground(0, QColor(Theme.MUTED))
@@ -154,9 +153,21 @@ class Sidebar(QWidget):
             db_item.setIcon(0, db_icon)
             db_item.setData(0, Qt.ItemDataRole.UserRole, db)
             for table in db.get("children", []):
-                table_item = QTreeWidgetItem([f"{table['name']} ({table.get('column_count', 0)})"])
+                # Enrichment status: stale → ⚠ + tooltip; base (catalog-only) → dimmed
+                # so it reads as "structure only, not yet enriched"; enriched → normal.
+                stale = bool(table.get("stale"))
+                enriched = bool(table.get("enriched"))
+                label = f"{table['name']} ({table.get('column_count', 0)})" + (" ⚠" if stale else "")
+                table_item = QTreeWidgetItem([label])
                 table_item.setIcon(0, tbl_icon)
                 table_item.setData(0, Qt.ItemDataRole.UserRole, table)
+                if stale:
+                    table_item.setToolTip(0, _t("schema.status_stale"))
+                elif enriched:
+                    table_item.setToolTip(0, _t("schema.status_enriched"))
+                else:
+                    table_item.setForeground(0, QColor(Theme.MUTED_2))
+                    table_item.setToolTip(0, _t("schema.status_base"))
                 db_item.addChild(table_item)
                 for col in table.get("children", []):
                     suffix = f" · {col.get('data_type')}" if col.get("data_type") else ""
