@@ -156,6 +156,7 @@ class MainWindow(QMainWindow):
         self.topbar.build_assets.connect(self.build_assets)
         self.topbar.settings.connect(lambda: self.open_settings("connections"))
         self.topbar.joins_requested.connect(self.open_joins)
+        self.topbar.sync_schema_requested.connect(self.sync_schema)
         self.topbar.copy_conversation_requested.connect(self.copy_conversation)
         self.topbar.new_query_requested.connect(self._shortcut_new_query)
         self.topbar.new_conn_requested.connect(lambda: self.open_settings("connections"))
@@ -829,6 +830,26 @@ class MainWindow(QMainWindow):
             dialog.show_test_result(False, str(exc), target="connection")
 
         self._run_background("save_connection", payload, on_done, on_error=on_fail)
+
+    def sync_schema(self) -> None:
+        """Re-sync the current connection's schema with the live database: detect
+        added/removed/changed objects, update the base docs, cascade-delete notes of
+        objects that are gone and flag stale enrichment. Runs in the background."""
+        conn = self.current_connection()
+        if not conn:
+            self.toast(_i18n_t("toast.select_connection"))
+            return
+        self.toast(_i18n_t("toast.syncing"))
+
+        def done(result: object) -> None:
+            summary = (result or {}).get("summary", "") if isinstance(result, dict) else ""
+            self.toast(_i18n_t("toast.synced", summary=summary))
+            self.bus.emit(ASSETS_CHANGED, {"instance": conn})
+
+        def fail(exc: object) -> None:
+            self.toast(_i18n_t("toast.sync_failed", error=str(exc)))
+
+        self._run_background("refresh_instance", {"name": conn}, done, on_error=fail)
 
     def _enrich_node(self, node: dict[str, Any]) -> None:
         """Build the optional enrichment (LLM summary + sample + profile) for a table

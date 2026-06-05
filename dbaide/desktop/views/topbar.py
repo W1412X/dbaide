@@ -35,6 +35,7 @@ class TopBar(QWidget):
     build_assets = pyqtSignal()
     settings = pyqtSignal()
     joins_requested = pyqtSignal()
+    sync_schema_requested = pyqtSignal()
     copy_conversation_requested = pyqtSignal()
     new_query_requested = pyqtSignal()
     new_conn_requested = pyqtSignal()
@@ -86,6 +87,7 @@ class TopBar(QWidget):
             icon=more_icon(color=Theme.TEXT_2), tooltip=t("topbar.settings"), icon_only=True
         )
         self.menu.add_action(t("topbar.build"), self.build_assets.emit)
+        self.menu.add_action(t("menu.sync_schema"), self.sync_schema_requested.emit)
         self.menu.add_action(t("topbar.refresh"), self.refresh.emit)
         self.menu.add_separator()
         self.menu.add_action(t("menu.joins"), self.joins_requested.emit)

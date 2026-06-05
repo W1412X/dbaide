@@ -325,6 +325,10 @@ _STRINGS: dict[str, dict[str, str]] = {
     "panel.clear_conversation": {"en": "Clear conversation", "zh": "清空对话"},
     "menu.history": {"en": "History…", "zh": "历史记录…"},
     "menu.joins": {"en": "Saved joins…", "zh": "已保存的关联…"},
+    "menu.sync_schema": {"en": "Sync schema with database", "zh": "与数据库同步库结构"},
+    "toast.syncing": {"en": "Syncing schema with the database…", "zh": "正在与数据库同步库结构…"},
+    "toast.synced": {"en": "Schema synced · {summary}", "zh": "库结构已同步 · {summary}"},
+    "toast.sync_failed": {"en": "Sync failed: {error}", "zh": "同步失败：{error}"},
     # Object annotations (user notes on db/table/column) — edited from the schema
     # tree's pencil icon, displayed inside the asset document.
     "schema.edit_note": {"en": "Edit note", "zh": "编辑备注"},
