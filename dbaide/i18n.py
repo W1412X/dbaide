@@ -198,9 +198,6 @@ _STRINGS: dict[str, dict[str, str]] = {
     "toast.select_connection": {"en": "Select a connection first", "zh": "请先选择一个连接"},
     "toast.conn_saved": {"en": "Connection saved", "zh": "连接已保存"},
     "toast.conn_removed": {"en": "Connection removed", "zh": "连接已删除"},
-    "toast.projecting": {"en": "Reading schema from the database…", "zh": "正在从数据库读取库结构…"},
-    "toast.projected": {"en": "Schema loaded", "zh": "库结构已载入"},
-    "toast.project_failed": {"en": "Couldn't read schema: {error}", "zh": "读取库结构失败：{error}"},
     "toast.model_saved": {"en": "Model saved", "zh": "模型已保存"},
     "toast.model_removed": {"en": "Model removed", "zh": "模型已删除"},
     "toast.resources_saved": {"en": "Resource limits saved", "zh": "资源限制已保存"},
@@ -234,6 +231,8 @@ _STRINGS: dict[str, dict[str, str]] = {
     "schema.copy_name": {"en": "Copy name", "zh": "复制名称"},
     "schema.copy_qualified": {"en": "Copy qualified name", "zh": "复制限定名"},
     "schema.no_assets": {"en": "No assets yet", "zh": "尚无资产"},
+    "schema.loading": {"en": "Loading schema…", "zh": "正在加载库结构…"},
+    "schema.projecting": {"en": "Reading schema from the database…", "zh": "正在从数据库读取库结构…"},
     "schema.no_assets_hint": {
         "en": "Build assets from the toolbar for richer answers.",
         "zh": "从工具栏构建资产以获得更准确的回答。",

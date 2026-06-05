@@ -240,6 +240,10 @@ class MainWindow(QMainWindow):
         # no right-hand activity panel at all.
         self.joins = JoinsTab()
         self._joins_dialog: JoinsDialog | None = None
+        # Connections whose base has been projected this session (avoid re-projecting on
+        # every select) and a connection to auto-select once the next bootstrap applies.
+        self._projected: set[str] = set()
+        self._pending_select_conn = ""
 
         body.addWidget(self.sidebar)
         body.addWidget(center)
@@ -273,8 +277,15 @@ class MainWindow(QMainWindow):
 
     def _apply_bootstrap_ui(self) -> None:
         conns = self.bootstrap.get("connections") or []
-        default = self.bootstrap.get("default_connection") or ""
-        self.topbar.set_connections(conns, default)
+        # Switch to a just-added connection now that it's in the list; the single
+        # _refresh_connection_context below then loads (and lazily projects) its schema
+        # with a visible loading state. (set_connections blocks signals, so selecting
+        # the target here doesn't trigger a second, redundant schema load.)
+        target = self.bootstrap.get("default_connection") or ""
+        if self._pending_select_conn and any(c.get("name") == self._pending_select_conn for c in conns):
+            target = self._pending_select_conn
+        self._pending_select_conn = ""
+        self.topbar.set_connections(conns, target)
         models = self.bootstrap.get("models") or []
         default_model = str(self.bootstrap.get("default_model") or "default")
         self.composer.set_models(models, default_model)
@@ -422,9 +433,43 @@ class MainWindow(QMainWindow):
         self._run_background("list_sessions", {"connection_name": name}, on_loaded)
 
     def _load_schema(self, name: str) -> None:
+        if not name:
+            self.sidebar.load_schema([])
+            return
+        self.sidebar.set_loading()  # visible state while the (possibly slow) fetch runs
         self._run_background(
             "schema_tree",
             {"name": name},
+            lambda rows: self._on_schema_rows(name, rows),
+            on_error=lambda exc: self._apply_schema_error(name, str(exc)),
+        )
+
+    def _on_schema_rows(self, name: str, rows: list[dict[str, Any]]) -> None:
+        if name != self.current_connection():
+            return
+        # No base document yet → build it from the live catalog (once per session),
+        # keeping a visible loading state, then re-fetch the tree.
+        if not rows and name not in self._projected:
+            self._projected.add(name)
+            self.sidebar.set_loading(_i18n_t("schema.projecting"))
+            self._run_background(
+                "project_instance", {"name": name},
+                lambda _r: self._fetch_schema_after_project(name),
+                on_error=lambda exc: self._project_failed(name, str(exc)),
+            )
+            return
+        self._apply_schema_loaded(name, rows)
+
+    def _project_failed(self, name: str, message: str) -> None:
+        self._projected.discard(name)  # allow a retry on the next select (e.g. DB was down)
+        self._apply_schema_error(name, message)
+
+    def _fetch_schema_after_project(self, name: str) -> None:
+        if name != self.current_connection():
+            return
+        self.topbar.set_asset_status("ready")
+        self._run_background(
+            "schema_tree", {"name": name},
             lambda rows: self._apply_schema_loaded(name, rows),
             on_error=lambda exc: self._apply_schema_error(name, str(exc)),
         )
@@ -811,6 +856,9 @@ class MainWindow(QMainWindow):
     def _settings_save_connection(self, dialog: SettingsDialog, payload: dict[str, Any]) -> None:
         dialog.set_save_busy(True, target="connection")
 
+        name = str(payload.get("name") or "")
+        was_new = name not in {c.get("name") for c in (self.bootstrap.get("connections") or [])}
+
         def on_done(result: object) -> None:
             dialog.set_save_busy(False, target="connection")
             dialog._connections[payload["name"]] = dict(payload)
@@ -818,12 +866,11 @@ class MainWindow(QMainWindow):
                 dialog._default_connection = payload["name"]
             dialog._reload_connection_list()
             self.toast(_i18n_t("toast.conn_saved"))
+            # A newly added connection → switch to it once the connection list reloads,
+            # which loads (and lazily projects) its schema with a visible loading state.
+            if was_new and name:
+                self._pending_select_conn = name
             self.bus.emit(CONNECTIONS_CHANGED, {"instance": payload.get("name")})
-            # No base document yet (new connection) → project the schema from the live
-            # catalog in the background so its tree populates without a manual build.
-            conn_info = (result or {}).get("connection") if isinstance(result, dict) else None
-            if isinstance(conn_info, dict) and conn_info.get("asset_status") == "missing":
-                self._auto_project(str(payload.get("name") or ""))
 
         def on_fail(exc: object) -> None:
             dialog.set_save_busy(False, target="connection")
@@ -881,23 +928,6 @@ class MainWindow(QMainWindow):
             self.toast(_i18n_t("toast.enrich_failed", error=str(exc)))
 
         self._run_background(action, payload, done, on_error=fail)
-
-    def _auto_project(self, name: str) -> None:
-        """Build the BASE schema document (structure only, from the live catalog) for a
-        connection that has none yet, in the background, then refresh its tree. Cheap
-        (no LLM/sampling); failures (unreachable / no catalog access) are non-fatal."""
-        if not name:
-            return
-        self.toast(_i18n_t("toast.projecting"))
-
-        def done(_r: object) -> None:
-            self.toast(_i18n_t("toast.projected"))
-            self.bus.emit(ASSETS_CHANGED, {"instance": name})  # → refresh_all reloads the tree
-
-        def fail(exc: object) -> None:
-            self.toast(_i18n_t("toast.project_failed", error=str(exc)))
-
-        self._run_background("project_instance", {"name": name}, done, on_error=fail)
 
     def _settings_delete_connection(self, name: str) -> None:
         try:

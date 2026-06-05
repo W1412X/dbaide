@@ -126,6 +126,16 @@ class Sidebar(QWidget):
         layout.addWidget(self.settings_btn)
         self._rows: list[dict[str, Any]] = []
 
+    def set_loading(self, message: str = "") -> None:
+        """Show a non-blocking placeholder while the schema is being loaded/projected,
+        so the panel never sits silently empty during a (possibly slow) fetch."""
+        from dbaide.i18n import t as _t
+        self.tree.clear()
+        item = QTreeWidgetItem([message or _t("schema.loading")])
+        item.setForeground(0, QColor(Theme.MUTED))
+        item.setFlags(Qt.ItemFlag.ItemIsEnabled)
+        self.tree.addTopLevelItem(item)
+
     def load_schema(self, rows: list[dict[str, Any]], *, error: str = "") -> None:
         self._rows = rows
         if error:
