@@ -792,6 +792,23 @@ class DesktopService:
             "elapsed_ms": result.elapsed_ms,
         }
 
+    @staticmethod
+    def _table_dialect(conn) -> str:
+        """Identifier-quoting dialect for a connection (only MySQL/MariaDB differ)."""
+        return "mysql" if str(conn.type).lower() in ("mysql", "mariadb") else "generic"
+
+    @staticmethod
+    def _select_from(table: str, where: str, dialect: str, *, columns: str = "*") -> str:
+        """`SELECT <columns> FROM <quoted table> [WHERE <where>]` — the shared head of
+        the data-grid browse and count queries. The table is quoted; `where` is the
+        caller's raw filter, neutralized downstream by the guarded read-only executor
+        (single-statement, no write keywords)."""
+        from dbaide.adapters.base import quote_identifier
+        sql = f"SELECT {columns} FROM {quote_identifier(table, dialect)}"
+        if where:
+            sql += f" WHERE {where}"
+        return sql
+
     def browse_table(self, payload: dict[str, Any]) -> dict[str, Any]:
         """Read-only, paginated browse of a single table for the data grid.
 
@@ -799,8 +816,6 @@ class DesktopService:
         with dialect-correct identifier quoting and runs it through the same guarded,
         read-only path as the SQL tab. No COUNT(*) — pagination is "has more = a full
         page came back", so big tables stay cheap."""
-        from dbaide.adapters.base import quote_identifier
-
         conn = self.cfg.get_connection(str(payload.get("connection_name") or "") or None)
         self._guard_busy(conn.name)
         database = str(payload.get("database") or "")
@@ -812,12 +827,11 @@ class DesktopService:
         order_by = str(payload.get("order_by") or "").strip()
         order_dir = "DESC" if str(payload.get("order_dir") or "asc").lower() == "desc" else "ASC"
         where = str(payload.get("where") or "").strip()
-        dialect = "mysql" if str(conn.type).lower() in ("mysql", "mariadb") else "generic"
+        dialect = self._table_dialect(conn)
 
-        sql = f"SELECT * FROM {quote_identifier(table, dialect)}"
-        if where:
-            sql += f" WHERE {where}"
+        sql = self._select_from(table, where, dialect)
         if order_by:
+            from dbaide.adapters.base import quote_identifier
             sql += f" ORDER BY {quote_identifier(order_by, dialect)} {order_dir}"
         sql += f" LIMIT {page_size} OFFSET {offset}"
 
@@ -843,8 +857,6 @@ class DesktopService:
 
         Run on demand from the data grid — browsing itself never issues a COUNT so
         large tables stay cheap; the user asks for the exact total explicitly."""
-        from dbaide.adapters.base import quote_identifier
-
         conn = self.cfg.get_connection(str(payload.get("connection_name") or "") or None)
         self._guard_busy(conn.name)
         database = str(payload.get("database") or "")
@@ -852,11 +864,9 @@ class DesktopService:
         if not table:
             raise ValueError("table is required")
         where = str(payload.get("where") or "").strip()
-        dialect = "mysql" if str(conn.type).lower() in ("mysql", "mariadb") else "generic"
+        dialect = self._table_dialect(conn)
 
-        sql = f"SELECT COUNT(*) AS n FROM {quote_identifier(table, dialect)}"
-        if where:
-            sql += f" WHERE {where}"
+        sql = self._select_from(table, where, dialect, columns="COUNT(*) AS n")
         tools = self._query_tools(conn)
         result = tools.execute_sql(sql, database=database, limit=1)
         count = 0
