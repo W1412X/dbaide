@@ -193,3 +193,16 @@ def test_workflow_history_connection_name_stays_in_base_dir(tmp_path):
     assert store.load("../escape", "wf1") is not None          # round-trips
     assert any(e["workflow_id"] == "wf1" for e in store.list_workflows("../escape"))
     assert store.delete("../escape", "wf1") is True
+
+
+def test_chat_session_connection_name_stays_in_base_dir(tmp_path):
+    """A connection name with traversal must not create the session dir outside
+    base_dir; create/list agree on the sanitized path."""
+    from dbaide.history.session_store import ChatSessionStore
+
+    base = tmp_path / "sess"
+    store = ChatSessionStore(base_dir=base)
+    sess = store.create("../escape", title="t")
+    assert not list(base.parent.glob("escape"))                 # nothing escaped base_dir
+    assert len(store.list_sessions("../escape")) == 1            # round-trips via sanitized path
+    assert store.load("../escape", sess["session_id"]) is not None

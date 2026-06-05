@@ -26,6 +26,14 @@ DEFAULT_TITLE = "New chat"
 _TITLE_MAX = 60
 
 
+def _safe_name(name: str) -> str:
+    """Filesystem-safe path component. Connection names (and ids) are user-chosen and
+    could contain path separators or traversal ('../x'); collapse anything that isn't a
+    plain identifier char so sessions always stay inside base_dir (mirrors
+    history.query_store / history.store / observability.query_log)."""
+    return "".join(c if c.isalnum() or c in "-_." else "_" for c in (name or "_default"))
+
+
 def _now() -> float:
     return time.time()
 
@@ -74,10 +82,10 @@ class ChatSessionStore:
     # ── paths ────────────────────────────────────────────────────────────────
 
     def _conn_dir(self, connection_name: str) -> Path:
-        return self.base_dir / (connection_name or "_default")
+        return self.base_dir / _safe_name(connection_name)
 
     def _path(self, connection_name: str, session_id: str) -> Path:
-        return self._conn_dir(connection_name) / f"{session_id}.json"
+        return self._conn_dir(connection_name) / f"{_safe_name(session_id)}.json"
 
     def purge_instance(self, connection_name: str) -> bool:
         """Delete all chat sessions for a connection (used when it is removed)."""
