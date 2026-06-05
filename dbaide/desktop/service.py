@@ -136,6 +136,7 @@ class DesktopService:
         handlers: dict[str, Callable[[dict[str, Any]], Any]] = {
             "bootstrap": self.bootstrap,
             "build_assets": self.build_assets,
+            "project_instance": self.project_instance,
             "list_databases": self.list_databases,
             "schema_tree": self.schema_tree,
             "search_assets": self.search_assets,
@@ -327,6 +328,36 @@ class DesktopService:
                 per_column_timeout=int(payload.get("per_column_timeout") or 30),
                 max_workers=int(max_workers) if max_workers else None,
                 dry_run=bool(payload.get("dry_run", False)),
+            )
+        finally:
+            self._end_build(conn.name)
+        return {"stats": _to_dict(stats)}
+
+    def project_instance(self, payload: dict[str, Any]) -> dict[str, Any]:
+        """Build the BASE (catalog-only) document from the live catalog — table/column
+        structure, types, keys, native comments, indexes, FKs, DDL. NO LLM summaries,
+        NO data sampling, NO profiling: it's cheap and deterministic, derivable purely
+        from the connection. This is the layer the schema tree renders; the optional
+        `build_assets` enrichment (semantics, samples, profiles) layers on top later.
+        ``databases`` (optional list) projects only those; otherwise all visible ones."""
+        conn = self.cfg.get_connection(str(payload.get("name") or payload.get("connection_name") or "") or None)
+        progress = payload.get("progress")
+        progress_cb = progress if callable(progress) else (lambda _msg: None)
+        policy = self.cfg.policy_for(conn)
+        adapter = build_adapter(conn, policy=policy, caller="build")
+        self._begin_build(conn.name)
+        try:
+            stats = AssetBuilder(
+                connection=conn,
+                adapter=adapter,
+                store=self.store,
+                llm=None,  # base layer is catalog-only — no LLM summaries
+                join_catalog=self.join_catalog,
+                progress=progress_cb,
+            ).build(
+                databases=payload.get("databases") or None,
+                sample=False,
+                profile_mode="none",
             )
         finally:
             self._end_build(conn.name)
