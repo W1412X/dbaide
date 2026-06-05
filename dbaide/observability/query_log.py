@@ -180,6 +180,18 @@ def for_instance(instance: str, *, log_dir: Path | None = None, persist: bool = 
         return existing
 
 
+def purge_instance(instance: str, *, log_dir: Path | None = None) -> bool:
+    """Delete the persisted query-audit log for a connection (used on removal)."""
+    key = instance or "default"
+    with _registry_lock:
+        _registry.pop(key, None)  # drop the in-memory ring too
+    path = (log_dir or _default_log_dir()) / f"{_safe_name(key)}.jsonl"
+    if path.exists():
+        path.unlink()
+        return True
+    return False
+
+
 def reset_registry() -> None:
     with _registry_lock:
         _registry.clear()

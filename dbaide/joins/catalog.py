@@ -94,6 +94,15 @@ class JoinCatalogStore:
         safe = instance.replace("/", "_").replace("\\", "_").strip() or "default"
         return self.base_dir / "instances" / safe / "joins.json"
 
+    def purge_instance(self, instance: str) -> bool:
+        """Delete the saved-join catalog for a connection (used when it is removed)."""
+        import shutil
+        path = self.instance_path(instance).parent
+        if path.exists():
+            shutil.rmtree(path, ignore_errors=True)
+            return True
+        return False
+
     def list_records(
         self,
         instance: str,

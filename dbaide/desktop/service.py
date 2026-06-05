@@ -216,7 +216,27 @@ class DesktopService:
         if not name:
             raise ValueError("Connection name is required")
         self.cfg.delete_connection(name)
-        return {"deleted": name}
+        # Remove ALL per-connection data, not just the config entry — otherwise the
+        # offline assets, saved joins, user notes, chat sessions, workflow history and
+        # the query-audit log linger as orphans (a "fake delete"). Each store owns its
+        # own layout via purge_instance(); best-effort so one failure can't block the rest.
+        purged: list[str] = []
+        from dbaide.observability import query_log
+        purgers = (
+            ("assets", lambda: self.store.purge_instance(name)),
+            ("joins", lambda: self.join_catalog.purge_instance(name)),
+            ("annotations", lambda: self.annotations.purge_instance(name)),
+            ("sessions", lambda: self.sessions.purge_instance(name)),
+            ("history", lambda: self.history.purge_instance(name)),
+            ("query_log", lambda: query_log.purge_instance(name)),
+        )
+        for label, fn in purgers:
+            try:
+                if fn():
+                    purged.append(label)
+            except Exception as exc:  # noqa: BLE001 — never let cleanup block the delete
+                logger.warning("delete_connection purge %s failed: %s", label, exc)
+        return {"deleted": name, "purged": purged}
 
     def save_model(self, payload: dict[str, Any]) -> dict[str, Any]:
         name = str(payload.get("name") or "default")

@@ -135,6 +135,15 @@ class AnnotationStore:
         safe = str(instance or "").replace("/", "_").replace("\\", "_").strip() or "default"
         return self.base_dir / "instances" / safe / "annotations.json"
 
+    def purge_instance(self, instance: str) -> bool:
+        """Delete all user notes for a connection (used when it is removed)."""
+        import shutil
+        path = self.instance_path(instance).parent
+        if path.exists():
+            shutil.rmtree(path, ignore_errors=True)
+            return True
+        return False
+
     # -- queries ---------------------------------------------------------
 
     def list_records(

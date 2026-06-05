@@ -79,6 +79,15 @@ class ChatSessionStore:
     def _path(self, connection_name: str, session_id: str) -> Path:
         return self._conn_dir(connection_name) / f"{session_id}.json"
 
+    def purge_instance(self, connection_name: str) -> bool:
+        """Delete all chat sessions for a connection (used when it is removed)."""
+        import shutil
+        path = self._conn_dir(connection_name)
+        if path.exists():
+            shutil.rmtree(path, ignore_errors=True)
+            return True
+        return False
+
     # ── read ───────────────────────────────────────────────────────────────--
 
     def load(self, connection_name: str, session_id: str) -> dict[str, Any] | None:

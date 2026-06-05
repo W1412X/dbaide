@@ -24,6 +24,15 @@ class WorkflowHistoryStore:
     def __init__(self, base_dir: Path | None = None) -> None:
         self.base_dir = base_dir or Path.home() / ".dbaide" / "history"
 
+    def purge_instance(self, connection_name: str) -> bool:
+        """Delete all workflow history for a connection (used when it is removed)."""
+        import shutil
+        path = self.base_dir / connection_name
+        if path.exists():
+            shutil.rmtree(path, ignore_errors=True)
+            return True
+        return False
+
     def save(self, result: WorkflowResult) -> Path:
         """Save a workflow result to disk."""
         conn_dir = self.base_dir / result.connection_name

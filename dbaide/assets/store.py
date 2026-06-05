@@ -4,6 +4,7 @@ import json
 import logging
 import os
 import re
+import shutil
 import tempfile
 from pathlib import Path
 from typing import Any
@@ -21,6 +22,14 @@ class AssetStore:
 
     def instance_dir(self, instance: str) -> Path:
         return self.base_dir / "instances" / safe_name(instance)
+
+    def purge_instance(self, instance: str) -> bool:
+        """Delete all offline assets for a connection (used when it is removed)."""
+        path = self.instance_dir(instance)
+        if path.exists():
+            shutil.rmtree(path, ignore_errors=True)
+            return True
+        return False
 
     def database_dir(self, instance: str, database: str) -> Path:
         return self.instance_dir(instance) / "databases" / safe_name(database)
