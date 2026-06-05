@@ -363,6 +363,38 @@ def test_explain_diagnose_path(_connections):
     assert _DiagnoseMock.SQL in (resp.answer or "")
 
 
+class _MultiIntentMock(_StressMock):
+    """Decomposes the question into a schema + a data sub-intent; each then drives the
+    normal loop (the base class handles the per-intent tool prompts)."""
+    def complete_json(self, messages, *, schema_hint=""):
+        system = messages[0].content if messages else ""
+        if "decompose a database-assistant question" in system:
+            return {"intents": [
+                {"type": "schema_explore", "text": "这个库有哪些表？"},
+                {"type": "data_query", "text": "统计订单数量"},
+            ]}
+        return super().complete_json(messages, schema_hint=schema_hint)
+
+
+def test_multi_intent_runs_each_and_aggregates(_connections):
+    """A multi-part question is decomposed into independent sub-intents; each runs on
+    its own and the answers aggregate into labelled sections, with the first concrete
+    data result surfaced for the SQL tab."""
+    cfg = _connections["shop"]
+    ref: dict = {}
+    mock = _MultiIntentMock(ref)
+    orch = AskOrchestrator(build_adapter(cfg), Session(connection=cfg), mock,
+                           execution_policy=ExecutionPolicy.SAFE_AUTO)
+    ref["orch"] = orch
+    resp = orch.run("有哪些表，以及统计订单数量", execute=True)  # NOTE: full entry (decomposes)
+    assert getattr(resp, "status", "completed") != "wait_user"
+    sections = [ln for ln in (resp.answer or "").splitlines() if ln.startswith("## ")]
+    assert len(sections) == 2                       # both sub-intents produced a section
+    assert "Schema" in sections[0] and "Data query" in sections[1]
+    assert resp.result is not None                  # the data sub-intent's result is surfaced
+    assert "FROM orders" in (resp.sql or "")
+
+
 def test_clarify_pause_then_resume_completes(_connections):
     """An ambiguous data query pauses for clarification, and the user's reply resumes
     the SAME workflow through to an executed result (no stall, no stale 'partial')."""
