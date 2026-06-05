@@ -338,6 +338,31 @@ def test_profile_question_runs_column_stats(_connections):
     assert ran.get("describe_table") and ran.get("column_stats")  # both ran and succeeded
 
 
+class _DiagnoseMock(_StressMock):
+    """Drives the explain/diagnose path: explain_sql on a given query, then finish."""
+    SQL = "SELECT * FROM orders WHERE total > 100"
+
+    def _loop(self, system, user):
+        if "Tool `explain_sql`" not in user:
+            return {"action": "call_tool", "tool": "explain_sql", "args": {"sql": self.SQL}}
+        return {"action": "finish", "answer": ""}  # answer comes from run_state via explain_sql
+
+
+def test_explain_diagnose_path(_connections):
+    """A 'why is this slow' question drives explain_sql to a clean finish; the EXPLAIN
+    diagnosis becomes the answer even though the model finishes with an empty string."""
+    cfg = _connections["shop"]
+    ref: dict = {}
+    mock = _DiagnoseMock(ref)
+    orch = AskOrchestrator(build_adapter(cfg), Session(connection=cfg), mock,
+                           execution_policy=ExecutionPolicy.SAFE_AUTO)
+    ref["orch"] = orch
+    resp = AskAgentLoop(orch).run("解释这个查询为什么慢", execute=True)
+    assert resp.status != "wait_user"
+    assert "EXPLAIN diagnosis" in (resp.answer or "")
+    assert _DiagnoseMock.SQL in (resp.answer or "")
+
+
 def test_clarify_pause_then_resume_completes(_connections):
     """An ambiguous data query pauses for clarification, and the user's reply resumes
     the SAME workflow through to an executed result (no stall, no stale 'partial')."""
