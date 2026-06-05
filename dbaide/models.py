@@ -118,6 +118,7 @@ class ColumnInfo:
         comment: str = "",
         primary_key: bool = False,
         indexed: bool = False,
+        note: str = "",
     ) -> None:
         self.name = name
         self.data_type = data_type
@@ -126,6 +127,9 @@ class ColumnInfo:
         self.comment = comment
         self.primary_key = primary_key
         self.indexed = indexed
+        # Authoritative user annotation (distinct from the DB-native `comment`):
+        # overrides schema guesses and is surfaced to the agent at high priority.
+        self.note = note
 
 
 class ForeignKeyInfo:

@@ -10,7 +10,7 @@ from typing import Any, Callable
 from dbaide.agent.answer_stream import JsonFieldStreamer
 from dbaide.agent.loop_state import dump_loop_state, restore_loop_state
 from dbaide.agent.progress_events import brief_tool_summary, from_trace_event, progress_event, progress_label
-from dbaide.agent.schema_context import disclosed_table_keys
+from dbaide.agent.schema_context import decision_notes_block, disclosed_table_keys
 from dbaide.i18n import answer_language_directive
 from dbaide.agent.runtime import AgentRuntime
 from dbaide.agent.toolkit import build_tool_registry, loop_tool_specs
@@ -419,6 +419,10 @@ class AskAgentLoop:
             "- SQL explain: validate_sql or explain_sql as needed → finish\n"
             "- Do not invent tables or columns. Prefer precision over listing everything.\n"
             "- When you have enough to answer, use action=finish.\n"
+            "- Remember durable facts: when the user states (or confirms via clarify_semantics) a "
+            "lasting fact about an object — a column's timezone/encoding, what a status value means, "
+            "that a table is deprecated and which replaces it — call annotate_object to save it so "
+            "future questions benefit. Only save what the user actually stated; never invent a note.\n"
             f"- {answer_language_directive()}"
         )
 
@@ -429,9 +433,12 @@ class AskAgentLoop:
         pins = _pinned_scope_labels(getattr(self.orchestrator, "schema_scope", None))
         pin_line = (f"User-attached schema (prefer these; resolve_schema on them directly, "
                     f"no broad discovery needed): {', '.join(pins)}\n\n") if pins else ""
+        notes = decision_notes_block(self.orchestrator, state.database)
+        notes_line = f"{notes}\n\n" if notes else ""
         user = (
             f"User question:\n{state.question}\n\n"
             f"Database scope: {state.database or '(any)'}\n\n"
+            f"{notes_line}"
             f"{pin_line}"
             f"Tool history:\n{history}"
         )

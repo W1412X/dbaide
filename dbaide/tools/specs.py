@@ -195,6 +195,29 @@ DELETE_JOIN = ToolSpec(
     safe_for_auto_call=True,
 )
 
+ANNOTATE_OBJECT = ToolSpec(
+    name="annotate_object",
+    description=(
+        "Save a durable, AUTHORITATIVE user note on a database/table/column (e.g. a "
+        "column's timezone, what a status value means, or that a table is deprecated and "
+        "which one replaces it). Upserts by object. ONLY call this when the user has "
+        "STATED or CONFIRMED the fact — never invent one. Set scope=column with table+column, "
+        "scope=table with table, or scope=database. Notes persist across sessions and are "
+        "shown to the agent at high priority on future questions."
+    ),
+    input_schema={
+        "scope": "string",
+        "note": "string",
+        "database": "string",
+        "table": "string",
+        "column": "string",
+    },
+    output_schema={"annotation": "dict"},
+    permission_level=CONFIG_WRITE,
+    timeout_seconds=10,
+    safe_for_auto_call=True,
+)
+
 VALIDATE_SQL = ToolSpec(
     name="validate_sql",
     description="Validate SQL for safety and correctness",

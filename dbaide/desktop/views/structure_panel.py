@@ -17,6 +17,7 @@ from PyQt6.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QPlainTextEdit,
+    QPushButton,
     QStackedWidget,
     QToolButton,
     QVBoxLayout,
@@ -43,11 +44,13 @@ def _generate_ddl(table: str, columns: list[dict[str, Any]]) -> str:
 
 class StructurePanel(QWidget):
     navigate_table = pyqtSignal(str)  # a related table name was clicked
+    annotate_requested = pyqtSignal(dict)  # user wants to add a note to this table/column
 
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
         from dbaide.i18n import t
         self._t = t
+        self._table_name = ""
         outer = QVBoxLayout(self)
         outer.setContentsMargins(0, 0, 0, 0)
         outer.setSpacing(8)
@@ -68,9 +71,26 @@ class StructurePanel(QWidget):
         pl = QVBoxLayout(page)
         pl.setContentsMargins(16, 10, 16, 0)
         pl.setSpacing(10)
+        title_row = QHBoxLayout()
+        title_row.setContentsMargins(0, 0, 0, 0)
         self._title = QLabel("")
         self._title.setFont(QFont("Inter", 13, QFont.Weight.DemiBold))
-        pl.addWidget(self._title)
+        title_row.addWidget(self._title)
+        title_row.addStretch(1)
+        # Convenient entry point: add an authoritative note to the selected column,
+        # or (no selection) to the whole table. Mirrors the Notes manager.
+        self._add_note = QPushButton(self._t("structure.add_note"))
+        self._add_note.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._add_note.setIcon(svg_icon("plus", color=Theme.TEXT_2, size=12))
+        self._add_note.setToolTip(self._t("structure.note_column"))
+        self._add_note.setStyleSheet(
+            f"QPushButton {{ background: {Theme.PANEL_2}; color: {Theme.TEXT_2};"
+            f" border: 1px solid {Theme.BORDER}; border-radius: 6px; padding: 3px 10px; font-size: 11px; }}"
+            f"QPushButton:hover {{ background: {Theme.PANEL_3}; color: {Theme.TEXT}; }}"
+        )
+        self._add_note.clicked.connect(self._on_add_note)
+        title_row.addWidget(self._add_note)
+        pl.addLayout(title_row)
         self._cols = ResultTableWidget()
         self._cols.meta.setVisible(False)
         self._cols.set_toolbar_visible(False)  # no value-viewer/export for a schema list
@@ -133,6 +153,7 @@ class StructurePanel(QWidget):
         relations: dict[str, list[dict[str, Any]]] | None = None,
         indexes: list[dict[str, Any]] | None = None,
     ) -> None:
+        self._table_name = table
         self._title.setText(table)
         rows = [{
             "Column": c.get("name", ""),
@@ -204,6 +225,20 @@ class StructurePanel(QWidget):
     def _on_link(self, href: str) -> None:
         if href:
             self.navigate_table.emit(href)
+
+    def _on_add_note(self) -> None:
+        """Emit a prefill for the Notes editor: selected column, else table-level."""
+        if not self._table_name:
+            return
+        column = ""
+        grid = getattr(self._cols, "table", None)
+        if grid is not None:
+            row = grid.currentRow()
+            if row >= 0:
+                item = grid.item(row, 0)  # the "Column" cell
+                if item is not None:
+                    column = str(item.text() or "").strip()
+        self.annotate_requested.emit({"table": self._table_name, "column": column})
 
     def _on_copy_ddl(self) -> None:
         QApplication.clipboard().setText(self._ddl.toPlainText())

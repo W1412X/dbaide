@@ -61,6 +61,7 @@ class WorkbenchView(QWidget):
     doc_closed = pyqtSignal(object)          # the closed widget
     navigate_table = pyqtSignal(str)         # FK link → open a related table
     navigate_fk = pyqtSignal(str, str, object)  # data-cell FK → open referenced row
+    annotate_requested = pyqtSignal(dict)    # Structure panel → add a note
     doc_requested = pyqtSignal(str)          # path — emitted when a DocTab is activated
 
     def __init__(self, history_panel: QueryHistoryPanel, parent=None) -> None:
@@ -252,6 +253,7 @@ class WorkbenchView(QWidget):
         doc.ddl_requested.connect(lambda payload, d=doc: self.ddl_requested.emit(d, payload))
         doc.navigate_table.connect(self.navigate_table.emit)
         doc.navigate_fk.connect(self.navigate_fk.emit)
+        doc.annotate_requested.connect(self.annotate_requested.emit)
         index = self.tabs.addTab(doc, table)
         self.tabs.setCurrentIndex(index)
         doc.open(columns, relations, indexes)

@@ -124,6 +124,8 @@ class SQLWriter:
             "connection is already pointed at the correct database. Only qualify a table with a "
             "database prefix when the query genuinely spans MORE THAN ONE database. "
             "Return confidence 0.0-1.0 based on how sure you are about the mapping. "
+            "User notes are AUTHORITATIVE: they override DB comments and any inference — "
+            "if a note says an object is deprecated/wrong, do NOT use it. "
             + answer_language_directive()
         )
         if multi_table:
@@ -139,6 +141,11 @@ class SQLWriter:
         blocks = [
             f"Dialect: {self.dialect}",
             f"Question: {question}",
+        ]
+        notes = self._format_object_notes(context)
+        if notes:
+            blocks.append(notes)
+        blocks += [
             f"Table: {table}",
             f"Columns:\n{col_lines}",
         ]
@@ -158,6 +165,9 @@ class SQLWriter:
         distinct_dbs = {db for db, _, _ in disclosed_schemas if db}
         cross_db = len(distinct_dbs) > 1
         blocks: list[str] = [f"Dialect: {self.dialect}", f"Question: {question}"]
+        notes = self._format_object_notes(context)
+        if notes:
+            blocks.append(notes)
         if len(distinct_dbs) == 1:
             blocks.append(f"Active database: {next(iter(distinct_dbs))} (reference tables by bare name)")
         blocks.append("Disclosed schemas (use ONLY these tables and columns):")
@@ -177,7 +187,22 @@ class SQLWriter:
 
     @staticmethod
     def _prompt_context(context: dict) -> dict:
-        return {k: v for k, v in context.items() if k not in ("foreign_keys", "criteria")}
+        return {k: v for k, v in context.items() if k not in ("foreign_keys", "criteria", "object_notes")}
+
+    @staticmethod
+    def _format_object_notes(context: dict) -> str:
+        """Authoritative user notes on databases/tables — highest priority, top of prompt."""
+        notes = [n for n in (context.get("object_notes") or []) if str(n.get("note") or "").strip()]
+        if not notes:
+            return ""
+        lines = [
+            "User notes (AUTHORITATIVE — override DB comments, schema guesses and any "
+            "inference; follow what each note says, e.g. if it says an object is "
+            "deprecated/wrong, do not use it):"
+        ]
+        for n in notes:
+            lines.append(f"- {n.get('scope')} {n.get('label')}: {str(n.get('note')).strip()}")
+        return "\n".join(lines)
 
     @staticmethod
     def _format_criteria(context: dict) -> str:
@@ -235,7 +260,11 @@ class SQLWriter:
 
     @staticmethod
     def _format_columns(columns: list[ColumnInfo]) -> str:
-        return "\n".join(
-            f"- {c.name}: {c.data_type}, pk={c.primary_key}, indexed={c.indexed}, comment={c.comment}"
-            for c in columns
-        )
+        def _line(c: ColumnInfo) -> str:
+            base = f"- {c.name}: {c.data_type}, pk={c.primary_key}, indexed={c.indexed}, comment={c.comment}"
+            note = str(getattr(c, "note", "") or "").strip()
+            if note:
+                base += f", note(AUTHORITATIVE)={note}"
+            return base
+
+        return "\n".join(_line(c) for c in columns)

@@ -23,6 +23,7 @@ class TableDocument(QWidget):
     ddl_requested = pyqtSignal(dict)   # fetch the real CREATE TABLE DDL from the DB
     navigate_table = pyqtSignal(str)  # bubbled from the Structure panel's FK links
     navigate_fk = pyqtSignal(str, str, object)  # (ref_table, ref_column, value)
+    annotate_requested = pyqtSignal(dict)  # add a note to this table/column
 
     def __init__(self, connection: str, database: str, table: str, parent=None) -> None:
         super().__init__(parent)
@@ -50,6 +51,7 @@ class TableDocument(QWidget):
         self.data.navigate_fk.connect(self.navigate_fk.emit)
         self.structure = StructurePanel()
         self.structure.navigate_table.connect(self.navigate_table.emit)
+        self.structure.annotate_requested.connect(self._on_annotate)
         # Structure first — opening a table shows its (offline, instant) structure;
         # the Data tab issues its query lazily, only when the user actually opens it.
         self._structure_index = self.tabs.addTab(self.structure, t("tab.structure"))
@@ -125,3 +127,8 @@ class TableDocument(QWidget):
 
     def show_count(self, total: int) -> None:
         self.data.show_count(total)
+
+    def _on_annotate(self, prefill: dict[str, Any]) -> None:
+        # The Structure panel only knows the table/column; add this document's
+        # database before bubbling up to the window's Notes editor.
+        self.annotate_requested.emit({**prefill, "database": self.database})

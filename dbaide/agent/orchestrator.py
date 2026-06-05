@@ -24,6 +24,7 @@ from dbaide.agent.progressive_schema import ModelRequiredError, ProgressiveSchem
 from dbaide.agent.router import TaskRouter
 from dbaide.agent.sql_writer import SQLWriter
 from dbaide.joins import JoinCatalogStore
+from dbaide.annotations import AnnotationStore
 from dbaide.assets import AssetStore
 from dbaide.core.errors import DBAideError, ErrorCode
 from dbaide.core.result import ExecutionPolicy, ValidationReport
@@ -70,6 +71,7 @@ class AskOrchestrator:
         *,
         asset_store: AssetStore | None = None,
         join_catalog: JoinCatalogStore | None = None,
+        annotations: AnnotationStore | None = None,
         execution_policy: ExecutionPolicy = ExecutionPolicy.SAFE_AUTO,
         progress: Callable[[Any], None] | None = None,
     ) -> None:
@@ -79,6 +81,7 @@ class AskOrchestrator:
         self.llm = llm or NullLLMClient()
         self.asset_store = asset_store or AssetStore()
         self.join_catalog = join_catalog or JoinCatalogStore()
+        self.annotations = annotations or AnnotationStore()
         self.execution_policy = execution_policy
         self.progress = progress or (lambda _msg: None)
         # User-pinned schema scope (set by the workflow from composer attachments).

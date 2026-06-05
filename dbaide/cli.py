@@ -132,6 +132,29 @@ def build_parser() -> argparse.ArgumentParser:
     relations.add_argument("--database", default="")
     relations.add_argument("--json", action="store_true")
 
+    annotate = sub.add_parser(
+        "annotate",
+        help="Add/list/remove authoritative user notes on a database/table/column",
+    )
+    ansub = annotate.add_subparsers(dest="annotate_command", required=True)
+    an_add = ansub.add_parser("add", help="Add or update a note (upserts by object)")
+    an_add.add_argument("note", help="The note text, e.g. 'UTC timestamp; show +8' or 'deprecated, use orders_v2'")
+    an_add.add_argument("--conn", default="", help="Connection name")
+    an_add.add_argument("--database", default="", help="Database/schema (optional; omit for a connection-wide note)")
+    an_add.add_argument("--table", default="", help="Table name (omit for a database-level note)")
+    an_add.add_argument("--column", default="", help="Column name (requires --table)")
+    an_list = ansub.add_parser("list", help="List notes for a connection")
+    an_list.add_argument("--conn", default="")
+    an_list.add_argument("--database", default="")
+    an_list.add_argument("--table", default="")
+    an_list.add_argument("--json", action="store_true")
+    an_rm = ansub.add_parser("rm", help="Remove a note by id, or by object (scope/database/table/column)")
+    an_rm.add_argument("--conn", default="")
+    an_rm.add_argument("--id", default="", help="Annotation id (from `annotate list`)")
+    an_rm.add_argument("--database", default="")
+    an_rm.add_argument("--table", default="")
+    an_rm.add_argument("--column", default="")
+
     doc = sub.add_parser("doc", help="Export schema markdown from assets")
     doc.add_argument("--conn", default="")
     doc.add_argument("--database", default="")
@@ -252,6 +275,8 @@ def dispatch(args: argparse.Namespace, cfg: ConfigManager) -> int:
             for row in rows:
                 print(f"{row['database']}.{row['table']}.{row['column']} -> {row['ref_table']}.{row['ref_column']} ({row['source']})")
         return 0
+    if args.command == "annotate":
+        return dispatch_annotate(args, cfg)
     if args.command == "doc":
         conn = cfg.get_connection(args.conn or None)
         text = DeveloperTools().markdown(conn.name, database=args.database)
@@ -371,6 +396,59 @@ def dispatch_queries(args: argparse.Namespace, cfg: ConfigManager) -> int:
     print("-" * 90)
     print(f"{len(entries)} queries · total {total_ms:.0f}ms")
     return 0
+
+
+def dispatch_annotate(args: argparse.Namespace, cfg: ConfigManager) -> int:
+    from dbaide.annotations import AnnotationStore
+
+    conn = cfg.get_connection(args.conn or None)
+    store = AnnotationStore()
+
+    if args.annotate_command == "add":
+        scope = "column" if args.column else ("table" if args.table else "database")
+        record = store.add(
+            conn.name,
+            scope=scope,
+            note=args.note,
+            database=args.database,
+            table=args.table,
+            column=args.column,
+        )
+        print(f"Saved {scope} note on {_annotation_label(record)}  (id {record['id']})")
+        return 0
+
+    if args.annotate_command == "list":
+        records = store.list_records(conn.name, database=args.database, table=args.table)
+        if getattr(args, "json", False):
+            print(json.dumps(records, ensure_ascii=False, indent=2, default=str))
+            return 0
+        if not records:
+            print(f"No notes for {conn.name}. Add one with: dbaide annotate add \"...\" --conn {conn.name} --table T")
+            return 0
+        for r in records:
+            print(f"{r['id']}  {r['scope']:<8} {_annotation_label(r):<40}  {r['note']}")
+        return 0
+
+    if args.annotate_command == "rm":
+        if args.id:
+            ok = store.delete(conn.name, ann_id=args.id)
+        else:
+            scope = "column" if args.column else ("table" if args.table else "database")
+            ok = store.delete(
+                conn.name, scope=scope, database=args.database, table=args.table, column=args.column
+            )
+        print("Removed." if ok else "No matching note found.")
+        return 0 if ok else 1
+
+    return 1
+
+
+def _annotation_label(record: dict) -> str:
+    db = str(record.get("database") or "").strip()
+    table = str(record.get("table") or "").strip()
+    column = str(record.get("column") or "").strip()
+    parts = [p for p in (db, table, column) if p]
+    return ".".join(parts) if parts else "(connection-wide)"
 
 
 def dispatch_connect(args: argparse.Namespace, cfg: ConfigManager) -> int:

@@ -46,6 +46,8 @@ def _tab_label(tab_id: str) -> str:
 from dbaide.desktop.views.ask_tab import AskTab
 from dbaide.desktop.dialogs.joins import JoinsDialog
 from dbaide.desktop.views.joins_tab import JoinsTab
+from dbaide.desktop.dialogs.annotations import AnnotationsDialog
+from dbaide.desktop.views.annotations_tab import AnnotationsTab
 from dbaide.desktop.views.sidebar import Sidebar
 from dbaide.desktop.views.workbench import WorkbenchView
 from dbaide.desktop.views.query_history import QueryHistoryPanel
@@ -155,6 +157,7 @@ class MainWindow(QMainWindow):
         self.topbar.build_assets.connect(self.build_assets)
         self.topbar.settings.connect(lambda: self.open_settings("connections"))
         self.topbar.joins_requested.connect(self.open_joins)
+        self.topbar.notes_requested.connect(self.open_annotations)
         self.topbar.copy_conversation_requested.connect(self.copy_conversation)
         self.topbar.new_query_requested.connect(self._shortcut_new_query)
         self.topbar.new_conn_requested.connect(lambda: self.open_settings("connections"))
@@ -219,6 +222,7 @@ class MainWindow(QMainWindow):
         self.workbench.doc_closed.connect(self._on_doc_closed)
         self.workbench.navigate_table.connect(self._open_table_by_name)
         self.workbench.navigate_fk.connect(self._navigate_fk)
+        self.workbench.annotate_requested.connect(self.annotate_object)
         self.stack.addWidget(self.ask_tab)    # mode 0 — Assistant
         self.stack.addWidget(self.workbench)  # mode 1 — Workbench
         center_layout.addWidget(self.stack, 1)
@@ -236,6 +240,8 @@ class MainWindow(QMainWindow):
         # no right-hand activity panel at all.
         self.joins = JoinsTab()
         self._joins_dialog: JoinsDialog | None = None
+        self.annotations = AnnotationsTab()
+        self._annotations_dialog: AnnotationsDialog | None = None
 
         body.addWidget(self.sidebar)
         body.addWidget(center)
@@ -533,6 +539,75 @@ class MainWindow(QMainWindow):
             self.service.dispatch("delete_join", {"connection_name": conn, "id": join_id})
             self.bus.emit(JOINS_CHANGED, {"instance": conn})
             self.toast(_i18n_t("toast.join_deleted"))
+        except Exception as exc:
+            self.toast(str(exc))
+
+    # ── Object annotations (user notes on db/table/column) ──────────────────
+
+    def refresh_annotations(self) -> None:
+        conn = self.current_connection()
+        if not conn:
+            self.annotations.load([])
+            return
+        try:
+            result = self.service.dispatch("list_annotations", {"connection_name": conn})
+            self.annotations.load(result.get("annotations") or [])
+        except Exception as exc:
+            self.toast(str(exc))
+
+    def open_annotations(self) -> None:
+        if not self.current_connection():
+            self.toast(_i18n_t("toast.select_connection"))
+            return
+        if self._annotations_dialog is None:
+            dialog = AnnotationsDialog(self.annotations, parent=self)
+            dialog.refresh_requested.connect(self.refresh_annotations)
+            dialog.add_requested.connect(self._add_annotation)
+            dialog.update_requested.connect(self._update_annotation)
+            dialog.delete_requested.connect(self._delete_annotation)
+            self._annotations_dialog = dialog
+        self.refresh_annotations()
+        self._annotations_dialog.show()
+        self._annotations_dialog.raise_()
+        self._annotations_dialog.activateWindow()
+
+    def annotate_object(self, prefill: dict[str, Any]) -> None:
+        """Entry point from the Structure panel context menu — pre-filled add."""
+        if not self.current_connection():
+            self.toast(_i18n_t("toast.select_connection"))
+            return
+        self.annotations.add_with_prefill(prefill)
+
+    def _add_annotation(self, payload: dict[str, Any]) -> None:
+        conn = self.current_connection()
+        if not conn:
+            return
+        try:
+            self.service.dispatch("add_annotation", {**payload, "connection_name": conn})
+            self.toast(_i18n_t("toast.note_saved"))
+            self.refresh_annotations()
+        except Exception as exc:
+            self.toast(str(exc))
+
+    def _update_annotation(self, payload: dict[str, Any]) -> None:
+        conn = self.current_connection()
+        if not conn:
+            return
+        try:
+            self.service.dispatch("update_annotation", {**payload, "connection_name": conn})
+            self.toast(_i18n_t("toast.note_updated"))
+            self.refresh_annotations()
+        except Exception as exc:
+            self.toast(str(exc))
+
+    def _delete_annotation(self, ann_id: str) -> None:
+        conn = self.current_connection()
+        if not conn:
+            return
+        try:
+            self.service.dispatch("delete_annotation", {"connection_name": conn, "id": ann_id})
+            self.toast(_i18n_t("toast.note_deleted"))
+            self.refresh_annotations()
         except Exception as exc:
             self.toast(str(exc))
 

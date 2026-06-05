@@ -9,6 +9,7 @@ logger = logging.getLogger("dbaide.desktop.service")
 from dbaide.adapters import build_adapter
 from dbaide.assets import AssetBuilder, AssetSearch, AssetStore
 from dbaide.joins import JoinCatalogStore
+from dbaide.annotations import AnnotationStore
 from dbaide.assets.summarizer import (
     render_database_markdown,
     render_instance_markdown,
@@ -103,6 +104,7 @@ class DesktopService:
         self.cfg = cfg or ConfigManager()
         self.store = store or AssetStore()
         self.join_catalog = JoinCatalogStore()
+        self.annotations = AnnotationStore()
         self.history = WorkflowHistoryStore()
         self.sessions = ChatSessionStore()
         import threading
@@ -167,6 +169,10 @@ class DesktopService:
             "add_join": self.add_join,
             "update_join": self.update_join,
             "delete_join": self.delete_join,
+            "list_annotations": self.list_annotations,
+            "add_annotation": self.add_annotation,
+            "update_annotation": self.update_annotation,
+            "delete_annotation": self.delete_annotation,
             "resource_defaults": self.resource_defaults,
             "save_resource_defaults": self.save_resource_defaults,
             "recent_queries": self.recent_queries,
@@ -838,6 +844,56 @@ class DesktopService:
         ok = self.join_catalog.delete(conn.name, join_id=join_id, endpoint=endpoint)
         if not ok:
             raise ValueError("Join not found")
+        return {"deleted": True}
+
+    # ── Object annotations (user notes on db/table/column) ──────────────────
+
+    def list_annotations(self, payload: dict[str, Any]) -> dict[str, Any]:
+        conn = self.cfg.get_connection(str(payload.get("connection_name") or payload.get("name") or None))
+        records = self.annotations.list_records(
+            conn.name,
+            scope=str(payload.get("scope") or ""),
+            database=str(payload.get("database") or ""),
+            table=str(payload.get("table") or ""),
+            column=str(payload.get("column") or ""),
+        )
+        return {"annotations": records, "count": len(records)}
+
+    def _annotation_scope(self, payload: dict[str, Any]) -> str:
+        scope = str(payload.get("scope") or "").strip().lower()
+        if scope in {"database", "table", "column"}:
+            return scope
+        if str(payload.get("column") or "").strip():
+            return "column"
+        if str(payload.get("table") or "").strip():
+            return "table"
+        return "database"
+
+    def add_annotation(self, payload: dict[str, Any]) -> dict[str, Any]:
+        conn = self.cfg.get_connection(str(payload.get("connection_name") or payload.get("name") or None))
+        record = self.annotations.add(
+            conn.name,
+            scope=self._annotation_scope(payload),
+            note=str(payload.get("note") or ""),
+            database=str(payload.get("database") or ""),
+            table=str(payload.get("table") or ""),
+            column=str(payload.get("column") or ""),
+        )
+        return {"annotation": record}
+
+    def update_annotation(self, payload: dict[str, Any]) -> dict[str, Any]:
+        conn = self.cfg.get_connection(str(payload.get("connection_name") or payload.get("name") or None))
+        ann_id = str(payload.get("id") or "")
+        updated = self.annotations.update(conn.name, ann_id, {"note": payload.get("note")})
+        if updated is None:
+            raise ValueError(f"Note not found: {ann_id}")
+        return {"annotation": updated}
+
+    def delete_annotation(self, payload: dict[str, Any]) -> dict[str, Any]:
+        conn = self.cfg.get_connection(str(payload.get("connection_name") or payload.get("name") or None))
+        ok = self.annotations.delete(conn.name, ann_id=str(payload.get("id") or ""))
+        if not ok:
+            raise ValueError("Note not found")
         return {"deleted": True}
 
     def _safe_llm(self):

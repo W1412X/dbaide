@@ -11,11 +11,13 @@ from dbaide.core.result import ExecutionPolicy
 from dbaide.models import ColumnInfo
 from dbaide.tools.registry import ToolContext, ToolRegistry, ToolResult
 from dbaide.agent.schema_context import (
+    apply_column_notes,
     collect_relations,
     disclosed_schemas_for_tables,
     join_confidence_for_sql,
     merge_sql_context,
     normalize_db_table,
+    object_notes_for_tables,
     validation_feedback,
 )
 from dbaide.agent.join_validation import validate_join_relations
@@ -43,6 +45,7 @@ from dbaide.tools.specs import (
     ADD_JOIN,
     UPDATE_JOIN,
     DELETE_JOIN,
+    ANNOTATE_OBJECT,
 )
 
 if TYPE_CHECKING:
@@ -68,6 +71,7 @@ LOOP_DECISION_TOOL_NAMES = frozenset({
     "profile_table",
     "column_stats",
     "ask_user",
+    "annotate_object",
 })
 
 
@@ -321,6 +325,32 @@ def build_tool_registry(orchestrator: AskOrchestrator) -> ToolRegistry:
         )
         return ToolResult(ok=True, data={"join": record, "relation": catalog_record_to_relation(record)})
 
+    def _annotate_object(args: dict[str, Any], _ctx: ToolContext) -> ToolResult:
+        note = str(args.get("note") or "").strip()
+        if not note:
+            return ToolResult(ok=False, error=_err("annotate_object", "note is required"))
+        table = str(args.get("table") or "").strip()
+        column = str(args.get("column") or "").strip()
+        scope = str(args.get("scope") or "").strip().lower()
+        if scope not in {"database", "table", "column"}:
+            scope = "column" if column else ("table" if table else "database")
+        database = str(args.get("database") or orchestrator._loop_database or "")
+        store = getattr(orchestrator, "annotations", None)
+        if store is None:
+            return ToolResult(ok=False, error=_err("annotate_object", "annotation store unavailable"))
+        try:
+            record = store.add(
+                orchestrator.instance,
+                scope=scope,
+                note=note,
+                database=database,
+                table=table,
+                column=column,
+            )
+        except ValueError as exc:
+            return ToolResult(ok=False, error=_err("annotate_object", str(exc)))
+        return ToolResult(ok=True, data={"annotation": record, "saved": True})
+
     def _update_join(args: dict[str, Any], _ctx: ToolContext) -> ToolResult:
         join_id = str(args.get("id") or args.get("join_id") or "").strip()
         if not join_id:
@@ -405,6 +435,9 @@ def build_tool_registry(orchestrator: AskOrchestrator) -> ToolRegistry:
             disclosed = _collect_disclosed_schemas(orchestrator, args)
         if not disclosed:
             return ToolResult(ok=False, error=_err("generate_sql", "table is required (resolve_schema or describe_table first)"))
+        # Backfill user column notes regardless of how `disclosed` was built (the
+        # resolve_schema fast path bypasses _disclosed_schemas_for_tables).
+        apply_column_notes(orchestrator, disclosed)
         try:
             targets = [(db, table) for db, table, _ in disclosed]
             relations = list(orchestrator._loop_relations or [])
@@ -420,6 +453,9 @@ def build_tool_registry(orchestrator: AskOrchestrator) -> ToolRegistry:
             ctx = merge_sql_context(orchestrator.session.disclosure.summary(), relations)
             if getattr(orchestrator, "_loop_clarifications", None):
                 ctx["criteria"] = list(orchestrator._loop_clarifications)  # confirmed 口径
+            object_notes = object_notes_for_tables(orchestrator, targets)
+            if object_notes:
+                ctx["object_notes"] = object_notes  # authoritative db/table user notes
             feedback = orchestrator._loop_sql_feedback
             table_names = ", ".join(t for _, t, _ in disclosed)
             orchestrator.progress(
@@ -679,6 +715,7 @@ def build_tool_registry(orchestrator: AskOrchestrator) -> ToolRegistry:
     registry.register(ADD_JOIN, _add_join)
     registry.register(UPDATE_JOIN, _update_join)
     registry.register(DELETE_JOIN, _delete_join)
+    registry.register(ANNOTATE_OBJECT, _annotate_object)
     registry.register(CLARIFY_SEMANTICS, _clarify_semantics)
     registry.register(GENERATE_SQL, _generate_sql)
     registry.register(VALIDATE_SQL, _validate_sql)

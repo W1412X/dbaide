@@ -207,7 +207,115 @@ def _disclosed_schemas_for_tables(
         if columns is None:
             columns = orchestrator.schema.describe_table(table, database=database)
         schemas.append((database, table, columns))
+    _apply_column_notes(orchestrator, schemas)
     return schemas
+
+
+def _annotation_store(orchestrator: AskOrchestrator):
+    return getattr(orchestrator, "annotations", None)
+
+
+def apply_column_notes(
+    orchestrator: AskOrchestrator,
+    schemas: list[tuple[str, str, list[ColumnInfo]]],
+) -> None:
+    """Public: backfill user column notes onto disclosed ColumnInfo objects.
+
+    Called on every path that feeds generate_sql — including the resolve_schema
+    fast path, which does not go through ``_disclosed_schemas_for_tables``."""
+    _apply_column_notes(orchestrator, schemas)
+
+
+def _apply_column_notes(
+    orchestrator: AskOrchestrator,
+    schemas: list[tuple[str, str, list[ColumnInfo]]],
+) -> None:
+    """Backfill user column notes onto the disclosed ColumnInfo objects."""
+    store = _annotation_store(orchestrator)
+    if store is None or not schemas:
+        return
+    try:
+        view = store.annotations_for_tables(
+            orchestrator.instance, [(db, table) for db, table, _ in schemas]
+        )
+    except Exception as exc:  # never let annotations break a query
+        logger.warning("annotation_lookup_failed: %s", exc)
+        return
+    col_notes = view.get("columns") or {}
+    for database, table, columns in schemas:
+        notes = col_notes.get((str(database).strip().lower(), str(table).strip().lower())) or {}
+        if not notes:
+            continue
+        for col in columns:
+            note = notes.get(str(col.name).strip().lower())
+            if note:
+                col.note = note
+
+
+def object_notes_for_tables(
+    orchestrator: AskOrchestrator,
+    tables: list[tuple[str, str]],
+) -> list[dict[str, Any]]:
+    """Database/table-level user notes for the given targets.
+
+    Returns a list of ``{"scope", "label", "note"}`` dicts the SQL writer and
+    decision prompt render as an authoritative block. The note text is passed
+    verbatim — the model reads it and decides what it implies."""
+    store = _annotation_store(orchestrator)
+    if store is None or not tables:
+        return []
+    try:
+        view = store.annotations_for_tables(orchestrator.instance, tables)
+    except Exception as exc:
+        logger.warning("annotation_lookup_failed: %s", exc)
+        return []
+    out: list[dict[str, Any]] = []
+    for db, note in (view.get("databases") or {}).items():
+        out.append({"scope": "database", "label": db or "(all databases)", "note": note})
+    for (db, table), note in (view.get("tables") or {}).items():
+        label = f"{db}.{table}" if db else table
+        out.append({"scope": "table", "label": label, "note": note})
+    return out
+
+
+def decision_notes_block(orchestrator: AskOrchestrator, database: str = "") -> str:
+    """Database/table notes for the whole instance, for the decision prompt.
+
+    Surfaced BEFORE the agent picks tables so notes (e.g. "this table is
+    deprecated, use X instead") can steer the choice. Bounded for prompt size;
+    the model interprets each note's meaning itself."""
+    store = _annotation_store(orchestrator)
+    if store is None:
+        return ""
+    try:
+        records = [
+            r
+            for r in store.list_records(orchestrator.instance, database=database)
+            if _norm_scope(r) in ("database", "table") and str(r.get("note") or "").strip()
+        ]
+    except Exception as exc:
+        logger.warning("annotation_lookup_failed: %s", exc)
+        return ""
+    if not records:
+        return ""
+    lines = [
+        "User notes on objects (AUTHORITATIVE — honour these when choosing tables "
+        "and writing SQL; they override DB comments and any inference):"
+    ]
+    for r in records[:40]:
+        scope = _norm_scope(r)
+        db = str(r.get("database") or "").strip()
+        if scope == "database":
+            label = db or "(all databases)"
+        else:
+            tbl = str(r.get("table") or "").strip()
+            label = f"{db}.{tbl}" if db else tbl
+        lines.append(f"- {scope} {label}: {str(r.get('note')).strip()}")
+    return "\n".join(lines)
+
+
+def _norm_scope(record: dict[str, Any]) -> str:
+    return str(record.get("scope") or "").strip().lower()
 
 
 def disclosed_table_keys(orchestrator: AskOrchestrator) -> list[tuple[str, str]]:
