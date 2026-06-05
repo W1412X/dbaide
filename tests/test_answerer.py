@@ -159,6 +159,20 @@ class TestSummarizeRowsBranches:
         result = QueryResult(columns=["id"], rows=[], sql="", row_count=0, elapsed_ms=1.0)
         assert _summarize_rows(result, False) == "The query returned no data."
 
+    def test_timing_line_en_singular_plural_and_truncation(self):
+        from dbaide.agent.answerer import _timing_line
+        one = QueryResult(columns=["id"], rows=[{"id": 1}], sql="", row_count=1, elapsed_ms=4.0)
+        assert _timing_line(one, False) == "1 row · 4ms"
+        many = QueryResult(columns=["id"], rows=[{"id": 1}] * 20, sql="", row_count=1234,
+                           elapsed_ms=7.0, truncated=True)
+        assert _timing_line(many, False) == "1,234 rows · 7ms (showing first 20)"
+
+    def test_timing_line_zh(self):
+        from dbaide.agent.answerer import _timing_line
+        r = QueryResult(columns=["id"], rows=[{"id": 1}] * 5, sql="", row_count=5,
+                        elapsed_ms=3.0, truncated=True)
+        assert _timing_line(r, True) == "共 5 条记录，耗时 3ms（仅展示前 5 条）"
+
 
 def test_answer_language_directive_is_ui_authoritative():
     from dbaide.i18n import answer_language_directive

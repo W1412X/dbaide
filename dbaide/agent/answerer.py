@@ -73,18 +73,23 @@ class AnswerFormatter:
                 label = "建议：" if zh else "Suggestions: "
                 sep = "；" if zh else "; "
                 parts.append(label + sep.join(str(a) for a in actions[:3]))
-        if zh:
-            timing = f"共 {result.row_count:,} 条记录" if result.row_count != 1 else "共 1 条记录"
-            timing += f"，耗时 {result.elapsed_ms:.0f}ms"
-            if result.truncated:
-                timing += f"（仅展示前 {len(result.rows)} 条）"
-        else:
-            timing = f"{result.row_count:,} rows" if result.row_count != 1 else "1 row"
-            timing += f" · {result.elapsed_ms:.0f}ms"
-            if result.truncated:
-                timing += f" (showing first {len(result.rows)})"
-        parts.append(timing)
+        parts.append(_timing_line(result, zh))
         return "\n\n".join(p for p in parts if p)
+
+
+def _timing_line(result: QueryResult, zh: bool) -> str:
+    """The footer: row count · elapsed, noting truncation if the result was capped."""
+    if zh:
+        timing = f"共 {result.row_count:,} 条记录" if result.row_count != 1 else "共 1 条记录"
+        timing += f"，耗时 {result.elapsed_ms:.0f}ms"
+        if result.truncated:
+            timing += f"（仅展示前 {len(result.rows)} 条）"
+        return timing
+    timing = f"{result.row_count:,} rows" if result.row_count != 1 else "1 row"
+    timing += f" · {result.elapsed_ms:.0f}ms"
+    if result.truncated:
+        timing += f" (showing first {len(result.rows)})"
+    return timing
 
 
 def _summarize_rows(result: QueryResult, zh: bool) -> str:
