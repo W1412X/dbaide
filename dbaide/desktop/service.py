@@ -400,7 +400,7 @@ class DesktopService:
         - unreachable database / un-describable table → left untouched (never deleted
           on uncertainty). User notes for surviving objects are always preserved.
         """
-        from dbaide.assets.diff import diff_catalog, table_fingerprint
+        from dbaide.assets.diff import diff_catalog
         from dbaide.assets.summarizer import AssetSummarizer
         from dbaide.llm import NullLLMClient
 
@@ -419,32 +419,8 @@ class DesktopService:
             store_db_names = [str(d.get("name") or "") for d in self.store.database_docs(instance) if d.get("name")]
             gone_dbs = [d for d in store_db_names if d not in set(live_db_names)]
 
-            new_snap: dict[str, dict[str, dict]] = {}
-            failed: set[tuple[str, str]] = set()
-            work: list[tuple[str, Any]] = []
-            for db in live_db_names:
-                try:
-                    tinfos = adapter.list_tables(database=db)
-                except Exception:  # noqa: BLE001 — unreachable db: leave it untouched
-                    continue
-                new_snap[db] = {}
-                work.extend((db, ti) for ti in tinfos)
-            # Project per-table metadata concurrently — a sync of a many-table instance
-            # must not be latency-bound on sequential round-trips. Bound the pool by the
-            # same policy.build_max_workers the builder uses, so DB load stays capped.
-            # Futures resolve here in the main thread, so new_snap needs no locking.
-            if work:
-                from concurrent.futures import ThreadPoolExecutor, as_completed
-                workers = max(1, int(getattr(policy, "build_max_workers", 1)))
-                with ThreadPoolExecutor(max_workers=workers) as pool:
-                    futs = {pool.submit(self._project_table_doc, summarizer, adapter, instance, db, ti):
-                            (db, ti) for (db, ti) in work}
-                    for fut in as_completed(futs):
-                        db, ti = futs[fut]
-                        try:
-                            new_snap[db][ti.name] = fut.result()
-                        except Exception:  # noqa: BLE001 — can't describe now: don't treat as dropped
-                            failed.add((db, ti.name))
+            new_snap, failed = self._build_live_snapshot(adapter, summarizer, instance,
+                                                          live_db_names, policy)
 
             considered = set(new_snap) | set(gone_dbs)
             old_snap: dict[str, dict[str, dict]] = {}
@@ -457,28 +433,7 @@ class DesktopService:
                 old_snap[db] = stored
 
             diff = diff_catalog(old_snap, new_snap)
-
-            # ── apply ────────────────────────────────────────────────────────────
-            for db in diff.removed_dbs:
-                self.store.delete_database(instance, db)
-                self.annotations.delete_under(instance, database=db)
-            for (db, table) in diff.removed_tables:
-                self.store.delete_table(instance, db, table)
-                self.annotations.delete_under(instance, database=db, table=table)
-            for (db, table, col) in diff.removed_columns:
-                self.annotations.delete_under(instance, database=db, table=table, column=col)
-            for (db, table) in diff.added_tables:
-                self.store.write_json(self.store.table_dir(instance, db, table) / "table.json",
-                                      new_snap[db][table])
-            for (db, table) in diff.changed_tables:
-                stored = self.store.table_doc(instance, db, table) or {}
-                base = new_snap[db][table]
-                for k in self._STRUCT_FIELDS:
-                    stored[k] = base.get(k)
-                stored["base_fingerprint"] = table_fingerprint(base)
-                if stored.get("sample_rows") or stored.get("enriched_at"):
-                    stored["enrichment_stale"] = True  # structure moved under the enrichment
-                self.store.write_json(self.store.table_dir(instance, db, table) / "table.json", stored)
+            self._apply_catalog_diff(instance, diff, new_snap)
 
             # ── rewrite rollups for affected databases + the instance ────────────
             touched = {db for (db, _t) in diff.added_tables} | {db for (db, _t) in diff.changed_tables} \
@@ -493,6 +448,71 @@ class DesktopService:
                     "added_dbs": len(diff.added_dbs)}
         finally:
             self._end_build(instance)
+
+    def _build_live_snapshot(self, adapter, summarizer, instance: str, live_db_names: list[str],
+                             policy) -> tuple[dict[str, dict[str, dict]], set[tuple[str, str]]]:
+        """Project the current live catalog into base docs, in memory (no writes).
+
+        Returns (snapshot, failed) where snapshot is {db: {table: base_doc}} and failed
+        is the set of (db, table) that couldn't be described this run — excluded from
+        the diff so a transient read error is never mistaken for a dropped table. An
+        unreachable database is skipped entirely (left untouched downstream).
+
+        Per-table metadata is projected concurrently so a sync of a many-table instance
+        isn't latency-bound on sequential round-trips; the pool is bounded by the same
+        policy.build_max_workers the builder uses, so DB load stays capped. Futures
+        resolve in this (caller) thread, so the snapshot dict needs no locking.
+        """
+        new_snap: dict[str, dict[str, dict]] = {}
+        failed: set[tuple[str, str]] = set()
+        work: list[tuple[str, Any]] = []
+        for db in live_db_names:
+            try:
+                tinfos = adapter.list_tables(database=db)
+            except Exception:  # noqa: BLE001 — unreachable db: leave it untouched
+                continue
+            new_snap[db] = {}
+            work.extend((db, ti) for ti in tinfos)
+        if work:
+            from concurrent.futures import ThreadPoolExecutor, as_completed
+            workers = max(1, int(getattr(policy, "build_max_workers", 1)))
+            with ThreadPoolExecutor(max_workers=workers) as pool:
+                futs = {pool.submit(self._project_table_doc, summarizer, adapter, instance, db, ti):
+                        (db, ti) for (db, ti) in work}
+                for fut in as_completed(futs):
+                    db, ti = futs[fut]
+                    try:
+                        new_snap[db][ti.name] = fut.result()
+                    except Exception:  # noqa: BLE001 — can't describe now: don't treat as dropped
+                        failed.add((db, ti.name))
+        return new_snap, failed
+
+    def _apply_catalog_diff(self, instance: str, diff, new_snap: dict[str, dict[str, dict]]) -> None:
+        """Apply a computed catalog diff to the base layer: delete docs for gone
+        objects (cascading their user notes), write base docs for new tables, and for
+        changed tables overwrite the structural fields + re-fingerprint while KEEPING
+        any enrichment (flagged stale when structure moved under it)."""
+        from dbaide.assets.diff import table_fingerprint
+        for db in diff.removed_dbs:
+            self.store.delete_database(instance, db)
+            self.annotations.delete_under(instance, database=db)
+        for (db, table) in diff.removed_tables:
+            self.store.delete_table(instance, db, table)
+            self.annotations.delete_under(instance, database=db, table=table)
+        for (db, table, col) in diff.removed_columns:
+            self.annotations.delete_under(instance, database=db, table=table, column=col)
+        for (db, table) in diff.added_tables:
+            self.store.write_json(self.store.table_dir(instance, db, table) / "table.json",
+                                  new_snap[db][table])
+        for (db, table) in diff.changed_tables:
+            stored = self.store.table_doc(instance, db, table) or {}
+            base = new_snap[db][table]
+            for k in self._STRUCT_FIELDS:
+                stored[k] = base.get(k)
+            stored["base_fingerprint"] = table_fingerprint(base)
+            if stored.get("sample_rows") or stored.get("enriched_at"):
+                stored["enrichment_stale"] = True  # structure moved under the enrichment
+            self.store.write_json(self.store.table_dir(instance, db, table) / "table.json", stored)
 
     def _rewrite_db_rollup(self, summarizer, instance: str, database: str, table_names: list[str]) -> None:
         docs = [d for d in (self.store.table_doc(instance, database, t) for t in table_names) if d]
