@@ -123,11 +123,11 @@ def test_auto_get_relations_after_multi_describe(tmp_path):
     session = Session(connection=cfg)
     orch = AskOrchestrator(adapter, session, AgentMockLLM())
     orch._reset_loop_state("sensor query", "", True)
-    orch._loop_schemas = {
+    orch.run_state.schemas = {
         "assets": [ColumnInfo(name="id", data_type="INTEGER", primary_key=True)],
         "asset_sensors": [ColumnInfo(name="asset_id", data_type="INTEGER")],
     }
-    orch._loop_schema_db = {"assets": "", "asset_sensors": ""}
+    orch.run_state.schema_db = {"assets": "", "asset_sensors": ""}
     loop = AskAgentLoop(orch)
     state = LoopState(question="sensor query", database="", execute_allowed=True)
     registry = build_tool_registry(orch)

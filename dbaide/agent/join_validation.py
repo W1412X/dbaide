@@ -192,7 +192,7 @@ class JoinSampleValidator:
         )
 
         db_map = table_db or {}
-        database = db_map.get(left_table) or db_map.get(right_table) or self.orchestrator._loop_database or ""
+        database = db_map.get(left_table) or db_map.get(right_table) or self.orchestrator.run_state.database or ""
         stats = self._sample_stats(left_table, left_col, right_table, right_col, database=database)
         join_type = classify_join_type(
             max_right_per_left=int(stats.get("max_right_per_left") or 0),

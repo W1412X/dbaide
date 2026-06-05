@@ -31,33 +31,33 @@ def _orch(tmp_path):
 def test_loop_state_preserves_resolved_schema_and_zero_confidence(tmp_path):
     orch = _orch(tmp_path)
     orch._reset_loop_state("q", "", True)
-    orch._loop_resolved_schema = ResolvedSchema(
+    orch.run_state.resolved_schema = ResolvedSchema(
         tables=[{"database": "shop", "table": "orders",
                  "columns": [ColumnInfo(name="id", data_type="bigint")],
                  "reason": "picked orders_v2 because orders is deprecated"}],
         joins=[], notes="", sufficient=True,
     )
-    orch._loop_sql_confidence = 0.0  # model said "no confidence"
+    orch.run_state.sql_confidence = 0.0  # model said "no confidence"
 
     snap = dump_loop_state(orch, transcript=["t"], execute_allowed=True)
 
     fresh = _orch(tmp_path)
     restore_loop_state(fresh, snap)
     # Resolved minimal schema survives the pause/resume round-trip (was lost before).
-    assert fresh._loop_resolved_schema is not None
-    assert not fresh._loop_resolved_schema.is_empty()
-    t = fresh._loop_resolved_schema.tables[0]
+    assert fresh.run_state.resolved_schema is not None
+    assert not fresh.run_state.resolved_schema.is_empty()
+    t = fresh.run_state.resolved_schema.tables[0]
     assert t["table"] == "orders"
     assert t["columns"][0].name == "id"
     assert "deprecated" in t["reason"]
     # A genuine 0.0 confidence is preserved (NOT masked to 0.7 or reset to None).
-    assert fresh._loop_sql_confidence == 0.0
+    assert fresh.run_state.sql_confidence == 0.0
 
 
 def test_confidence_none_when_no_sql_generated(tmp_path):
     orch = _orch(tmp_path)
     orch._reset_loop_state("q", "", True)
-    assert orch._loop_sql_confidence is None  # neutral until the writer sets a real value
+    assert orch.run_state.sql_confidence is None  # neutral until the writer sets a real value
 
 
 def test_continue_multi_runs_all_remaining_intents(tmp_path):

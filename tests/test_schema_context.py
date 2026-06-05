@@ -98,7 +98,7 @@ def test_get_relations_tool(tmp_path):
     result = registry.invoke("get_relations", {}, ctx)
     assert result.ok
     assert result.data["count"] == 1
-    assert orch._loop_relations[0]["ref_table"] == "users"
+    assert orch.run_state.relations[0]["ref_table"] == "users"
 
 
 def test_generate_sql_prompt_includes_foreign_keys(tmp_path):

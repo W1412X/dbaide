@@ -107,7 +107,7 @@ def test_observed_values_sampled(tmp_path):
     from dbaide.agent.toolkit import _sample_observed_values
     from dbaide.models import ColumnInfo
     orch = _orch(tmp_path)
-    orch._loop_execute_allowed = True
+    orch.run_state.execute_allowed = True
     disclosed = [("main", "orders", [
         ColumnInfo(name="status", data_type="TEXT"),
         ColumnInfo(name="amount", data_type="REAL"),

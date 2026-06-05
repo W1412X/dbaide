@@ -12,6 +12,7 @@ from dbaide.agent.answerer import AnswerFormatter
 from dbaide.agent.controllers import ErrorRouter, ResultInterpreter, RiskController
 from dbaide.agent.progress_events import progress_event
 from dbaide.agent.progressive_schema import ProgressiveSchemaAgent
+from dbaide.agent.run_state import RunState
 from dbaide.agent.sql_writer import SQLWriter
 from dbaide.joins import JoinCatalogStore
 from dbaide.annotations import AnnotationStore
@@ -106,36 +107,13 @@ class AskOrchestrator:
         self._reset_loop_state("", "", False)
 
     def _reset_loop_state(self, question: str, database: str, execute: bool) -> None:
-        self._loop_question = question
-        self._loop_database = database
-        self._loop_execute_allowed = execute
-        self._loop_discovery = None
-        self._loop_table = ""
-        self._loop_table_database = database
-        self._loop_columns: list[ColumnInfo] = []
-        self._loop_schemas: dict[str, list[ColumnInfo]] = {}
-        self._loop_schema_db: dict[str, str] = {}
-        self._loop_relations: list[dict[str, Any]] = []
-        self._loop_resolved_schema = None  # ResolvedSchema from the schema linker (minimal-necessary)
-        self._loop_trace_node = ""  # node id of the tool step currently running (for nested traces)
-        self._loop_sql = ""
-        self._loop_sql_rationale = ""
-        self._loop_sql_confidence = None  # None = no SQL generated yet (neutral); a float is the writer's real confidence
-        self._loop_query_result = None
-        self._loop_answer = ""
-        self._loop_sql_feedback = ""
-        self._loop_pending_question = ""
-        self._loop_pending_options = []
-        self._loop_pending_questions: list[dict[str, Any]] = []
-        self._loop_fail_reason = ""
-        # The pinned scope (attachments) prioritises the FIRST discovery only; a later
-        # discovery in the same run broadens, so a wrong/insufficient pin can't trap
-        # the agent into searching only the attached scope forever.
-        self._scope_used = False
-        # Business-criteria (口径) clarification: confirmed criteria injected into SQL,
-        # and the questions currently awaiting a user reply (paired with it on resume).
-        self._loop_clarifications: list[str] = []
-        self._loop_clarify_questions = ""
+        """Start a fresh per-run state for one question (see RunState)."""
+        self.run_state = RunState(
+            question=question,
+            database=database,
+            execute_allowed=execute,
+            table_database=database,
+        )
 
     def run(
         self,
@@ -201,7 +179,7 @@ class AskOrchestrator:
         trace_parent: str = "",
     ) -> AssistantResponse:
         self.error_router.reset()
-        self._loop_fail_reason = ""  # fresh per run (never carry a stale reason)
+        self.run_state.fail_reason = ""  # fresh per run (never carry a stale reason)
         disclosures = list(self.session.disclosure.events)
 
         from dbaide.agent.loop import AskAgentLoop
@@ -223,7 +201,7 @@ class AskOrchestrator:
             )
         except Exception as exc:
             logger.warning("agent_loop_failed: %s", exc, exc_info=True)
-            self._loop_fail_reason = f"exception: {exc}"
+            self.run_state.fail_reason = f"exception: {exc}"
             return AssistantResponse(
                 answer=_i18n_t("agent.loop_failed"),
                 disclosures=self._new_disclosures(disclosures),
@@ -341,9 +319,9 @@ class AskOrchestrator:
         # Prioritise the user's pinned scope on the first discovery; broaden afterwards
         # so the agent can recover if the pinned tables don't actually answer the
         # question (a permanently-scoped run would otherwise never see the right table).
-        scope = self.schema_scope if (self.schema_scope and not getattr(self, "_scope_used", False)) else {}
+        scope = self.schema_scope if (self.schema_scope and not self.run_state.scope_used) else {}
         if scope:
-            self._scope_used = True
+            self.run_state.scope_used = True
         discovery = agent.discover(
             question,
             schema_tools=self.schema,

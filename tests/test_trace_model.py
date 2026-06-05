@@ -210,7 +210,8 @@ def test_execute_step_carries_sql_for_audit():
     from dbaide.agent.loop import _executed_sql, _SQL_TOOLS
 
     class _Orch:
-        _loop_sql = "SELECT 1 FROM t"
+        from dbaide.agent.run_state import RunState
+        run_state = RunState(sql="SELECT 1 FROM t")
 
     class _Res:
         data = {"sql": "SELECT * FROM users LIMIT 100", "row_count": 3}

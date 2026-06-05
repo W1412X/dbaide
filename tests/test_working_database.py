@@ -49,7 +49,7 @@ def test_list_tables_sets_working_database(tmp_path):
     orch._reset_loop_state("how many employees", database="", execute=True)  # auto scope
     ctx = ToolContext()
     reg.invoke("list_tables", {"database": "platform"}, ctx)
-    assert orch._loop_table_database == "platform"  # narrowed to the explored db
+    assert orch.run_state.table_database == "platform"  # narrowed to the explored db
 
 
 def test_describe_without_db_inherits_working_database(tmp_path):
@@ -62,8 +62,8 @@ def test_describe_without_db_inherits_working_database(tmp_path):
     res = reg.invoke("describe_table", {"table": "sys_user"}, ctx)
     assert res.ok
     assert res.data["database"] == "platform"
-    assert orch._loop_table_database == "platform"
-    assert "platform.sys_user" in orch._loop_schemas
+    assert orch.run_state.table_database == "platform"
+    assert "platform.sys_user" in orch.run_state.schemas
 
 
 def test_execute_default_database_is_the_working_db(tmp_path):
@@ -101,4 +101,4 @@ def test_empty_db_does_not_clobber_working_db(tmp_path):
     reg.invoke("list_tables", {"database": "platform"}, ctx)
     from dbaide.agent.toolkit import _remember_table_schema
     _remember_table_schema(orch, "other", "", [ColumnInfo(name="id", data_type="int")])
-    assert orch._loop_table_database == "platform"
+    assert orch.run_state.table_database == "platform"

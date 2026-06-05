@@ -61,10 +61,10 @@ def test_describe_table_accumulates_schemas(tmp_path):
     r2 = registry.invoke("describe_table", {"table": "users"}, ctx)
 
     assert r1.ok and r2.ok
-    assert len(orch._loop_schemas) == 2
+    assert len(orch.run_state.schemas) == 2
     assert "orders" in r2.data["disclosed_tables"]
     assert "users" in r2.data["disclosed_tables"]
-    assert orch._loop_columns == orch._loop_schemas["users"]
+    assert orch.run_state.columns == orch.run_state.schemas["users"]
 
 
 def test_generate_sql_uses_all_disclosed_schemas(tmp_path):

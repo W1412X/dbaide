@@ -78,7 +78,7 @@ class SchemaLinker:
 
         # Base trace node = the resolve_schema tool step; the linker's activities
         # (discovery, selection, relations) nest under it as a true call tree.
-        base = getattr(orch, "_loop_trace_node", "") or self.PARENT
+        base = orch.run_state.trace_node or self.PARENT
         self._base = base
         confirmed: dict[tuple[str, str], dict[str, Any]] = {}  # (db,table) → {columns, reason}
         joins: list[dict[str, Any]] = []
@@ -286,7 +286,7 @@ class SchemaLinker:
 
     def _deterministic(self, question: str, database: str) -> ResolvedSchema:
         """No-LLM fallback: take the discovered tables as-is (full columns)."""
-        base = getattr(self.orch, "_loop_trace_node", "") or self.PARENT
+        base = self.orch.run_state.trace_node or self.PARENT
         discovery = self.orch._discover(question, parent=child_node(base, "discover"))
         confirmed: dict[tuple[str, str], dict[str, Any]] = {}
         for h in discovery.hits:

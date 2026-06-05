@@ -109,7 +109,7 @@ def collect_relations(
     table_names = {table for _, table in tables}
     active_db = ""
     if tables:
-        active_db = tables[0][0] or getattr(orchestrator, "_loop_database", "") or ""
+        active_db = tables[0][0] or orchestrator.run_state.database or ""
 
     catalog_relations: list[dict[str, Any]] = []
     catalog = getattr(orchestrator, "join_catalog", None)
@@ -150,7 +150,7 @@ def collect_relations(
         try:
             inferencer = SemanticJoinInferencer(orchestrator.llm, orchestrator.asset_store, orchestrator.instance)
             semantic = inferencer.infer(
-                question or getattr(orchestrator, "_loop_question", "") or "",
+                question or orchestrator.run_state.question or "",
                 schemas,
                 declared=combined_for_connectivity,
                 progress=orchestrator.progress,
@@ -197,12 +197,12 @@ def _disclosed_schemas_for_tables(
     schemas: list[tuple[str, str, list[ColumnInfo]]] = []
     for database, table in tables:
         schema_key = f"{database}.{table}" if database else table
-        columns = orchestrator._loop_schemas.get(schema_key)
+        columns = orchestrator.run_state.schemas.get(schema_key)
         if columns is None:
-            for key, cols in orchestrator._loop_schemas.items():
+            for key, cols in orchestrator.run_state.schemas.items():
                 if key == table or key.endswith(f".{table}"):
                     columns = cols
-                    database = orchestrator._loop_schema_db.get(key, database)
+                    database = orchestrator.run_state.schema_db.get(key, database)
                     break
         if columns is None:
             columns = orchestrator.schema.describe_table(table, database=database)
@@ -377,8 +377,8 @@ def _norm_scope(record: dict[str, Any]) -> str:
 def disclosed_table_keys(orchestrator: AskOrchestrator) -> list[tuple[str, str]]:
     """(database, table) pairs already described in the tool loop."""
     keys: list[tuple[str, str]] = []
-    for schema_key in orchestrator._loop_schemas:
-        db = str(orchestrator._loop_schema_db.get(schema_key) or orchestrator._loop_database or "")
+    for schema_key in orchestrator.run_state.schemas:
+        db = str(orchestrator.run_state.schema_db.get(schema_key) or orchestrator.run_state.database or "")
         table = schema_key.split(".", 1)[1] if "." in schema_key else schema_key
         keys.append((db, table))
     return keys

@@ -53,8 +53,8 @@ def test_ask_user_tool_sets_pending(tmp_path):
     )
     assert result.ok
     assert result.data["pending"] is True
-    assert orch._loop_pending_question == "Pick one"
-    assert orch._loop_pending_options == ["A", "B"]
+    assert orch.run_state.pending_question == "Pick one"
+    assert orch.run_state.pending_options == ["A", "B"]
 
 
 def test_loop_pauses_on_ask_user_and_resumes(tmp_path):
@@ -88,10 +88,10 @@ def test_loop_state_roundtrip(tmp_path):
     conn = ConnectionConfig(name="local", type="sqlite", path=str(db))
     orch = AskOrchestrator(build_adapter(conn), Session(connection=conn), ClarifyMockLLM())
     orch._reset_loop_state("q", "main", True)
-    orch._loop_sql = "SELECT 1"
-    orch._loop_pending_question = "ignored on restore"
+    orch.run_state.sql = "SELECT 1"
+    orch.run_state.pending_question = "ignored on restore"
     snapshot = dump_loop_state(orch, transcript=["Tool `x` → ok"], execute_allowed=False)
     restore_loop_state(orch, snapshot)
-    assert orch._loop_question == "q"
-    assert orch._loop_sql == "SELECT 1"
-    assert orch._loop_execute_allowed is False
+    assert orch.run_state.question == "q"
+    assert orch.run_state.sql == "SELECT 1"
+    assert orch.run_state.execute_allowed is False

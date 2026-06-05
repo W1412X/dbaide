@@ -41,13 +41,13 @@ def test_explain_sql_sets_loop_answer(tmp_path):
     from dbaide.agent.toolkit import build_tool_registry
 
     orch = _orchestrator(tmp_path)
-    orch._loop_answer = ""
+    orch.run_state.answer = ""
     registry = build_tool_registry(orch)
     handler = registry._handlers["explain_sql"]  # _ctx is unused by _explain_sql
     result = handler({"sql": "SELECT amount FROM orders"}, None)
 
     assert result.ok
-    assert "EXPLAIN diagnosis" in orch._loop_answer
+    assert "EXPLAIN diagnosis" in orch.run_state.answer
 
 
 # ── 2. record_columns is fail-closed without a prior list_tables ────────────

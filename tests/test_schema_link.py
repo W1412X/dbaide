@@ -162,7 +162,7 @@ def test_end_to_end_loop_uses_minimal_resolved_schema(tmp_path):
     resp = orch.run("total paid order amounts", execute=True)
 
     # The loop resolved a minimal schema (only orders, only the 3 picked columns)…
-    assert [t["table"] for t in orch._loop_resolved_schema.tables] == ["orders"]
+    assert [t["table"] for t in orch.run_state.resolved_schema.tables] == ["orders"]
     # …and generate_sql was handed exactly that minimal column set (not all 5 of orders).
     assert captured["tables"] == ["orders"]
     assert set(captured["columns"]) == {"id", "amount", "status"}
@@ -212,7 +212,7 @@ def test_trace_is_a_true_call_tree(tmp_path):
     del orch._discover  # use the REAL progressive discovery (so its internals emit)
     events: list = []
     orch.progress = events.append
-    orch._loop_trace_node = "step:1"  # simulate the loop assigning the tool node
+    orch.run_state.trace_node = "step:1"  # simulate the loop assigning the tool node
     SchemaLinker(orch).resolve("total amount per user")
 
     m = TraceModel()

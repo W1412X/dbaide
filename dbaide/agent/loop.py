@@ -41,7 +41,7 @@ def _executed_sql(tool_name: str, orch, result) -> str:
     data = getattr(result, "data", None)
     if isinstance(data, dict) and data.get("sql"):
         return str(data["sql"]).strip()
-    return str(getattr(orch, "_loop_sql", "") or "").strip()
+    return str(orch.run_state.sql or "").strip()
 RESULT_PREVIEW_LIMIT = 3500
 
 
@@ -113,12 +113,12 @@ class AskAgentLoop:
                 transcript.append(f"User reply: {reply}")
                 # If the pause was a business-criteria (口径) clarification, fold the
                 # reply into the confirmed criteria so generate_sql honours it exactly.
-                if getattr(orch, "_loop_clarify_questions", ""):
-                    orch._loop_clarifications.append(
-                        f"User confirmed the following criteria — {orch._loop_clarify_questions}\n"
+                if orch.run_state.clarify_questions:
+                    orch.run_state.clarifications.append(
+                        f"User confirmed the following criteria — {orch.run_state.clarify_questions}\n"
                         f"User's answer: {reply}"
                     )
-                    orch._loop_clarify_questions = ""
+                    orch.run_state.clarify_questions = ""
                 self.progress(
                     progress_event(stage="user", title=f"Reply: {reply[:120]}", status="completed", kind="user"),
                 )
@@ -221,7 +221,7 @@ class AskAgentLoop:
             )
             # Expose this step's trace node id so the tool's sub-agents/sub-tools nest
             # under it (true call hierarchy), not flattened by stage-name resolution.
-            orch._loop_trace_node = (f"{self._trace_parent}:step:{step_no}"
+            orch.run_state.trace_node = (f"{self._trace_parent}:step:{step_no}"
                                      if self._trace_parent else f"step:{step_no}")
             with llm_stage(tool_name):
                 result = runtime.call_tool(tool_name, args, tool_ctx)
@@ -274,7 +274,7 @@ class AskAgentLoop:
                 data = result.data if isinstance(result.data, dict) else {}
                 if data.get("row_count") is not None:
                     done_event["row_count"] = data.get("row_count")
-                db = str(data.get("database") or orch._loop_database or "").strip()
+                db = str(data.get("database") or orch.run_state.database or "").strip()
                 if db:
                     done_event["database"] = db
             self.progress(done_event)
@@ -297,15 +297,15 @@ class AskAgentLoop:
             if tool_name in _EXECUTE_TOOLS and result.ok:
                 break
             if tool_name in _EXECUTE_TOOLS and isinstance(result.data, dict) and result.data.get("blocked"):
-                sql = str(result.data.get("sql") or orch._loop_sql or "")
+                sql = str(result.data.get("sql") or orch.run_state.sql or "")
                 reason = str(result.data.get("reason") or "Execution blocked")
-                orch._loop_answer = f"SQL:\n```sql\n{sql}\n```\n\n_{reason}_"
+                orch.run_state.answer = f"SQL:\n```sql\n{sql}\n```\n\n_{reason}_"
                 break
             if tool_name == "validate_sql" and result.ok:
                 policy = orch.execution_policy
                 if not state.execute_allowed or policy.value in ("sql_only", "inspect_only"):
-                    sql = orch._loop_sql or ""
-                    orch._loop_answer = f"SQL:\n```sql\n{sql}\n```\n\n_Generated (not executed)._"
+                    sql = orch.run_state.sql or ""
+                    orch.run_state.answer = f"SQL:\n```sql\n{sql}\n```\n\n_Generated (not executed)._"
                     break
             if tool_name == "synthesize_schema_answer" and result.ok:
                 break
@@ -316,11 +316,11 @@ class AskAgentLoop:
         # of the step budget mid-task — the latter must not present a stale intermediate
         # answer as a finished result without telling the user it may be incomplete.
         budget_exhausted = getattr(runtime, "steps_remaining", 1) <= 0
-        if orch._loop_query_result or orch._loop_answer:
-            if orch._loop_query_result:
+        if orch.run_state.query_result or orch.run_state.answer:
+            if orch.run_state.query_result:
                 answer = self._answer_from_state(orch)
             else:
-                answer = orch._loop_answer or self._answer_from_state(orch)
+                answer = orch.run_state.answer or self._answer_from_state(orch)
             if answer:
                 resp = self._build_response(orch, answer, disclosures_before or [])
                 if budget_exhausted:
@@ -334,7 +334,7 @@ class AskAgentLoop:
         return self._build_failed_response(orch, "step_budget_exhausted", disclosures_before or [])
 
     def _fail(self, reason: str) -> None:
-        self.orchestrator._loop_fail_reason = reason
+        self.orchestrator.run_state.fail_reason = reason
 
     def _build_failed_response(
         self, orch: AskOrchestrator, reason: str, disclosures_before: list[str],
@@ -348,15 +348,15 @@ class AskAgentLoop:
                            kind="agent", detail=reason),
         )
         from dbaide.i18n import t
-        answer = (orch._loop_answer or "").strip()
-        if not answer and orch._loop_query_result:
+        answer = (orch.run_state.answer or "").strip()
+        if not answer and orch.run_state.query_result:
             answer = self._answer_from_state(orch)
         if not answer:
             answer = t("agent.loop_failed")
         return AssistantResponse(
             answer=answer,
-            sql=orch._loop_sql or "",
-            result=orch._loop_query_result,
+            sql=orch.run_state.sql or "",
+            result=orch.run_state.query_result,
             disclosures=orch.session.disclosure.events[len(disclosures_before):],
             warnings=[t("agent.loop_failed_reason", reason=reason)],
         )
@@ -477,7 +477,7 @@ class AskAgentLoop:
         notes_line = f"{notes}\n\n" if notes else ""
         # Confirmed business criteria (口径) the user already settled — surface them so the
         # decision model doesn't re-clarify or finish in a way that ignores them.
-        confirmed = [c for c in getattr(self.orchestrator, "_loop_clarifications", []) if str(c).strip()]
+        confirmed = [c for c in self.orchestrator.run_state.clarifications if str(c).strip()]
         criteria_line = ""
         if confirmed:
             criteria_line = (
@@ -531,28 +531,28 @@ class AskAgentLoop:
         raise LoopDecisionError(last_error or "no valid decision")
 
     def _answer_from_state(self, orch: AskOrchestrator) -> str:
-        if orch._loop_query_result and orch._loop_sql:
+        if orch.run_state.query_result and orch.run_state.sql:
             # Drop the generic English placeholder — it added a stray line in the
             # wrong language; only a real rationale (already UI-language) is shown.
-            draft_rationale = orch._loop_sql_rationale or ""
+            draft_rationale = orch.run_state.sql_rationale or ""
             interpretation = orch.interpreter.interpret(
-                question=orch._loop_question or "",
-                sql=orch._loop_sql,
-                row_count=orch._loop_query_result.row_count,
-                columns=orch._loop_query_result.columns,
-                elapsed_ms=orch._loop_query_result.elapsed_ms,
-                truncated=orch._loop_query_result.truncated,
+                question=orch.run_state.question or "",
+                sql=orch.run_state.sql,
+                row_count=orch.run_state.query_result.row_count,
+                columns=orch.run_state.query_result.columns,
+                elapsed_ms=orch.run_state.query_result.elapsed_ms,
+                truncated=orch.run_state.query_result.truncated,
                 warnings=[],
             )
             return orch.formatter.query_result(
-                orch._loop_query_result,
+                orch.run_state.query_result,
                 rationale=draft_rationale,
                 interpretation=interpretation,
             )
-        if orch._loop_sql and not orch._loop_query_result:
+        if orch.run_state.sql and not orch.run_state.query_result:
             note = "SQL generated (not executed)."
-            return f"SQL:\n```sql\n{orch._loop_sql}\n```\n\n_{note}_"
-        return orch._loop_answer or ""
+            return f"SQL:\n```sql\n{orch.run_state.sql}\n```\n\n_{note}_"
+        return orch.run_state.answer or ""
 
     def _build_wait_response(
         self,
@@ -561,8 +561,8 @@ class AskAgentLoop:
         transcript: list[str],
         disclosures_before: list[str],
     ) -> AssistantResponse:
-        question = orch._loop_pending_question
-        options = list(orch._loop_pending_options)
+        question = orch.run_state.pending_question
+        options = list(orch.run_state.pending_options)
         lines = [question]
         if options:
             lines.append("")
@@ -582,20 +582,20 @@ class AskAgentLoop:
         wait_event["question"] = question
         if options:
             wait_event["options"] = options
-        structured = list(orch._loop_pending_questions)
+        structured = list(orch.run_state.pending_questions)
         if structured:
             wait_event["questions"] = structured
         self.progress(wait_event)
         return AssistantResponse(
             answer=answer,
-            sql=orch._loop_sql or "",
+            sql=orch.run_state.sql or "",
             result=None,
             disclosures=orch.session.disclosure.events[len(disclosures_before):],
             warnings=[],
             status="wait_user",
             pending_question=question,
             pending_options=options,
-            pending_questions=list(orch._loop_pending_questions),
+            pending_questions=list(orch.run_state.pending_questions),
             resume_state=snapshot,
         )
 
@@ -604,8 +604,8 @@ class AskAgentLoop:
     ) -> AssistantResponse:
         return AssistantResponse(
             answer=answer,
-            sql=orch._loop_sql or "",
-            result=orch._loop_query_result,
+            sql=orch.run_state.sql or "",
+            result=orch.run_state.query_result,
             disclosures=orch.session.disclosure.events[len(disclosures_before):],
             warnings=[],
         )

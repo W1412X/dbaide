@@ -84,12 +84,12 @@ def build_tool_registry(orchestrator: AskOrchestrator) -> ToolRegistry:
     registry = ToolRegistry()
 
     def _discover_schema(args: dict[str, Any], _ctx: ToolContext) -> ToolResult:
-        question = str(args.get("question") or orchestrator._loop_question or "").strip()
+        question = str(args.get("question") or orchestrator.run_state.question or "").strip()
         if not question:
             return ToolResult(ok=False, error=_err("discover_schema", "question is required"))
         try:
-            discovery = orchestrator._discover(question, parent=orchestrator._loop_trace_node)
-            orchestrator._loop_discovery = discovery
+            discovery = orchestrator._discover(question, parent=orchestrator.run_state.trace_node)
+            orchestrator.run_state.discovery = discovery
             # If discovery points at exactly one database, narrow the working scope to
             # it so SQL generation/execution target it (not the connection default).
             hit_dbs = {h.database for h in discovery.hits if h.database}
@@ -107,8 +107,8 @@ def build_tool_registry(orchestrator: AskOrchestrator) -> ToolRegistry:
     def _resolve_schema(args: dict[str, Any], _ctx: ToolContext) -> ToolResult:
         from dbaide.agent.schema_link import SchemaLinker
 
-        question = str(args.get("question") or orchestrator._loop_question or "").strip()
-        database = str(args.get("database") or orchestrator._loop_database or "")
+        question = str(args.get("question") or orchestrator.run_state.question or "").strip()
+        database = str(args.get("database") or orchestrator.run_state.database or "")
         if not question:
             return ToolResult(ok=False, error=_err("resolve_schema", "question is required"))
         try:
@@ -118,17 +118,17 @@ def build_tool_registry(orchestrator: AskOrchestrator) -> ToolRegistry:
             return ToolResult(ok=False, error=_err("resolve_schema", str(exc), retryable=True))
         # Ambiguous → surface as a user question (same pause/resume path as ask_user).
         if resolved.pending_question:
-            orchestrator._loop_pending_question = resolved.pending_question
-            orchestrator._loop_pending_options = list(resolved.pending_options)
-            orchestrator._loop_pending_questions = [
+            orchestrator.run_state.pending_question = resolved.pending_question
+            orchestrator.run_state.pending_options = list(resolved.pending_options)
+            orchestrator.run_state.pending_questions = [
                 {"ask": resolved.pending_question, "options": list(resolved.pending_options)}
             ]
             return ToolResult(ok=True, data={
                 "pending": True, "question": resolved.pending_question,
                 "options": resolved.pending_options,
             })
-        orchestrator._loop_resolved_schema = resolved
-        orchestrator._loop_relations = list(resolved.joins)
+        orchestrator.run_state.resolved_schema = resolved
+        orchestrator.run_state.relations = list(resolved.joins)
         # Remember the resolved tables so generate_sql / validation see them.
         for db, table, columns in resolved.to_disclosed():
             _remember_table_schema(orchestrator, table, db, columns)
@@ -151,11 +151,11 @@ def build_tool_registry(orchestrator: AskOrchestrator) -> ToolRegistry:
     def _synthesize_schema_answer(args: dict[str, Any], _ctx: ToolContext) -> ToolResult:
         from dbaide.agent.progressive_schema import ProgressiveSchemaAgent
 
-        question = str(args.get("question") or orchestrator._loop_question or "").strip()
+        question = str(args.get("question") or orchestrator.run_state.question or "").strip()
         if not question:
             return ToolResult(ok=False, error=_err("synthesize_schema_answer", "question is required"))
         try:
-            discovery = orchestrator._loop_discovery or orchestrator._discover(question, parent=orchestrator._loop_trace_node)
+            discovery = orchestrator.run_state.discovery or orchestrator._discover(question, parent=orchestrator.run_state.trace_node)
             agent = ProgressiveSchemaAgent(orchestrator.llm, orchestrator.asset_store, orchestrator.instance)
             pairs = list({
                 (str(getattr(h, "database", "") or ""), str(getattr(h, "table", "") or ""))
@@ -165,10 +165,10 @@ def build_tool_registry(orchestrator: AskOrchestrator) -> ToolRegistry:
                 question,
                 discovery,
                 progress=orchestrator.progress,
-                parent=orchestrator._loop_trace_node,
+                parent=orchestrator.run_state.trace_node,
                 object_notes=object_notes_for_tables(orchestrator, pairs),
             )
-            orchestrator._loop_answer = answer
+            orchestrator.run_state.answer = answer
             return ToolResult(ok=True, data={"answer": answer})
         except Exception as exc:
             return ToolResult(ok=False, error=_err("synthesize_schema_answer", str(exc), retryable=True))
@@ -178,7 +178,7 @@ def build_tool_registry(orchestrator: AskOrchestrator) -> ToolRegistry:
         return ToolResult(ok=True, data={"databases": dbs})
 
     def _list_tables(args: dict[str, Any], _ctx: ToolContext) -> ToolResult:
-        database = str(args.get("database") or orchestrator._loop_table_database or orchestrator._loop_database or "")
+        database = str(args.get("database") or orchestrator.run_state.table_database or orchestrator.run_state.database or "")
         # Listing a specific database narrows the agent's working scope to it.
         _note_working_db(orchestrator, database)
         tables = orchestrator.schema.list_tables(database=database)
@@ -187,7 +187,7 @@ def build_tool_registry(orchestrator: AskOrchestrator) -> ToolRegistry:
 
     def _describe_table(args: dict[str, Any], _ctx: ToolContext) -> ToolResult:
         table = str(args.get("table") or "").strip()
-        database = str(args.get("database") or orchestrator._loop_table_database or orchestrator._loop_database or "")
+        database = str(args.get("database") or orchestrator.run_state.table_database or orchestrator.run_state.database or "")
         if not table:
             return ToolResult(ok=False, error=_err("describe_table", "table is required"))
         # Tolerate a db-qualified name like "platform.sys_user" (with empty database) —
@@ -228,7 +228,7 @@ def build_tool_registry(orchestrator: AskOrchestrator) -> ToolRegistry:
         return ToolResult(ok=True, data=data)
 
     def _get_relations(args: dict[str, Any], _ctx: ToolContext) -> ToolResult:
-        database_default = str(args.get("database") or orchestrator._loop_table_database or orchestrator._loop_database or "")
+        database_default = str(args.get("database") or orchestrator.run_state.table_database or orchestrator.run_state.database or "")
         tables_arg = args.get("tables")
         targets: list[tuple[str, str]] = []
         if isinstance(tables_arg, list) and tables_arg:
@@ -236,13 +236,13 @@ def build_tool_registry(orchestrator: AskOrchestrator) -> ToolRegistry:
                 name = str(raw).strip()
                 if name:
                     targets.append((database_default, name))
-        elif orchestrator._loop_schemas:
-            for key in orchestrator._loop_schemas:
-                db = orchestrator._loop_schema_db.get(key, database_default)
+        elif orchestrator.run_state.schemas:
+            for key in orchestrator.run_state.schemas:
+                db = orchestrator.run_state.schema_db.get(key, database_default)
                 table = key.split(".", 1)[1] if "." in key else key
                 targets.append((db, table))
         else:
-            table = str(args.get("table") or orchestrator._loop_table or "").strip()
+            table = str(args.get("table") or orchestrator.run_state.table or "").strip()
             if table:
                 targets.append((database_default, table))
         if not targets:
@@ -257,18 +257,18 @@ def build_tool_registry(orchestrator: AskOrchestrator) -> ToolRegistry:
         relations = collect_relations(
             orchestrator,
             targets,
-            question=orchestrator._loop_question,
+            question=orchestrator.run_state.question,
             disclosed_schemas=schemas,
             sample_size=sample_size,
             infer_semantic=infer_semantic,
-            parent=orchestrator._loop_trace_node,
+            parent=orchestrator.run_state.trace_node,
         )
-        orchestrator._loop_relations = relations
+        orchestrator.run_state.relations = relations
         _persist_agent_joins(orchestrator, relations, database=targets[0][0] if targets else "")
         return ToolResult(ok=True, data=_relations_payload(relations))
 
     def _validate_joins(args: dict[str, Any], _ctx: ToolContext) -> ToolResult:
-        relations = list(orchestrator._loop_relations or [])
+        relations = list(orchestrator.run_state.relations or [])
         if not relations:
             return ToolResult(ok=False, error=_err("validate_joins", "no relations; call get_relations first"))
         targets = _targets_from_relations(orchestrator, relations)
@@ -283,12 +283,12 @@ def build_tool_registry(orchestrator: AskOrchestrator) -> ToolRegistry:
             sample_size=sample_size,
             parent="validate_joins",
         )
-        orchestrator._loop_relations = validated
+        orchestrator.run_state.relations = validated
         _persist_agent_joins(orchestrator, validated, database=targets[0][0] if targets else "")
         return ToolResult(ok=True, data=_relations_payload(validated))
 
     def _list_joins(args: dict[str, Any], _ctx: ToolContext) -> ToolResult:
-        database = str(args.get("database") or orchestrator._loop_database or "")
+        database = str(args.get("database") or orchestrator.run_state.database or "")
         tables_arg = args.get("tables")
         tables: list[str] | None = None
         if isinstance(tables_arg, list):
@@ -309,7 +309,7 @@ def build_tool_registry(orchestrator: AskOrchestrator) -> ToolRegistry:
         missing = [k for k in required if not str(args.get(k) or "").strip()]
         if missing:
             return ToolResult(ok=False, error=_err("add_join", f"missing: {', '.join(missing)}"))
-        database = str(args.get("database") or orchestrator._loop_database or "")
+        database = str(args.get("database") or orchestrator.run_state.database or "")
         source = str(args.get("source") or "user").strip().lower()
         if source not in {"user", "agent"}:
             source = "user"
@@ -339,7 +339,7 @@ def build_tool_registry(orchestrator: AskOrchestrator) -> ToolRegistry:
         scope = str(args.get("scope") or "").strip().lower()
         if scope not in {"database", "table", "column"}:
             scope = "column" if column else ("table" if table else "database")
-        database = str(args.get("database") or orchestrator._loop_database or "")
+        database = str(args.get("database") or orchestrator.run_state.database or "")
         store = getattr(orchestrator, "annotations", None)
         if store is None:
             return ToolResult(ok=False, error=_err("annotate_object", "annotation store unavailable"))
@@ -385,8 +385,8 @@ def build_tool_registry(orchestrator: AskOrchestrator) -> ToolRegistry:
     def _clarify_semantics(args: dict[str, Any], _ctx: ToolContext) -> ToolResult:
         from dbaide.agent.clarify import SemanticClarifier
 
-        question = str(args.get("question") or orchestrator._loop_question or "").strip()
-        resolved = getattr(orchestrator, "_loop_resolved_schema", None)
+        question = str(args.get("question") or orchestrator.run_state.question or "").strip()
+        resolved = orchestrator.run_state.resolved_schema
         if resolved is not None and not resolved.is_empty():
             disclosed = resolved.to_disclosed()
         else:
@@ -407,7 +407,7 @@ def build_tool_registry(orchestrator: AskOrchestrator) -> ToolRegistry:
         try:
             plan = SemanticClarifier(orchestrator.llm).analyze(
                 question, disclosed, observed,
-                already_confirmed=list(getattr(orchestrator, "_loop_clarifications", [])),
+                already_confirmed=list(orchestrator.run_state.clarifications),
                 object_notes=object_notes,
             )
         except Exception as exc:  # noqa: BLE001 — surface the failure, do NOT fake "clear"
@@ -417,16 +417,16 @@ def build_tool_registry(orchestrator: AskOrchestrator) -> ToolRegistry:
             return ToolResult(ok=False, error=_err("clarify_semantics", f"clarification failed: {exc}", retryable=True))
         # Assumptions are applied whether or not we ask, so SQL generation honours them.
         if plan.assumptions:
-            orchestrator._loop_clarifications.extend(plan.assumptions)
+            orchestrator.run_state.clarifications.extend(plan.assumptions)
         if plan.is_empty():
             return ToolResult(ok=True, data={"clear": True, "assumptions": plan.assumptions})
         # Material ambiguity → pause and confirm the exact criteria with the user.
         rendered = plan.render_question()
-        orchestrator._loop_clarify_questions = rendered
-        orchestrator._loop_pending_question = rendered
-        orchestrator._loop_pending_options = plan.first_options()
+        orchestrator.run_state.clarify_questions = rendered
+        orchestrator.run_state.pending_question = rendered
+        orchestrator.run_state.pending_options = plan.first_options()
         # Structured per-question list so the UI can step through them one at a time.
-        orchestrator._loop_pending_questions = [
+        orchestrator.run_state.pending_questions = [
             {"ask": str(q.get("ask") or ""), "options": list(q.get("options") or [])}
             for q in plan.questions
         ]
@@ -435,12 +435,12 @@ def build_tool_registry(orchestrator: AskOrchestrator) -> ToolRegistry:
         })
 
     def _generate_sql(args: dict[str, Any], _ctx: ToolContext) -> ToolResult:
-        question = str(args.get("question") or orchestrator._loop_question or "").strip()
+        question = str(args.get("question") or orchestrator.run_state.question or "").strip()
         # Prefer the minimal-necessary schema from resolve_schema: generating SQL on
         # only the relevant tables/columns is more accurate than the full disclosure
         # (the irrelevant schema is noise). Fall back to the full disclosure if the
         # model named specific tables in args, or no resolved schema exists.
-        resolved = getattr(orchestrator, "_loop_resolved_schema", None)
+        resolved = orchestrator.run_state.resolved_schema
         if resolved is not None and not resolved.is_empty() and not args.get("table") and not args.get("tables"):
             disclosed = resolved.to_disclosed()
         else:
@@ -452,19 +452,19 @@ def build_tool_registry(orchestrator: AskOrchestrator) -> ToolRegistry:
         apply_column_notes(orchestrator, disclosed)
         try:
             targets = [(db, table) for db, table, _ in disclosed]
-            relations = list(orchestrator._loop_relations or [])
+            relations = list(orchestrator.run_state.relations or [])
             if not relations and len(targets) >= 2:
                 relations = collect_relations(
                     orchestrator,
                     targets,
                     question=question,
                     disclosed_schemas=disclosed,
-                    parent=orchestrator._loop_trace_node,
+                    parent=orchestrator.run_state.trace_node,
                 )
-                orchestrator._loop_relations = relations
+                orchestrator.run_state.relations = relations
             ctx = merge_sql_context(orchestrator.session.disclosure.summary(), relations)
-            if getattr(orchestrator, "_loop_clarifications", None):
-                ctx["criteria"] = list(orchestrator._loop_clarifications)  # confirmed 口径
+            if orchestrator.run_state.clarifications:
+                ctx["criteria"] = list(orchestrator.run_state.clarifications)  # confirmed 口径
             object_notes = object_notes_for_tables(orchestrator, targets)
             if object_notes:
                 ctx["object_notes"] = object_notes  # authoritative db/table user notes
@@ -477,7 +477,7 @@ def build_tool_registry(orchestrator: AskOrchestrator) -> ToolRegistry:
                 ]
                 if reasons:
                     ctx["schema_reasons"] = reasons
-            feedback = orchestrator._loop_sql_feedback
+            feedback = orchestrator.run_state.sql_feedback
             table_names = ", ".join(t for _, t, _ in disclosed)
             orchestrator.progress(
                 subagent_event(
@@ -503,10 +503,10 @@ def build_tool_registry(orchestrator: AskOrchestrator) -> ToolRegistry:
                     context=ctx,
                     feedback=feedback,
                 )
-            orchestrator._loop_sql_feedback = ""
-            orchestrator._loop_sql = draft.sql
-            orchestrator._loop_sql_rationale = draft.rationale
-            orchestrator._loop_sql_confidence = draft.confidence
+            orchestrator.run_state.sql_feedback = ""
+            orchestrator.run_state.sql = draft.sql
+            orchestrator.run_state.sql_rationale = draft.rationale
+            orchestrator.run_state.sql_confidence = draft.confidence
             orchestrator.progress(
                 subagent_event(
                     agent="sql_writer",
@@ -518,7 +518,7 @@ def build_tool_registry(orchestrator: AskOrchestrator) -> ToolRegistry:
             )
             tables_used = [t for _, t, _ in disclosed]
             if tables_used:
-                orchestrator._loop_table = tables_used[0]
+                orchestrator.run_state.table = tables_used[0]
                 _note_working_db(orchestrator, disclosed[0][0])
             return ToolResult(
                 ok=True,
@@ -533,14 +533,14 @@ def build_tool_registry(orchestrator: AskOrchestrator) -> ToolRegistry:
             return ToolResult(ok=False, error=_err("generate_sql", str(exc), retryable=True))
 
     def _validate_sql(args: dict[str, Any], _ctx: ToolContext) -> ToolResult:
-        sql = str(args.get("sql") or orchestrator._loop_sql or "").strip()
+        sql = str(args.get("sql") or orchestrator.run_state.sql or "").strip()
         if not sql:
             return ToolResult(ok=False, error=_err("validate_sql", "sql is required"))
         report = orchestrator.query.validate_sql_report(sql, add_limit=True)
         if report.ok:
-            orchestrator._loop_sql = report.normalized_sql
+            orchestrator.run_state.sql = report.normalized_sql
         else:
-            orchestrator._loop_sql_feedback = validation_feedback(report.issues)
+            orchestrator.run_state.sql_feedback = validation_feedback(report.issues)
         return ToolResult(
             ok=report.ok,
             data={
@@ -554,8 +554,8 @@ def build_tool_registry(orchestrator: AskOrchestrator) -> ToolRegistry:
         )
 
     def _execute_sql(args: dict[str, Any], ctx: ToolContext) -> ToolResult:
-        sql = str(args.get("sql") or orchestrator._loop_sql or "").strip()
-        database = str(args.get("database") or orchestrator._loop_table_database or orchestrator._loop_database or "")
+        sql = str(args.get("sql") or orchestrator.run_state.sql or "").strip()
+        database = str(args.get("database") or orchestrator.run_state.table_database or orchestrator.run_state.database or "")
         if not sql:
             return ToolResult(ok=False, error=_err("execute_sql", "sql is required"))
 
@@ -565,7 +565,7 @@ def build_tool_registry(orchestrator: AskOrchestrator) -> ToolRegistry:
                 ok=False,
                 data={"blocked": True, "reason": f"Execution blocked by policy: {policy.value}"},
             )
-        if not orchestrator._loop_execute_allowed:
+        if not orchestrator.run_state.execute_allowed:
             return ToolResult(ok=False, data={"blocked": True, "reason": "Execution disabled for this request"})
 
         validation = orchestrator.query.validate_sql(sql, add_limit=True)
@@ -577,11 +577,11 @@ def build_tool_registry(orchestrator: AskOrchestrator) -> ToolRegistry:
         # Do NOT coerce a genuine 0.0 ("no confidence") up to 0.7 — `or 0.7` would mask
         # exactly the low-confidence plans the risk gate must catch. Only a missing
         # (None) confidence falls back to the neutral default.
-        _conf = orchestrator._loop_sql_confidence
+        _conf = orchestrator.run_state.sql_confidence
         confidence = 0.7 if _conf is None else float(_conf)
         has_joins = " join " in validation.normalized_sql.lower()
         join_conf = (
-            join_confidence_for_sql(orchestrator._loop_relations, validation.normalized_sql)
+            join_confidence_for_sql(orchestrator.run_state.relations, validation.normalized_sql)
             if has_joins
             else 1.0
         )
@@ -641,9 +641,9 @@ def build_tool_registry(orchestrator: AskOrchestrator) -> ToolRegistry:
                 database=database,
                 limit=orchestrator.session.default_limit,
             )
-            orchestrator._loop_query_result = result
-            orchestrator._loop_sql = validation.normalized_sql
-            orchestrator._loop_sql_feedback = ""
+            orchestrator.run_state.query_result = result
+            orchestrator.run_state.sql = validation.normalized_sql
+            orchestrator.run_state.sql_feedback = ""
             orchestrator.progress(
                 subagent_event(
                     agent="sql",
@@ -665,12 +665,12 @@ def build_tool_registry(orchestrator: AskOrchestrator) -> ToolRegistry:
                 },
             )
         except Exception as exc:
-            orchestrator._loop_sql_feedback = str(exc)
+            orchestrator.run_state.sql_feedback = str(exc)
             return ToolResult(ok=False, error=_err("execute_sql", str(exc), retryable=True))
 
     def _explain_sql(args: dict[str, Any], _ctx: ToolContext) -> ToolResult:
-        sql = str(args.get("sql") or orchestrator._loop_sql or "").strip()
-        database = str(args.get("database") or orchestrator._loop_database or "")
+        sql = str(args.get("sql") or orchestrator.run_state.sql or "").strip()
+        database = str(args.get("database") or orchestrator.run_state.database or "")
         if not sql:
             return ToolResult(ok=False, error=_err("explain_sql", "sql is required"))
         report = orchestrator.diagnose.diagnose_sql(sql, database=database)
@@ -680,12 +680,12 @@ def build_tool_registry(orchestrator: AskOrchestrator) -> ToolRegistry:
         if hints:
             lines = [f"EXPLAIN diagnosis for:\n```sql\n{sql}\n```", ""]
             lines += [f"- {hint}" for hint in hints]
-            orchestrator._loop_answer = "\n".join(lines)
+            orchestrator.run_state.answer = "\n".join(lines)
         return ToolResult(ok=bool(report.get("ok")), data=report)
 
     def _profile_table(args: dict[str, Any], _ctx: ToolContext) -> ToolResult:
-        table = str(args.get("table") or orchestrator._loop_table or "").strip()
-        database = str(args.get("database") or orchestrator._loop_table_database or "")
+        table = str(args.get("table") or orchestrator.run_state.table or "").strip()
+        database = str(args.get("database") or orchestrator.run_state.table_database or "")
         if not table:
             return ToolResult(ok=False, error=_err("profile_table", "table is required"))
         columns = args.get("columns")
@@ -694,12 +694,12 @@ def build_tool_registry(orchestrator: AskOrchestrator) -> ToolRegistry:
             columns = [c.name for c in cols[:8]]
         profiles = orchestrator.profile.profile_table(table, list(columns), database=database)
         answer = orchestrator.formatter.profiles(profiles)
-        orchestrator._loop_answer = answer
+        orchestrator.run_state.answer = answer
         return ToolResult(ok=True, data={"answer": answer, "column_count": len(profiles)})
 
     def _column_stats(args: dict[str, Any], _ctx: ToolContext) -> ToolResult:
-        table = str(args.get("table") or orchestrator._loop_table or "").strip()
-        database = str(args.get("database") or orchestrator._loop_table_database or "")
+        table = str(args.get("table") or orchestrator.run_state.table or "").strip()
+        database = str(args.get("database") or orchestrator.run_state.table_database or "")
         if not table:
             return ToolResult(ok=False, error=_err("column_stats", "table is required"))
         columns = args.get("columns") if isinstance(args.get("columns"), list) else None
@@ -720,9 +720,9 @@ def build_tool_registry(orchestrator: AskOrchestrator) -> ToolRegistry:
         options: list[str] = []
         if isinstance(options_raw, list):
             options = [str(item).strip() for item in options_raw if str(item).strip()]
-        orchestrator._loop_pending_question = question
-        orchestrator._loop_pending_options = options
-        orchestrator._loop_pending_questions = [{"ask": question, "options": options}]
+        orchestrator.run_state.pending_question = question
+        orchestrator.run_state.pending_options = options
+        orchestrator.run_state.pending_questions = [{"ask": question, "options": options}]
         return ToolResult(
             ok=True,
             data={"pending": True, "question": question, "options": options},
@@ -766,7 +766,7 @@ def _persist_agent_joins(
         saved = catalog.persist_agent_candidates(
             orchestrator.instance,
             relations,
-            database=database or orchestrator._loop_database or "",
+            database=database or orchestrator.run_state.database or "",
         )
         if saved:
             orchestrator.progress(
@@ -796,7 +796,7 @@ def _relations_payload(relations: list[dict[str, Any]]) -> dict[str, Any]:
 
 
 def _targets_from_relations(orchestrator: AskOrchestrator, relations: list[dict[str, Any]]) -> list[tuple[str, str]]:
-    db_default = orchestrator._loop_table_database or orchestrator._loop_database or ""
+    db_default = orchestrator.run_state.table_database or orchestrator.run_state.database or ""
     names: set[str] = set()
     for rel in relations:
         for key in ("table", "ref_table"):
@@ -806,7 +806,7 @@ def _targets_from_relations(orchestrator: AskOrchestrator, relations: list[dict[
     targets: list[tuple[str, str]] = []
     for name in sorted(names):
         db = db_default
-        for schema_key, schema_db in orchestrator._loop_schema_db.items():
+        for schema_key, schema_db in orchestrator.run_state.schema_db.items():
             table_part = schema_key.split(".", 1)[1] if "." in schema_key else schema_key
             if table_part == name or schema_key == name:
                 db = schema_db
@@ -827,7 +827,7 @@ def _note_working_db(orchestrator: AskOrchestrator, database: str) -> None:
     with an empty one."""
     db = (database or "").strip()
     if db:
-        orchestrator._loop_table_database = db
+        orchestrator.run_state.table_database = db
 
 
 _CATEGORICAL_TYPES = ("char", "text", "string", "enum", "varchar", "nchar", "nvarchar", "tinytext")
@@ -851,7 +851,7 @@ def _sample_observed_values(
     The per-column sample reads run CONCURRENTLY (bounded) — they're independent
     SELECT … LIMIT probes, so doing them sequentially just stacked latency before
     every clarification."""
-    if not getattr(orchestrator, "_loop_execute_allowed", False):
+    if not orchestrator.run_state.execute_allowed:
         return {}
     candidates: list[tuple[str, str, str]] = []  # (db, table, column)
     for db, table, columns in disclosed:
@@ -904,16 +904,16 @@ def _sample_observed_values(
 
 def _remember_table_schema(orchestrator: AskOrchestrator, table: str, database: str, columns: list[ColumnInfo]) -> None:
     key = _schema_key(database, table)
-    orchestrator._loop_schemas[key] = columns
-    orchestrator._loop_schema_db[key] = database
-    orchestrator._loop_table = table
+    orchestrator.run_state.schemas[key] = columns
+    orchestrator.run_state.schema_db[key] = database
+    orchestrator.run_state.table = table
     _note_working_db(orchestrator, database)
-    orchestrator._loop_columns = columns
+    orchestrator.run_state.columns = columns
 
 
 def _disclosed_table_names(orchestrator: AskOrchestrator) -> list[str]:
     names: list[str] = []
-    for key in orchestrator._loop_schemas:
+    for key in orchestrator.run_state.schemas:
         if "." in key:
             names.append(key.split(".", 1)[1])
         else:
@@ -923,9 +923,9 @@ def _disclosed_table_names(orchestrator: AskOrchestrator) -> list[str]:
 
 def _find_schema_columns(orchestrator: AskOrchestrator, table: str, database: str) -> list[ColumnInfo] | None:
     key = _schema_key(database, table)
-    if key in orchestrator._loop_schemas:
-        return orchestrator._loop_schemas[key]
-    for schema_key, columns in orchestrator._loop_schemas.items():
+    if key in orchestrator.run_state.schemas:
+        return orchestrator.run_state.schemas[key]
+    for schema_key, columns in orchestrator.run_state.schemas.items():
         if schema_key == table or schema_key.endswith(f".{table}"):
             return columns
     return None
@@ -960,7 +960,7 @@ def _collect_disclosed_schemas(
     orchestrator: AskOrchestrator,
     args: dict[str, Any],
 ) -> list[tuple[str, str, list[ColumnInfo]]]:
-    database_default = str(args.get("database") or orchestrator._loop_table_database or orchestrator._loop_database or "")
+    database_default = str(args.get("database") or orchestrator.run_state.table_database or orchestrator.run_state.database or "")
     tables_arg = args.get("tables")
     selected: list[tuple[str, str, list[ColumnInfo]]] = []
 
@@ -977,17 +977,17 @@ def _collect_disclosed_schemas(
             selected.append((db, name, columns))
         return selected
 
-    if orchestrator._loop_schemas:
-        for key, columns in orchestrator._loop_schemas.items():
-            db = orchestrator._loop_schema_db.get(key, database_default)
+    if orchestrator.run_state.schemas:
+        for key, columns in orchestrator.run_state.schemas.items():
+            db = orchestrator.run_state.schema_db.get(key, database_default)
             table = key.split(".", 1)[1] if "." in key else key
             selected.append((db, table, columns))
         return selected
 
-    table = str(args.get("table") or orchestrator._loop_table or "").strip()
+    table = str(args.get("table") or orchestrator.run_state.table or "").strip()
     if not table:
         return []
-    db = str(args.get("database") or orchestrator._loop_table_database or database_default)
+    db = str(args.get("database") or orchestrator.run_state.table_database or database_default)
     columns = _find_schema_columns(orchestrator, table, db)
     if columns is None:
         columns = orchestrator.schema.describe_table(table, database=db)
