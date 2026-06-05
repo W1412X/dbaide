@@ -1,5 +1,3 @@
-import pytest
-
 from dbaide.agent.answerer import AnswerFormatter
 from dbaide.i18n import set_language
 from dbaide.models import ColumnProfile, QueryResult, TableInfo
@@ -121,6 +119,45 @@ class TestAnswerFormatter:
         formatted = self.formatter.query_result(result)
         assert "1 row" in formatted
         assert "条记录" not in formatted and "查询" not in formatted
+
+
+class TestSummarizeRowsBranches:
+    """Lock the per-shape branches of _summarize_rows (tested directly via the `zh`
+    param, so it's deterministic regardless of UI language)."""
+
+    def test_two_column_pairs(self):
+        from dbaide.agent.answerer import _summarize_rows
+        result = QueryResult(
+            columns=["name", "n"],
+            rows=[{"name": "a", "n": 3}, {"name": "b", "n": 5}],
+            sql="", row_count=2, elapsed_ms=1.0,
+        )
+        out = _summarize_rows(result, False)
+        assert out == "Results: a (3), b (5)."
+
+    def test_two_column_pairs_with_overflow_suffix(self):
+        from dbaide.agent.answerer import _summarize_rows
+        rows = [{"k": f"k{i}", "v": i} for i in range(20)]
+        result = QueryResult(columns=["k", "v"], rows=rows, sql="", row_count=42, elapsed_ms=1.0)
+        out = _summarize_rows(result, False)
+        assert out.startswith("Results: k0 (0)")
+        assert "and 42 total." in out          # overflow beyond the 10 shown
+
+    def test_three_plus_columns_numbered_first_few(self):
+        from dbaide.agent.answerer import _summarize_rows
+        rows = [{"id": i, "name": f"n{i}", "amt": i * 1.0} for i in range(10)]
+        result = QueryResult(columns=["id", "name", "amt"], rows=rows, sql="", row_count=10, elapsed_ms=1.0)
+        out = _summarize_rows(result, False)
+        assert out.startswith("The query returned 10 rows. First few:")
+        assert "1. id=0, name=n0, amt=0.0" in out
+        # only the first 8 are listed, with a "more not listed" tail
+        assert "8. id=7" in out and "9. id=8" not in out
+        assert "and 2 more not listed." in out
+
+    def test_no_rows(self):
+        from dbaide.agent.answerer import _summarize_rows
+        result = QueryResult(columns=["id"], rows=[], sql="", row_count=0, elapsed_ms=1.0)
+        assert _summarize_rows(result, False) == "The query returned no data."
 
 
 def test_answer_language_directive_is_ui_authoritative():
