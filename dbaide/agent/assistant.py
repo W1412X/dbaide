@@ -6,7 +6,6 @@ from typing import Callable
 
 from dbaide.adapters.base import DatabaseAdapter
 from dbaide.agent.orchestrator import AgentContext, AgentStep, AskOrchestrator, format_inspect
-from dbaide.agent.orchestrator import _format_diagnose  # re-export for tests/tools
 from dbaide.assets import AssetStore
 from dbaide.joins import JoinCatalogStore
 from dbaide.core.result import ExecutionPolicy

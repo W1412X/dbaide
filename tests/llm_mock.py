@@ -1,4 +1,4 @@
-"""LLM test doubles for agent/router/schema tests."""
+"""LLM test doubles for agent/schema tests."""
 
 from __future__ import annotations
 
@@ -6,23 +6,6 @@ import re
 from typing import Any
 
 from dbaide.llm import LLMClient, LLMMessage
-
-
-class RoutingMockLLM(LLMClient):
-    """Returns task classifications from a question → task map."""
-
-    def __init__(self, routes: dict[str, str]) -> None:
-        self.routes = routes
-
-    def complete_json(self, messages: list[LLMMessage], *, schema_hint: str = "") -> dict[str, Any]:
-        text = messages[-1].content
-        for key, task in self.routes.items():
-            if key in text:
-                return {"task": task}
-        return {"task": "unknown"}
-
-    def complete_text(self, messages: list[LLMMessage]) -> str:
-        return "mock"
 
 
 class AgentMockLLM(LLMClient):
