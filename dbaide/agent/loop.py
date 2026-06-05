@@ -293,22 +293,7 @@ class AskAgentLoop:
                     )
                     transcript.append(f"Tool `get_relations` (auto) → {summary}")
 
-            if tool_name in _EXECUTE_TOOLS and result.ok:
-                break
-            if tool_name in _EXECUTE_TOOLS and isinstance(result.data, dict) and result.data.get("blocked"):
-                sql = str(result.data.get("sql") or orch.run_state.sql or "")
-                reason = str(result.data.get("reason") or "Execution blocked")
-                orch.run_state.answer = f"SQL:\n```sql\n{sql}\n```\n\n_{reason}_"
-                break
-            if tool_name == "validate_sql" and result.ok:
-                policy = orch.execution_policy
-                if not state.execute_allowed or policy.value in ("sql_only", "inspect_only"):
-                    sql = orch.run_state.sql or ""
-                    orch.run_state.answer = f"SQL:\n```sql\n{sql}\n```\n\n_Generated (not executed)._"
-                    break
-            if tool_name == "synthesize_schema_answer" and result.ok:
-                break
-            if tool_name == "profile_table" and result.ok:
+            if self._stop_after_tool(orch, state, tool_name, result):
                 break
 
         # Distinguish a clean stop (a tool `break` above, steps left) from running out
@@ -331,6 +316,35 @@ class AskAgentLoop:
 
         logger.warning("loop_budget_exhausted steps=%d", len(state.calls))
         return self._build_failed_response(orch, "step_budget_exhausted", disclosures_before or [])
+
+    def _stop_after_tool(self, orch: AskOrchestrator, state: LoopState,
+                         tool_name: str, result: ToolResult) -> bool:
+        """Whether the loop is done after this tool ran — the terminal tools and their
+        answer side-effects, in one place. Returns True to break the loop.
+
+        - execute_sql succeeded → the data result is the answer;
+        - execute_sql was blocked by policy → present the SQL + the block reason;
+        - validate_sql succeeded under a non-executing policy → present the SQL only;
+        - synthesize_schema_answer / profile_table succeeded → their output is the answer.
+        """
+        if tool_name in _EXECUTE_TOOLS and result.ok:
+            return True
+        if tool_name in _EXECUTE_TOOLS and isinstance(result.data, dict) and result.data.get("blocked"):
+            sql = str(result.data.get("sql") or orch.run_state.sql or "")
+            reason = str(result.data.get("reason") or "Execution blocked")
+            orch.run_state.answer = f"SQL:\n```sql\n{sql}\n```\n\n_{reason}_"
+            return True
+        if tool_name == "validate_sql" and result.ok:
+            policy = orch.execution_policy
+            if not state.execute_allowed or policy.value in ("sql_only", "inspect_only"):
+                sql = orch.run_state.sql or ""
+                orch.run_state.answer = f"SQL:\n```sql\n{sql}\n```\n\n_Generated (not executed)._"
+                return True
+        if tool_name == "synthesize_schema_answer" and result.ok:
+            return True
+        if tool_name == "profile_table" and result.ok:
+            return True
+        return False
 
     def _fail(self, reason: str) -> None:
         self.orchestrator.run_state.fail_reason = reason
