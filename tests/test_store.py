@@ -50,6 +50,14 @@ class TestAssetStore:
         path = store.database_dir("test", "main")
         assert path == tmp_path / "instances" / "test" / "databases" / "main"
 
+    def test_column_path_sanitizes_name(self, tmp_path):
+        store = AssetStore(base_dir=tmp_path)
+        cols = store.column_dir("i", "main", "t")
+        # normal name unchanged; a quoted-identifier traversal stays inside the dir
+        assert store.column_path("i", "main", "t", "amount") == cols / "amount.json"
+        evil = store.column_path("i", "main", "t", "../../evil")
+        assert evil.parent == cols and ".." not in evil.name
+
     def test_write_read_json(self, tmp_path):
         store = AssetStore(base_dir=tmp_path)
         path = tmp_path / "test.json"

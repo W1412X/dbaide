@@ -574,7 +574,7 @@ def dispatch_assets(args: argparse.Namespace, cfg: ConfigManager) -> int:
         elif len(parts) == 3:
             doc = store.table_doc(parts[0], parts[1], parts[2])
         elif len(parts) == 4:
-            col_path = store.column_dir(parts[0], parts[1], parts[2]) / f"{parts[3]}.json"
+            col_path = store.column_path(parts[0], parts[1], parts[2], parts[3])
             doc = store._read_optional(col_path)
         else:
             raise ValueError("asset path must be instance, instance.database, instance.database.table, or instance.database.table.column")
@@ -688,7 +688,7 @@ def enrich_assets(
             continue
         profile = profiler.profile(table, column, database=database, top_k=top_k, sample_limit=sample_limit)
         doc = summarizer.column_doc(instance=conn.name, database=database, table=table, column=column, profile=profile)
-        store.write_json(store.column_dir(conn.name, database, table) / f"{column.name}.json", doc)
+        store.write_json(store.column_path(conn.name, database, table, column.name), doc)
         updated += 1
     column_docs = store.column_docs(conn.name, database, table)
     fks = adapter.foreign_keys(table, database=database)

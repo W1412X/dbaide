@@ -56,6 +56,12 @@ class AssetStore:
     def column_dir(self, instance: str, database: str, table: str) -> Path:
         return self.table_dir(instance, database, table) / "columns"
 
+    def column_path(self, instance: str, database: str, table: str, column: str) -> Path:
+        """Per-column doc file. The column name is sanitized like every other path
+        component — a quoted identifier could legitimately contain '/' or '..', which
+        must not escape the table's columns dir."""
+        return self.column_dir(instance, database, table) / f"{safe_name(column)}.json"
+
     def write_json(self, path: Path, data: dict[str, Any] | list[Any]) -> None:
         path.parent.mkdir(parents=True, exist_ok=True)
         content = json.dumps(data, ensure_ascii=False, indent=2, default=str)
