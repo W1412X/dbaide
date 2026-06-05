@@ -100,12 +100,12 @@ def test_join_cardinality_no_product_inflation(tmp_path: Path):
     assert stats["max_right_per_left"] == 2
 
 
-# 6) MEDIUM: ordered lists are closed with </ol>, not </ul>.
+# 6) MEDIUM: ordered lists render as <ol>, unordered as <ul> (via the public API).
 def test_ordered_list_closes_with_ol():
-    from dbaide.rendering.markdown import _process_blocks
-    out = _process_blocks("1. a\n2. b\n\nafter")
+    from dbaide.rendering.markdown import render_markdown_safe
+    out = render_markdown_safe("1. a\n2. b\n\nafter")
     assert "<ol>" in out and "</ol>" in out and "</ul>" not in out
-    out2 = _process_blocks("- a\n- b\n\nx")
+    out2 = render_markdown_safe("- a\n- b\n\nx")
     assert "<ul>" in out2 and "</ul>" in out2 and "</ol>" not in out2
 
 

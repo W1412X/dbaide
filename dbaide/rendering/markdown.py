@@ -1,15 +1,19 @@
 """Safe Markdown rendering for DBAide.
 
-Rendering is delegated to mistune (a small, pure-Python CommonMark + GFM library)
-when it is available — it handles the cases a hand-rolled regex renderer keeps
-getting wrong: inline code containing ``*`` / ``_``, nested emphasis, escaping,
-tables with inline markup, etc. If mistune isn't installed (e.g. a minimal CLI
-install), we fall back to the original regex renderer so nothing hard-breaks.
+Rendering is delegated to **mistune** (a small, pure-Python CommonMark + GFM
+library) — it handles the cases a hand-rolled regex renderer keeps getting wrong:
+inline code containing ``*`` / ``_``, nested emphasis, escaping, tables with
+inline markup, etc. mistune is a required dependency of the GUI (the only place
+that renders Markdown to HTML), so the primary path always applies.
+
+If mistune ever raises at runtime we fall back to a TRIVIAL always-safe renderer
+(escape everything, keep fenced code as ``<pre>``, newlines → ``<br>``) — not a
+second Markdown engine. The old ~200-line regex renderer was removed: it was the
+source of the very bugs mistune fixes and was effectively never exercised.
 """
 from __future__ import annotations
 
 import re
-from typing import Any
 
 from dbaide.rendering.sanitize import escape_user_text, sanitize_markdown_html
 
@@ -22,7 +26,7 @@ try:  # Preferred path: a real Markdown parser.
         escape=True,
         plugins=["table", "strikethrough", "url"],
     )
-except Exception:  # noqa: BLE001 — any import/init failure → use the fallback
+except Exception:  # noqa: BLE001 — any import/init failure → use the trivial fallback
     _MISTUNE = None
 
 
@@ -43,225 +47,21 @@ def render_markdown_safe(text: str) -> str:
             return sanitize_markdown_html(html)
         except Exception:  # noqa: BLE001 — never let rendering throw; fall back
             pass
-    return _render_markdown_regex(str(text))
+    return _safe_fallback(str(text))
 
 
-def _render_markdown_regex(text: str) -> str:
-    """Original dependency-free renderer — the fallback when mistune is absent."""
-    # First escape all HTML in the source
-    safe = escape_user_text(str(text))
-
-    # Process code blocks first (fenced with ```)
-    safe = _process_code_blocks(safe)
-
-    # GitHub-style pipe tables (before inline/block so rows are not wrapped in <p>)
-    safe = _process_tables(safe)
-
-    # Process inline elements
-    safe = _process_inline(safe)
-
-    # Protect fenced code blocks (already <pre>) from paragraph wrapping
-    safe, html_blocks = _isolate_html_blocks(safe)
-    safe = _process_blocks(safe)
-    safe = _restore_html_blocks(safe, html_blocks)
-
-    # Final sanitization
-    safe = sanitize_markdown_html(safe)
-
-    return safe
-
-
-_BLOCK_TOKEN = re.compile(r"@@HTMLBLOCK(\d+)@@")
-
-
-def _isolate_html_blocks(text: str) -> tuple[str, list[str]]:
-    blocks: list[str] = []
-    pattern = re.compile(r"<(?:pre|table)\b[^>]*>.*?</(?:pre|table)>", re.S | re.I)
-
-    def repl(match: re.Match[str]) -> str:
-        blocks.append(match.group(0))
-        return f"@@HTMLBLOCK{len(blocks) - 1}@@"
-
-    return pattern.sub(repl, text), blocks
-
-
-def _restore_html_blocks(text: str, blocks: list[str]) -> str:
-    for index, block in enumerate(blocks):
-        token = f"@@HTMLBLOCK{index}@@"
-        text = text.replace(f"<p>{token}</p>", block)
-        text = text.replace(token, block)
-    return text
-
-
-def _process_code_blocks(text: str) -> str:
-    """Process fenced code blocks."""
-    def replace_block(match):
-        lang = match.group(1) or ""
-        code = match.group(2)
-        lang_attr = f' data-lang="{lang}"' if lang else ""
-        return f'<pre{lang_attr}><code>{code}</code></pre>'
-
-    return re.sub(r'```(\w*)\n(.*?)```', replace_block, text, flags=re.S)
-
-
-def _looks_like_table_row(line: str) -> bool:
-    stripped = line.strip()
-    if not stripped:
-        return False
-    if stripped.startswith("|") and stripped.count("|") >= 2:
-        return True
-    return stripped.count("|") >= 1 and not stripped.startswith("#")
-
-
-def _is_table_separator(line: str) -> bool:
-    stripped = line.strip().strip("|")
-    if not stripped:
-        return False
-    parts = [part.strip() for part in stripped.split("|")]
-    if not parts:
-        return False
-    return all(re.fullmatch(r":?-{3,}:?", part) for part in parts if part)
-
-
-def _parse_table_row(line: str) -> list[str]:
-    stripped = line.strip()
-    if stripped.startswith("|"):
-        stripped = stripped[1:]
-    if stripped.endswith("|"):
-        stripped = stripped[:-1]
-    return [cell.strip() for cell in stripped.split("|")]
-
-
-def _render_table_html(header: list[str], rows: list[list[str]]) -> str:
-    def _cells(values: list[str], tag: str) -> str:
-        parts = []
-        for value in values:
-            parts.append(f"<{tag}>{_process_inline(value)}</{tag}>")
-        return "".join(parts)
-
-    thead = f"<thead><tr>{_cells(header, 'th')}</tr></thead>"
-    body_rows = "".join(f"<tr>{_cells(row, 'td')}</tr>" for row in rows)
-    tbody = f"<tbody>{body_rows}</tbody>" if body_rows else ""
-    return f'<table class="md-table">{thead}{tbody}</table>'
-
-
-def _process_tables(text: str) -> str:
-    lines = text.split("\n")
-    result: list[str] = []
-    index = 0
-    while index < len(lines):
-        line = lines[index]
-        if (
-            _looks_like_table_row(line)
-            and index + 1 < len(lines)
-            and _is_table_separator(lines[index + 1])
-        ):
-            header = _parse_table_row(line)
-            index += 2
-            rows: list[list[str]] = []
-            while index < len(lines) and _looks_like_table_row(lines[index]):
-                rows.append(_parse_table_row(lines[index]))
-                index += 1
-            result.append(_render_table_html(header, rows))
-            continue
-        result.append(line)
-        index += 1
-    return "\n".join(result)
-
-
-def _process_inline(text: str) -> str:
-    """Process inline Markdown elements."""
-    # Bold: **text** or __text__
-    text = re.sub(r'\*\*(.+?)\*\*', r'<strong>\1</strong>', text)
-    text = re.sub(r'__(.+?)__', r'<strong>\1</strong>', text)
-
-    # Italic: *text* or _text_
-    text = re.sub(r'\*(.+?)\*', r'<em>\1</em>', text)
-    text = re.sub(r'(?<!\w)_(.+?)_(?!\w)', r'<em>\1</em>', text)
-
-    # Inline code: `code`
-    text = re.sub(r'`([^`]+)`', r'<code>\1</code>', text)
-
-    # Links: [text](url) - only allow http/https
-    text = re.sub(
-        r'\[([^\]]+)\]\((https?://[^)]+)\)',
-        r'<a href="\2" target="_blank" rel="noopener">\1</a>',
-        text,
-    )
-
-    return text
-
-
-def _process_blocks(text: str) -> str:
-    """Process block Markdown elements."""
-    lines = text.split('\n')
-    result = []
-    list_tag = ""  # "ul" | "ol" | "" — track the open list type to close it correctly
-
-    for line in lines:
-        stripped = line.strip()
-
-        # Headers
-        if stripped.startswith('### '):
-            if list_tag:
-                result.append(f'</{list_tag}>')
-                list_tag = ""
-            result.append(f'<h3>{stripped[4:]}</h3>')
-        elif stripped.startswith('## '):
-            if list_tag:
-                result.append(f'</{list_tag}>')
-                list_tag = ""
-            result.append(f'<h2>{stripped[3:]}</h2>')
-        elif stripped.startswith('# '):
-            if list_tag:
-                result.append(f'</{list_tag}>')
-                list_tag = ""
-            result.append(f'<h1>{stripped[2:]}</h1>')
-
-        # Unordered list
-        elif stripped.startswith('- ') or stripped.startswith('* '):
-            if list_tag != "ul":
-                if list_tag:
-                    result.append(f'</{list_tag}>')
-                result.append('<ul>')
-                list_tag = "ul"
-            result.append(f'<li>{stripped[2:]}</li>')
-
-        # Ordered list
-        elif re.match(r'^\d+\.\s', stripped):
-            if list_tag != "ol":
-                if list_tag:
-                    result.append(f'</{list_tag}>')
-                result.append('<ol>')
-                list_tag = "ol"
-            content = re.sub(r'^\d+\.\s', '', stripped)
-            result.append(f'<li>{content}</li>')
-
-        # Empty line
-        elif not stripped:
-            if list_tag:
-                result.append(f'</{list_tag}>')
-                list_tag = ""
-            result.append('')
-
-        # Preserved HTML blocks (fenced code converted to <pre>)
-        elif _BLOCK_TOKEN.fullmatch(stripped):
-            if list_tag:
-                result.append(f'</{list_tag}>')
-                list_tag = ""
-            result.append(stripped)
-
-        # Regular paragraph
+def _safe_fallback(text: str) -> str:
+    """Always-safe minimal rendering used only if mistune raises: escape everything,
+    keep fenced code blocks as ``<pre>``, and turn newlines into ``<br>``."""
+    parts = re.split(r"```", text)
+    out: list[str] = []
+    for index, part in enumerate(parts):
+        escaped = escape_user_text(part)
+        if index % 2 == 1:  # text between a pair of ``` fences
+            out.append(f"<pre>{escaped}</pre>")
         else:
-            if list_tag:
-                result.append(f'</{list_tag}>')
-                list_tag = ""
-            result.append(f'<p>{stripped}</p>')
-
-    if list_tag:
-        result.append(f'</{list_tag}>')
-
-    return '\n'.join(result)
+            out.append(escaped.replace("\n", "<br>"))
+    return sanitize_markdown_html("".join(out))
 
 
 def format_answer_card(
