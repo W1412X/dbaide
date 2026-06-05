@@ -209,7 +209,10 @@ class OpenAICompatibleClient(LLMClient):
         end = stripped.rfind("}")
         if start >= 0 and end > start:
             stripped = stripped[start : end + 1]
-        result = json.loads(stripped)
+        # strict=False tolerates literal control characters (raw newlines/tabs) inside
+        # string values — models routinely emit multi-line markdown answers with real
+        # newlines rather than escaped \n, which strict JSON would reject.
+        result = json.loads(stripped, strict=False)
         if not isinstance(result, dict):
             raise ValueError(f"Expected JSON object, got {type(result).__name__}")
         return result

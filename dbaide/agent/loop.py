@@ -444,17 +444,24 @@ class AskAgentLoop:
             schema_hint = ('Return {"action":"call_tool|finish","tool":"...","args":{},'
                            '"thought":"...","answer":"..."}')
             orch = self.orchestrator
-            if getattr(orch, "stream_answers", False) and orch.llm.supports_streaming():
-                # Stream the decision; surface only the "answer" field's tokens live so
-                # the FINAL answer arrives token-by-token (intermediate call_tool
-                # decisions have no answer field → nothing streams). The full JSON is
-                # still parsed below, so the answer is authoritative regardless.
-                streamer = JsonFieldStreamer(self._emit_answer_chunk, field="answer")
-                payload = orch.llm.complete_json_stream(
-                    messages, schema_hint=schema_hint, on_text_chunk=streamer.feed
-                )
-            else:
-                payload = orch.llm.complete_json(messages, schema_hint=schema_hint)
+            try:
+                if getattr(orch, "stream_answers", False) and orch.llm.supports_streaming():
+                    # Stream the decision; surface only the "answer" field's tokens live
+                    # so the FINAL answer arrives token-by-token (intermediate call_tool
+                    # decisions have no answer field → nothing streams). The full JSON is
+                    # still parsed below, so the answer is authoritative regardless.
+                    streamer = JsonFieldStreamer(self._emit_answer_chunk, field="answer")
+                    payload = orch.llm.complete_json_stream(
+                        messages, schema_hint=schema_hint, on_text_chunk=streamer.feed
+                    )
+                else:
+                    payload = orch.llm.complete_json(messages, schema_hint=schema_hint)
+            except ValueError as exc:
+                # Malformed JSON (e.g. bad escaping) — don't abort the whole run; feed the
+                # error back and let the model re-emit valid JSON on the next attempt.
+                last_error = f"response was not valid JSON ({exc}); return ONLY a JSON object"
+                logger.warning("loop_decide_parse_failed: %s", exc)
+                continue
             if not isinstance(payload, dict) or not payload.get("action"):
                 last_error = "missing action field"
                 continue

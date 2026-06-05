@@ -62,6 +62,8 @@ class JsonFieldStreamer:
             raw.append(ch)
             i += 1
         try:
-            return json.loads('"' + "".join(raw) + '"')
+            # strict=False: tolerate literal newlines/tabs inside the value (multi-line
+            # markdown answers), matching the authoritative parser.
+            return json.loads('"' + "".join(raw) + '"', strict=False)
         except ValueError:
             return None
