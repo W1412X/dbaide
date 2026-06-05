@@ -591,53 +591,66 @@ class DesktopService:
                 "children": [],
             }
             table_docs = list(self.store.table_docs(name, db_name))
-            # Reverse FK index: which tables reference each table (incoming FKs).
-            referenced_by: dict[str, list[dict[str, Any]]] = {}
-            for td in table_docs:
-                src = str(td.get("name") or td.get("table") or "")
-                for fk in (td.get("foreign_keys") or []):
-                    ref = str(fk.get("ref_table") or "")
-                    if ref:
-                        referenced_by.setdefault(ref, []).append({
-                            "table": src,
-                            "column": fk.get("column") or "",
-                            "ref_column": fk.get("ref_column") or "",
-                        })
+            referenced_by = self._referenced_by_index(table_docs)
             for table_doc in table_docs:
-                table = str(table_doc.get("name") or table_doc.get("table") or "")
-                outgoing = [
-                    {"column": fk.get("column") or "", "ref_table": fk.get("ref_table") or "",
-                     "ref_column": fk.get("ref_column") or ""}
-                    for fk in (table_doc.get("foreign_keys") or [])
-                    if fk.get("ref_table")
-                ]
-                table_row = {
-                    "kind": "table",
-                    "name": table,
-                    "path": f"{name}.{db_name}.{table}",
-                    "column_count": table_doc.get("column_count") or len(table_doc.get("columns") or []),
-                    "foreign_keys": outgoing,
-                    "referenced_by": referenced_by.get(table, []),
-                    "indexes": table_doc.get("indexes") or [],
-                    # Enrichment status for the tree: base = catalog-only (structure),
-                    # enriched = has samples/summary, stale = structure moved under it.
-                    "enriched": bool(table_doc.get("sample_rows")) or bool(table_doc.get("enriched_at")),
-                    "stale": bool(table_doc.get("enrichment_stale")),
-                    "children": [],
-                }
-                for col_doc in self.store.column_docs(name, db_name, table):
-                    col = str(col_doc.get("name") or col_doc.get("column") or "")
-                    table_row["children"].append({
-                        "kind": "column",
-                        "name": col,
-                        "path": f"{name}.{db_name}.{table}.{col}",
-                        "data_type": col_doc.get("data_type") or col_doc.get("type") or "",
-                        "primary_key": bool(col_doc.get("primary_key")),
-                        "indexed": bool(col_doc.get("indexed")),
-                    })
-                db_row["children"].append(table_row)
+                db_row["children"].append(
+                    self._table_tree_row(name, db_name, table_doc, referenced_by))
             rows.append(db_row)
         return rows
+
+    @staticmethod
+    def _referenced_by_index(table_docs: list[dict[str, Any]]) -> dict[str, list[dict[str, Any]]]:
+        """Reverse foreign-key index: ref_table → list of incoming FKs (which tables
+        reference it), so each table node can show what points AT it."""
+        referenced_by: dict[str, list[dict[str, Any]]] = {}
+        for td in table_docs:
+            src = str(td.get("name") or td.get("table") or "")
+            for fk in (td.get("foreign_keys") or []):
+                ref = str(fk.get("ref_table") or "")
+                if ref:
+                    referenced_by.setdefault(ref, []).append({
+                        "table": src,
+                        "column": fk.get("column") or "",
+                        "ref_column": fk.get("ref_column") or "",
+                    })
+        return referenced_by
+
+    def _table_tree_row(self, instance: str, db_name: str, table_doc: dict[str, Any],
+                        referenced_by: dict[str, list[dict[str, Any]]]) -> dict[str, Any]:
+        """One table node for the schema tree: outgoing/incoming FKs, denormalized
+        column count, enrichment status, and its column children."""
+        table = str(table_doc.get("name") or table_doc.get("table") or "")
+        outgoing = [
+            {"column": fk.get("column") or "", "ref_table": fk.get("ref_table") or "",
+             "ref_column": fk.get("ref_column") or ""}
+            for fk in (table_doc.get("foreign_keys") or [])
+            if fk.get("ref_table")
+        ]
+        children = [
+            {
+                "kind": "column",
+                "name": str(col_doc.get("name") or col_doc.get("column") or ""),
+                "path": f"{instance}.{db_name}.{table}.{col_doc.get('name') or col_doc.get('column') or ''}",
+                "data_type": col_doc.get("data_type") or col_doc.get("type") or "",
+                "primary_key": bool(col_doc.get("primary_key")),
+                "indexed": bool(col_doc.get("indexed")),
+            }
+            for col_doc in self.store.column_docs(instance, db_name, table)
+        ]
+        return {
+            "kind": "table",
+            "name": table,
+            "path": f"{instance}.{db_name}.{table}",
+            "column_count": table_doc.get("column_count") or len(table_doc.get("columns") or []),
+            "foreign_keys": outgoing,
+            "referenced_by": referenced_by.get(table, []),
+            "indexes": table_doc.get("indexes") or [],
+            # Enrichment status for the tree: base = catalog-only (structure),
+            # enriched = has samples/summary, stale = structure moved under it.
+            "enriched": bool(table_doc.get("sample_rows")) or bool(table_doc.get("enriched_at")),
+            "stale": bool(table_doc.get("enrichment_stale")),
+            "children": children,
+        }
 
     def search_assets(self, payload: dict[str, Any]) -> list[dict[str, Any]]:
         name = str(payload.get("name") or payload.get("connection_name") or "")
