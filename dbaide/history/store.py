@@ -12,6 +12,14 @@ from dbaide.core.result import WorkflowResult
 logger = logging.getLogger("dbaide.history")
 
 
+def _safe_name(name: str) -> str:
+    """Filesystem-safe path component. Connection names are user-chosen and could
+    contain path separators or traversal ('../x'); collapse anything that isn't a
+    plain identifier char so history always stays inside base_dir (mirrors
+    history.query_store / observability.query_log)."""
+    return "".join(c if c.isalnum() or c in "-_." else "_" for c in (name or "_default"))
+
+
 class WorkflowHistoryStore:
     """Persists workflow results to disk for debugging and replay.
 
@@ -24,10 +32,16 @@ class WorkflowHistoryStore:
     def __init__(self, base_dir: Path | None = None) -> None:
         self.base_dir = base_dir or Path.home() / ".dbaide" / "history"
 
+    def _conn_dir(self, connection_name: str) -> Path:
+        return self.base_dir / _safe_name(connection_name)
+
+    def _workflow_path(self, connection_name: str, workflow_id: str) -> Path:
+        return self._conn_dir(connection_name) / f"{_safe_name(workflow_id)}.json"
+
     def purge_instance(self, connection_name: str) -> bool:
         """Delete all workflow history for a connection (used when it is removed)."""
         import shutil
-        path = self.base_dir / connection_name
+        path = self._conn_dir(connection_name)
         if path.exists():
             shutil.rmtree(path, ignore_errors=True)
             return True
@@ -35,10 +49,10 @@ class WorkflowHistoryStore:
 
     def save(self, result: WorkflowResult) -> Path:
         """Save a workflow result to disk."""
-        conn_dir = self.base_dir / result.connection_name
+        conn_dir = self._conn_dir(result.connection_name)
         conn_dir.mkdir(parents=True, exist_ok=True)
 
-        path = conn_dir / f"{result.workflow_id}.json"
+        path = conn_dir / f"{_safe_name(result.workflow_id)}.json"
         data = result.to_dict()
         path.write_text(json.dumps(data, ensure_ascii=False, indent=2, default=str), encoding="utf-8")
         logger.debug("saved workflow %s to %s", result.workflow_id, path)
@@ -46,7 +60,7 @@ class WorkflowHistoryStore:
 
     def load(self, connection_name: str, workflow_id: str) -> dict[str, Any] | None:
         """Load a workflow result from disk."""
-        path = self.base_dir / connection_name / f"{workflow_id}.json"
+        path = self._workflow_path(connection_name, workflow_id)
         if not path.exists():
             return None
         try:
@@ -57,7 +71,7 @@ class WorkflowHistoryStore:
 
     def list_workflows(self, connection_name: str, limit: int = 50) -> list[dict[str, Any]]:
         """List recent workflows for a connection."""
-        conn_dir = self.base_dir / connection_name
+        conn_dir = self._conn_dir(connection_name)
         if not conn_dir.exists():
             return []
 
@@ -84,7 +98,7 @@ class WorkflowHistoryStore:
 
     def delete(self, connection_name: str, workflow_id: str) -> bool:
         """Delete a workflow result from disk."""
-        path = self.base_dir / connection_name / f"{workflow_id}.json"
+        path = self._workflow_path(connection_name, workflow_id)
         if path.exists():
             path.unlink()
             return True
@@ -92,7 +106,7 @@ class WorkflowHistoryStore:
 
     def cleanup(self, connection_name: str, max_age_days: int = 30) -> int:
         """Delete old workflow results."""
-        conn_dir = self.base_dir / connection_name
+        conn_dir = self._conn_dir(connection_name)
         if not conn_dir.exists():
             return 0
 

@@ -178,3 +178,18 @@ def test_trailing_empty_statement_not_multi():
     g = SQLGuard(default_limit=100, max_row_limit=1000)
     assert g.validate("SELECT 1 ; ;").ok is True
     assert g.validate("SELECT 1; SELECT 2").ok is False  # genuine multi still rejected
+
+
+def test_workflow_history_connection_name_stays_in_base_dir(tmp_path):
+    """A connection name with traversal must not write workflow history outside
+    base_dir; save/load/list/delete all agree on the sanitized path."""
+    from dbaide.history.store import WorkflowHistoryStore
+    from dbaide.core.result import WorkflowResult
+
+    base = tmp_path / "hist"
+    store = WorkflowHistoryStore(base_dir=base)
+    saved = store.save(WorkflowResult(workflow_id="wf1", connection_name="../escape", question="q"))
+    assert base.resolve() in saved.resolve().parents          # never escaped base_dir
+    assert store.load("../escape", "wf1") is not None          # round-trips
+    assert any(e["workflow_id"] == "wf1" for e in store.list_workflows("../escape"))
+    assert store.delete("../escape", "wf1") is True
