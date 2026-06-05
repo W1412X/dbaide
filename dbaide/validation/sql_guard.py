@@ -3,7 +3,6 @@ from __future__ import annotations
 
 import re
 
-from dbaide.core.errors import DBAideError, ErrorCode, RepairAction
 from dbaide.core.result import ValidationReport
 from dbaide.models import ValidationIssue, ValidationResult
 
@@ -117,7 +116,6 @@ class SQLGuard:
         *,
         add_limit: bool = True,
         known_tables: set[str] | None = None,
-        known_columns: set[str] | None = None,
     ) -> ValidationReport:
         """Extended validation returning a full ValidationReport with risk assessment."""
         result = self.validate(sql, add_limit=add_limit)
@@ -146,11 +144,6 @@ class SQLGuard:
             if unknown_tables:
                 warnings.append(f"Unknown tables: {', '.join(unknown_tables)}")
                 risk_level = "medium"
-
-        if known_columns:
-            columns_in_sql = self._extract_columns(stripped)
-            # This is a heuristic - we can't reliably extract all column references
-            # But we can flag obviously wrong ones
 
         # Check: high-risk patterns
         for pattern in HIGH_RISK_PATTERNS:
@@ -244,15 +237,6 @@ class SQLGuard:
         for match in re.finditer(r"\binto\s+(\w+)", sql):
             tables.add(match.group(1).lower())
         return tables
-
-    def _extract_columns(self, sql: str) -> set[str]:
-        """Extract column names from SQL (heuristic)."""
-        columns = set()
-        # This is a best-effort extraction
-        # We can't reliably parse SQL without a proper parser
-        for match in re.finditer(r"\b(\w+)\s*=", sql):
-            columns.add(match.group(1).lower())
-        return columns
 
 
 # ─────────────────────────────────────────────────────────────────────────────
