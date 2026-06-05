@@ -33,6 +33,7 @@ class SchemaHit:
     table: str = ""
     summary: str = ""
     reason: str = ""
+    note: str = ""  # authoritative user note for this object (db/table/column)
 
 
 @dataclass(slots=True)
@@ -500,6 +501,10 @@ class ProgressiveSchemaAgent:
             lines.append(f"- {prefix}")
             if body:
                 lines.append(f"  {body[:280]}")
+            # The user note travels with its object — show it right under the hit.
+            note = str(getattr(hit, "note", "") or "").strip()
+            if note:
+                lines.append(f"  📝 USER NOTE (authoritative): {note}")
         notes = [n for n in (object_notes or []) if str(n.get("note") or "").strip()]
         if notes:
             lines += ["", "User notes (AUTHORITATIVE — override the summaries above):"]

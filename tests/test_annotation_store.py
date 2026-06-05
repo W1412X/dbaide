@@ -187,8 +187,41 @@ def test_schema_linker_sees_table_note(tmp_path):
          "columns": ["spu_id", "attr_value"], "summary": "attribute values linked to SPU"},
     ]
     linker._select("产品的属性在哪个表能找到？", candidates, {})
-    assert "USER NOTE" in llm.last_user
+    assert "TABLE NOTE" in llm.last_user
     assert "deprecated; use product_data.product_attributes" in llm.last_user
+
+
+def test_schema_linker_shows_column_notes(tmp_path):
+    from dbaide.agent.schema_link import SchemaLinker
+
+    store = AnnotationStore(tmp_path / "ann")
+    store.add("demo", scope="column", note="UTC; +8 on display",
+              database="shop", table="orders", column="paid_at")
+    llm = _CapturingLLM({"tables": [], "sufficient": True})
+    linker = SchemaLinker(_FakeOrch(llm, store))
+    linker._select("q", [{"database": "shop", "table": "orders",
+                          "columns": ["id", "paid_at"], "summary": "orders"}], {})
+    assert "paid_at(📝UTC; +8 on display)" in llm.last_user
+
+
+def test_attach_notes_to_hits(tmp_path):
+    from dbaide.agent.schema_context import attach_notes_to_hits
+    from dbaide.agent.progressive_schema import DiscoveryResult, SchemaHit
+
+    orch, annotations = _orch(tmp_path)
+    annotations.add("local", scope="database", note="prod db", database="shop")
+    annotations.add("local", scope="table", note="deprecated", database="shop", table="orders")
+    annotations.add("local", scope="column", note="UTC", database="shop", table="orders", column="paid_at")
+    discovery = DiscoveryResult(question="q", hits=[
+        SchemaHit(kind="database", path="local.shop", name="shop", database="shop"),
+        SchemaHit(kind="table", path="local.shop.orders", name="orders", database="shop", table="orders"),
+        SchemaHit(kind="column", path="local.shop.orders.paid_at", name="paid_at",
+                  database="shop", table="orders"),
+    ])
+    attach_notes_to_hits(orch, discovery)
+    assert discovery.hits[0].note == "prod db"
+    assert discovery.hits[1].note == "deprecated"
+    assert discovery.hits[2].note == "UTC"
 
 
 def test_synthesize_answer_sees_notes(tmp_path):

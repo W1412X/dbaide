@@ -132,7 +132,7 @@ class AskOrchestrator:
         self._loop_trace_node = ""  # node id of the tool step currently running (for nested traces)
         self._loop_sql = ""
         self._loop_sql_rationale = ""
-        self._loop_sql_confidence = 0.0
+        self._loop_sql_confidence = None  # None = no SQL generated yet (neutral); a float is the writer's real confidence
         self._loop_query_result = None
         self._loop_answer = ""
         self._loop_sql_feedback = ""
@@ -170,8 +170,14 @@ class AskOrchestrator:
 
         # Resuming a paused run continues that single in-flight intent — never re-decompose.
         if resume_state or user_reply:
-            return self._run_single(question, database=database, execute=execute,
+            multi = resume_state.get("multi") if isinstance(resume_state, dict) else None
+            resp = self._run_single(question, database=database, execute=execute,
                                     resume_state=resume_state, user_reply=user_reply)
+            # If the pause happened inside a multi-intent plan, resume the WHOLE plan
+            # (the paused intent + any not-yet-run ones) rather than dropping the rest.
+            if multi is not None:
+                return self._continue_multi(multi, resp, database=database, execute=execute)
+            return resp
 
         from dbaide.agent.intent import IntentDecomposer
         from dbaide.agent.llm_trace import llm_stage
@@ -259,10 +265,66 @@ class AskOrchestrator:
                 status="failed" if (resp.warnings and not resp.answer) else "completed",
                 kind="phase", node_id=node_id,
             ))
-            results.append((intent, resp))
-            # If a sub-intent pauses for the user, surface that immediately.
+            # If a sub-intent pauses for the user, surface it — but carry the plan
+            # (completed answers + not-yet-run intents) so resume continues the whole
+            # set instead of silently dropping the rest.
             if getattr(resp, "status", "completed") == "wait_user":
+                resp.resume_state = self._attach_multi(
+                    resp.resume_state, question, results, intent, intents[idx:]
+                )
                 return resp
+            results.append((intent, resp))
+        return self._aggregate(question, results)
+
+    @staticmethod
+    def _ser_intent(intent) -> dict[str, Any]:
+        return {"id": intent.id, "type": intent.type, "text": intent.text}
+
+    def _attach_multi(self, resume_state, question, done_results, paused_intent, remaining) -> dict[str, Any]:
+        """Fold the multi-intent plan into the paused intent's resume snapshot."""
+        state = dict(resume_state or {})
+        state["multi"] = {
+            "question": question,
+            "done": [
+                {"intent": self._ser_intent(it), "answer": rp.answer, "sql": rp.sql}
+                for it, rp in done_results
+            ],
+            "paused": self._ser_intent(paused_intent),
+            "remaining": [self._ser_intent(it) for it in remaining],
+        }
+        return state
+
+    def _continue_multi(self, multi: dict[str, Any], paused_resp: AssistantResponse,
+                        *, database: str, execute: bool) -> AssistantResponse:
+        """After a paused sub-intent resumes, finish it + run the remaining sub-intents."""
+        from dbaide.agent.intent import SubIntent
+
+        question = str(multi.get("question") or "")
+        done: list[tuple[Any, AssistantResponse]] = [
+            (SubIntent(**d["intent"]), AssistantResponse(answer=d.get("answer") or "", sql=d.get("sql") or ""))
+            for d in (multi.get("done") or [])
+        ]
+        paused_intent = SubIntent(**multi["paused"])
+
+        # The resumed intent paused AGAIN → re-attach the plan and keep waiting.
+        if getattr(paused_resp, "status", "completed") == "wait_user":
+            paused_resp.resume_state = self._attach_multi(
+                paused_resp.resume_state, question, done, paused_intent,
+                [SubIntent(**r) for r in (multi.get("remaining") or [])],
+            )
+            return paused_resp
+
+        results = done + [(paused_intent, paused_resp)]
+        remaining = [SubIntent(**r) for r in (multi.get("remaining") or [])]
+        for i, intent in enumerate(remaining):
+            resp = self._run_single(intent.text, database=database, execute=execute,
+                                    trace_parent=f"intent:{intent.id}")
+            if getattr(resp, "status", "completed") == "wait_user":
+                resp.resume_state = self._attach_multi(
+                    resp.resume_state, question, results, intent, remaining[i + 1:]
+                )
+                return resp
+            results.append((intent, resp))
         return self._aggregate(question, results)
 
     def _aggregate(self, question: str, results: list[tuple[Any, AssistantResponse]]) -> AssistantResponse:
@@ -360,7 +422,7 @@ class AskOrchestrator:
         scope = self.schema_scope if (self.schema_scope and not getattr(self, "_scope_used", False)) else {}
         if scope:
             self._scope_used = True
-        return agent.discover(
+        discovery = agent.discover(
             question,
             schema_tools=self.schema,
             progress=progress_cb,
@@ -368,6 +430,11 @@ class AskOrchestrator:
             column_detail=column_detail,
             scope=scope,
         )
+        # Fold the matching user note onto each hit (db/table/column) so the note
+        # travels with its object through every downstream consumer.
+        from dbaide.agent.schema_context import attach_notes_to_hits
+        attach_notes_to_hits(self, discovery)
+        return discovery
 
     def _pick_table(self, question: str, active_database: str) -> tuple[str, str]:
         try:

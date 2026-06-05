@@ -56,6 +56,45 @@ def discovery_from_dict(data: dict[str, Any] | None) -> DiscoveryResult | None:
     )
 
 
+def resolved_schema_to_dict(resolved: Any) -> dict[str, Any] | None:
+    if resolved is None:
+        return None
+    return {
+        "tables": [
+            {
+                "database": t.get("database", ""),
+                "table": t.get("table", ""),
+                "columns": [column_to_dict(c) for c in t.get("columns", [])],
+                "reason": t.get("reason", ""),
+            }
+            for t in getattr(resolved, "tables", [])
+        ],
+        "joins": list(getattr(resolved, "joins", [])),
+        "notes": getattr(resolved, "notes", ""),
+        "sufficient": bool(getattr(resolved, "sufficient", True)),
+    }
+
+
+def resolved_schema_from_dict(data: dict[str, Any] | None) -> Any:
+    if not data:
+        return None
+    from dbaide.agent.schema_link import ResolvedSchema
+    return ResolvedSchema(
+        tables=[
+            {
+                "database": str(t.get("database") or ""),
+                "table": str(t.get("table") or ""),
+                "columns": [column_from_dict(c) for c in t.get("columns") or []],
+                "reason": str(t.get("reason") or ""),
+            }
+            for t in data.get("tables") or []
+        ],
+        joins=list(data.get("joins") or []),
+        notes=str(data.get("notes") or ""),
+        sufficient=bool(data.get("sufficient", True)),
+    )
+
+
 def dump_loop_state(
     orchestrator: Any,
     *,
@@ -82,6 +121,9 @@ def dump_loop_state(
             "_loop_schemas": schemas,
             "_loop_schema_db": dict(orchestrator._loop_schema_db),
             "_loop_relations": list(orchestrator._loop_relations),
+            "_loop_resolved_schema": resolved_schema_to_dict(
+                getattr(orchestrator, "_loop_resolved_schema", None)
+            ),
             "_loop_sql": orchestrator._loop_sql,
             "_loop_sql_rationale": orchestrator._loop_sql_rationale,
             "_loop_sql_confidence": orchestrator._loop_sql_confidence,
@@ -111,9 +153,11 @@ def restore_loop_state(orchestrator: Any, snapshot: dict[str, Any]) -> tuple[lis
     }
     orchestrator._loop_schema_db = dict(payload.get("_loop_schema_db") or {})
     orchestrator._loop_relations = list(payload.get("_loop_relations") or [])
+    orchestrator._loop_resolved_schema = resolved_schema_from_dict(payload.get("_loop_resolved_schema"))
     orchestrator._loop_sql = str(payload.get("_loop_sql") or "")
     orchestrator._loop_sql_rationale = str(payload.get("_loop_sql_rationale") or "")
-    orchestrator._loop_sql_confidence = float(payload.get("_loop_sql_confidence") or 0.0)
+    _conf = payload.get("_loop_sql_confidence")
+    orchestrator._loop_sql_confidence = None if _conf is None else float(_conf)
     orchestrator._loop_sql_feedback = str(payload.get("_loop_sql_feedback") or "")
     orchestrator._loop_answer = str(payload.get("_loop_answer") or "")
     orchestrator._loop_clarifications = list(payload.get("_loop_clarifications") or [])

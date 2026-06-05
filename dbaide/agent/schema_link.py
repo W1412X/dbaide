@@ -163,8 +163,9 @@ class SchemaLinker:
             }
         return list(seen.values())
 
-    def _candidate_notes(self, candidates: list[dict[str, Any]]) -> dict[tuple[str, str], str]:
-        """Authoritative user notes per candidate (table note, falling back to db note)."""
+    def _candidate_notes(self, candidates: list[dict[str, Any]]) -> dict[tuple[str, str], dict[str, Any]]:
+        """Authoritative user notes per candidate: the table note (falling back to the
+        db note) and a {column: note} map — so the note travels with each object."""
         store = getattr(self.orch, "annotations", None)
         if store is None or not candidates:
             return {}
@@ -176,23 +177,36 @@ class SchemaLinker:
             return {}
         tnotes = view.get("tables") or {}
         dbnotes = view.get("databases") or {}
-        out: dict[tuple[str, str], str] = {}
+        cnotes = view.get("columns") or {}
+        out: dict[tuple[str, str], dict[str, Any]] = {}
         for c in candidates:
             db, tbl = str(c["database"]).strip().lower(), str(c["table"]).strip().lower()
-            note = tnotes.get((db, tbl)) or dbnotes.get(db) or dbnotes.get("")
-            if note:
-                out[(db, tbl)] = note
+            entry: dict[str, Any] = {
+                "table": tnotes.get((db, tbl)) or dbnotes.get(db) or dbnotes.get("") or "",
+                "columns": cnotes.get((db, tbl)) or {},
+            }
+            if entry["table"] or entry["columns"]:
+                out[(db, tbl)] = entry
         return out
 
     def _select(self, question: str, candidates: list[dict[str, Any]],
                 confirmed: dict[tuple[str, str], dict[str, Any]]) -> dict[str, Any]:
+        from dbaide.agent.schema_context import sanitize_note
         notes = self._candidate_notes(candidates)
         lines = []
         for c in candidates:
-            cols = ", ".join(c["columns"][:25])
+            db_l, tbl_l = str(c["database"]).strip().lower(), str(c["table"]).strip().lower()
+            entry = notes.get((db_l, tbl_l)) or {}
+            col_notes = entry.get("columns") or {}
+            # Annotate any column that carries a note, inline with the column it belongs to.
+            cols = ", ".join(
+                f"{col}(📝{sanitize_note(col_notes[col.strip().lower()])})"
+                if col.strip().lower() in col_notes else col
+                for col in c["columns"][:25]
+            )
             summary = f" — {c['summary']}" if c["summary"] else ""
-            note = notes.get((str(c["database"]).strip().lower(), str(c["table"]).strip().lower()))
-            note_tag = f"  📝 USER NOTE (authoritative): {note}" if note else ""
+            note_tag = (f"  📝 TABLE NOTE (authoritative): {sanitize_note(entry['table'])}"
+                        if entry.get("table") else "")
             lines.append(f"- {c['database']}.{c['table']} [{cols}]{summary}{note_tag}")
         already = ", ".join(f"{db}.{t}" for (db, t) in confirmed) or "(none)"
         system = (

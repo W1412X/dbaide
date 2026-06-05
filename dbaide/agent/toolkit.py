@@ -410,9 +410,11 @@ def build_tool_registry(orchestrator: AskOrchestrator) -> ToolRegistry:
                 already_confirmed=list(getattr(orchestrator, "_loop_clarifications", [])),
                 object_notes=object_notes,
             )
-        except Exception as exc:  # noqa: BLE001 — clarification must never break a query
+        except Exception as exc:  # noqa: BLE001 — surface the failure, do NOT fake "clear"
             logger.debug("clarify_semantics failed: %s", exc, exc_info=True)
-            return ToolResult(ok=True, data={"clear": True})
+            # Returning clear=True here would turn "never guess" into "skip clarification
+            # and generate SQL anyway". Report the failure so the loop can retry/decide.
+            return ToolResult(ok=False, error=_err("clarify_semantics", f"clarification failed: {exc}", retryable=True))
         # Assumptions are applied whether or not we ask, so SQL generation honours them.
         if plan.assumptions:
             orchestrator._loop_clarifications.extend(plan.assumptions)
@@ -466,6 +468,15 @@ def build_tool_registry(orchestrator: AskOrchestrator) -> ToolRegistry:
             object_notes = object_notes_for_tables(orchestrator, targets)
             if object_notes:
                 ctx["object_notes"] = object_notes  # authoritative db/table user notes
+            # Carry the linker's per-table rationale so the SQL writer honours WHY each
+            # table/column was chosen (e.g. "picked orders_v2 because orders is deprecated").
+            if resolved is not None and not resolved.is_empty():
+                reasons = [
+                    {"table": t.get("table", ""), "reason": t.get("reason", "")}
+                    for t in resolved.tables if str(t.get("reason") or "").strip()
+                ]
+                if reasons:
+                    ctx["schema_reasons"] = reasons
             feedback = orchestrator._loop_sql_feedback
             table_names = ", ".join(t for _, t, _ in disclosed)
             orchestrator.progress(
@@ -563,7 +574,11 @@ def build_tool_registry(orchestrator: AskOrchestrator) -> ToolRegistry:
             return ToolResult(ok=False, error=_err("execute_sql", f"SQL invalid: {issues}"))
 
         validation_report = orchestrator.query.validate_sql_report(validation.normalized_sql, add_limit=False)
-        confidence = float(orchestrator._loop_sql_confidence or 0.7)
+        # Do NOT coerce a genuine 0.0 ("no confidence") up to 0.7 — `or 0.7` would mask
+        # exactly the low-confidence plans the risk gate must catch. Only a missing
+        # (None) confidence falls back to the neutral default.
+        _conf = orchestrator._loop_sql_confidence
+        confidence = 0.7 if _conf is None else float(_conf)
         has_joins = " join " in validation.normalized_sql.lower()
         join_conf = (
             join_confidence_for_sql(orchestrator._loop_relations, validation.normalized_sql)

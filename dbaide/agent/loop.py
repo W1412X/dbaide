@@ -312,13 +312,23 @@ class AskAgentLoop:
             if tool_name == "profile_table" and result.ok:
                 break
 
+        # Distinguish a clean stop (a tool `break` above, steps left) from running out
+        # of the step budget mid-task — the latter must not present a stale intermediate
+        # answer as a finished result without telling the user it may be incomplete.
+        budget_exhausted = getattr(runtime, "steps_remaining", 1) <= 0
         if orch._loop_query_result or orch._loop_answer:
             if orch._loop_query_result:
                 answer = self._answer_from_state(orch)
             else:
                 answer = orch._loop_answer or self._answer_from_state(orch)
             if answer:
-                return self._build_response(orch, answer, disclosures_before or [])
+                resp = self._build_response(orch, answer, disclosures_before or [])
+                if budget_exhausted:
+                    logger.warning("loop_budget_exhausted_partial steps=%d", len(state.calls))
+                    resp.warnings = list(resp.warnings or []) + [
+                        "Step budget exhausted before the task finished — this result may be partial."
+                    ]
+                return resp
 
         logger.warning("loop_budget_exhausted steps=%d", len(state.calls))
         return self._build_failed_response(orch, "step_budget_exhausted", disclosures_before or [])
@@ -465,10 +475,20 @@ class AskAgentLoop:
                     f"no broad discovery needed): {', '.join(pins)}\n\n") if pins else ""
         notes = decision_notes_block(self.orchestrator, state.database)
         notes_line = f"{notes}\n\n" if notes else ""
+        # Confirmed business criteria (口径) the user already settled — surface them so the
+        # decision model doesn't re-clarify or finish in a way that ignores them.
+        confirmed = [c for c in getattr(self.orchestrator, "_loop_clarifications", []) if str(c).strip()]
+        criteria_line = ""
+        if confirmed:
+            criteria_line = (
+                "Confirmed criteria (already settled with the user — honour these, do NOT re-ask):\n"
+                + "\n".join(f"- {c}" for c in confirmed) + "\n\n"
+            )
         user = (
             f"User question:\n{state.question}\n\n"
             f"Database scope: {state.database or '(any)'}\n\n"
             f"{notes_line}"
+            f"{criteria_line}"
             f"{pin_line}"
             f"Tool history:\n{history}"
         )

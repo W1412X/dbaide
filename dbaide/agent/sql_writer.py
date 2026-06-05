@@ -149,6 +149,9 @@ class SQLWriter:
             f"Table: {table}",
             f"Columns:\n{col_lines}",
         ]
+        reasons = self._format_schema_reasons(context)
+        if reasons:
+            blocks.append(reasons)
         rel = self._format_relations(context)
         if rel:
             blocks.append(rel)
@@ -176,6 +179,9 @@ class SQLWriter:
             blocks.append(f"Table: {label}")
             blocks.append("Columns:")
             blocks.append(self._format_columns(columns))
+        reasons = self._format_schema_reasons(context)
+        if reasons:
+            blocks.append(reasons)
         rel = self._format_relations(context)
         if rel:
             blocks.append(rel)
@@ -187,7 +193,25 @@ class SQLWriter:
 
     @staticmethod
     def _prompt_context(context: dict) -> dict:
-        return {k: v for k, v in context.items() if k not in ("foreign_keys", "criteria", "object_notes")}
+        # `tables` is the FULL disclosure dump (every table seen this turn, with all
+        # columns+profiles). The prompt already lists the exact disclosed/resolved
+        # tables above; re-dumping the full set here re-introduces the irrelevant-schema
+        # noise that resolve_schema exists to remove — so drop it.
+        skip = ("foreign_keys", "criteria", "object_notes", "schema_reasons", "tables")
+        return {k: v for k, v in context.items() if k not in skip}
+
+    @staticmethod
+    def _format_schema_reasons(context: dict) -> str:
+        """Why the schema linker chose these tables/columns — grounding the SQL writer
+        should honour (e.g. 'picked orders_v2 because orders is deprecated')."""
+        reasons = [r for r in (context.get("schema_reasons") or [])
+                   if str(r.get("reason") or "").strip()]
+        if not reasons:
+            return ""
+        lines = ["Why these tables were chosen (schema linker — honour this intent):"]
+        for r in reasons:
+            lines.append(f"- {r.get('table')}: {str(r.get('reason')).strip()}")
+        return "\n".join(lines)
 
     @staticmethod
     def _format_object_notes(context: dict) -> str:
