@@ -96,30 +96,92 @@ class ProfileTools:
     def column_stats(self, table: str, columns: list[str] | None = None, *,
                      metrics: list[str] | None = None, database: str = "",
                      top_k: int = 10) -> list[dict[str, Any]]:
-        """On-demand, type-aware statistics. One bounded aggregate scan per column;
-        the caller (LLM) chooses metrics, else type defaults apply. Values truncated."""
+        """On-demand, type-aware statistics. The scalar aggregates for ALL requested
+        columns are computed in ONE table scan (not one scan per column), with a
+        per-column fallback if that batched query fails. top_values (a GROUP BY) stays
+        per-column and only runs when chosen. The caller (LLM) picks metrics, else type
+        defaults apply. Values truncated."""
         database = database or self._asset_database_for_table(table) or self._default_asset_database()
         all_cols = {c.name: c for c in self.adapter.describe_table(table, database=database)}
         wanted = [all_cols[c] for c in (columns or list(all_cols)) if c in all_cols]
         picked = [str(m).strip().lower() for m in (metrics or []) if str(m).strip()]
-        out: list[dict[str, Any]] = []
+
+        # Decide each column's metrics up front. Explicit picks are honoured for ANY
+        # supported metric (the model knows what it needs — e.g. top_values on a char
+        # flag); type defaults apply only when nothing is picked. Unsupported picks get
+        # a clear note so the model stops retrying instead of silently getting empty stats.
+        plans: list[tuple[Any, str, list[str], list[str]]] = []
         for col in wanted:
             kind = kind_from_type(col)
             defaults, _optional = _METRICS.get(kind, _METRICS["unknown"])
-            # Explicit picks are honoured for ANY supported metric (the model knows
-            # what it needs — e.g. top_values on a char flag). Type defaults only
-            # apply when the caller picks nothing. Unsupported picks get a clear note
-            # so the model stops retrying instead of silently getting empty stats.
             if picked:
                 chosen = [m for m in picked if m in _ALL_METRICS]
                 unsupported = [m for m in picked if m not in _ALL_METRICS]
             else:
                 chosen, unsupported = list(defaults), []
-            stats = self._compute_stats(table, col, chosen, database=database, top_k=top_k)
+            plans.append((col, kind, chosen, unsupported))
+
+        # One scan for every column's scalar aggregates; None signals the batch failed
+        # (e.g. an incompatible expression) → fall back to isolated per-column queries.
+        scalar = self._batch_scalar_stats(table, [(c, ch) for c, _k, ch, _u in plans], database=database)
+
+        out: list[dict[str, Any]] = []
+        for col, kind, chosen, unsupported in plans:
+            if scalar is not None:
+                stats = dict(scalar.get(col.name, {}))
+                if "top_values" in chosen:
+                    self._add_top_values(stats, table, col, database=database, top_k=top_k)
+            else:
+                stats = self._compute_stats(table, col, chosen, database=database, top_k=top_k)
             if unsupported:
                 stats["note"] = "unsupported metric(s) ignored: " + ", ".join(unsupported)
             out.append({"column": col.name, "data_type": col.data_type, "kind": kind, "stats": stats})
         return out
+
+    def _batch_scalar_stats(self, table: str, plans: list[tuple[Any, list[str]]], *,
+                            database: str) -> dict[str, dict[str, Any]] | None:
+        """Compute the scalar aggregates (everything except top_values) for every column
+        in a SINGLE table scan. Returns {column_name: {metric: value}}, or None if the
+        combined query fails so the caller can fall back to per-column isolation."""
+        tq = quote_identifier(table, self.adapter.dialect)
+        selects: list[str] = []
+        layout: list[tuple[str, str]] = []  # (column_name, metric), positionally aligned with selects
+        for col, metrics in plans:
+            cq = quote_identifier(col.name, self.adapter.dialect)
+            for m in metrics:
+                if m in _AGG:
+                    selects.append(f"{_AGG[m].format(c=cq)} AS m{len(layout)}")
+                    layout.append((col.name, m))
+        if not selects:
+            return {}
+        try:
+            res = self.adapter.execute_readonly(
+                f"SELECT {', '.join(selects)} FROM {tq}", database=database, limit=1,
+            )
+        except Exception:  # one incompatible column would fail the whole batch — fall back
+            return None
+        row = res.rows[0] if res.rows else {}
+        vals = list(row.values())  # positional: adapters don't all preserve the aliases as keys
+        out: dict[str, dict[str, Any]] = {}
+        for i, (cname, metric) in enumerate(layout):
+            v = vals[i] if i < len(vals) else None
+            out.setdefault(cname, {})[metric] = (
+                round(float(v), 4) if metric.endswith("_rate") and v is not None else truncate_cell(v)
+            )
+        return out
+
+    def _add_top_values(self, stats: dict[str, Any], table: str, col: ColumnInfo, *,
+                        database: str, top_k: int) -> None:
+        cq = quote_identifier(col.name, self.adapter.dialect)
+        tq = quote_identifier(table, self.adapter.dialect)
+        try:
+            res = self.adapter.execute_readonly(
+                f"SELECT {cq} AS value, COUNT(*) AS n FROM {tq} WHERE {cq} IS NOT NULL "
+                f"GROUP BY {cq} ORDER BY n DESC", database=database, limit=top_k,
+            )
+            stats["top_values"] = [{"value": truncate_cell(r.get("value")), "count": r.get("n")} for r in res.rows]
+        except Exception:
+            pass
 
     def _compute_stats(self, table: str, col: ColumnInfo, metrics: list[str], *,
                        database: str, top_k: int) -> dict[str, Any]:
@@ -144,14 +206,7 @@ class ProfileTools:
             except Exception as exc:  # surface as a note rather than failing the tool
                 stats["error"] = str(exc)
         if "top_values" in metrics:
-            try:
-                res = self.adapter.execute_readonly(
-                    f"SELECT {cq} AS value, COUNT(*) AS n FROM {tq} WHERE {cq} IS NOT NULL "
-                    f"GROUP BY {cq} ORDER BY n DESC", database=database, limit=top_k,
-                )
-                stats["top_values"] = [{"value": truncate_cell(r.get("value")), "count": r.get("n")} for r in res.rows]
-            except Exception:
-                pass
+            self._add_top_values(stats, table, col, database=database, top_k=top_k)
         return stats
 
     def profile_table(self, table: str, columns: list[str] | None = None, *, database: str = "", top_k: int = 10) -> list[ColumnProfile]:

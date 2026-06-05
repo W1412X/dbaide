@@ -61,3 +61,40 @@ def test_unsupported_metric_gets_a_note(tmp_path):
     pt = _tools(tmp_path)
     stats = pt.column_stats("t", ["status"], metrics=["nonsense"])[0]["stats"]
     assert "note" in stats and "nonsense" in stats["note"]
+
+
+def test_scalar_aggregates_share_one_table_scan(tmp_path):
+    """Every column's scalar aggregates are computed in ONE scan, not one per column;
+    top_values (a GROUP BY) stays per-column."""
+    pt = _tools(tmp_path)
+    calls: list[str] = []
+    orig = pt.adapter.execute_readonly
+    pt.adapter.execute_readonly = lambda sql, **kw: (calls.append(sql), orig(sql, **kw))[1]
+
+    pt.column_stats("t")  # 4 columns, scalar defaults only
+    assert len([s for s in calls if "GROUP BY" not in s]) == 1  # single aggregate scan
+
+    calls.clear()
+    pt.column_stats("t", ["status", "note"], metrics=["distinct_count", "top_values"])
+    assert len([s for s in calls if "GROUP BY" not in s]) == 1   # one shared scalar scan
+    assert len([s for s in calls if "GROUP BY" in s]) == 2       # one top_values per column
+
+
+def test_batch_falls_back_per_column_on_query_error(tmp_path):
+    """If the combined scalar query fails, results are still computed per column so one
+    incompatible column can't wipe out the rest."""
+    pt = _tools(tmp_path)
+    orig = pt.adapter.execute_readonly
+    state = {"first": True}
+
+    def flaky(sql, **kw):
+        # Fail only the first (batched, multi-column) aggregate scan; let per-column retries through.
+        if state["first"] and "GROUP BY" not in sql and sql.count(" AS m") > 1:
+            state["first"] = False
+            raise RuntimeError("simulated batch failure")
+        return orig(sql, **kw)
+
+    pt.adapter.execute_readonly = flaky
+    by_col = {s["column"]: s for s in pt.column_stats("t")}
+    assert abs(by_col["amount"]["stats"]["null_rate"] - 0.3333) < 0.001  # recovered per-column
+    assert by_col["note"]["stats"].get("empty_rate", 0) > 0
