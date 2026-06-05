@@ -378,15 +378,17 @@ class DesktopService:
             ddl = adapter.get_table_ddl(table_info.name, database=database)
         except Exception:  # noqa: BLE001
             ddl = ""
-        return summarizer.table_doc(
+        doc = summarizer.table_doc(
             instance=instance, database=database, table=table_info,
             columns=cols, foreign_keys=fks, indexes=idxs, ddl=ddl, sample_rows=[],
         )
+        doc["column_count"] = len(cols)  # denormalized count the tree/rollup read
+        return doc
 
     # Structural fields a refresh overwrites from the live catalog; everything else
     # in a table doc (description, sample_rows, profiles, …) is enrichment and kept.
-    _STRUCT_FIELDS = ("columns", "indexes", "foreign_keys", "source_comment",
-                      "ddl", "table_type", "row_count", "row_count_exact")
+    _STRUCT_FIELDS = ("columns", "column_count", "indexes", "foreign_keys",
+                      "source_comment", "ddl", "table_type", "row_count", "row_count_exact")
 
     def refresh_instance(self, payload: dict[str, Any]) -> dict[str, Any]:
         """Re-sync the base layer with the live catalog and react to changes.

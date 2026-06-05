@@ -66,6 +66,11 @@ def test_refresh_applies_diff_and_cascades_notes(tmp_path, monkeypatch):
     cols = {col["name"] for col in odoc["columns"]}
     assert cols == {"id", "amount", "note"} and "legacy" not in cols
     assert odoc.get("base_fingerprint")  # changed table re-fingerprinted
+    # The denormalized column_count must track the new structure (not stay stale).
+    assert odoc.get("column_count") == 3
+    trow = next(t for d in svc.dispatch("schema_tree", {"name": "shop"})
+                for t in d["children"] if t["name"] == "orders")
+    assert trow["column_count"] == 3
     assert store.table_doc("shop", "main", "users") is None  # dropped doc removed
 
     # Notes: surviving objects kept, gone objects cascade-deleted.
