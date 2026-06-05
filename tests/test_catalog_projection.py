@@ -59,3 +59,35 @@ def test_project_instance_builds_base_from_catalog(tmp_path, monkeypatch):
     # Enrichment fields are NOT built (no sampling / no profiling at base layer).
     assert not odoc.get("sample_rows")
     assert all("profile" not in c and "semantic_summary" not in c for c in odoc.get("columns", []))
+
+
+def test_enrich_table_is_granular_and_preserves_others(tmp_path, monkeypatch):
+    db = tmp_path / "shop.db"
+    conn = sqlite3.connect(db)
+    conn.executescript(
+        """
+        CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT);
+        CREATE TABLE orders (id INTEGER PRIMARY KEY, amount REAL);
+        INSERT INTO users VALUES (1, 'a');
+        INSERT INTO orders VALUES (1, 2.0), (2, 3.0);
+        """
+    )
+    conn.commit(); conn.close()
+
+    svc = _service(tmp_path, monkeypatch)
+    svc.dispatch("save_connection", {"name": "shop", "type": "sqlite", "path": str(db)})
+    svc.dispatch("project_instance", {"name": "shop"})  # base only, no samples
+
+    store = AssetStore()
+    assert not store.table_doc("shop", "main", "orders").get("sample_rows")
+    assert not store.table_doc("shop", "main", "users").get("sample_rows")
+
+    # Enrich just `orders` (sampling on). `users` must stay base-only and present.
+    svc.dispatch("enrich_table", {"name": "shop", "database": "main", "table": "orders"})
+
+    assert store.table_doc("shop", "main", "orders").get("sample_rows"), "enriched table gets samples"
+    assert not store.table_doc("shop", "main", "users").get("sample_rows"), "other table preserved as base"
+    # Both tables still in the rollup / tree (granular build didn't drop the rest).
+    tree = svc.dispatch("schema_tree", {"name": "shop"})
+    tables = {t["name"] for d in tree for t in d["children"]}
+    assert {"users", "orders"} <= tables

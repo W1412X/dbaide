@@ -187,6 +187,7 @@ class AssetBuilder:
         self,
         *,
         databases: list[str] | None = None,
+        tables: list[str] | None = None,
         sample: bool = True,
         profile: bool | None = None,
         profile_mode: str | None = None,
@@ -234,8 +235,15 @@ class AssetBuilder:
         if options.dry_run:
             return self._dry_run(instance, databases, options, stats)
 
+        # Table-level build: rebuild only the named tables within their database,
+        # preserving every other table's existing doc (used for granular enrichment).
+        # It requires an explicit database so the filter is unambiguous.
+        only_tables = {str(t) for t in tables if str(t)} if tables else None
+        if only_tables and not databases:
+            raise ValueError("table-level build requires an explicit database")
+
         # Step 2: Discover databases
-        partial = bool(databases)
+        partial = bool(databases or tables)
         preserved_docs = self._load_existing_database_docs(instance) if partial else []
         db_names = self._resolve_databases(databases)
         self._emit(f"discovered {len(db_names)} database(s): {', '.join(db_names)}", status="running")
@@ -252,7 +260,8 @@ class AssetBuilder:
         unsubscribe = self.adapter.query_log.subscribe(self._on_query_logged)
         try:
             with ThreadPoolExecutor(max_workers=options.max_workers) as executor:
-                database_docs = self._build_databases(instance, db_names, options, stats, executor)
+                database_docs = self._build_databases(instance, db_names, options, stats, executor,
+                                                      only_tables=only_tables)
         finally:
             unsubscribe()
         self._persist_fk_joins(instance)
@@ -439,7 +448,8 @@ class AssetBuilder:
         return 0
 
     def _build_databases(self, instance: str, db_names: list[str], options: BuildOptions,
-                         stats: BuildStats, executor: ThreadPoolExecutor) -> list[dict]:
+                         stats: BuildStats, executor: ThreadPoolExecutor,
+                         *, only_tables: set[str] | None = None) -> list[dict]:
         """Build databases serially; tables within each database run on the shared pool."""
         database_docs = []
         for database in db_names:
@@ -449,17 +459,27 @@ class AssetBuilder:
                 continue
             try:
                 doc = self._build_database(instance, database, options=options, stats=stats,
-                                           executor=executor)
+                                           executor=executor, only_tables=only_tables)
                 database_docs.append(doc)
             except Exception as exc:
                 self._record_error(stats, f"{instance}.{database}: {type(exc).__name__}: {exc}")
         return database_docs
 
     def _build_database(self, instance: str, database: str, *, options: BuildOptions,
-                        stats: BuildStats, executor: ThreadPoolExecutor) -> dict:
+                        stats: BuildStats, executor: ThreadPoolExecutor,
+                        only_tables: set[str] | None = None) -> dict:
         self._emit_db(database, f"{database} · listing tables…", status="running")
         self._bump(stats, databases=1)
         tables = self.adapter.list_tables(database=database)
+        # Table-level build: rebuild only the targeted tables; the rest keep their
+        # existing docs so the database/instance rollup stays complete.
+        preserved_table_docs: list[dict] = []
+        if only_tables is not None:
+            preserved_table_docs = [
+                td for td in self.store.table_docs(instance, database)
+                if str(td.get("name") or td.get("table") or "") not in only_tables
+            ]
+            tables = [t for t in tables if t.name in only_tables]
         total = len(tables)
         self._emit_db(database, f"{database} · {total} tables", status="running")
 
@@ -483,6 +503,8 @@ class AssetBuilder:
             # The table node itself is emitted live from the worker; here we only
             # advance the database-level progress counter.
             self._emit_db(database, f"{database} · {done}/{total} tables · {table.name}", status="running")
+        if preserved_table_docs:
+            table_docs = table_docs + preserved_table_docs  # keep non-targeted tables in the rollup
         cols = sum(int(td.get("column_count") or 0) for td in table_docs)
         self._emit_db(database, f"{database} · {len(table_docs)} tables · {cols} columns", status="completed")
 

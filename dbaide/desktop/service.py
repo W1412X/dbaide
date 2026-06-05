@@ -137,6 +137,7 @@ class DesktopService:
             "bootstrap": self.bootstrap,
             "build_assets": self.build_assets,
             "project_instance": self.project_instance,
+            "enrich_table": self.enrich_table,
             "list_databases": self.list_databases,
             "schema_tree": self.schema_tree,
             "search_assets": self.search_assets,
@@ -358,6 +359,38 @@ class DesktopService:
                 databases=payload.get("databases") or None,
                 sample=False,
                 profile_mode="none",
+            )
+        finally:
+            self._end_build(conn.name)
+        return {"stats": _to_dict(stats)}
+
+    def enrich_table(self, payload: dict[str, Any]) -> dict[str, Any]:
+        """Enrich ONE table's document — LLM summary + sample rows + profiling — from
+        the live database, leaving every other table's doc untouched. The optional,
+        table-granular counterpart to the catalog-only base layer (project_instance)."""
+        conn = self.cfg.get_connection(str(payload.get("name") or payload.get("connection_name") or "") or None)
+        database = str(payload.get("database") or "").strip()
+        table = str(payload.get("table") or "").strip()
+        if not database or not table:
+            raise ValueError("database and table are required")
+        progress = payload.get("progress")
+        progress_cb = progress if callable(progress) else (lambda _msg: None)
+        policy = self.cfg.policy_for(conn)
+        adapter = build_adapter(conn, policy=policy, caller="build")
+        self._begin_build(conn.name)
+        try:
+            stats = AssetBuilder(
+                connection=conn,
+                adapter=adapter,
+                store=self.store,
+                llm=self._safe_llm(),  # enrichment uses the model when one is configured
+                join_catalog=self.join_catalog,
+                progress=progress_cb,
+            ).build(
+                databases=[database],
+                tables=[table],
+                profile_mode=payload.get("profile_mode") or None,
+                sample_limit=int(payload.get("sample_limit") or 50),
             )
         finally:
             self._end_build(conn.name)
