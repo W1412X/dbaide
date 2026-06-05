@@ -45,9 +45,8 @@ def _tab_label(tab_id: str) -> str:
     }.get(tab_id, tab_id)
 from dbaide.desktop.views.ask_tab import AskTab
 from dbaide.desktop.dialogs.joins import JoinsDialog
+from dbaide.desktop.dialogs.note_editor import NoteEditorDialog
 from dbaide.desktop.views.joins_tab import JoinsTab
-from dbaide.desktop.dialogs.annotations import AnnotationsDialog
-from dbaide.desktop.views.annotations_tab import AnnotationsTab
 from dbaide.desktop.views.sidebar import Sidebar
 from dbaide.desktop.views.workbench import WorkbenchView
 from dbaide.desktop.views.query_history import QueryHistoryPanel
@@ -157,7 +156,6 @@ class MainWindow(QMainWindow):
         self.topbar.build_assets.connect(self.build_assets)
         self.topbar.settings.connect(lambda: self.open_settings("connections"))
         self.topbar.joins_requested.connect(self.open_joins)
-        self.topbar.notes_requested.connect(self.open_annotations)
         self.topbar.copy_conversation_requested.connect(self.copy_conversation)
         self.topbar.new_query_requested.connect(self._shortcut_new_query)
         self.topbar.new_conn_requested.connect(lambda: self.open_settings("connections"))
@@ -172,6 +170,7 @@ class MainWindow(QMainWindow):
         self.sidebar.schema_preview.connect(self.preview_schema)
         self.sidebar.schema_selected.connect(self.open_schema_asset)
         self.sidebar.generate_sql.connect(self._generate_sql)
+        self.sidebar.edit_note.connect(self._edit_note)
         self.sidebar.semantic_search_requested.connect(self.search_assets)
         self.sidebar.settings_requested.connect(lambda: self.open_settings("connections"))
         self.sidebar.chats.new_requested.connect(self.new_session)
@@ -222,7 +221,6 @@ class MainWindow(QMainWindow):
         self.workbench.doc_closed.connect(self._on_doc_closed)
         self.workbench.navigate_table.connect(self._open_table_by_name)
         self.workbench.navigate_fk.connect(self._navigate_fk)
-        self.workbench.note_edited.connect(self._save_inline_note)
         self.stack.addWidget(self.ask_tab)    # mode 0 — Assistant
         self.stack.addWidget(self.workbench)  # mode 1 — Workbench
         center_layout.addWidget(self.stack, 1)
@@ -240,8 +238,6 @@ class MainWindow(QMainWindow):
         # no right-hand activity panel at all.
         self.joins = JoinsTab()
         self._joins_dialog: JoinsDialog | None = None
-        self.annotations = AnnotationsTab()
-        self._annotations_dialog: AnnotationsDialog | None = None
 
         body.addWidget(self.sidebar)
         body.addWidget(center)
@@ -539,121 +535,6 @@ class MainWindow(QMainWindow):
             self.service.dispatch("delete_join", {"connection_name": conn, "id": join_id})
             self.bus.emit(JOINS_CHANGED, {"instance": conn})
             self.toast(_i18n_t("toast.join_deleted"))
-        except Exception as exc:
-            self.toast(str(exc))
-
-    # ── Object annotations (user notes on db/table/column) ──────────────────
-
-    def refresh_annotations(self) -> None:
-        conn = self.current_connection()
-        if not conn:
-            self.annotations.load([])
-            return
-        try:
-            result = self.service.dispatch("list_annotations", {"connection_name": conn})
-            self.annotations.load(result.get("annotations") or [])
-        except Exception as exc:
-            self.toast(str(exc))
-
-    def open_annotations(self) -> None:
-        if not self.current_connection():
-            self.toast(_i18n_t("toast.select_connection"))
-            return
-        if self._annotations_dialog is None:
-            dialog = AnnotationsDialog(self.annotations, parent=self)
-            dialog.refresh_requested.connect(self.refresh_annotations)
-            dialog.add_requested.connect(self._add_annotation)
-            dialog.update_requested.connect(self._update_annotation)
-            dialog.delete_requested.connect(self._delete_annotation)
-            self._annotations_dialog = dialog
-        self.refresh_annotations()
-        self._annotations_dialog.show()
-        self._annotations_dialog.raise_()
-        self._annotations_dialog.activateWindow()
-
-    def _merge_notes_into_columns(self, conn: str, database: str, table: str,
-                                  columns: list[dict[str, Any]]) -> str:
-        """Fold saved notes into the column dicts (sets ``note``) and return the
-        table-level note, so the Structure document renders them inline."""
-        try:
-            result = self.service.dispatch(
-                "list_annotations", {"connection_name": conn, "table": table}
-            )
-        except Exception:
-            return ""
-        records = result.get("annotations") or []
-        col_notes: dict[str, str] = {}
-        table_note = ""
-        for r in records:
-            db = str(r.get("database") or "")
-            if db and database and db != database:
-                continue
-            scope = str(r.get("scope") or "")
-            if scope == "column":
-                col_notes[str(r.get("column") or "").strip().lower()] = str(r.get("note") or "")
-            elif scope == "table":
-                table_note = str(r.get("note") or "")
-        for c in columns:
-            note = col_notes.get(str(c.get("name") or "").strip().lower())
-            if note:
-                c["note"] = note
-        return table_note
-
-    def _save_inline_note(self, payload: dict[str, Any]) -> None:
-        """Persist an inline note edit from the Structure document. Empty text
-        deletes the note; non-empty upserts it."""
-        conn = self.current_connection()
-        if not conn:
-            return
-        note = str(payload.get("note") or "").strip()
-        body = {
-            "connection_name": conn,
-            "database": str(payload.get("database") or ""),
-            "table": str(payload.get("table") or ""),
-            "column": str(payload.get("column") or ""),
-        }
-        try:
-            if note:
-                self.service.dispatch("add_annotation", {**body, "note": note})
-                self.toast(_i18n_t("toast.note_saved"))
-            else:
-                self.service.dispatch("delete_annotation", body)
-                self.toast(_i18n_t("toast.note_deleted"))
-            if self._annotations_dialog is not None and self._annotations_dialog.isVisible():
-                self.refresh_annotations()
-        except Exception as exc:
-            self.toast(str(exc))
-
-    def _add_annotation(self, payload: dict[str, Any]) -> None:
-        conn = self.current_connection()
-        if not conn:
-            return
-        try:
-            self.service.dispatch("add_annotation", {**payload, "connection_name": conn})
-            self.toast(_i18n_t("toast.note_saved"))
-            self.refresh_annotations()
-        except Exception as exc:
-            self.toast(str(exc))
-
-    def _update_annotation(self, payload: dict[str, Any]) -> None:
-        conn = self.current_connection()
-        if not conn:
-            return
-        try:
-            self.service.dispatch("update_annotation", {**payload, "connection_name": conn})
-            self.toast(_i18n_t("toast.note_updated"))
-            self.refresh_annotations()
-        except Exception as exc:
-            self.toast(str(exc))
-
-    def _delete_annotation(self, ann_id: str) -> None:
-        conn = self.current_connection()
-        if not conn:
-            return
-        try:
-            self.service.dispatch("delete_annotation", {"connection_name": conn, "id": ann_id})
-            self.toast(_i18n_t("toast.note_deleted"))
-            self.refresh_annotations()
         except Exception as exc:
             self.toast(str(exc))
 
@@ -1108,6 +989,59 @@ class MainWindow(QMainWindow):
             return
         self._show_asset("preview_asset", path)
 
+    def _edit_note(self, node: dict[str, Any]) -> None:
+        """Edit the user note for a db/table/column node (schema-tree pencil icon).
+
+        The note is stored separately from the asset and shown inside the asset
+        document; clearing the text removes it."""
+        conn = self.current_connection()
+        if not conn:
+            self.toast(_i18n_t("toast.select_connection"))
+            return
+        kind = str(node.get("kind") or "")
+        if kind not in ("database", "table", "column"):
+            return
+        parts = str(node.get("path") or "").split(".")
+        database = parts[1] if len(parts) > 1 else ""
+        table = parts[2] if (kind in ("table", "column") and len(parts) > 2) else ""
+        column = parts[3] if (kind == "column" and len(parts) > 3) else ""
+        body = {"connection_name": conn, "scope": kind,
+                "database": database, "table": table, "column": column}
+        try:
+            res = self.service.dispatch("list_annotations", body)
+            records = res.get("annotations") or []
+            current = str(records[0].get("note")) if records else ""
+        except Exception:
+            current = ""
+        qualified = ".".join(p for p in (database, table, column) if p) or conn
+        label = f"{_i18n_t('notes.scope_' + kind)} · {qualified}"
+        dialog = NoteEditorDialog(self, target_label=label, note=current)
+        if dialog.exec() != QDialog.DialogCode.Accepted:
+            return
+        text = dialog.value()
+        try:
+            if text:
+                self.service.dispatch("add_annotation", {**body, "note": text})
+                self.toast(_i18n_t("toast.note_saved"))
+            else:
+                self.service.dispatch("delete_annotation", body)
+                self.toast(_i18n_t("toast.note_deleted"))
+        except Exception as exc:
+            self.toast(str(exc))
+            return
+        # Refresh the affected document if it's open (a column note shows in its
+        # parent table's doc; db/table notes show in their own doc).
+        doc_path = f"{conn}.{database}" if kind == "database" else f"{conn}.{database}.{table}"
+        self._refresh_doc_if_open(doc_path)
+
+    def _refresh_doc_if_open(self, path: str) -> None:
+        if not path or path not in getattr(self.workbench, "_doc_tabs", {}):
+            return
+        self._run_background(
+            "preview_asset", {"path": path},
+            lambda res: self.workbench.update_doc(path, res.get("markdown") or ""),
+        )
+
     def open_schema_asset(self, data: dict[str, Any]) -> None:
         # Double-clicking a table opens its data in the Data browser; other nodes
         # (databases, columns) fall back to the asset preview in a Workbench DocTab.
@@ -1121,16 +1055,13 @@ class MainWindow(QMainWindow):
                 # Structure is built from the columns and FK data already in the node
                 # — instant, no query; Data is the default view and loads its page 1.
                 self.tabbar.setCurrentIndex(1)
-                columns = list(data.get("children") or [])
-                table_note = self._merge_notes_into_columns(conn, database, table, columns)
                 self.workbench.open_table(
-                    conn, database, table, columns,
+                    conn, database, table, data.get("children") or [],
                     relations={
                         "foreign_keys": data.get("foreign_keys") or [],
                         "referenced_by": data.get("referenced_by") or [],
                     },
                     indexes=data.get("indexes") or [],
-                    table_note=table_note,
                 )
                 return
             # Fall through: table with a malformed/short path → show as doc

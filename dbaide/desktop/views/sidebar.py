@@ -5,6 +5,7 @@ from typing import Any
 from PyQt6.QtCore import QSize, Qt, pyqtSignal
 from PyQt6.QtWidgets import (
     QFrame,
+    QHBoxLayout,
     QHeaderView,
     QLineEdit,
     QSizePolicy,
@@ -30,6 +31,7 @@ class Sidebar(QWidget):
     semantic_search_requested = pyqtSignal(str)
     settings_requested = pyqtSignal()
     generate_sql = pyqtSignal(dict, str)  # (table node, template kind)
+    edit_note = pyqtSignal(dict)  # edit the user note for a db/table/column node
 
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
@@ -75,14 +77,15 @@ class Sidebar(QWidget):
         schema_layout.addWidget(self.search)
         self.tree = QTreeWidget()
         self.tree.setHeaderHidden(True)
-        # Column 0 = the schema name (stretches); column 1 = a small "view doc" icon
-        # button per row. Clicking the row opens its DATA; the icon opens the DOC.
+        # Column 0 = the schema name (stretches); column 1 = small per-row action
+        # icons. Clicking the row opens its DATA; the doc icon opens the DOC; the
+        # pencil icon edits the object's user note (db/table/column).
         self.tree.setColumnCount(2)
         header = self.tree.header()
         header.setStretchLastSection(False)
         header.setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
         header.setSectionResizeMode(1, QHeaderView.ResizeMode.Fixed)
-        header.resizeSection(1, 28)
+        header.resizeSection(1, 42)
         self.tree.setIndentation(16)
         self.tree.setAnimated(True)
         # Borderless tree that blends into the sidebar — interactivity comes from the
@@ -162,12 +165,13 @@ class Sidebar(QWidget):
                     table_item.addChild(col_item)
             self.tree.addTopLevelItem(db_item)
             db_item.setExpanded(True)
-        # Add the per-row "view doc" icon to databases and tables (the levels that have
-        # an offline doc; columns are covered by their table's doc). Done after the tree
-        # is built so the item widgets attach to live items.
-        self._attach_doc_buttons()
+        # Add per-row action icons. Databases/tables get a "view doc" icon (they have
+        # an offline doc) plus a "edit note" pencil; columns get just the pencil (their
+        # note shows inside the table's doc). Done after the tree is built so the item
+        # widgets attach to live items.
+        self._attach_row_actions()
 
-    def _attach_doc_buttons(self) -> None:
+    def _attach_row_actions(self) -> None:
         from dbaide.i18n import t
         stack = [self.tree.topLevelItem(i) for i in range(self.tree.topLevelItemCount())]
         while stack:
@@ -175,29 +179,44 @@ class Sidebar(QWidget):
             if item is None:
                 continue
             data = item.data(0, Qt.ItemDataRole.UserRole)
-            if isinstance(data, dict) and data.get("path") and data.get("kind") in ("database", "table"):
-                self.tree.setItemWidget(item, 1, self._doc_button(data, t("schema.view_doc")))
+            if isinstance(data, dict) and data.get("kind") in ("database", "table", "column"):
+                self.tree.setItemWidget(item, 1, self._row_actions(data, t))
             stack.extend(item.child(i) for i in range(item.childCount()))
 
-    def _doc_button(self, data: dict[str, Any], tooltip: str) -> QToolButton:
+    def _row_actions(self, data: dict[str, Any], t) -> QWidget:
+        holder = QWidget()
+        lay = QHBoxLayout(holder)
+        lay.setContentsMargins(0, 0, 2, 0)
+        lay.setSpacing(2)
+        lay.addStretch(1)
+        if data.get("path") and data.get("kind") in ("database", "table"):
+            lay.addWidget(self._icon_button(
+                "file-text", t("schema.view_doc"),
+                lambda d=data: self.schema_preview.emit(d)))
+        lay.addWidget(self._icon_button(
+            "pencil", t("schema.edit_note"),
+            lambda d=data: self.edit_note.emit(d)))
+        return holder
+
+    def _icon_button(self, icon: str, tooltip: str, on_click) -> QToolButton:
         btn = QToolButton()
         # TEXT_2 (not MUTED) so the icon is clearly visible at rest — a muted-grey
         # stroke icon at the row's edge reads as "nothing there". Brightens on hover.
-        btn.setIcon(svg_icon("file-text", color=Theme.TEXT_2, size=15))
-        btn.setIconSize(QSize(15, 15))
+        # Small size + thin (1.4px) stroke so the row-edge icons stay unobtrusive.
+        btn.setIcon(svg_icon(icon, color=Theme.TEXT_2, size=13, width=1.4))
+        btn.setIconSize(QSize(13, 13))
         btn.setToolTip(tooltip)
         btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        btn.setFixedSize(22, 22)
+        btn.setFixedSize(18, 18)
         # Override the GLOBAL QToolButton rule (padding:0 10px; min/max-height:26px;
-        # border) — otherwise the 10px side padding squeezes the 15px icon down to a
-        # ~2px dot, which is exactly why the icon looked like it wasn't showing.
+        # border) — otherwise the side padding squeezes the icon down to a dot.
         btn.setStyleSheet(
-            f"QToolButton {{ background: transparent; border: none; border-radius: 5px;"
-            f" padding: 0; margin: 0; min-width: 0; max-width: 22px;"
-            f" min-height: 0; max-height: 22px; color: {Theme.TEXT_2}; }}"
+            f"QToolButton {{ background: transparent; border: none; border-radius: 4px;"
+            f" padding: 0; margin: 0; min-width: 0; max-width: 18px;"
+            f" min-height: 0; max-height: 18px; color: {Theme.TEXT_2}; }}"
             f"QToolButton:hover {{ background: {Theme.PANEL_3}; }}"
         )
-        btn.clicked.connect(lambda _checked=False, d=data: self.schema_preview.emit(d))
+        btn.clicked.connect(lambda _checked=False: on_click())
         return btn
 
     def _filter_tree(self, text: str) -> None:
@@ -258,6 +277,8 @@ class Sidebar(QWidget):
             menu.addAction(t("schema.open_data"), lambda: self.schema_selected.emit(data))
         if kind in ("database", "table") and data.get("path"):
             menu.addAction(t("schema.view_doc"), lambda: self.schema_preview.emit(data))
+        if kind in ("database", "table", "column"):
+            menu.addAction(t("schema.edit_note"), lambda: self.edit_note.emit(data))
         if kind == "table":
             gen = menu.addMenu(t("schema.generate_sql"))
             _style_menu(gen)

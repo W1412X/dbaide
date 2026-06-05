@@ -311,46 +311,24 @@ _STRINGS: dict[str, dict[str, str]] = {
     "panel.clear_conversation": {"en": "Clear conversation", "zh": "清空对话"},
     "menu.history": {"en": "History…", "zh": "历史记录…"},
     "menu.joins": {"en": "Saved joins…", "zh": "已保存的关联…"},
-    "menu.notes": {"en": "Notes…", "zh": "备注…"},
-    # Object annotations (user notes on db/table/column)
-    "notes.title": {"en": "Notes", "zh": "备注"},
-    "notes.hint": {
-        "en": "Authoritative notes on databases, tables and columns — shown to the assistant at high priority.",
-        "zh": "对库 / 表 / 列的权威备注 —— 会作为高优先级信息提示给助手。",
-    },
-    "notes.empty": {
-        "en": "No notes yet. Add one here, or right-click a column in a table's Structure view.",
-        "zh": "暂无备注。可在此添加，或在表结构视图中右键某一列添加。",
-    },
-    "notes.add": {"en": "Add", "zh": "添加"},
-    "notes.edit": {"en": "Edit", "zh": "编辑"},
-    "notes.delete": {"en": "Delete", "zh": "删除"},
-    "notes.refresh": {"en": "Refresh", "zh": "刷新"},
-    "notes.add_title": {"en": "Add note", "zh": "添加备注"},
+    # Object annotations (user notes on db/table/column) — edited from the schema
+    # tree's pencil icon, displayed inside the asset document.
+    "schema.edit_note": {"en": "Edit note", "zh": "编辑备注"},
     "notes.edit_title": {"en": "Edit note", "zh": "编辑备注"},
-    "notes.field_database": {"en": "Database (optional)", "zh": "数据库（可选）"},
-    "notes.field_table": {"en": "Table (optional)", "zh": "表（可选）"},
-    "notes.field_column": {"en": "Column (optional)", "zh": "列（可选）"},
-    "notes.field_note": {"en": "Note", "zh": "备注内容"},
-    "notes.note_required": {"en": "Note text is required.", "zh": "备注内容不能为空。"},
-    "notes.column_needs_table": {"en": "A column note also needs a table.", "zh": "列备注必须同时填写表名。"},
-    "notes.scope_database": {"en": "database", "zh": "库"},
-    "notes.scope_table": {"en": "table", "zh": "表"},
-    "notes.scope_column": {"en": "column", "zh": "列"},
-    "notes.delete_confirm": {"en": "Remove this note?", "zh": "删除该备注？"},
-    "structure.col_column": {"en": "Column", "zh": "列"},
-    "structure.col_type": {"en": "Type", "zh": "类型"},
-    "structure.col_key": {"en": "Key", "zh": "键"},
-    "structure.col_note": {"en": "Note", "zh": "备注"},
-    "structure.note_hint": {
-        "en": "Double-click to edit · authoritative, shown to the assistant",
-        "zh": "双击编辑 · 权威备注，会提示给助手",
+    "notes.editor_hint": {
+        "en": "Authoritative note — shown in the document and given to the assistant at "
+              "high priority. Stored separately from the asset, so a rebuild keeps it. "
+              "Clear the text to remove the note.",
+        "zh": "权威备注 —— 显示在文档中，并作为高优先级信息提示给助手。与 asset 分开存储，"
+              "重建不会覆盖。清空内容即删除备注。",
     },
-    "structure.table_note": {"en": "Table note", "zh": "表备注"},
-    "structure.table_note_ph": {
-        "en": "Add a note for this table (e.g. deprecated, use orders_v2)…",
-        "zh": "为该表添加备注（如：已弃用，改用 orders_v2）…",
+    "notes.editor_ph": {
+        "en": "e.g. UTC timestamp, show +8 · this table is deprecated, use orders_v2",
+        "zh": "如：UTC 时间戳，展示需 +8 · 此表已弃用，改用 orders_v2",
     },
+    "notes.scope_database": {"en": "Database", "zh": "库"},
+    "notes.scope_table": {"en": "Table", "zh": "表"},
+    "notes.scope_column": {"en": "Column", "zh": "列"},
     # Chat sessions (会话 → 对话)
     "session.chats": {"en": "CHATS", "zh": "会话"},
     "session.new": {"en": "New chat", "zh": "新建会话"},

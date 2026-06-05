@@ -105,6 +105,39 @@ def test_decision_notes_block(tmp_path):
     assert "弃用，改用 orders_v2" in block
 
 
+def test_apply_notes_to_doc_table(tmp_path):
+    from dbaide.annotations import apply_notes_to_doc
+    from dbaide.assets.summarizer import render_table_markdown
+
+    store = AnnotationStore(tmp_path / "ann")
+    store.add("demo", scope="table", note="deprecated, use orders_v2", database="shop", table="orders")
+    store.add("demo", scope="column", note="UTC; +8", database="shop", table="orders", column="paid_at")
+    doc = {"kind": "table", "name": "orders", "database": "shop", "columns": [
+        {"name": "id", "data_type": "bigint"},
+        {"name": "paid_at", "data_type": "bigint"},
+    ]}
+    apply_notes_to_doc(store, "demo", doc)
+    assert doc["user_note"] == "deprecated, use orders_v2"
+    assert doc["columns"][1]["user_note"] == "UTC; +8"
+    md = render_table_markdown(doc)
+    assert "User note" in md and "deprecated, use orders_v2" in md and "UTC; +8" in md
+
+
+def test_apply_notes_to_doc_database(tmp_path):
+    from dbaide.annotations import apply_notes_to_doc
+
+    store = AnnotationStore(tmp_path / "ann")
+    store.add("demo", scope="database", note="prod; ignore test_*", database="shop")
+    store.add("demo", scope="table", note="legacy", database="shop", table="orders")
+    doc = {"kind": "database", "name": "shop", "tables": [
+        {"name": "orders"}, {"name": "users"},
+    ]}
+    apply_notes_to_doc(store, "demo", doc)
+    assert doc["user_note"] == "prod; ignore test_*"
+    assert doc["tables"][0]["user_note"] == "legacy"
+    assert "user_note" not in doc["tables"][1]
+
+
 def test_annotate_object_tool(tmp_path):
     orch, annotations = _orch(tmp_path)
     registry = build_tool_registry(orch)

@@ -23,7 +23,6 @@ class TableDocument(QWidget):
     ddl_requested = pyqtSignal(dict)   # fetch the real CREATE TABLE DDL from the DB
     navigate_table = pyqtSignal(str)  # bubbled from the Structure panel's FK links
     navigate_fk = pyqtSignal(str, str, object)  # (ref_table, ref_column, value)
-    note_edited = pyqtSignal(dict)  # inline note edit {database, table, column, note}
 
     def __init__(self, connection: str, database: str, table: str, parent=None) -> None:
         super().__init__(parent)
@@ -51,7 +50,6 @@ class TableDocument(QWidget):
         self.data.navigate_fk.connect(self.navigate_fk.emit)
         self.structure = StructurePanel()
         self.structure.navigate_table.connect(self.navigate_table.emit)
-        self.structure.note_edited.connect(self._on_note_edited)
         # Structure first — opening a table shows its (offline, instant) structure;
         # the Data tab issues its query lazily, only when the user actually opens it.
         self._structure_index = self.tabs.addTab(self.structure, t("tab.structure"))
@@ -71,12 +69,10 @@ class TableDocument(QWidget):
 
     def open(self, columns: list[dict[str, Any]],
              relations: dict[str, list[dict[str, Any]]] | None = None,
-             indexes: list[dict[str, Any]] | None = None,
-             table_note: str = "") -> None:
+             indexes: list[dict[str, Any]] | None = None) -> None:
         """Render the offline structure and show it. No query runs until the user
         opens the Data tab (see ``_ensure_data``)."""
-        self.structure.show_table(self.table, columns or [], relations or {}, indexes or [],
-                                  table_note=table_note)
+        self.structure.show_table(self.table, columns or [], relations or {}, indexes or [])
         # Feed the data grid the outgoing FK map so cells can navigate to refs.
         fk_map = {
             fk.get("column"): (fk.get("ref_table"), fk.get("ref_column"))
@@ -129,13 +125,3 @@ class TableDocument(QWidget):
 
     def show_count(self, total: int) -> None:
         self.data.show_count(total)
-
-    def _on_note_edited(self, column: str, text: str) -> None:
-        # The Structure panel knows only table/column; add this document's database
-        # before bubbling the inline edit up to the window for persistence.
-        self.note_edited.emit({
-            "database": self.database,
-            "table": self.table,
-            "column": column,
-            "note": text,
-        })

@@ -70,6 +70,58 @@ def make_record(
     }
 
 
+def apply_notes_to_doc(store: "AnnotationStore", instance: str, doc: dict[str, Any]) -> dict[str, Any]:
+    """Fold user notes into an asset doc in place (sets ``user_note`` fields).
+
+    Storage stays separate from the asset (a rebuild never overwrites notes); this
+    merges them for display. Handles table / database / instance docs."""
+    if not isinstance(doc, dict):
+        return doc
+    kind = str(doc.get("kind") or "")
+    try:
+        if kind == "table":
+            db = str(doc.get("database") or "")
+            table = str(doc.get("name") or doc.get("table") or "")
+            view = store.annotations_for_tables(instance, [(db, table)])
+            key = (db.strip().lower(), table.strip().lower())
+            doc["user_note"] = view["tables"].get(key, "")
+            col_notes = view["columns"].get(key, {})
+            for col in doc.get("columns", []):
+                note = col_notes.get(str(col.get("name") or "").strip().lower())
+                if note:
+                    col["user_note"] = note
+        elif kind == "database":
+            db = str(doc.get("name") or "")
+            records = store.list_records(instance, database=db)
+            tnotes: dict[str, str] = {}
+            for r in records:
+                scope = _norm(r.get("scope"))
+                if scope == "database":
+                    doc["user_note"] = str(r.get("note") or "")
+                elif scope == "table":
+                    tnotes[_norm(r.get("table"))] = str(r.get("note") or "")
+            for table in doc.get("tables", []):
+                note = tnotes.get(str(table.get("name") or "").strip().lower())
+                if note:
+                    table["user_note"] = note
+        else:  # instance
+            records = store.list_records(instance)
+            dbnotes: dict[str, str] = {}
+            for r in records:
+                if _norm(r.get("scope")) != "database":
+                    continue
+                dbnotes[_norm(r.get("database"))] = str(r.get("note") or "")
+            if dbnotes.get(""):
+                doc["user_note"] = dbnotes[""]
+            for db in doc.get("databases", []):
+                note = dbnotes.get(str(db.get("name") or "").strip().lower())
+                if note:
+                    db["user_note"] = note
+    except Exception:  # display merge must never break the doc
+        return doc
+    return doc
+
+
 class AnnotationStore:
     """CRUD for user notes under ~/.dbaide/annotations/instances/{instance}/."""
 

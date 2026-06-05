@@ -226,13 +226,23 @@ def _index_label(idx: dict[str, Any]) -> str:
     return f"{idx.get('name', '')} ({cols}){suffix}{type_suffix}"
 
 
+def _md_cell(text: Any, limit: int = 200) -> str:
+    return str(text or "").replace("|", "\\|").replace("\n", " ")[:limit]
+
+
 def render_instance_markdown(doc: dict[str, Any]) -> str:
     lines = [f"# {doc.get('name', 'Instance')}", ""]
     if doc.get("description"):
         lines += [doc["description"], ""]
-    lines += ["## Databases", "", "| Database | Tables | Description |", "| --- | --- | --- |"]
+    if doc.get("user_note"):
+        lines += [f"> 📝 **User note:** {doc['user_note']}", ""]
+    lines += ["## Databases", "", "| Database | Tables | Description | User note |",
+              "| --- | --- | --- | --- |"]
     for db in doc.get("databases", []):
-        lines.append(f"| {db.get('name', '')} | {db.get('table_count', '?')} | {db.get('description', '')} |")
+        lines.append(
+            f"| {db.get('name', '')} | {db.get('table_count', '?')} "
+            f"| {_md_cell(db.get('description'))} | {_md_cell(db.get('user_note'))} |"
+        )
     lines.append("")
     return "\n".join(lines)
 
@@ -241,15 +251,22 @@ def render_database_markdown(doc: dict[str, Any]) -> str:
     lines = [f"# {doc.get('name', 'Database')}", ""]
     if doc.get("description"):
         lines += [doc["description"], ""]
-    lines += ["## Tables", "", "| Table | Description |", "| --- | --- |"]
+    if doc.get("user_note"):
+        lines += [f"> 📝 **User note:** {doc['user_note']}", ""]
+    lines += ["## Tables", "", "| Table | Description | User note |", "| --- | --- | --- |"]
     for table in doc.get("tables", []):
-        lines.append(f"| {table.get('name', '')} | {table.get('description', '')} |")
+        lines.append(
+            f"| {table.get('name', '')} | {_md_cell(table.get('description'))} "
+            f"| {_md_cell(table.get('user_note'))} |"
+        )
     lines.append("")
     return "\n".join(lines)
 
 
 def render_table_markdown(doc: dict[str, Any]) -> str:
     lines = [f"# {doc.get('name', 'Table')}", ""]
+    if doc.get("user_note"):
+        lines += [f"> 📝 **User note:** {doc['user_note']}", ""]
     lines += ["## Summary", ""]
     lines.append(f"- **Database:** {doc.get('database', '?')}")
     lines.append(f"- **Type:** {doc.get('table_type', 'table')}")
@@ -262,13 +279,20 @@ def render_table_markdown(doc: dict[str, Any]) -> str:
         lines.append(f"- **Description:** {doc['description']}")
     lines.append("")
 
-    # Full structured column shape (the table is the disclosure leaf).
-    lines += ["## Columns", "", "| Column | Type | PK | Null | Comment |", "| --- | --- | --- | --- | --- |"]
+    # Full structured column shape (the table is the disclosure leaf). The User note
+    # column carries the user's authoritative annotation (stored separately from the
+    # asset, merged in for display).
+    lines += ["## Columns", "", "| Column | Type | PK | Null | Comment | User note |",
+              "| --- | --- | --- | --- | --- | --- |"]
     for col in doc.get("columns", []):
         pk = "✓" if col.get("primary_key") else ""
         nullable = "" if col.get("nullable") is False else "✓"
-        comment = str(col.get("comment") or "").replace("|", "\\|")[:60]
-        lines.append(f"| {col.get('name', '')} | {col.get('data_type', '')} | {pk} | {nullable} | {comment} |")
+        comment = _md_cell(col.get("comment"), 60)
+        user_note = _md_cell(col.get("user_note"), 120)
+        lines.append(
+            f"| {col.get('name', '')} | {col.get('data_type', '')} | {pk} | {nullable} "
+            f"| {comment} | {user_note} |"
+        )
     lines.append("")
 
     indexes = doc.get("indexes", [])

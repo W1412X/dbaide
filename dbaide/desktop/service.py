@@ -670,8 +670,13 @@ class DesktopService:
         return {"deleted": self.sessions.delete(conn, session_id), "session_id": session_id}
 
     def asset_markdown(self, payload: dict[str, Any]) -> dict[str, Any]:
+        from dbaide.annotations import apply_notes_to_doc
+
         path = str(payload.get("path") or "")
         doc = self.read_asset({"path": path})
+        instance = path.split(".")[0] if path else ""
+        if instance:
+            apply_notes_to_doc(self.annotations, instance, doc)  # fold in user notes
         kind = str(doc.get("kind") or "")
         if kind == "table":
             markdown = render_table_markdown(doc)
