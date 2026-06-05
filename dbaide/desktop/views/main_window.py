@@ -809,7 +809,7 @@ class MainWindow(QMainWindow):
     def _settings_save_connection(self, dialog: SettingsDialog, payload: dict[str, Any]) -> None:
         dialog.set_save_busy(True, target="connection")
 
-        def on_done(_result: object) -> None:
+        def on_done(result: object) -> None:
             dialog.set_save_busy(False, target="connection")
             dialog._connections[payload["name"]] = dict(payload)
             if payload.get("make_default"):
@@ -817,12 +817,34 @@ class MainWindow(QMainWindow):
             dialog._reload_connection_list()
             self.toast(_i18n_t("toast.conn_saved"))
             self.bus.emit(CONNECTIONS_CHANGED, {"instance": payload.get("name")})
+            # No base document yet (new connection) → project the schema from the live
+            # catalog in the background so its tree populates without a manual build.
+            conn_info = (result or {}).get("connection") if isinstance(result, dict) else None
+            if isinstance(conn_info, dict) and conn_info.get("asset_status") == "missing":
+                self._auto_project(str(payload.get("name") or ""))
 
         def on_fail(exc: object) -> None:
             dialog.set_save_busy(False, target="connection")
             dialog.show_test_result(False, str(exc), target="connection")
 
         self._run_background("save_connection", payload, on_done, on_error=on_fail)
+
+    def _auto_project(self, name: str) -> None:
+        """Build the BASE schema document (structure only, from the live catalog) for a
+        connection that has none yet, in the background, then refresh its tree. Cheap
+        (no LLM/sampling); failures (unreachable / no catalog access) are non-fatal."""
+        if not name:
+            return
+        self.toast(_i18n_t("toast.projecting"))
+
+        def done(_r: object) -> None:
+            self.toast(_i18n_t("toast.projected"))
+            self.bus.emit(ASSETS_CHANGED, {"instance": name})  # → refresh_all reloads the tree
+
+        def fail(exc: object) -> None:
+            self.toast(_i18n_t("toast.project_failed", error=str(exc)))
+
+        self._run_background("project_instance", {"name": name}, done, on_error=fail)
 
     def _settings_delete_connection(self, name: str) -> None:
         try:
