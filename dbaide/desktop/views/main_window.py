@@ -297,7 +297,13 @@ class MainWindow(QMainWindow):
         if has_conn:
             self._refresh_connection_context(conn_name)
         else:
+            # No connection left (e.g. the current one was deleted) — clear the
+            # per-connection views so a deleted connection's schema/sessions don't linger.
             self.composer.set_placeholder(_i18n_t("composer.placeholder.no_conn"))
+            self.schema_rows = []
+            self.sidebar.load_schema([])
+            self.sidebar.chats.load([])
+            self.topbar.set_databases([])
 
     def _run_background(
         self,
