@@ -9,14 +9,13 @@ from typing import Any, Callable
 
 from dbaide.agent.answer_stream import JsonFieldStreamer
 from dbaide.agent.loop_state import dump_loop_state, restore_loop_state
-from dbaide.agent.progress_events import brief_tool_summary, from_trace_event, progress_event, progress_label
+from dbaide.agent.progress_events import brief_tool_summary, from_trace_event, progress_event
 from dbaide.agent.schema_context import decision_notes_block, disclosed_table_keys
 from dbaide.agent.llm_trace import llm_stage
 from dbaide.i18n import answer_language_directive
 from dbaide.agent.runtime import AgentRuntime
 from dbaide.agent.toolkit import build_tool_registry, loop_tool_specs
-from dbaide.core.events import TraceEvent, TraceKind, TraceLevel
-from dbaide.core.result import ExecutionPolicy
+from dbaide.core.events import TraceEvent
 from dbaide.llm import LLMMessage
 from dbaide.models import AssistantResponse
 from dbaide.tools.registry import ToolContext, ToolResult
@@ -406,14 +405,11 @@ class AskAgentLoop:
         if text:
             self.progress({"kind": "answer_chunk", "text": text})
 
-    def _decide(self, state: LoopState, transcript: list[str]) -> dict[str, Any]:
-        tools = loop_tool_specs(self.registry)
-        tool_lines = "\n".join(f"- {s.name}: {s.description}" for s in tools)
-        policy = self.orchestrator.execution_policy.value
-        execute_note = "allowed" if state.execute_allowed else "disabled"
-
-        system = (
-            "You are DBAide, a database assistant operating in a tool loop.\n"
+    def _decision_system_prompt(self, state: "LoopState", tool_lines: str,
+                                policy: str, execute_note: str) -> str:
+        """The static decision-policy system prompt (how the agent should work)."""
+        return (
+"You are DBAide, a database assistant operating in a tool loop.\n"
             "Choose the next action to answer the user.\n\n"
             "How to work (read carefully):\n"
             "• Big direction first, then detail — get the relevant tables, THEN their columns. "
@@ -466,6 +462,10 @@ class AskAgentLoop:
             f"- {answer_language_directive()}"
         )
 
+    def _decision_user_prompt(self, state: "LoopState", transcript: list[str]) -> str:
+        """Per-step user prompt: question, scope, authoritative notes, confirmed
+        criteria, pinned schema, and recent tool history."""
+
         history = "\n\n".join(transcript[-8:]) if transcript else "(no tool calls yet)"
         # Surface the user's pinned schema (composer attachments) so the model knows
         # which tables were explicitly attached and can resolve_schema on them directly
@@ -492,6 +492,16 @@ class AskAgentLoop:
             f"{pin_line}"
             f"Tool history:\n{history}"
         )
+        return user
+
+    def _decide(self, state: LoopState, transcript: list[str]) -> dict[str, Any]:
+        tools = loop_tool_specs(self.registry)
+        tool_lines = "\n".join(f"- {s.name}: {s.description}" for s in tools)
+        policy = self.orchestrator.execution_policy.value
+        execute_note = "allowed" if state.execute_allowed else "disabled"
+
+        system = self._decision_system_prompt(state, tool_lines, policy, execute_note)
+        user = self._decision_user_prompt(state, transcript)
 
         last_error = ""
         for attempt in range(DECISION_RETRIES):
