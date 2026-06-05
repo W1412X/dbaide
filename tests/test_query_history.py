@@ -68,3 +68,26 @@ def test_panel_loads(qapp):
     assert p.stack.currentIndex() == 1
     p.load([])
     assert p.stack.currentIndex() == 0
+
+
+def test_connection_name_cannot_escape_base_dir(tmp_path: Path):
+    """A connection name with path separators / traversal must not write the history
+    file outside base_dir — the name is sanitized into a single filename stem."""
+    base = tmp_path / "hist"
+    s = QueryHistoryStore(base_dir=base)
+    s.record("../escape", "select 1")
+    s.record("a/b", "select 2")
+    # Nothing escaped the base dir, and every history file is a direct child of it.
+    assert not list(base.parent.glob("escape.jsonl"))
+    files = sorted(p.name for p in base.glob("*.jsonl"))
+    assert files == [".._escape.jsonl", "a_b.jsonl"]
+    # The sanitized names still round-trip through the public API.
+    assert [e["sql"] for e in s.recent("../escape")] == ["select 1"]
+    assert [e["sql"] for e in s.recent("a/b")] == ["select 2"]
+
+
+def test_normal_connection_names_are_unchanged(tmp_path: Path):
+    """Ordinary names (the common case) keep their exact filename — no migration."""
+    s = QueryHistoryStore(base_dir=tmp_path)
+    s.record("prod", "select 1")
+    assert (tmp_path / "prod.jsonl").exists()

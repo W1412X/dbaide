@@ -19,12 +19,20 @@ logger = logging.getLogger(__name__)
 MAX_ENTRIES = 500
 
 
+def _safe_name(connection_name: str) -> str:
+    """Filesystem-safe per-connection filename stem. A connection name is user-chosen
+    and could contain path separators ('a/b') or traversal ('../x'); collapse anything
+    that isn't a plain identifier char so the history file always stays inside base_dir
+    (mirrors observability.query_log._safe_name)."""
+    return "".join(c if c.isalnum() or c in "-_." else "_" for c in (connection_name or "_default"))
+
+
 class QueryHistoryStore:
     def __init__(self, base_dir: Path | None = None) -> None:
         self.base_dir = base_dir or Path.home() / ".dbaide" / "query_history"
 
     def _path(self, connection_name: str) -> Path:
-        return self.base_dir / f"{connection_name or '_default'}.jsonl"
+        return self.base_dir / f"{_safe_name(connection_name)}.jsonl"
 
     def record(
         self,
