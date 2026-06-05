@@ -292,6 +292,7 @@ class MainWindow(QMainWindow):
         conn_name = self.current_connection()
         has_conn = bool(conn_name)
         self.ask_tab.set_has_connection(has_conn)
+        self.ask_tab.set_empty_context(has_conn, bool(models))
         self.composer.set_disabled_no_connection(not has_conn)
         if has_conn:
             self._refresh_connection_context(conn_name)

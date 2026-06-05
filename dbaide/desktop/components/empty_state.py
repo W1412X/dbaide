@@ -45,17 +45,21 @@ class EmptyState(QWidget):
             col_layout.addWidget(tile, alignment=Qt.AlignmentFlag.AlignHCenter)
             col_layout.addSpacing(6)
 
-        title_label = QLabel(title)
-        title_label.setWordWrap(True)
-        title_label.setStyleSheet(f"color: {Theme.TEXT}; font-size:18px; font-weight:600;")
-        title_label.setAlignment(Qt.AlignmentFlag.AlignHCenter)
+        self._title_label = QLabel(title)
+        self._title_label.setWordWrap(True)
+        self._title_label.setStyleSheet(f"color: {Theme.TEXT}; font-size:18px; font-weight:600;")
+        self._title_label.setAlignment(Qt.AlignmentFlag.AlignHCenter)
 
-        body_label = QLabel(body)
-        body_label.setWordWrap(True)
-        body_label.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Minimum)
-        body_label.setStyleSheet(f"color: {Theme.MUTED}; font-size: 13px;")
-        body_label.setAlignment(Qt.AlignmentFlag.AlignHCenter)
+        self._body_label = QLabel(body)
+        self._body_label.setWordWrap(True)
+        self._body_label.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Minimum)
+        self._body_label.setStyleSheet(f"color: {Theme.MUTED}; font-size: 13px;")
+        self._body_label.setAlignment(Qt.AlignmentFlag.AlignHCenter)
 
-        col_layout.addWidget(title_label)
-        col_layout.addWidget(body_label)
+        col_layout.addWidget(self._title_label)
+        col_layout.addWidget(self._body_label)
         layout.addWidget(column, alignment=Qt.AlignmentFlag.AlignHCenter)
+
+    def set_text(self, title: str, body: str) -> None:
+        self._title_label.setText(title)
+        self._body_label.setText(body)

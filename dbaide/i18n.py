@@ -269,6 +269,16 @@ _STRINGS: dict[str, dict[str, str]] = {
         "en": "Open Settings to add a connection and configure the model.",
         "zh": "打开设置以添加连接并配置模型。",
     },
+    "ask.empty_model_title": {"en": "Configure a model", "zh": "配置一个模型"},
+    "ask.empty_model_subtitle": {
+        "en": "A connection is set. Open Settings to add an LLM (provider, base URL, key, model).",
+        "zh": "连接已就绪。打开设置以添加大模型（provider、base URL、key、model）。",
+    },
+    "ask.empty_ready_title": {"en": "Ask anything about your data", "zh": "随便问点关于你数据的问题"},
+    "ask.empty_ready_subtitle": {
+        "en": "Type a question below to start a new chat.",
+        "zh": "在下方输入问题即可开始新对话。",
+    },
     "note.error": {"en": "Error", "zh": "错误"},
     "note.assets_built": {"en": "Assets built", "zh": "资产已构建"},
     # Build dialog

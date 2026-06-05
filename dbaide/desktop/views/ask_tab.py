@@ -132,6 +132,20 @@ class AskTab(QWidget):
         self._has_conn = has_connection
         self.set_active(self._active)
 
+    def set_empty_context(self, has_connection: bool, has_model: bool) -> None:
+        """Make the empty page reflect what's actually missing: no connection, no
+        model, or just no chats yet (ready)."""
+        from dbaide.i18n import t
+        if not has_connection:
+            self.empty.set_text(t("ask.empty_title"), t("ask.empty_subtitle"))
+            self._empty_btn.setVisible(True)
+        elif not has_model:
+            self.empty.set_text(t("ask.empty_model_title"), t("ask.empty_model_subtitle"))
+            self._empty_btn.setVisible(True)
+        else:
+            self.empty.set_text(t("ask.empty_ready_title"), t("ask.empty_ready_subtitle"))
+            self._empty_btn.setVisible(False)
+
     # ── keyed conversation operations ─────────────────────────────────────────
 
     def begin_turn(self, key: str, question: str, *, connection: str, database: str, policy: str,
