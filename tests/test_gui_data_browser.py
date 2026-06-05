@@ -143,6 +143,16 @@ def test_fk_cell_navigation(qapp):
     assert w._fk_cell_actions(0, w._columns.index("id")) == []
 
 
+def test_fk_cell_navigation_skips_null_value(qapp):
+    """A NULL foreign-key cell offers no navigation — there is no referenced row to
+    open (and `ref_column = NULL` would never match)."""
+    from dbaide.desktop.views.data_browser import DataBrowser
+    w = DataBrowser()
+    w.set_foreign_keys({"user_id": ("users", "id")})
+    w.show_result({"columns": ["id", "user_id"], "rows": [{"id": 1, "user_id": None}], "offset": 0})
+    assert w._fk_cell_actions(0, w._columns.index("user_id")) == []
+
+
 def test_browse_filtered_sets_identity_and_where(qapp):
     from dbaide.desktop.views.data_browser import DataBrowser
     w = DataBrowser()
