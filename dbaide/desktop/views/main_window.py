@@ -708,6 +708,7 @@ class MainWindow(QMainWindow):
             resource_defaults=resource_defaults,
             language=get_language(),
             stream_answers=self.service.cfg.stream_answers(),
+            debug_trace=self.service.cfg.debug_trace(),
             parent=self,
             initial_page=page,
         )
@@ -721,7 +722,20 @@ class MainWindow(QMainWindow):
         dialog.language_changed.connect(self._change_language)
         dialog.theme_changed.connect(self._change_theme)
         dialog.stream_answers_changed.connect(self._change_stream_answers)
+        dialog.debug_trace_changed.connect(self._change_debug_trace)
         dialog.exec()
+
+    def _change_debug_trace(self, enabled: bool) -> None:
+        # Capture full LLM prompts/responses into the trace so a copied trace shows
+        # every stage's context. Applied to THIS process immediately (next query) and
+        # persisted for future launches.
+        from dbaide.agent.llm_trace import set_tracing
+        try:
+            self.service.cfg.set_debug_trace(bool(enabled))
+            set_tracing(bool(enabled))
+            self.toast(_i18n_t("toast.debug_trace_on" if enabled else "toast.debug_trace_off"))
+        except Exception as exc:  # noqa: BLE001
+            self.toast(str(exc))
 
     def _change_stream_answers(self, enabled: bool) -> None:
         # Persisted to config; the backend reads it per request (next query streams or

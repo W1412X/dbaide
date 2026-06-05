@@ -129,6 +129,7 @@ class SettingsDialog(QDialog):
     language_changed = pyqtSignal(str)
     theme_changed = pyqtSignal(str)
     stream_answers_changed = pyqtSignal(bool)
+    debug_trace_changed = pyqtSignal(bool)
 
     # Numeric resource knobs shown on the Resources page: (key, min, max).
     # The display label comes from i18n ("res.<key>").
@@ -157,6 +158,7 @@ class SettingsDialog(QDialog):
         resource_defaults: dict | None = None,
         language: str = "en",
         stream_answers: bool = True,
+        debug_trace: bool = False,
         parent=None,
         initial_page: str = "connections",
     ) -> None:
@@ -164,6 +166,7 @@ class SettingsDialog(QDialog):
         from dbaide.i18n import t as _t
         self._language = language
         self._stream_answers = bool(stream_answers)
+        self._debug_trace = bool(debug_trace)
         from dbaide.desktop.theme import current_theme_name
         self._theme = current_theme_name()
         self.setWindowTitle(_t("settings.title"))
@@ -425,6 +428,11 @@ class SettingsDialog(QDialog):
         self.stream_answers_check.setChecked(self._stream_answers)
         self.stream_answers_check.toggled.connect(self.stream_answers_changed.emit)
         form.addRow(t("settings.stream_answers"), self.stream_answers_check)
+
+        self.debug_trace_check = QCheckBox(t("settings.debug_trace.label"))
+        self.debug_trace_check.setChecked(self._debug_trace)
+        self.debug_trace_check.toggled.connect(self.debug_trace_changed.emit)
+        form.addRow(t("settings.debug_trace"), self.debug_trace_check)
 
         card_layout.addLayout(form)
         layout.addWidget(card)

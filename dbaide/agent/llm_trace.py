@@ -25,8 +25,20 @@ from dbaide.llm import LLMClient, LLMMessage
 # The stage the current LLM call belongs to (e.g. a tool name, or "decide").
 _active_stage: contextvars.ContextVar[str] = contextvars.ContextVar("dbaide_llm_stage", default="")
 
+# Process-level override (set by the desktop launcher from config), so the GUI can
+# enable debug tracing without an env var. None = not set → fall back to the env var.
+_forced: bool | None = None
+
+
+def set_tracing(on: bool | None) -> None:
+    """Force tracing on/off for this process (None reverts to the env-var gate)."""
+    global _forced
+    _forced = on
+
 
 def tracing_enabled() -> bool:
+    if _forced is not None:
+        return _forced
     return bool(os.environ.get("DBAIDE_TRACE_LLM"))
 
 

@@ -226,6 +226,18 @@ class ConfigManager:
             ui["theme"] = name
         self.save()
 
+    # ── Debug: capture full LLM prompts/responses into the trace ──────────────
+
+    def debug_trace(self) -> bool:
+        ui = self._data.get("ui") or {}
+        return bool(ui.get("debug_trace")) if isinstance(ui, dict) else False
+
+    def set_debug_trace(self, on: bool) -> None:
+        ui = self._data.setdefault("ui", {})
+        if isinstance(ui, dict):
+            ui["debug_trace"] = bool(on)
+        self.save()
+
     # ── UI: stream the assistant's answer (progressive reveal) ────────────────
 
     def stream_answers(self) -> bool:
