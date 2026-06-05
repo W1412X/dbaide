@@ -73,7 +73,8 @@ class _StressMock(LLMClient):
         tables = []
         for m in re.finditer(r'^-\s+([^\s.]+)\.("[^"]+"|[^\s\[]+)\s*\[([^\]]*)\]', section, re.MULTILINE):
             db, tbl, cols = m.group(1), m.group(2).strip('"'), m.group(3)
-            col_names = [c.split()[0] for c in cols.split(",") if c.strip()]
+            # A column may carry an inline note annotation ("total(📝note)") — strip it.
+            col_names = [c.split("(")[0].split()[0] for c in cols.split(",") if c.strip()]
             tables.append({"database": db, "table": tbl, "columns": col_names, "reason": "stress"})
         if self.ambiguous and len(tables) >= 2:
             return {"ask": {"question": "Which table?", "options": [t["table"] for t in tables[:3]]}}
@@ -210,6 +211,41 @@ def test_join_question_exercises_multi_table_path(_connections):
     assert len(orch.run_state.resolved_schema.tables) == 2     # two tables resolved
     assert len(orch.run_state.relations or []) >= 1            # FK inferred between them
     assert resp.result is not None
+
+
+def test_user_notes_reach_the_sql_writer(_connections, tmp_path):
+    """User notes are authoritative and must reach the SQL writer — the most critical
+    injection point. A table note AND a column note both appear in the generate_sql
+    prompt (table note in the authoritative block, column note on its column line)."""
+    from dbaide.annotations import AnnotationStore
+
+    cfg = _connections["shop"]
+    ann = AnnotationStore(base_dir=tmp_path / "ann")
+    ann.add("shop", scope="table", note="DEPRECATED use orders_v2", database="main", table="orders")
+    ann.add("shop", scope="column", note="total is in CENTS not dollars",
+            database="main", table="orders", column="total")
+
+    ref: dict = {}
+    mock = _StressMock(ref)
+    orch = AskOrchestrator(build_adapter(cfg), Session(connection=cfg), mock,
+                           execution_policy=ExecutionPolicy.SAFE_AUTO, annotations=ann)
+    ref["orch"] = orch
+
+    sql_prompts: list[str] = []
+    inner = mock.complete_json
+
+    def capture(messages, **kw):
+        if messages and "generate safe read-only SQL" in messages[0].content:
+            sql_prompts.append("\n".join(m.content for m in messages))
+        return inner(messages, **kw)
+
+    mock.complete_json = capture
+    AskAgentLoop(orch).run("统计订单总额", execute=True)
+
+    assert sql_prompts, "generate_sql never ran"
+    prompt = sql_prompts[-1]
+    assert "DEPRECATED use orders_v2" in prompt          # table note reached the SQL writer
+    assert "total is in CENTS not dollars" in prompt     # column note rode on its column
 
 
 def test_clarify_pause_then_resume_completes(_connections):
