@@ -818,7 +818,7 @@ class MainWindow(QMainWindow):
         # Language is applied at startup from config (UI + the model's answer
         # language), so a change persists and takes effect on the next launch —
         # we ask the user to restart rather than retranslate every live widget.
-        from dbaide.i18n import normalize, t
+        from dbaide.i18n import normalize
         if normalize(lang) == self.service.cfg.ui_language():
             return
         try:
@@ -894,14 +894,19 @@ class MainWindow(QMainWindow):
             self.toast(_i18n_t("toast.select_connection"))
             return
         self.toast(_i18n_t("toast.syncing"))
+        # Persistent badge for the whole (possibly slow, remote) sync — a transient
+        # toast alone leaves no indication once it fades while work continues.
+        self.topbar.set_global_status(_i18n_t("status.syncing"), "building")
 
         def done(result: object) -> None:
             summary = (result or {}).get("summary", "") if isinstance(result, dict) else ""
             self.toast(_i18n_t("toast.synced", summary=summary))
+            self._restore_status_badge()
             self.bus.emit(ASSETS_CHANGED, {"instance": conn})
 
         def fail(exc: object) -> None:
             self.toast(_i18n_t("toast.sync_failed", error=str(exc)))
+            self._restore_status_badge()
 
         self._run_background("refresh_instance", {"name": conn}, done, on_error=fail)
 
@@ -926,13 +931,18 @@ class MainWindow(QMainWindow):
         else:
             return
         self.toast(_i18n_t("toast.enriching", target=target))
+        # Enrichment runs the LLM + sampling + profiling — slow enough that the start
+        # toast fades long before it finishes; keep a persistent badge meanwhile.
+        self.topbar.set_global_status(_i18n_t("status.enriching"), "building")
 
         def done(_r: object) -> None:
             self.toast(_i18n_t("toast.enriched", target=target))
+            self._restore_status_badge()
             self.bus.emit(ASSETS_CHANGED, {"instance": conn})
 
         def fail(exc: object) -> None:
             self.toast(_i18n_t("toast.enrich_failed", error=str(exc)))
+            self._restore_status_badge()
 
         self._run_background(action, payload, done, on_error=fail)
 

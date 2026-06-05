@@ -192,6 +192,8 @@ _STRINGS: dict[str, dict[str, str]] = {
     "status.ready": {"en": "Ready", "zh": "就绪"},
     "status.loading": {"en": "Loading…", "zh": "加载中…"},
     "status.building": {"en": "Building assets", "zh": "正在构建资产"},
+    "status.syncing": {"en": "Syncing schema…", "zh": "正在同步库结构…"},
+    "status.enriching": {"en": "Enriching docs…", "zh": "正在补充文档…"},
     "toast.task_running": {"en": "A task is already running", "zh": "已有任务在运行"},
     "toast.cancelling": {"en": "Cancelling…", "zh": "正在取消…"},
     "toast.cancelled": {"en": "Cancelled", "zh": "已取消"},
