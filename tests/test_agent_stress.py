@@ -272,6 +272,72 @@ def test_user_notes_reach_the_sql_writer(_connections, tmp_path):
     assert "name is the full legal name" in joined       # users column note
 
 
+class _AnnotateMock(_StressMock):
+    """Drives the agent to save a note via annotate_object, then finish."""
+    def _loop(self, system, user):
+        if "Tool `annotate_object`" not in user:
+            return {"action": "call_tool", "tool": "annotate_object",
+                    "args": {"scope": "table", "table": "orders", "note": "frozen: use orders_v2"}}
+        return {"action": "finish", "answer": "Saved the note."}
+
+
+def test_agent_annotate_object_persists(_connections, tmp_path):
+    """The agent can durably record a fact via annotate_object — the note is written
+    to the annotation store so future runs benefit."""
+    from dbaide.annotations import AnnotationStore
+    cfg = _connections["shop"]
+    ann = AnnotationStore(base_dir=tmp_path / "ann")
+    ref: dict = {}
+    mock = _AnnotateMock(ref)
+    orch = AskOrchestrator(build_adapter(cfg), Session(connection=cfg), mock,
+                           execution_policy=ExecutionPolicy.SAFE_AUTO, annotations=ann)
+    ref["orch"] = orch
+    resp = AskAgentLoop(orch).run("记住 orders 表已停用", execute=True)
+    assert resp.status != "wait_user"
+    recs = {(r["scope"], r.get("table"), r["note"]) for r in ann.list_records("shop")}
+    assert ("table", "orders", "frozen: use orders_v2") in recs
+
+
+class _ProfileMock(_StressMock):
+    """Drives the profile path: describe_table → column_stats → finish."""
+    def _loop(self, system, user):
+        if "Tool `describe_table`" not in user:
+            return {"action": "call_tool", "tool": "describe_table",
+                    "args": {"table": "orders", "database": "main"}}
+        if "Tool `column_stats`" not in user:
+            return {"action": "call_tool", "tool": "column_stats",
+                    "args": {"table": "orders", "database": "main"}}
+        return {"action": "finish", "answer": "Profile done."}
+
+
+def test_profile_question_runs_column_stats(_connections):
+    """A data-quality question drives describe_table then column_stats to a clean
+    finish (the batched single-scan stats path, exercised through the full loop)."""
+    cfg = _connections["shop"]
+    ref: dict = {}
+    mock = _ProfileMock(ref)
+    orch = AskOrchestrator(build_adapter(cfg), Session(connection=cfg), mock,
+                           execution_policy=ExecutionPolicy.SAFE_AUTO)
+    ref["orch"] = orch
+
+    ran: dict[str, bool] = {}
+    from dbaide.agent.runtime import AgentRuntime
+    inner = AgentRuntime.call_tool
+
+    def capture(self, name, args, ctx):
+        result = inner(self, name, args, ctx)
+        ran[name] = ran.get(name, True) and result.ok
+        return result
+
+    AgentRuntime.call_tool = capture
+    try:
+        resp = AskAgentLoop(orch).run("orders 表的数据质量如何", execute=True)
+    finally:
+        AgentRuntime.call_tool = inner
+    assert resp.status != "wait_user"
+    assert ran.get("describe_table") and ran.get("column_stats")  # both ran and succeeded
+
+
 def test_clarify_pause_then_resume_completes(_connections):
     """An ambiguous data query pauses for clarification, and the user's reply resumes
     the SAME workflow through to an executed result (no stall, no stale 'partial')."""
