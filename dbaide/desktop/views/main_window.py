@@ -171,6 +171,7 @@ class MainWindow(QMainWindow):
         self.sidebar.schema_selected.connect(self.open_schema_asset)
         self.sidebar.generate_sql.connect(self._generate_sql)
         self.sidebar.edit_note.connect(self._edit_note)
+        self.sidebar.enrich_requested.connect(self._enrich_node)
         self.sidebar.semantic_search_requested.connect(self.search_assets)
         self.sidebar.settings_requested.connect(lambda: self.open_settings("connections"))
         self.sidebar.chats.new_requested.connect(self.new_session)
@@ -828,6 +829,37 @@ class MainWindow(QMainWindow):
             dialog.show_test_result(False, str(exc), target="connection")
 
         self._run_background("save_connection", payload, on_done, on_error=on_fail)
+
+    def _enrich_node(self, node: dict[str, Any]) -> None:
+        """Build the optional enrichment (LLM summary + sample + profile) for a table
+        or whole database, from the schema-tree context menu. Runs in the background;
+        a table enriches just itself (others untouched), a database enriches all its
+        tables. Refreshes the tree on completion."""
+        conn = self.current_connection()
+        if not conn:
+            self.toast(_i18n_t("toast.select_connection"))
+            return
+        kind = str(node.get("kind") or "")
+        parts = str(node.get("path") or "").split(".")
+        database = parts[1] if len(parts) > 1 else ""
+        if kind == "table" and len(parts) > 2:
+            target = f"{database}.{parts[2]}"
+            action, payload = "enrich_table", {"connection_name": conn, "database": database, "table": parts[2]}
+        elif kind == "database" and database:
+            target = database
+            action, payload = "build_assets", {"connection_name": conn, "databases": [database]}
+        else:
+            return
+        self.toast(_i18n_t("toast.enriching", target=target))
+
+        def done(_r: object) -> None:
+            self.toast(_i18n_t("toast.enriched", target=target))
+            self.bus.emit(ASSETS_CHANGED, {"instance": conn})
+
+        def fail(exc: object) -> None:
+            self.toast(_i18n_t("toast.enrich_failed", error=str(exc)))
+
+        self._run_background(action, payload, done, on_error=fail)
 
     def _auto_project(self, name: str) -> None:
         """Build the BASE schema document (structure only, from the live catalog) for a

@@ -32,6 +32,7 @@ class Sidebar(QWidget):
     settings_requested = pyqtSignal()
     generate_sql = pyqtSignal(dict, str)  # (table node, template kind)
     edit_note = pyqtSignal(dict)  # edit the user note for a db/table/column node
+    enrich_requested = pyqtSignal(dict)  # build the optional enrichment for a db/table node
 
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
@@ -277,6 +278,8 @@ class Sidebar(QWidget):
             menu.addAction(t("schema.open_data"), lambda: self.schema_selected.emit(data))
         if kind in ("database", "table") and data.get("path"):
             menu.addAction(t("schema.view_doc"), lambda: self.schema_preview.emit(data))
+        if kind in ("database", "table"):
+            menu.addAction(t("schema.enrich"), lambda: self.enrich_requested.emit(data))
         if kind in ("database", "table", "column"):
             menu.addAction(t("schema.edit_note"), lambda: self.edit_note.emit(data))
         if kind == "table":
