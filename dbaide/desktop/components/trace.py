@@ -18,7 +18,6 @@ from PyQt6.QtWidgets import (
     QTreeWidget,
     QTreeWidgetItem,
     QVBoxLayout,
-    QWidget,
 )
 
 from dbaide.agent.progress_events import STEP_TYPE_LABELS

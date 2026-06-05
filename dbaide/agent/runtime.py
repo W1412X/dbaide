@@ -7,7 +7,7 @@ from typing import Any, Callable
 
 from dbaide.core.errors import DBAideError, ErrorCode, RepairAction
 from dbaide.core.events import TraceEvent, TraceKind, TraceLevel
-from dbaide.core.result import ExecutionPolicy, WorkflowResult
+from dbaide.core.result import ExecutionPolicy
 from dbaide.llm import LLMClient, NullLLMClient
 from dbaide.tools.registry import ToolContext, ToolRegistry, ToolResult
 

@@ -20,8 +20,6 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 
-from dbaide.desktop.components.base import AgentButton
-from dbaide.desktop.components.icons import svg_icon
 from dbaide.desktop.components.menu import MenuButton
 from dbaide.desktop.theme import Theme
 from dbaide.rendering.table import export_csv, export_insert, export_json, export_markdown_table

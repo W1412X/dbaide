@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import logging
-import re
 from dataclasses import dataclass, field
 from typing import Any, Callable
 
@@ -20,7 +19,7 @@ from dbaide.assets import AssetStore
 from dbaide.core.result import ExecutionPolicy
 from dbaide.i18n import t as _i18n_t
 from dbaide.llm import LLMClient, NullLLMClient
-from dbaide.models import AssistantResponse, ColumnInfo, TaskType
+from dbaide.models import AssistantResponse, TaskType
 from dbaide.session import Session
 from dbaide.tools import DiagnoseTools, ProfileTools, QueryTools, SchemaTools
 

@@ -7,10 +7,8 @@ from PyQt6.QtWidgets import (
     QComboBox,
     QFormLayout,
     QLabel,
-    QLineEdit,
     QPlainTextEdit,
     QSizePolicy,
-    QSpinBox,
     QTextEdit,
 )
 

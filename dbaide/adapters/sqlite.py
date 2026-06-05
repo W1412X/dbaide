@@ -5,7 +5,7 @@ import sqlite3
 import time
 from contextlib import contextmanager
 from pathlib import Path
-from typing import Any, Iterator
+from typing import Iterator
 
 from dbaide.adapters.base import DatabaseAdapter, append_limit, quote_identifier, rows_to_result
 from dbaide.models import ColumnInfo, ColumnProfile, ForeignKeyInfo, IndexInfo, QueryResult, TableInfo

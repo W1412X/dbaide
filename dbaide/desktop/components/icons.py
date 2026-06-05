@@ -8,7 +8,7 @@ device-pixel-ratio so it stays sharp on HiDPI, tinted to the requested colour.
 from __future__ import annotations
 
 from PyQt6.QtCore import QByteArray, QRectF, QSize, Qt
-from PyQt6.QtGui import QGuiApplication, QIcon, QPainter, QPixmap, QTransform
+from PyQt6.QtGui import QGuiApplication, QIcon, QPainter, QPixmap
 from PyQt6.QtSvg import QSvgRenderer
 
 from dbaide.desktop.theme import Theme

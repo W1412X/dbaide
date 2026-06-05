@@ -270,7 +270,7 @@ class AskTab(QWidget):
     def _build_actions(self, sql: str, cli_command: str | None) -> QWidget | None:
         if not sql:
             return None
-        from PyQt6.QtCore import QSize, QTimer
+        from PyQt6.QtCore import QTimer
         from dbaide.desktop.components.base import ghost_action_button
         from dbaide.desktop.components.icons import svg_icon
         from dbaide.desktop.theme import Theme

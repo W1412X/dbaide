@@ -11,7 +11,7 @@ from __future__ import annotations
 import re
 from typing import Any
 
-from PyQt6.QtCore import QSize, Qt, QStringListModel, pyqtSignal
+from PyQt6.QtCore import Qt, QStringListModel, pyqtSignal
 from PyQt6.QtGui import QFont
 from PyQt6.QtWidgets import (
     QCompleter,

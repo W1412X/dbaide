@@ -5,11 +5,10 @@ import logging
 import time
 from typing import Any, Callable
 
-from dbaide.core.result import WorkflowRequest, WorkflowResult
+from dbaide.core.result import WorkflowRequest
 from dbaide.core.workflow import WorkflowEngine
 from dbaide.eval.golden import GoldenCase, GoldenSuite
 from dbaide.eval.metrics import compare_result
-from dbaide.models import ConnectionConfig
 
 logger = logging.getLogger("dbaide.eval")
 

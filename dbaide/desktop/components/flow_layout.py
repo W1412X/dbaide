@@ -5,7 +5,7 @@ labels wrap instead of being clipped."""
 from __future__ import annotations
 
 from PyQt6.QtCore import QPoint, QRect, QSize, Qt
-from PyQt6.QtWidgets import QLayout, QLayoutItem, QSizePolicy, QWidget
+from PyQt6.QtWidgets import QLayout, QLayoutItem, QWidget
 
 
 class FlowLayout(QLayout):

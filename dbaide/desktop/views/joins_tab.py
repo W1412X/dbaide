@@ -20,7 +20,7 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 
-from dbaide.desktop.components.inputs import FORM_INNER_LABEL_RULES, configure_form, form_label
+from dbaide.desktop.components.inputs import configure_form, form_label
 from dbaide.desktop.theme import app_style, Theme
 
 

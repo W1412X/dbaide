@@ -7,7 +7,6 @@ statement boundary or a keyword.
 """
 from __future__ import annotations
 
-import re
 
 # Clauses that begin a new line at the base indent level.
 _NEWLINE_KEYWORDS = (
