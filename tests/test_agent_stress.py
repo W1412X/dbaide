@@ -247,6 +247,30 @@ def test_user_notes_reach_the_sql_writer(_connections, tmp_path):
     assert "DEPRECATED use orders_v2" in prompt          # table note reached the SQL writer
     assert "total is in CENTS not dollars" in prompt     # column note rode on its column
 
+    # Same must hold on the MULTI-table (join) path: every joined table's column
+    # notes ride into the combined SQL prompt.
+    ann.add("shop", scope="column", note="name is the full legal name",
+            database="main", table="users", column="name")
+    sql_prompts.clear()
+    ref2: dict = {}
+    mock2 = _StressMock(ref2)
+    orch2 = AskOrchestrator(build_adapter(cfg), Session(connection=cfg), mock2,
+                            execution_policy=ExecutionPolicy.SAFE_AUTO, annotations=ann)
+    ref2["orch"] = orch2
+    inner2 = mock2.complete_json
+
+    def capture2(messages, **kw):
+        if messages and "generate safe read-only SQL" in messages[0].content:
+            sql_prompts.append("\n".join(m.content for m in messages))
+        return inner2(messages, **kw)
+
+    mock2.complete_json = capture2
+    AskAgentLoop(orch2).run("统计每个用户的订单总额", execute=True)  # join intent
+    assert sql_prompts, "multi-table generate_sql never ran"
+    joined = sql_prompts[-1]
+    assert "total is in CENTS not dollars" in joined     # orders column note
+    assert "name is the full legal name" in joined       # users column note
+
 
 def test_clarify_pause_then_resume_completes(_connections):
     """An ambiguous data query pauses for clarification, and the user's reply resumes
