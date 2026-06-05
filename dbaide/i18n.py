@@ -338,9 +338,19 @@ _STRINGS: dict[str, dict[str, str]] = {
     "notes.scope_table": {"en": "table", "zh": "表"},
     "notes.scope_column": {"en": "column", "zh": "列"},
     "notes.delete_confirm": {"en": "Remove this note?", "zh": "删除该备注？"},
-    "structure.add_note": {"en": "Add note", "zh": "添加备注"},
-    "structure.note_column": {"en": "Add note to column…", "zh": "为该列添加备注…"},
-    "structure.note_table": {"en": "Add note to table…", "zh": "为该表添加备注…"},
+    "structure.col_column": {"en": "Column", "zh": "列"},
+    "structure.col_type": {"en": "Type", "zh": "类型"},
+    "structure.col_key": {"en": "Key", "zh": "键"},
+    "structure.col_note": {"en": "Note", "zh": "备注"},
+    "structure.note_hint": {
+        "en": "Double-click to edit · authoritative, shown to the assistant",
+        "zh": "双击编辑 · 权威备注，会提示给助手",
+    },
+    "structure.table_note": {"en": "Table note", "zh": "表备注"},
+    "structure.table_note_ph": {
+        "en": "Add a note for this table (e.g. deprecated, use orders_v2)…",
+        "zh": "为该表添加备注（如：已弃用，改用 orders_v2）…",
+    },
     # Chat sessions (会话 → 对话)
     "session.chats": {"en": "CHATS", "zh": "会话"},
     "session.new": {"en": "New chat", "zh": "新建会话"},

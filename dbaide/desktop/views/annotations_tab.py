@@ -157,11 +157,6 @@ class AnnotationsTab(QWidget):
 
     # ── actions ───────────────────────────────────────────────────────────────
 
-    def add_with_prefill(self, prefill: dict[str, Any]) -> None:
-        """Open the editor pre-filled (used by the Structure panel context menu)."""
-        dialog = AnnotationEditorDialog(self, prefill=prefill)
-        self._run_add(dialog)
-
     def _add(self) -> None:
         self._run_add(AnnotationEditorDialog(self))
 

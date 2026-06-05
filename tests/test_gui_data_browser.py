@@ -91,15 +91,25 @@ def test_table_browser_content_uses_clean_margins(qapp):
 
 
 def test_structure_panel(qapp):
-    from dbaide.desktop.views.structure_panel import StructurePanel, _generate_ddl
+    from dbaide.desktop.views.structure_panel import StructurePanel, _generate_ddl, _NOTE_COL
     cols = [{"name": "id", "data_type": "INTEGER", "primary_key": True},
-            {"name": "city", "data_type": "TEXT", "indexed": True}]
+            {"name": "city", "data_type": "TEXT", "indexed": True, "note": "ISO city code"}]
     ddl = _generate_ddl("orders", cols)
     assert "CREATE TABLE orders" in ddl and "id INTEGER PRIMARY KEY" in ddl
     sp = StructurePanel()
-    sp.show_table("orders", cols)
-    assert len(sp._cols._rows) == 2
+    sp.show_table("orders", cols, table_note="deprecated, use orders_v2")
+    assert sp._cols.rowCount() == 2
     assert sp.stack.currentIndex() == 1
+    # Column note is rendered inline in the editable Note column.
+    assert sp._cols.item(1, _NOTE_COL).text() == "ISO city code"
+    # Table note renders in the inline field.
+    assert sp._table_note.text() == "deprecated, use orders_v2"
+
+    # Editing a column note in the document emits an upward edit signal.
+    edits = []
+    sp.note_edited.connect(lambda col, txt: edits.append((col, txt)))
+    sp._cols.item(0, _NOTE_COL).setText("primary key")
+    assert ("id", "primary key") in edits
 
 
 def test_count_table_service(qapp, tmp_path):

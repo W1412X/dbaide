@@ -222,7 +222,7 @@ class MainWindow(QMainWindow):
         self.workbench.doc_closed.connect(self._on_doc_closed)
         self.workbench.navigate_table.connect(self._open_table_by_name)
         self.workbench.navigate_fk.connect(self._navigate_fk)
-        self.workbench.annotate_requested.connect(self.annotate_object)
+        self.workbench.note_edited.connect(self._save_inline_note)
         self.stack.addWidget(self.ask_tab)    # mode 0 — Assistant
         self.stack.addWidget(self.workbench)  # mode 1 — Workbench
         center_layout.addWidget(self.stack, 1)
@@ -571,12 +571,58 @@ class MainWindow(QMainWindow):
         self._annotations_dialog.raise_()
         self._annotations_dialog.activateWindow()
 
-    def annotate_object(self, prefill: dict[str, Any]) -> None:
-        """Entry point from the Structure panel context menu — pre-filled add."""
-        if not self.current_connection():
-            self.toast(_i18n_t("toast.select_connection"))
+    def _merge_notes_into_columns(self, conn: str, database: str, table: str,
+                                  columns: list[dict[str, Any]]) -> str:
+        """Fold saved notes into the column dicts (sets ``note``) and return the
+        table-level note, so the Structure document renders them inline."""
+        try:
+            result = self.service.dispatch(
+                "list_annotations", {"connection_name": conn, "table": table}
+            )
+        except Exception:
+            return ""
+        records = result.get("annotations") or []
+        col_notes: dict[str, str] = {}
+        table_note = ""
+        for r in records:
+            db = str(r.get("database") or "")
+            if db and database and db != database:
+                continue
+            scope = str(r.get("scope") or "")
+            if scope == "column":
+                col_notes[str(r.get("column") or "").strip().lower()] = str(r.get("note") or "")
+            elif scope == "table":
+                table_note = str(r.get("note") or "")
+        for c in columns:
+            note = col_notes.get(str(c.get("name") or "").strip().lower())
+            if note:
+                c["note"] = note
+        return table_note
+
+    def _save_inline_note(self, payload: dict[str, Any]) -> None:
+        """Persist an inline note edit from the Structure document. Empty text
+        deletes the note; non-empty upserts it."""
+        conn = self.current_connection()
+        if not conn:
             return
-        self.annotations.add_with_prefill(prefill)
+        note = str(payload.get("note") or "").strip()
+        body = {
+            "connection_name": conn,
+            "database": str(payload.get("database") or ""),
+            "table": str(payload.get("table") or ""),
+            "column": str(payload.get("column") or ""),
+        }
+        try:
+            if note:
+                self.service.dispatch("add_annotation", {**body, "note": note})
+                self.toast(_i18n_t("toast.note_saved"))
+            else:
+                self.service.dispatch("delete_annotation", body)
+                self.toast(_i18n_t("toast.note_deleted"))
+            if self._annotations_dialog is not None and self._annotations_dialog.isVisible():
+                self.refresh_annotations()
+        except Exception as exc:
+            self.toast(str(exc))
 
     def _add_annotation(self, payload: dict[str, Any]) -> None:
         conn = self.current_connection()
@@ -1075,13 +1121,16 @@ class MainWindow(QMainWindow):
                 # Structure is built from the columns and FK data already in the node
                 # — instant, no query; Data is the default view and loads its page 1.
                 self.tabbar.setCurrentIndex(1)
+                columns = list(data.get("children") or [])
+                table_note = self._merge_notes_into_columns(conn, database, table, columns)
                 self.workbench.open_table(
-                    conn, database, table, data.get("children") or [],
+                    conn, database, table, columns,
                     relations={
                         "foreign_keys": data.get("foreign_keys") or [],
                         "referenced_by": data.get("referenced_by") or [],
                     },
                     indexes=data.get("indexes") or [],
+                    table_note=table_note,
                 )
                 return
             # Fall through: table with a malformed/short path → show as doc

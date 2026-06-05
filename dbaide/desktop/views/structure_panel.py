@@ -2,23 +2,29 @@
 
 Renders from the schema asset already in memory (the columns and foreign-key data
 carried by the tree node), so opening it is instant — no extra database
-round-trip. Columns show name/type/key; the Relations section lists outgoing and
-incoming foreign keys with the related table as a clickable link (``navigate_table``);
-a generated CREATE TABLE skeleton is shown below.
+round-trip. Columns show name/type/key and an editable **Note** the user can fill
+right in the document (authoritative annotations, surfaced to the assistant). The
+table itself also has an inline note field. Edits emit ``note_edited`` upward; the
+window persists them. The Relations section lists outgoing/incoming foreign keys
+with the related table as a clickable link (``navigate_table``); a generated CREATE
+TABLE skeleton is shown below.
 """
 from __future__ import annotations
 
 from typing import Any
 
 from PyQt6.QtCore import Qt, pyqtSignal
-from PyQt6.QtGui import QFont
+from PyQt6.QtGui import QColor, QFont
 from PyQt6.QtWidgets import (
     QApplication,
     QHBoxLayout,
+    QHeaderView,
     QLabel,
+    QLineEdit,
     QPlainTextEdit,
-    QPushButton,
     QStackedWidget,
+    QTableWidget,
+    QTableWidgetItem,
     QToolButton,
     QVBoxLayout,
     QWidget,
@@ -26,8 +32,9 @@ from PyQt6.QtWidgets import (
 
 from dbaide.desktop.components.icons import svg_icon
 from dbaide.desktop.components.sql_highlighter import SqlHighlighter
-from dbaide.desktop.components.table import ResultTableWidget
 from dbaide.desktop.theme import Theme
+
+_NOTE_COL = 3  # index of the editable "Note" column in the structure grid
 
 
 def _generate_ddl(table: str, columns: list[dict[str, Any]]) -> str:
@@ -42,15 +49,90 @@ def _generate_ddl(table: str, columns: list[dict[str, Any]]) -> str:
     return f"CREATE TABLE {table} (\n" + ",\n".join(defs) + "\n);"
 
 
+class _StructureGrid(QTableWidget):
+    """Columns grid with an inline-editable Note column (only Note is editable)."""
+
+    note_committed = pyqtSignal(str, str)  # (column_name, note_text)
+
+    def __init__(self, parent=None) -> None:
+        super().__init__(0, 4, parent)
+        from dbaide.i18n import t
+        self.setHorizontalHeaderLabels([t("structure.col_column"), t("structure.col_type"),
+                                        t("structure.col_key"), t("structure.col_note")])
+        self.verticalHeader().setVisible(False)
+        self.setShowGrid(False)
+        self.setWordWrap(False)
+        self.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
+        self.setEditTriggers(
+            QTableWidget.EditTrigger.DoubleClicked
+            | QTableWidget.EditTrigger.EditKeyPressed
+            | QTableWidget.EditTrigger.AnyKeyPressed
+        )
+        self.setFont(QFont("Menlo", 11))
+        hh = self.horizontalHeader()
+        hh.setSectionResizeMode(0, QHeaderView.ResizeMode.Interactive)
+        hh.setSectionResizeMode(1, QHeaderView.ResizeMode.Interactive)
+        hh.setSectionResizeMode(2, QHeaderView.ResizeMode.Interactive)
+        hh.setSectionResizeMode(_NOTE_COL, QHeaderView.ResizeMode.Stretch)
+        self.setStyleSheet(
+            f"""
+            QTableWidget {{ background: {Theme.SURFACE}; border: none; outline: none; }}
+            QTableWidget::item {{ border-bottom: 1px solid {Theme.BORDER_SOFT}; padding: 4px 10px; }}
+            QTableWidget::item:selected {{ background: {Theme.PANEL_3}; color: {Theme.TEXT}; }}
+            QHeaderView::section:horizontal {{
+                background: {Theme.SURFACE}; color: {Theme.MUTED}; padding: 7px 10px;
+                border: none; border-bottom: 1px solid {Theme.BORDER}; font-weight: 600;
+            }}
+            """
+        )
+        self._loading = False
+        self.itemChanged.connect(self._on_item_changed)
+
+    def set_columns(self, columns: list[dict[str, Any]]) -> None:
+        from dbaide.i18n import t
+        self._loading = True
+        self.setRowCount(0)
+        self.setRowCount(len(columns))
+        for r, c in enumerate(columns):
+            name = str(c.get("name") or "")
+            key = "PK" if c.get("primary_key") else ("indexed" if c.get("indexed") else "")
+            cells = [name, str(c.get("data_type") or ""), key]
+            for col_idx, text in enumerate(cells):
+                item = QTableWidgetItem(text)
+                item.setFlags(item.flags() & ~Qt.ItemFlag.ItemIsEditable)
+                if col_idx == 2 and key:
+                    item.setForeground(QColor(Theme.MUTED))
+                self.setItem(r, col_idx, item)
+            note_item = QTableWidgetItem(str(c.get("note") or ""))
+            note_item.setFlags(note_item.flags() | Qt.ItemFlag.ItemIsEditable)
+            if not c.get("note"):
+                note_item.setForeground(QColor(Theme.MUTED_2))
+            note_item.setToolTip(t("structure.note_hint"))
+            self.setItem(r, _NOTE_COL, note_item)
+        self._loading = False
+
+    def _on_item_changed(self, item: QTableWidgetItem) -> None:
+        if self._loading or item.column() != _NOTE_COL:
+            return
+        name_item = self.item(item.row(), 0)
+        if name_item is None:
+            return
+        text = item.text().strip()
+        # Restore default vs. authored colour so empty cells read as placeholders.
+        item.setForeground(QColor(Theme.TEXT if text else Theme.MUTED_2))
+        self.note_committed.emit(name_item.text().strip(), text)
+
+
 class StructurePanel(QWidget):
-    navigate_table = pyqtSignal(str)  # a related table name was clicked
-    annotate_requested = pyqtSignal(dict)  # user wants to add a note to this table/column
+    navigate_table = pyqtSignal(str)        # a related table name was clicked
+    note_edited = pyqtSignal(str, str)      # (column_name or "" for table-level, note text)
 
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
         from dbaide.i18n import t
         self._t = t
         self._table_name = ""
+        self._table_note_value = ""
         outer = QVBoxLayout(self)
         outer.setContentsMargins(0, 0, 0, 0)
         outer.setSpacing(8)
@@ -71,29 +153,30 @@ class StructurePanel(QWidget):
         pl = QVBoxLayout(page)
         pl.setContentsMargins(16, 10, 16, 0)
         pl.setSpacing(10)
-        title_row = QHBoxLayout()
-        title_row.setContentsMargins(0, 0, 0, 0)
         self._title = QLabel("")
         self._title.setFont(QFont("Inter", 13, QFont.Weight.DemiBold))
-        title_row.addWidget(self._title)
-        title_row.addStretch(1)
-        # Convenient entry point: add an authoritative note to the selected column,
-        # or (no selection) to the whole table. Mirrors the Notes manager.
-        self._add_note = QPushButton(self._t("structure.add_note"))
-        self._add_note.setCursor(Qt.CursorShape.PointingHandCursor)
-        self._add_note.setIcon(svg_icon("plus", color=Theme.TEXT_2, size=12))
-        self._add_note.setToolTip(self._t("structure.note_column"))
-        self._add_note.setStyleSheet(
-            f"QPushButton {{ background: {Theme.PANEL_2}; color: {Theme.TEXT_2};"
-            f" border: 1px solid {Theme.BORDER}; border-radius: 6px; padding: 3px 10px; font-size: 11px; }}"
-            f"QPushButton:hover {{ background: {Theme.PANEL_3}; color: {Theme.TEXT}; }}"
+        pl.addWidget(self._title)
+
+        # Inline table-level note — edited right here in the document.
+        note_row = QHBoxLayout()
+        note_row.setContentsMargins(0, 0, 0, 0)
+        note_row.setSpacing(6)
+        tag = QLabel(t("structure.table_note"))
+        tag.setStyleSheet(f"color: {Theme.MUTED}; font-size: 11px; font-weight: 600;")
+        note_row.addWidget(tag)
+        self._table_note = QLineEdit()
+        self._table_note.setPlaceholderText(t("structure.table_note_ph"))
+        self._table_note.setStyleSheet(
+            f"QLineEdit {{ background: {Theme.PANEL}; color: {Theme.TEXT}; border: 1px solid {Theme.BORDER};"
+            f" border-radius: 6px; padding: 4px 8px; font-size: 12px; }}"
+            f"QLineEdit:focus {{ border-color: {Theme.ACCENT}; }}"
         )
-        self._add_note.clicked.connect(self._on_add_note)
-        title_row.addWidget(self._add_note)
-        pl.addLayout(title_row)
-        self._cols = ResultTableWidget()
-        self._cols.meta.setVisible(False)
-        self._cols.set_toolbar_visible(False)  # no value-viewer/export for a schema list
+        self._table_note.editingFinished.connect(self._on_table_note_done)
+        note_row.addWidget(self._table_note, 1)
+        pl.addLayout(note_row)
+
+        self._cols = _StructureGrid()
+        self._cols.note_committed.connect(self._on_column_note)
         pl.addWidget(self._cols, 1)
 
         # Relations — outgoing/incoming foreign keys, with clickable related tables.
@@ -152,15 +235,15 @@ class StructurePanel(QWidget):
         columns: list[dict[str, Any]],
         relations: dict[str, list[dict[str, Any]]] | None = None,
         indexes: list[dict[str, Any]] | None = None,
+        table_note: str = "",
     ) -> None:
         self._table_name = table
         self._title.setText(table)
-        rows = [{
-            "Column": c.get("name", ""),
-            "Type": c.get("data_type") or "",
-            "Key": "PK" if c.get("primary_key") else ("indexed" if c.get("indexed") else " "),
-        } for c in (columns or [])]
-        self._cols.load(columns=["Column", "Type", "Key"], rows=rows, row_count=len(rows))
+        self._table_note_value = str(table_note or "")
+        self._table_note.blockSignals(True)
+        self._table_note.setText(self._table_note_value)
+        self._table_note.blockSignals(False)
+        self._cols.set_columns(columns or [])
         self._relations.setText(self._relations_html(relations or {}))
         self._indexes.setText(self._indexes_text(indexes or []))
         # Show a generated skeleton instantly; the real DDL from the database replaces
@@ -176,6 +259,19 @@ class StructurePanel(QWidget):
             return
         self._ddl.setPlainText(ddl)
         self._ddl_label.setText(self._t("structure.ddl_real"))
+
+    # ── inline note editing ────────────────────────────────────────────────────
+
+    def _on_table_note_done(self) -> None:
+        text = self._table_note.text().strip()
+        if text == self._table_note_value:
+            return
+        self._table_note_value = text
+        self.note_edited.emit("", text)
+
+    def _on_column_note(self, column: str, text: str) -> None:
+        if column:
+            self.note_edited.emit(column, text)
 
     def _indexes_text(self, indexes: list[dict[str, Any]]) -> str:
         # Skip the primary-key index (already shown in the Key column).
@@ -225,20 +321,6 @@ class StructurePanel(QWidget):
     def _on_link(self, href: str) -> None:
         if href:
             self.navigate_table.emit(href)
-
-    def _on_add_note(self) -> None:
-        """Emit a prefill for the Notes editor: selected column, else table-level."""
-        if not self._table_name:
-            return
-        column = ""
-        grid = getattr(self._cols, "table", None)
-        if grid is not None:
-            row = grid.currentRow()
-            if row >= 0:
-                item = grid.item(row, 0)  # the "Column" cell
-                if item is not None:
-                    column = str(item.text() or "").strip()
-        self.annotate_requested.emit({"table": self._table_name, "column": column})
 
     def _on_copy_ddl(self) -> None:
         QApplication.clipboard().setText(self._ddl.toPlainText())

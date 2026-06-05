@@ -61,7 +61,7 @@ class WorkbenchView(QWidget):
     doc_closed = pyqtSignal(object)          # the closed widget
     navigate_table = pyqtSignal(str)         # FK link → open a related table
     navigate_fk = pyqtSignal(str, str, object)  # data-cell FK → open referenced row
-    annotate_requested = pyqtSignal(dict)    # Structure panel → add a note
+    note_edited = pyqtSignal(dict)           # Structure panel → inline note edit (persist)
     doc_requested = pyqtSignal(str)          # path — emitted when a DocTab is activated
 
     def __init__(self, history_panel: QueryHistoryPanel, parent=None) -> None:
@@ -239,7 +239,8 @@ class WorkbenchView(QWidget):
     def open_table(self, connection: str, database: str, table: str,
                    columns: list[dict[str, Any]],
                    relations: dict[str, list[dict[str, Any]]] | None = None,
-                   indexes: list[dict[str, Any]] | None = None) -> TableDocument:
+                   indexes: list[dict[str, Any]] | None = None,
+                   table_note: str = "") -> TableDocument:
         target_key = TableDocument.key(connection, database, table)
         for i in range(self.tabs.count()):
             w = self.tabs.widget(i)
@@ -253,10 +254,10 @@ class WorkbenchView(QWidget):
         doc.ddl_requested.connect(lambda payload, d=doc: self.ddl_requested.emit(d, payload))
         doc.navigate_table.connect(self.navigate_table.emit)
         doc.navigate_fk.connect(self.navigate_fk.emit)
-        doc.annotate_requested.connect(self.annotate_requested.emit)
+        doc.note_edited.connect(self.note_edited.emit)
         index = self.tabs.addTab(doc, table)
         self.tabs.setCurrentIndex(index)
-        doc.open(columns, relations, indexes)
+        doc.open(columns, relations, indexes, table_note=table_note)
         return doc
 
     # ── focus helpers (used by MainWindow.switch_tab) ────────────────────────────

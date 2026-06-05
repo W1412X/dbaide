@@ -891,10 +891,20 @@ class DesktopService:
 
     def delete_annotation(self, payload: dict[str, Any]) -> dict[str, Any]:
         conn = self.cfg.get_connection(str(payload.get("connection_name") or payload.get("name") or None))
-        ok = self.annotations.delete(conn.name, ann_id=str(payload.get("id") or ""))
-        if not ok:
-            raise ValueError("Note not found")
-        return {"deleted": True}
+        ann_id = str(payload.get("id") or "")
+        if ann_id:
+            ok = self.annotations.delete(conn.name, ann_id=ann_id)
+        else:
+            # Object-identity delete (used when an inline note is cleared).
+            ok = self.annotations.delete(
+                conn.name,
+                scope=self._annotation_scope(payload),
+                database=str(payload.get("database") or ""),
+                table=str(payload.get("table") or ""),
+                column=str(payload.get("column") or ""),
+            )
+        # Clearing an already-empty note is a no-op, not an error.
+        return {"deleted": bool(ok)}
 
     def _safe_llm(self):
         return build_llm_client(self.cfg.model())
