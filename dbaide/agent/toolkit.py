@@ -157,11 +157,16 @@ def build_tool_registry(orchestrator: AskOrchestrator) -> ToolRegistry:
         try:
             discovery = orchestrator._loop_discovery or orchestrator._discover(question, parent=orchestrator._loop_trace_node)
             agent = ProgressiveSchemaAgent(orchestrator.llm, orchestrator.asset_store, orchestrator.instance)
+            pairs = list({
+                (str(getattr(h, "database", "") or ""), str(getattr(h, "table", "") or ""))
+                for h in discovery.hits if getattr(h, "table", "")
+            })
             answer = agent.synthesize_answer(
                 question,
                 discovery,
                 progress=orchestrator.progress,
                 parent=orchestrator._loop_trace_node,
+                object_notes=object_notes_for_tables(orchestrator, pairs),
             )
             orchestrator._loop_answer = answer
             return ToolResult(ok=True, data={"answer": answer})
@@ -394,11 +399,16 @@ def build_tool_registry(orchestrator: AskOrchestrator) -> ToolRegistry:
         # the model to ask about a "which column?" candidate it can't actually see —
         # the cause of fabricated field names. Expand each table to its full columns.
         disclosed = _expand_to_full_columns(orchestrator, disclosed)
+        apply_column_notes(orchestrator, disclosed)  # user column notes visible to clarifier
         observed = _sample_observed_values(orchestrator, disclosed)
+        object_notes = object_notes_for_tables(
+            orchestrator, [(db, tbl) for db, tbl, _ in disclosed]
+        )
         try:
             plan = SemanticClarifier(orchestrator.llm).analyze(
                 question, disclosed, observed,
                 already_confirmed=list(getattr(orchestrator, "_loop_clarifications", [])),
+                object_notes=object_notes,
             )
         except Exception as exc:  # noqa: BLE001 — clarification must never break a query
             logger.debug("clarify_semantics failed: %s", exc, exc_info=True)

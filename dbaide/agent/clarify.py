@@ -84,8 +84,10 @@ def _schema_digest(disclosed: list[tuple[str, str, list[ColumnInfo]]]) -> str:
                 tags.append("pk")
             tag = f" [{', '.join(tags)}]" if tags else ""
             comment = (getattr(c, "comment", "") or "").strip()
-            note = f" — {comment[:60]}" if comment else ""
-            cols.append(f"    {c.name}: {c.data_type or '?'}{tag}{note}")
+            comment_txt = f" — {comment[:60]}" if comment else ""
+            user_note = (getattr(c, "note", "") or "").strip()
+            note_txt = f"  📝 USER NOTE (authoritative): {user_note[:80]}" if user_note else ""
+            cols.append(f"    {c.name}: {c.data_type or '?'}{tag}{comment_txt}{note_txt}")
         blocks.append(f"  {label}\n" + "\n".join(cols))
     return "\n".join(blocks)
 
@@ -113,6 +115,7 @@ class SemanticClarifier:
         disclosed: list[tuple[str, str, list[ColumnInfo]]],
         observed_values: dict[str, list[str]] | None = None,
         already_confirmed: list[str] | None = None,
+        object_notes: list[dict[str, str]] | None = None,
     ) -> ClarificationPlan:
         if isinstance(self.llm, NullLLMClient) or not question.strip() or not disclosed:
             return ClarificationPlan()
@@ -161,10 +164,21 @@ class SemanticClarifier:
                 "\nAlready confirmed with the user — do NOT ask these again:\n"
                 + "\n".join(f"  - {c}" for c in confirmed) + "\n"
             )
+        notes_block = ""
+        notes = [n for n in (object_notes or []) if str(n.get("note") or "").strip()]
+        if notes:
+            notes_block = (
+                "\n📝 User notes (AUTHORITATIVE — override the schema/summaries; if a note says a "
+                "table is deprecated/wrong or names a replacement, the resolved table may be WRONG "
+                "— surface that as a question instead of assuming):\n"
+                + "\n".join(f"  - {n.get('scope')} {n.get('label')}: {str(n.get('note')).strip()}"
+                            for n in notes) + "\n"
+            )
         user = (
             f"Question:\n{question}\n\n"
             f"Resolved schema (only these tables/columns are in play):\n{_schema_digest(disclosed)}\n"
             + (f"\n{_values_digest(observed_values)}\n" if observed_values else "")
+            + notes_block
             + confirmed_block
             + '\nReturn {"questions":[{"ask":"...","options":["..."]}], "assumptions":["..."]}. '
             "Empty questions means every interpretation is already unambiguous."

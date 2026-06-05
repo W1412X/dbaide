@@ -78,7 +78,16 @@ class AskOrchestrator:
         self.adapter = adapter
         self.session = session
         self.instance = session.connection.name
-        self.llm = llm or NullLLMClient()
+        llm = llm or NullLLMClient()
+        # Debug trace: wrap a real client so every model call (full prompt+response)
+        # is captured and attached to the trace. Gated by env so normal runs are lean.
+        self.llm_recorder = None
+        if not isinstance(llm, NullLLMClient):
+            from dbaide.agent.llm_trace import RecordingLLMClient, tracing_enabled
+            if tracing_enabled():
+                llm = RecordingLLMClient(llm)
+                self.llm_recorder = llm
+        self.llm = llm
         self.asset_store = asset_store or AssetStore()
         self.join_catalog = join_catalog or JoinCatalogStore()
         self.annotations = annotations or AnnotationStore()
@@ -165,11 +174,24 @@ class AskOrchestrator:
                                     resume_state=resume_state, user_reply=user_reply)
 
         from dbaide.agent.intent import IntentDecomposer
+        from dbaide.agent.llm_trace import llm_stage
+        rec = self.llm_recorder
+        intent_start = rec.snapshot_len() if rec else 0
         try:
-            intents = IntentDecomposer(self.llm).decompose(question)
+            with llm_stage("intent"):
+                intents = IntentDecomposer(self.llm).decompose(question)
         except Exception as exc:
             logger.warning("intent_decompose_failed: %s", exc)
             intents = []
+        # Intent decomposition runs before the tool loop, so its LLM call isn't in any
+        # tool step's capture window — surface it as its own debug-trace step.
+        if rec is not None:
+            intent_calls = rec.since(intent_start)
+            if intent_calls:
+                ev = progress_event(stage="intent", title="Decompose intent",
+                                    status="completed", kind="tool", step=0)
+                ev["llm_calls"] = intent_calls
+                self.progress(ev)
         if len(intents) > 1:
             return self._run_multi(question, intents, database=database, execute=execute)
         return self._run_single(question, database=database, execute=execute)
@@ -305,7 +327,14 @@ class AskOrchestrator:
                 self._step(ctx, "discover", note)
             agent = ProgressiveSchemaAgent(self.llm, self.asset_store, self.instance)
             self._step(ctx, "synthesize", "Synthesizing answer…")
-            answer = agent.synthesize_answer(ctx.question, discovery)
+            from dbaide.agent.schema_context import object_notes_for_tables
+            pairs = list({
+                (str(getattr(h, "database", "") or ""), str(getattr(h, "table", "") or ""))
+                for h in discovery.hits if getattr(h, "table", "")
+            })
+            answer = agent.synthesize_answer(
+                ctx.question, discovery, object_notes=object_notes_for_tables(self, pairs)
+            )
             self._step(ctx, "done", f"Found {len(discovery.hits)} relevant object(s)")
             return AssistantResponse(
                 answer=answer,

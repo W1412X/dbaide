@@ -369,6 +369,27 @@ def render_trace_text(model: "TraceModel") -> str:
             if shown and shown not in head and shown != question:
                 kv(indent, "output" if output else "detail", shown)
 
+        # Debug trace: the full structured tool result (discovery hits, resolved
+        # schema, relations, …) — the intermediate output passed between stages.
+        if raw.get("result_data") not in (None, "", {}, []):
+            kv(indent, "result_data", raw.get("result_data"))
+
+        # Debug trace: the full prompt+response of every model call this step made.
+        llm_calls = raw.get("llm_calls")
+        if isinstance(llm_calls, list) and llm_calls:
+            lines.append(f"{indent}    llm calls: {len(llm_calls)}")
+            for i, call in enumerate(llm_calls, 1):
+                if not isinstance(call, dict):
+                    continue
+                ms = call.get("ms")
+                head_bits = [b for b in (call.get("stage"), call.get("method"),
+                                         f"{ms}ms" if ms else "") if b]
+                lines.append(f"{indent}    ── call {i} [{' · '.join(head_bits)}]")
+                for msg in call.get("messages") or []:
+                    if isinstance(msg, dict):
+                        kv(indent + "  ", str(msg.get("role") or "msg"), msg.get("content"))
+                kv(indent + "  ", "response", call.get("response"))
+
         for child in node.children:
             walk(child, depth + 1)
 

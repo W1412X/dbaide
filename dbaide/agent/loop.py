@@ -11,6 +11,7 @@ from dbaide.agent.answer_stream import JsonFieldStreamer
 from dbaide.agent.loop_state import dump_loop_state, restore_loop_state
 from dbaide.agent.progress_events import brief_tool_summary, from_trace_event, progress_event, progress_label
 from dbaide.agent.schema_context import decision_notes_block, disclosed_table_keys
+from dbaide.agent.llm_trace import llm_stage
 from dbaide.i18n import answer_language_directive
 from dbaide.agent.runtime import AgentRuntime
 from dbaide.agent.toolkit import build_tool_registry, loop_tool_specs
@@ -149,9 +150,12 @@ class AskAgentLoop:
         )
 
         step_no = 0
+        recorder = getattr(orch, "llm_recorder", None)
         while runtime.steps_remaining > 0:
+            decide_start = recorder.snapshot_len() if recorder else 0
             try:
-                decision = self._decide(state, transcript)
+                with llm_stage("decide"):
+                    decision = self._decide(state, transcript)
             except LoopDecisionError as exc:
                 logger.warning("loop_decision_failed: %s", exc)
                 return self._build_failed_response(orch, f"decision_invalid: {exc}", disclosures_before or [])
@@ -168,6 +172,16 @@ class AskAgentLoop:
                                       "Provide the markdown answer, or call a tool to get what you need.")
                     runtime.consume_step()
                     continue
+                # The decide call that chose to finish runs outside any tool step;
+                # surface it (prompt+response) as its own debug-trace step.
+                if recorder is not None:
+                    finish_calls = recorder.since(decide_start)
+                    if finish_calls:
+                        ev = progress_event(stage="finish", title="Finish",
+                                            status="completed", kind="tool", step=step_no + 1)
+                        ev["llm_calls"] = finish_calls
+                        ev["output"] = answer
+                        self.progress(self._ns_step(ev))
                 self.progress(
                     progress_event(stage="loop", title="Agent loop finished", status="completed", kind="agent"),
                 )
@@ -209,7 +223,8 @@ class AskAgentLoop:
             # under it (true call hierarchy), not flattened by stage-name resolution.
             orch._loop_trace_node = (f"{self._trace_parent}:step:{step_no}"
                                      if self._trace_parent else f"step:{step_no}")
-            result = runtime.call_tool(tool_name, args, tool_ctx)
+            with llm_stage(tool_name):
+                result = runtime.call_tool(tool_name, args, tool_ctx)
             summary = _summarize_tool_result(tool_name, result)
             brief = brief_tool_summary(tool_name, result)
             state.calls.append(ToolCallRecord(tool=tool_name, args=args, ok=result.ok, summary=summary))
@@ -238,6 +253,21 @@ class AskAgentLoop:
                 done_event["args"] = args
             if summary and summary != done_detail:
                 done_event["output"] = summary
+            # Full prompt+response of every model call this iteration made — the
+            # decide call plus the tool's own sub-agent calls (debug trace). Grouped
+            # on the tool step because a standalone "decision" event is collapsed to
+            # its thought by the trace model. Each call keeps its own `stage` tag.
+            if recorder is not None:
+                iter_calls = recorder.since(decide_start)
+                if iter_calls:
+                    done_event["llm_calls"] = iter_calls
+                # Full structured tool output (e.g. discovery hits, resolved schema,
+                # relations) — skip execute tools whose rows are large and already
+                # summarised via sql + row_count.
+                if isinstance(result.data, dict) and tool_name not in {
+                    "execute_sql", "execute_readonly_sql",
+                }:
+                    done_event["result_data"] = result.data
             if executed_sql:
                 done_event["sql"] = executed_sql
                 # Carry the SQL facts so the typed SQL step can show rows/db on click.

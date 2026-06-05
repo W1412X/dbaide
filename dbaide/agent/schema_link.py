@@ -163,13 +163,37 @@ class SchemaLinker:
             }
         return list(seen.values())
 
+    def _candidate_notes(self, candidates: list[dict[str, Any]]) -> dict[tuple[str, str], str]:
+        """Authoritative user notes per candidate (table note, falling back to db note)."""
+        store = getattr(self.orch, "annotations", None)
+        if store is None or not candidates:
+            return {}
+        try:
+            view = store.annotations_for_tables(
+                self.orch.instance, [(c["database"], c["table"]) for c in candidates]
+            )
+        except Exception:  # noqa: BLE001 — notes are best-effort, never fatal
+            return {}
+        tnotes = view.get("tables") or {}
+        dbnotes = view.get("databases") or {}
+        out: dict[tuple[str, str], str] = {}
+        for c in candidates:
+            db, tbl = str(c["database"]).strip().lower(), str(c["table"]).strip().lower()
+            note = tnotes.get((db, tbl)) or dbnotes.get(db) or dbnotes.get("")
+            if note:
+                out[(db, tbl)] = note
+        return out
+
     def _select(self, question: str, candidates: list[dict[str, Any]],
                 confirmed: dict[tuple[str, str], dict[str, Any]]) -> dict[str, Any]:
+        notes = self._candidate_notes(candidates)
         lines = []
         for c in candidates:
             cols = ", ".join(c["columns"][:25])
-            note = f" — {c['summary']}" if c["summary"] else ""
-            lines.append(f"- {c['database']}.{c['table']} [{cols}]{note}")
+            summary = f" — {c['summary']}" if c["summary"] else ""
+            note = notes.get((str(c["database"]).strip().lower(), str(c["table"]).strip().lower()))
+            note_tag = f"  📝 USER NOTE (authoritative): {note}" if note else ""
+            lines.append(f"- {c['database']}.{c['table']} [{cols}]{summary}{note_tag}")
         already = ", ".join(f"{db}.{t}" for (db, t) in confirmed) or "(none)"
         system = (
             "You are a schema linker for Text-to-SQL. From the candidate tables (each shown with "
@@ -178,7 +202,10 @@ class SchemaLinker:
             "shot: you already have the candidates and their columns, so confirm everything you need "
             "now and set sufficient=true. Only set sufficient=false (with `missing`) if a needed "
             "table is clearly absent from the candidates. If the question is genuinely ambiguous "
-            "about which table/field is meant, return an ask. Return JSON only."
+            "about which table/field is meant, return an ask.\n"
+            "A 📝 USER NOTE on a candidate is AUTHORITATIVE and OVERRIDES its summary: if a note "
+            "says a table is deprecated/wrong or names a replacement, you MUST NOT pick that table — "
+            "pick the replacement the note points to (it is among the candidates). Return JSON only."
         )
         user = (
             f"Question:\n{question}\n\nAlready confirmed: {already}\n\n"

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextvars
 import logging
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, field
@@ -301,8 +302,14 @@ class ProgressiveSchemaAgent:
             return local_tables, local_columns, f"{db_name}: kept {len(local_tables)} table(s)"
 
         workers = min(6, max(1, len(db_indices)))
+        # Carry the active context (esp. the LLM-trace stage label) into workers —
+        # contextvars don't cross ThreadPoolExecutor boundaries on their own. Each
+        # worker gets its OWN context copy (a Context can't run concurrently).
         with ThreadPoolExecutor(max_workers=workers) as pool:
-            futures = {pool.submit(_scan_database, idx): idx for idx in db_indices}
+            futures = {
+                pool.submit(contextvars.copy_context().run, _scan_database, idx): idx
+                for idx in db_indices
+            }
             for future in as_completed(futures):
                 idx = futures[future]
                 db_name = db_items[idx]["name"]
@@ -438,7 +445,10 @@ class ProgressiveSchemaAgent:
         # Live catalog reads (list_tables/describe_table) hit the database directly,
         # so keep discovery single-threaded to avoid spraying concurrent connections.
         with ThreadPoolExecutor(max_workers=1) as pool:
-            futures = {pool.submit(_scan_live_database, idx): idx for idx in db_indices}
+            futures = {
+                pool.submit(contextvars.copy_context().run, _scan_live_database, idx): idx
+                for idx in db_indices
+            }
             for future in as_completed(futures):
                 idx = futures[future]
                 db_name = db_items[idx]["name"]
@@ -467,6 +477,7 @@ class ProgressiveSchemaAgent:
         *,
         progress: ProgressFn | None = None,
         parent: str = "",
+        object_notes: list[dict[str, str]] | None = None,
     ) -> str:
         if not discovery.hits:
             return (
@@ -489,6 +500,11 @@ class ProgressiveSchemaAgent:
             lines.append(f"- {prefix}")
             if body:
                 lines.append(f"  {body[:280]}")
+        notes = [n for n in (object_notes or []) if str(n.get("note") or "").strip()]
+        if notes:
+            lines += ["", "User notes (AUTHORITATIVE — override the summaries above):"]
+            for n in notes:
+                lines.append(f"- {n.get('scope')} {n.get('label')}: {str(n.get('note')).strip()}")
         context = "\n".join(lines)
         text = self.llm.complete_text(
             [
@@ -497,6 +513,9 @@ class ProgressiveSchemaAgent:
                     "You are a database schema assistant. Answer using ONLY the relevant schema below. "
                     "Be concise. Format as markdown with bullet groups by database. "
                     "Do NOT list unrelated tables. "
+                    "User notes are AUTHORITATIVE and override the summaries: if a note says a table "
+                    "is deprecated/wrong or names a replacement, recommend the replacement and do NOT "
+                    "point the user at the deprecated table. "
                     + answer_language_directive(),
                 ),
                 LLMMessage("user", f"Question:\n{question}\n\nSchema:\n{context}"),

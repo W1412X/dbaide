@@ -4,6 +4,7 @@ import argparse
 import csv
 import json
 import logging
+import os
 import sys
 from pathlib import Path
 
@@ -103,6 +104,9 @@ def build_parser() -> argparse.ArgumentParser:
     ask.add_argument("--no-execute", action="store_true")
     ask.add_argument("--show-disclosure", action="store_true")
     ask.add_argument("--show-trace", action="store_true")
+    ask.add_argument("--debug-trace", action="store_true",
+                     help="Full debug trace: every step's args/output + each LLM call's "
+                          "prompt and response (set DBAIDE_TRACE_LLM=1 to capture LLM I/O).")
     ask.add_argument("--policy", choices=["inspect-only", "sql-only", "safe-auto", "expert"], default="safe-auto")
     ask.add_argument("--export-debug", action="store_true")
     ask.add_argument("--json", action="store_true")
@@ -246,7 +250,15 @@ def dispatch(args: argparse.Namespace, cfg: ConfigManager) -> int:
             print(json.dumps(result.to_dict(), ensure_ascii=False, indent=2, default=str))
         else:
             print(result.answer_markdown or result.answer_plaintext)
-            if args.show_trace:
+            if args.debug_trace:
+                from dbaide.agent.trace_model import render_events_text
+                events = [e.metadata for e in result.trace if getattr(e, "metadata", None)]
+                print("\n" + "=" * 60 + "\nDEBUG TRACE\n" + "=" * 60)
+                print(render_events_text(events))
+                if not os.environ.get("DBAIDE_TRACE_LLM"):
+                    print("\n(LLM prompts/responses not captured — rerun with "
+                          "DBAIDE_TRACE_LLM=1 to include them.)")
+            elif args.show_trace:
                 print("\nTrace:")
                 for event in result.trace:
                     print(f"- {event.kind.value}:{event.stage} {event.title}")

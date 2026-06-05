@@ -138,6 +138,92 @@ def test_apply_notes_to_doc_database(tmp_path):
     assert "user_note" not in doc["tables"][1]
 
 
+class _CapturingLLM(LLMClient):
+    """Records the last prompt seen (json + text); returns a fixed reply."""
+
+    def __init__(self, reply: dict | None = None):
+        self.reply = reply or {}
+        self.last_user = ""
+        self.last_prompt = ""
+
+    def complete_json(self, messages, *, schema_hint: str = "") -> dict:
+        self.last_user = messages[-1].content
+        self.last_prompt = "\n".join(m.content for m in messages)
+        return self.reply
+
+    def complete_text(self, messages) -> str:
+        self.last_user = messages[-1].content
+        self.last_prompt = "\n".join(m.content for m in messages)
+        return "ok"
+
+
+class _FakeOrch:
+    def __init__(self, llm, store):
+        self.llm = llm
+        self.annotations = store
+        self.instance = "demo"
+
+
+def test_schema_linker_sees_table_note(tmp_path):
+    # Reproduces the deprecated-table miss: the linker must SEE the note so it can
+    # avoid the deprecated table. Previously the candidate lines carried only the
+    # asset summary, so the note never reached the table-selecting LLM.
+    from dbaide.agent.schema_link import SchemaLinker
+
+    store = AnnotationStore(tmp_path / "ann")
+    store.add("demo", scope="table",
+              note="deprecated; use product_data.product_attributes instead",
+              database="data_analysis", table="product_attributes")
+    llm = _CapturingLLM({
+        "tables": [{"database": "product_data", "table": "product_attributes",
+                    "columns": ["spu_id"], "reason": "current"}],
+        "sufficient": True, "missing": "", "ask": None,
+    })
+    linker = SchemaLinker(_FakeOrch(llm, store))
+    candidates = [
+        {"database": "data_analysis", "table": "product_attributes",
+         "columns": ["id", "design"], "summary": "product attribute details"},
+        {"database": "product_data", "table": "product_attributes",
+         "columns": ["spu_id", "attr_value"], "summary": "attribute values linked to SPU"},
+    ]
+    linker._select("产品的属性在哪个表能找到？", candidates, {})
+    assert "USER NOTE" in llm.last_user
+    assert "deprecated; use product_data.product_attributes" in llm.last_user
+
+
+def test_synthesize_answer_sees_notes(tmp_path):
+    # The "which table?" answer path bypasses the schema linker — it must also see
+    # notes or it will point the user at the deprecated table.
+    from dbaide.agent.progressive_schema import ProgressiveSchemaAgent, DiscoveryResult, SchemaHit
+
+    llm = _CapturingLLM()
+    agent = ProgressiveSchemaAgent(llm, None, "demo")
+    discovery = DiscoveryResult(question="q", hits=[
+        SchemaHit(kind="table", path="demo.data_analysis.product_attributes",
+                  name="product_attributes", database="data_analysis",
+                  table="product_attributes", summary="product attribute details"),
+    ])
+    notes = [{"scope": "table", "label": "data_analysis.product_attributes",
+              "note": "deprecated; use product_data.product_attributes"}]
+    agent.synthesize_answer("产品属性在哪个表？", discovery, object_notes=notes)
+    assert "AUTHORITATIVE" in llm.last_prompt
+    assert "deprecated; use product_data.product_attributes" in llm.last_prompt
+
+
+def test_clarifier_sees_object_notes(tmp_path):
+    from dbaide.agent.clarify import SemanticClarifier
+
+    llm = _CapturingLLM({"questions": [], "assumptions": []})
+    clarifier = SemanticClarifier(llm)
+    disclosed = [("data_analysis", "product_attributes",
+                  [ColumnInfo(name="design", data_type="varchar")])]
+    object_notes = [{"scope": "table", "label": "data_analysis.product_attributes",
+                     "note": "deprecated; use product_data.product_attributes"}]
+    clarifier.analyze("产品的属性在哪个表能找到？", disclosed, object_notes=object_notes)
+    assert "AUTHORITATIVE" in llm.last_user
+    assert "deprecated; use product_data.product_attributes" in llm.last_user
+
+
 def test_annotate_object_tool(tmp_path):
     orch, annotations = _orch(tmp_path)
     registry = build_tool_registry(orch)
