@@ -10,13 +10,11 @@ from PyQt6.QtGui import QKeySequence, QShortcut
 from PyQt6.QtWidgets import (
     QApplication,
     QDialog,
-    QHBoxLayout,
     QMainWindow,
     QMessageBox,
     QSplitter,
     QStackedWidget,
     QStatusBar,
-    QTabBar,
     QVBoxLayout,
     QWidget,
 )
@@ -171,6 +169,10 @@ class MainWindow(QMainWindow):
         self.topbar.new_query_requested.connect(self._shortcut_new_query)
         self.topbar.new_conn_requested.connect(lambda: self.open_settings("connections"))
         layout.addWidget(self.topbar)
+        self.tabbar = self.topbar.mode_tabs
+        for name in self._tab_names:
+            self.tabbar.addTab(_tab_label(name))
+        self.tabbar.currentChanged.connect(self._on_tab_changed)
 
         body = QSplitter(Qt.Orientation.Horizontal)
         body.setObjectName("mainSplitter")
@@ -193,20 +195,8 @@ class MainWindow(QMainWindow):
 
         center = QWidget()
         center_layout = QVBoxLayout(center)
-        center_layout.setContentsMargins(16, 14, 16, 12)
+        center_layout.setContentsMargins(16, 12, 16, 12)
         center_layout.setSpacing(12)
-        tab_row = QHBoxLayout()
-        self.tabbar = QTabBar()
-        self.tabbar.setProperty("segmented", True)
-        self.tabbar.setDrawBase(False)
-        self.tabbar.setUsesScrollButtons(True)
-        self.tabbar.setExpanding(False)
-        for name in self._tab_names:
-            self.tabbar.addTab(_tab_label(name))
-        self.tabbar.currentChanged.connect(self._on_tab_changed)
-        tab_row.addWidget(self.tabbar)
-        tab_row.addStretch(1)
-        center_layout.addLayout(tab_row)
 
         self.stack = QStackedWidget()
         # Assistant mode = the AI conversation; Workbench mode = the database client
@@ -270,6 +260,7 @@ class MainWindow(QMainWindow):
         self.statusbar = QStatusBar()
         self.setStatusBar(self.statusbar)
         self.statusbar.showMessage("Ready")
+        self._on_tab_changed(self.tabbar.currentIndex())
         # Land focus in the composer so the cursor is ready to type on launch
         # (and the topbar selectors don't show a stray focus ring at rest).
         self.composer.input.setFocus()
@@ -383,7 +374,9 @@ class MainWindow(QMainWindow):
     def _on_tab_changed(self, index: int) -> None:
         if 0 <= index < self.stack.count():
             self.stack.setCurrentIndex(index)
-            self.composer.setVisible(self._tab_names[index] == "Assistant")
+            mode = self._tab_names[index]
+            self.sidebar.set_mode(mode)
+            self.composer.setVisible(mode == "Assistant")
 
     def switch_tab(self, name: str) -> None:
         """Route the old per-tab names to the new Assistant/Workbench modes."""
@@ -858,32 +851,25 @@ class MainWindow(QMainWindow):
             return
         try:
             self.service.cfg.set_ui_theme(theme)
+            self._show_restart_required()
         except Exception as exc:
             self.fail(exc)
-            return
-        from dbaide.i18n import _STRINGS, DEFAULT_LANGUAGE
-        code = self.service.cfg.ui_language()
-        entry = _STRINGS.get("settings.restart_required", {})
-        msg = entry.get(code) or entry.get(DEFAULT_LANGUAGE) or "Restart to apply."
-        QMessageBox.information(self, "DBAide", msg)
 
     def _change_language(self, lang: str) -> None:
-        # Language is applied at startup from config (UI + the model's answer
-        # language), so a change persists and takes effect on the next launch —
-        # we ask the user to restart rather than retranslate every live widget.
         from dbaide.i18n import normalize
         if normalize(lang) == self.service.cfg.ui_language():
             return
         try:
             self.service.cfg.set_ui_language(lang)
+            self._show_restart_required(lang)
         except Exception as exc:
             self.fail(exc)
-            return
-        # Show the notice in the chosen language directly (i18n stays unchanged in-process).
-        from dbaide.i18n import _STRINGS, DEFAULT_LANGUAGE
-        code = normalize(lang)
+
+    def _show_restart_required(self, lang: str | None = None) -> None:
+        from dbaide.i18n import DEFAULT_LANGUAGE, _STRINGS, normalize
+        code = normalize(lang) if lang is not None else self.service.cfg.ui_language()
         entry = _STRINGS.get("settings.restart_required", {})
-        msg = entry.get(code) or entry.get(DEFAULT_LANGUAGE) or "Restart to apply."
+        msg = entry.get(code) or entry.get(DEFAULT_LANGUAGE) or "Restart DBAide to apply this setting."
         QMessageBox.information(self, "DBAide", msg)
 
     def _settings_save_resources(self, payload: dict[str, Any]) -> None:

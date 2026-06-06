@@ -26,6 +26,10 @@ from dbaide.desktop.theme import app_style, Theme
 from dbaide.i18n import t as _pt
 
 
+_NEW_CONNECTION_ID = "__new_connection__"
+_NEW_MODEL_ID = "__new_model__"
+
+
 class _SectionCard(QFrame):
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
@@ -96,8 +100,8 @@ class ModelForm(QWidget):
         self.api_key.clear()
 
     def clear(self) -> None:
-        self.profile_name.setText("default")
-        self.provider.setCurrentText("none")
+        self.profile_name.clear()
+        self.provider.setCurrentText("openai_compatible")
         self.base_url.clear()
         self.api_key.clear()
         self.model_id.clear()
@@ -105,7 +109,7 @@ class ModelForm(QWidget):
 
     def payload(self, *, make_default: bool = False) -> dict:
         payload = {
-            "name": self.profile_name.text().strip() or "default",
+            "name": self.profile_name.text().strip(),
             "provider": self.provider.currentText(),
             "base_url": self.base_url.text().strip(),
             "model": self.model_id.text().strip(),
@@ -470,15 +474,15 @@ class SettingsDialog(QDialog):
     def _conn_actions(self) -> QHBoxLayout:
         actions = QHBoxLayout()
         actions.setSpacing(8)
-        self.add_conn_btn = compact_button(_pt("btn.add"), width=72)
+        self.add_conn_btn = compact_button(_pt("btn.new"), width=72)
         self.add_conn_btn.clicked.connect(self._add_connection)
         self.save_conn_btn = compact_button(_pt("btn.save"), primary=True, width=80)
         self.save_conn_btn.clicked.connect(self._save_connection)
         self.test_conn_btn = compact_button(_pt("btn.test"), width=72)
         self.test_conn_btn.clicked.connect(self._test_connection)
-        self.conn_more = MenuButton("More ▾", max_width=88)
-        self.conn_more.add_action("Set as default", self._set_default_connection)
-        self.conn_more.add_action("Remove", self._remove_connection)
+        self.conn_more = MenuButton(_pt("settings.more"), max_width=88)
+        self.conn_more.add_action(_pt("settings.set_default"), self._set_default_connection)
+        self.conn_more.add_action(_pt("settings.remove"), self._remove_connection)
         actions.addWidget(self.add_conn_btn)
         actions.addStretch(1)
         actions.addWidget(self.save_conn_btn)
@@ -489,15 +493,15 @@ class SettingsDialog(QDialog):
     def _model_actions(self) -> QHBoxLayout:
         actions = QHBoxLayout()
         actions.setSpacing(8)
-        self.add_model_btn = compact_button(_pt("btn.add"), width=72)
+        self.add_model_btn = compact_button(_pt("btn.new"), width=72)
         self.add_model_btn.clicked.connect(self._add_model)
         self.save_model_btn = compact_button(_pt("btn.save"), primary=True, width=80)
         self.save_model_btn.clicked.connect(self._save_model)
         self.test_model_btn = compact_button(_pt("btn.test"), width=72)
         self.test_model_btn.clicked.connect(self._test_model)
-        self.model_more = MenuButton("More ▾", max_width=88)
-        self.model_more.add_action("Set as default", self._set_default_model)
-        self.model_more.add_action("Remove", self._remove_model)
+        self.model_more = MenuButton(_pt("settings.more"), max_width=88)
+        self.model_more.add_action(_pt("settings.set_default"), self._set_default_model)
+        self.model_more.add_action(_pt("settings.remove"), self._remove_model)
         actions.addWidget(self.add_model_btn)
         actions.addStretch(1)
         actions.addWidget(self.save_model_btn)
@@ -513,6 +517,7 @@ class SettingsDialog(QDialog):
         self._fill_list(self.conn_list, self._connections, self._default_connection, self._selected_conn)
         if not self._connections:
             self.conn_form.clear()
+            self._set_connection_new_mode(False)
 
     def _reload_model_list(self) -> None:
         self._fill_list(
@@ -524,6 +529,7 @@ class SettingsDialog(QDialog):
         )
         if not self._models:
             self.model_form.clear()
+            self._set_model_new_mode(False)
 
     def _model_list_label(self, name: str, entry: dict) -> str:
         model_id = str(entry.get("model") or "").strip()
@@ -549,24 +555,71 @@ class SettingsDialog(QDialog):
                     return
             widget.setCurrentRow(0)
 
+    def _select_draft(self, widget: QListWidget, key: str, label: str) -> None:
+        self._remove_draft(widget, key)
+        item = QListWidgetItem(label)
+        item.setData(Qt.ItemDataRole.UserRole, key)
+        widget.insertItem(0, item)
+        widget.setCurrentItem(item)
+
+    def _remove_draft(self, widget: QListWidget, key: str) -> None:
+        for i in range(widget.count()):
+            item = widget.item(i)
+            if item.data(Qt.ItemDataRole.UserRole) == key:
+                widget.takeItem(i)
+                return
+
+    def _set_connection_new_mode(self, new: bool) -> None:
+        self.save_conn_btn.setText(_pt("btn.create") if new else _pt("btn.save"))
+        key = self._selected_list_key(self.conn_list)
+        self.conn_more.setEnabled((not new) and bool(key))
+
+    def _set_model_new_mode(self, new: bool) -> None:
+        self.save_model_btn.setText(_pt("btn.create") if new else _pt("btn.save"))
+        key = self._selected_list_key(self.model_list)
+        self.model_more.setEnabled((not new) and bool(key))
+
+    def _selected_list_key(self, widget: QListWidget) -> str:
+        item = widget.currentItem()
+        return str(item.data(Qt.ItemDataRole.UserRole) or "") if item is not None else ""
+
     def _on_connection_selected(self, current, _previous) -> None:
         if not current:
             return
         name = str(current.data(Qt.ItemDataRole.UserRole) or "")
+        if name == _NEW_CONNECTION_ID:
+            self._selected_conn = ""
+            self.conn_form.clear()
+            self.conn_test_status.setStyleSheet(f"color:{Theme.MUTED}; font-size:12px;")
+            self.conn_test_status.setText(_pt("settings.new_connection_hint"))
+            self._set_connection_new_mode(True)
+            return
+        self._remove_draft(self.conn_list, _NEW_CONNECTION_ID)
         self._selected_conn = name
         self.conn_form.load(self._connections.get(name))
+        self.conn_test_status.clear()
+        self._set_connection_new_mode(False)
 
     def _on_model_selected(self, current, _previous) -> None:
         if not current:
             return
         name = str(current.data(Qt.ItemDataRole.UserRole) or "")
+        if name == _NEW_MODEL_ID:
+            self._selected_model = ""
+            self.model_form.clear()
+            self.model_test_status.setStyleSheet(f"color:{Theme.MUTED}; font-size:12px;")
+            self.model_test_status.setText(_pt("settings.new_model_hint"))
+            self._set_model_new_mode(True)
+            return
+        self._remove_draft(self.model_list, _NEW_MODEL_ID)
         self._selected_model = name
         self.model_form.load(self._models.get(name))
+        self.model_test_status.clear()
+        self._set_model_new_mode(False)
 
     def _add_connection(self) -> None:
         self._selected_conn = ""
-        self.conn_list.clearSelection()
-        self.conn_form.clear()
+        self._select_draft(self.conn_list, _NEW_CONNECTION_ID, _pt("settings.new_connection"))
 
     def _save_connection(self) -> None:
         payload = self.conn_form.payload(make_default=not self._connections)
@@ -611,8 +664,7 @@ class SettingsDialog(QDialog):
 
     def _add_model(self) -> None:
         self._selected_model = ""
-        self.model_list.clearSelection()
-        self.model_form.clear()
+        self._select_draft(self.model_list, _NEW_MODEL_ID, _pt("settings.new_model"))
 
     def _save_model(self) -> None:
         payload = self.model_form.payload(make_default=not self._models)
@@ -658,12 +710,18 @@ class SettingsDialog(QDialog):
         if target == "connection":
             self.save_conn_btn.setEnabled(not busy)
             self.test_conn_btn.setEnabled(not busy)
+            self.add_conn_btn.setEnabled(not busy)
+            key = self._selected_list_key(self.conn_list)
+            self.conn_more.setEnabled((not busy) and bool(key) and key != _NEW_CONNECTION_ID)
             if busy:
                 self.conn_test_status.setText("Saving connection…")
                 self.conn_test_status.setStyleSheet(f"color:{Theme.MUTED}; font-size:12px;")
         else:
             self.save_model_btn.setEnabled(not busy)
             self.test_model_btn.setEnabled(not busy)
+            self.add_model_btn.setEnabled(not busy)
+            key = self._selected_list_key(self.model_list)
+            self.model_more.setEnabled((not busy) and bool(key) and key != _NEW_MODEL_ID)
             if busy:
                 self.model_test_status.setText("Saving model…")
                 self.model_test_status.setStyleSheet(f"color:{Theme.MUTED}; font-size:12px;")

@@ -116,6 +116,29 @@ def test_settings_resources_page_roundtrip(qapp):
     assert captured["values"]["max_row_limit"] == 321
 
 
+def test_settings_new_connection_and_model_are_explicit_drafts(qapp):
+    from dbaide.i18n import set_language
+    from dbaide.desktop.dialogs.settings import SettingsDialog
+
+    set_language("en")
+    dlg = SettingsDialog(
+        connections=[{"name": "local", "type": "sqlite", "path": "a.db"}],
+        models=[{"name": "default", "provider": "none", "model": ""}],
+    )
+
+    dlg._add_connection()
+    assert dlg.conn_list.currentItem().text() == "New connection"
+    assert dlg.conn_form.payload()["name"] == ""
+    assert dlg.save_conn_btn.text() == "Create"
+    assert dlg.conn_more.isEnabled() is False
+
+    dlg._add_model()
+    assert dlg.model_list.currentItem().text() == "New model"
+    assert dlg.model_form.payload()["name"] == ""
+    assert dlg.save_model_btn.text() == "Create"
+    assert dlg.model_more.isEnabled() is False
+
+
 def test_connection_form_includes_load_profile(qapp):
     from dbaide.desktop.dialogs.connection import ConnectionForm
 

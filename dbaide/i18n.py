@@ -23,7 +23,7 @@ _STRINGS: dict[str, dict[str, str]] = {
     "tab.ask": {"en": "Ask", "zh": "提问"},
     "tab.sql": {"en": "SQL", "zh": "SQL"},
     "tab.data": {"en": "Data", "zh": "数据"},
-    "mode.assistant": {"en": "Assistant", "zh": "助手"},
+    "mode.assistant": {"en": "Chat", "zh": "对话"},
     "mode.workbench": {"en": "Workbench", "zh": "工作台"},
     "data.empty_hint": {
         "en": "Double-click a table in the schema (left) to browse its data.",
@@ -146,18 +146,21 @@ _STRINGS: dict[str, dict[str, str]] = {
     "settings.theme.light": {"en": "Light", "zh": "浅色"},
     "settings.theme.dark": {"en": "Dark", "zh": "深色"},
     "settings.language": {"en": "Language", "zh": "语言"},
+    "settings.more": {"en": "More ▾", "zh": "更多 ▾"},
+    "settings.set_default": {"en": "Set as default", "zh": "设为默认"},
+    "settings.remove": {"en": "Remove", "zh": "删除"},
     "settings.language.hint": {
         "en": "Interface, prompts and the model's default answer language.",
         "zh": "界面、提示以及模型默认回答所使用的语言。",
+    },
+    "settings.restart_required": {
+        "en": "This setting will apply after you restart DBAide.",
+        "zh": "该设置将在重启 DBAide 后生效。",
     },
     "settings.resources.title": {"en": "Resources & Safety", "zh": "资源与安全"},
     "settings.resources.subtitle": {
         "en": "Hard limits that keep database load negligible. Values shown are the connection's load-profile defaults; change one to override it.",
         "zh": "将数据库负载控制到极低的硬性限制。显示的是连接负载档位的默认值，修改某项即为覆盖该默认值。",
-    },
-    "settings.restart_required": {
-        "en": "Language will apply after you restart DBAide.",
-        "zh": "语言将在重启 DBAide 后生效。",
     },
     # Resources page field labels
     "res.max_inflight_queries": {"en": "Max concurrent queries", "zh": "最大并发查询数"},
@@ -183,6 +186,8 @@ _STRINGS: dict[str, dict[str, str]] = {
     "btn.build": {"en": "Build", "zh": "构建"},
     "btn.delete": {"en": "Delete", "zh": "删除"},
     "btn.add": {"en": "Add", "zh": "添加"},
+    "btn.new": {"en": "New", "zh": "新建"},
+    "btn.create": {"en": "Create", "zh": "创建"},
     "btn.reset_defaults": {"en": "Reset to defaults", "zh": "恢复默认"},
     # Status / toasts
     "status.idle": {"en": "Idle", "zh": "空闲"},
@@ -201,7 +206,6 @@ _STRINGS: dict[str, dict[str, str]] = {
     "toast.model_saved": {"en": "Model saved", "zh": "模型已保存"},
     "toast.model_removed": {"en": "Model removed", "zh": "模型已删除"},
     "toast.resources_saved": {"en": "Resource limits saved", "zh": "资源限制已保存"},
-    "toast.language_changed": {"en": "Language updated", "zh": "语言已更新"},
     "toast.assets_built": {"en": "Assets built", "zh": "资产已构建"},
     "toast.no_databases": {"en": "No databases found on this connection", "zh": "该连接下未发现数据库"},
     "toast.select_database": {"en": "Select at least one database", "zh": "请至少选择一个数据库"},
@@ -258,6 +262,8 @@ _STRINGS: dict[str, dict[str, str]] = {
     },
     # Sidebar
     "sidebar.filter": {"en": "Search schema…", "zh": "搜索结构…"},
+    "sidebar.chats": {"en": "Chats", "zh": "对话"},
+    "sidebar.schema": {"en": "Schema", "zh": "结构"},
     "sidebar.filter.hint": {
         "en": "Filter the schema tree · press Enter for semantic search",
         "zh": "筛选结构树 · 回车进行语义搜索",
@@ -313,9 +319,19 @@ _STRINGS: dict[str, dict[str, str]] = {
     "conn.load_profile": {"en": "Load profile", "zh": "负载档位"},
     # Settings page headers
     "settings.connections.subtitle": {"en": "Manage database connections.", "zh": "管理数据库连接。"},
+    "settings.new_connection": {"en": "New connection", "zh": "新建连接"},
+    "settings.new_connection_hint": {
+        "en": "Fill the form, then create the connection.",
+        "zh": "填写表单后创建连接。",
+    },
     "settings.models.subtitle": {
         "en": "Configure LLM providers. Switch models from the composer.",
         "zh": "配置 LLM 提供方。可在输入栏切换模型。",
+    },
+    "settings.new_model": {"en": "New model", "zh": "新建模型"},
+    "settings.new_model_hint": {
+        "en": "Fill the provider, key and model id, then create the profile.",
+        "zh": "填写提供方、密钥和模型 ID 后创建配置。",
     },
     # Model form
     "model.profile": {"en": "Profile", "zh": "配置名"},

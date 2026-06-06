@@ -7,6 +7,7 @@ from PyQt6.QtWidgets import (
     QFrame,
     QHBoxLayout,
     QLabel,
+    QTabBar,
     QSizePolicy,
     QWidget,
 )
@@ -62,10 +63,9 @@ class TopBar(QWidget):
 
         from dbaide.i18n import t
 
-        # New query / build assets / new connection used to sit here as a cluttered
-        # icon-button strip; they're reachable via ⌘T + the Workbench "+ New SQL"
-        # button, and Build / Settings in the overflow menu — so the topbar stays
-        # clean: brand · connection · database … status · ⋯.
+        # New query / build assets / new connection are reachable via ⌘T + the
+        # Workbench "+ New SQL" button, and Build / Settings in the overflow menu —
+        # so the topbar stays clean: brand · connection · database … mode · status · ⋯.
 
         # Connection + database selectors
         self.connection = DropdownCombo(max_visible=8)
@@ -79,7 +79,16 @@ class TopBar(QWidget):
 
         row.addStretch(1)
 
-        # Status + panel toggle + overflow menu
+        self.mode_tabs = QTabBar()
+        self.mode_tabs.setObjectName("modeTabs")
+        self.mode_tabs.setProperty("topMode", True)
+        self.mode_tabs.setDrawBase(False)
+        self.mode_tabs.setUsesScrollButtons(True)
+        self.mode_tabs.setExpanding(False)
+        self.mode_tabs.setMinimumWidth(190)
+        row.addWidget(self.mode_tabs)
+
+        # Status + overflow menu
         self.status = StatusBadge("Idle", "idle")
         row.addWidget(self.status)
 

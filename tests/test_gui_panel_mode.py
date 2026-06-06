@@ -51,11 +51,24 @@ def test_modes_switch_and_composer_visibility(qapp, tmp_path):
     win = _make_window(tmp_path, qapp)
     assert win._current_mode() == "Assistant"
     assert win.composer.isVisibleTo(win) is True
+    assert win.sidebar.context_tabs.isVisibleTo(win) is True
+    assert win.sidebar.chats.isVisibleTo(win) is True
+    assert win.sidebar._schema_panel.isVisibleTo(win) is False
+    win.sidebar.context_tabs.setCurrentIndex(1)            # Schema inside Chat
+    assert win.sidebar.chats.isVisibleTo(win) is False
+    assert win.sidebar._schema_panel.isVisibleTo(win) is True
+    win.sidebar.context_tabs.setCurrentIndex(0)            # Chats inside Chat
     win.tabbar.setCurrentIndex(1)               # Workbench
     assert win._current_mode() == "Workbench"
     assert win.composer.isVisibleTo(win) is False
+    assert win.sidebar.context_tabs.isVisibleTo(win) is False
+    assert win.sidebar.chats.isVisibleTo(win) is False
+    assert win.sidebar._schema_panel.isVisibleTo(win) is True
     win.tabbar.setCurrentIndex(0)               # back to Assistant
     assert win.composer.isVisibleTo(win) is True
+    assert win.sidebar.context_tabs.isVisibleTo(win) is True
+    assert win.sidebar.chats.isVisibleTo(win) is True
+    assert win.sidebar._schema_panel.isVisibleTo(win) is False
     win.deleteLater(); _drain(qapp)
 
 

@@ -8,17 +8,17 @@ from PyQt6.QtWidgets import (
     QFrame,
     QHBoxLayout,
     QHeaderView,
+    QLabel,
     QLineEdit,
     QSizePolicy,
     QSplitter,
+    QTabBar,
     QToolButton,
     QTreeWidget,
     QTreeWidgetItem,
     QVBoxLayout,
     QWidget,
 )
-
-from PyQt6.QtWidgets import QLabel
 
 from dbaide.desktop.components.base import SectionLabel, compact_button
 from dbaide.desktop.components.icons import more_icon, svg_icon, svg_pixmap
@@ -46,8 +46,21 @@ class Sidebar(QWidget):
         layout.setSpacing(10)
         from dbaide.i18n import t
 
-        # Chats (会话) over Schema, split so each can be resized; both stay visible.
+        self.context_tabs = QTabBar()
+        self.context_tabs.setObjectName("sidebarContextTabs")
+        self.context_tabs.setProperty("sidebarSwitch", True)
+        self.context_tabs.setDrawBase(False)
+        self.context_tabs.setUsesScrollButtons(False)
+        self.context_tabs.setExpanding(True)
+        self.context_tabs.addTab(t("sidebar.chats"))
+        self.context_tabs.addTab(t("sidebar.schema"))
+        self.context_tabs.currentChanged.connect(self._on_context_tab_changed)
+        layout.addWidget(self.context_tabs)
+
+        # Chats and Schema share the same sidebar shell. In Chat mode the user can
+        # switch between the two; in Workbench mode Schema is forced.
         split = QSplitter(Qt.Orientation.Vertical)
+        self._split = split
         split.setHandleWidth(1)
         split.setChildrenCollapsible(False)
 
@@ -55,6 +68,7 @@ class Sidebar(QWidget):
         split.addWidget(self.chats)
 
         schema_panel = QWidget()
+        self._schema_panel = schema_panel
         schema_layout = QVBoxLayout(schema_panel)
         schema_layout.setContentsMargins(0, 0, 0, 0)
         schema_layout.setSpacing(8)
@@ -132,6 +146,32 @@ class Sidebar(QWidget):
         self._node_refreshing: set[str] = set()
         self._node_busy_buttons: dict[str, QToolButton] = {}
         self._node_busy = BusyAnimator(self._tick_node_refreshing, parent=self)
+        self._app_mode = "Assistant"
+        self.set_mode("Assistant")
+
+    def set_mode(self, mode: str) -> None:
+        """Show the sidebar surface that belongs to the active app mode."""
+        self._app_mode = str(mode)
+        if self._app_mode == "Workbench":
+            self.context_tabs.hide()
+            self._show_sidebar_page("Schema")
+        else:
+            self.context_tabs.show()
+            self._sync_context_tab()
+
+    def _on_context_tab_changed(self, _index: int) -> None:
+        if self._app_mode != "Workbench":
+            self._sync_context_tab()
+
+    def _sync_context_tab(self) -> None:
+        self._show_sidebar_page("Schema" if self.context_tabs.currentIndex() == 1 else "Chats")
+
+    def _show_sidebar_page(self, page: str) -> None:
+        schema = page == "Schema"
+        self.chats.setVisible(not schema)
+        self._schema_panel.setVisible(schema)
+        self._split.setStretchFactor(0, 0 if schema else 1)
+        self._split.setStretchFactor(1, 1 if schema else 0)
 
     def set_loading(self, message: str = "") -> None:
         """Show a non-blocking placeholder while the schema is being loaded/projected,
