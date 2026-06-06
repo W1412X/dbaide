@@ -47,6 +47,41 @@ class _FakeWorker:
         self.is_cancelled = True
 
 
+class _FakeDoc:
+    def __init__(self):
+        self.running: list[bool] = []
+        self.result = None
+        self.error = ""
+
+    def set_running(self, running: bool):
+        self.running.append(running)
+
+    def show_result(self, result):
+        self.result = result
+
+    def show_error(self, message: str):
+        self.error = message
+
+
+class _FakeHistoryStore:
+    def __init__(self):
+        self.records = []
+
+    def record(self, connection, sql, **kwargs):
+        self.records.append((connection, sql, kwargs))
+
+    def recent(self, connection):
+        return []
+
+
+class _FakeBus:
+    def __init__(self):
+        self.events = []
+
+    def emit(self, event, payload):
+        self.events.append((event, payload))
+
+
 def test_runs_over_cap_are_queued(qapp, tmp_path):
     """Starting more conversation runs than the cap queues the overflow rather than
     rejecting it; the active slot's run is tracked per session."""
@@ -138,3 +173,81 @@ def test_running_new_chat_appears_as_pending_row(qapp, tmp_path):
     assert not any(str(p.get("key")) == key for p in sl._pending)
 
     win.deleteLater(); qapp.processEvents()
+
+
+def test_oneoff_sql_result_routes_to_originating_editor(monkeypatch):
+    """A SQL run must clear/write the editor that launched it, not the editor active
+    when the worker finishes."""
+    import dbaide.desktop.views.main_window as mw
+
+    monkeypatch.setattr(mw.sip, "isdeleted", lambda _obj: False)
+    win = mw.MainWindow.__new__(mw.MainWindow)
+    origin = _FakeDoc()
+    other = _FakeDoc()
+    history = _FakeHistoryStore()
+    bus = _FakeBus()
+    win._oneoff_action = "execute_sql"
+    win._oneoff_worker = object()
+    win._oneoff_sql_doc = origin
+    win._oneoff_data_doc = None
+    win._oneoff_sql = "select 1"
+    win._oneoff_connection = "old"
+    win._oneoff_database = "main"
+    win._active_sql_doc = other
+    win._active_data_doc = None
+    win._building = False
+    win.query_history_store = history
+    win.bus = bus
+    win.current_connection = lambda: "current"  # type: ignore[method-assign]
+    win.current_database = lambda: "other_db"  # type: ignore[method-assign]
+    win._refresh_query_history = lambda: None  # type: ignore[method-assign]
+    win._sync_active_ui = lambda: None  # type: ignore[method-assign]
+    win._refresh_run_status = lambda: None  # type: ignore[method-assign]
+
+    result = {"columns": ["x"], "rows": [{"x": 1}], "row_count": 1, "elapsed_ms": 7}
+    win._on_oneoff_done("execute_sql", result)
+
+    assert origin.running == [False]
+    assert origin.result == result
+    assert other.running == [] and other.result is None
+    assert history.records == [("old", "select 1", {
+        "ok": True,
+        "row_count": 1,
+        "elapsed_ms": 7,
+        "database": "main",
+    })]
+    assert bus.events[-1][1] == {"instance": "old"}
+    assert win._oneoff_worker is None
+    assert win._oneoff_sql_doc is None
+
+
+def test_query_completed_event_ignores_other_connections():
+    import dbaide.desktop.views.main_window as mw
+
+    win = mw.MainWindow.__new__(mw.MainWindow)
+    calls: list[str] = []
+    win.current_connection = lambda: "current"  # type: ignore[method-assign]
+    win._load_sessions = lambda conn: calls.append(conn)  # type: ignore[method-assign]
+
+    win._on_query_completed({"instance": "old"})
+    assert calls == []
+
+    win._on_query_completed({"instance": "current"})
+    assert calls == ["current"]
+
+
+def test_stale_ask_completion_is_ignored():
+    import dbaide.desktop.views.main_window as mw
+
+    win = mw.MainWindow.__new__(mw.MainWindow)
+    calls: list[str] = []
+    win._runs = {}
+    win.ask_tab = type("Ask", (), {"append_result": lambda *_a: calls.append("append")})()
+    win._sync_active_ui = lambda: calls.append("sync")  # type: ignore[method-assign]
+    win._refresh_run_status = lambda: calls.append("status")  # type: ignore[method-assign]
+    win._drain_queue = lambda: calls.append("drain")  # type: ignore[method-assign]
+
+    win._on_ask_done("old", {"status": "completed"})
+    win._on_ask_failed("old", RuntimeError("late failure"))
+
+    assert calls == []

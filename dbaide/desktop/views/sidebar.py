@@ -129,6 +129,9 @@ class Sidebar(QWidget):
         self._rows: list[dict[str, Any]] = []
         self._schema_loading_item: QTreeWidgetItem | None = None
         self._schema_busy = BusyAnimator(self._tick_schema_loading, parent=self)
+        self._node_refreshing: set[str] = set()
+        self._node_busy_buttons: dict[str, QToolButton] = {}
+        self._node_busy = BusyAnimator(self._tick_node_refreshing, parent=self)
 
     def set_loading(self, message: str = "") -> None:
         """Show a non-blocking placeholder while the schema is being loaded/projected,
@@ -164,6 +167,32 @@ class Sidebar(QWidget):
     def _stop_schema_loading(self) -> None:
         self._schema_busy.stop()
         self._schema_loading_item = None
+
+    def set_node_refreshing(self, node_or_path: dict[str, Any] | str, refreshing: bool) -> None:
+        """Mark a database/table row as refreshing and swap its overflow icon for a spinner."""
+        path = (
+            str(node_or_path.get("path") or "")
+            if isinstance(node_or_path, dict)
+            else str(node_or_path or "")
+        ).strip()
+        if not path:
+            return
+        if refreshing:
+            self._node_refreshing.add(path)
+        else:
+            self._node_refreshing.discard(path)
+        self._sync_node_refreshing()
+
+    def _sync_node_refreshing(self) -> None:
+        if self._node_refreshing:
+            self._node_busy.start()
+        else:
+            self._node_busy.stop()
+        self._attach_row_actions()
+
+    def _tick_node_refreshing(self) -> None:
+        for btn in list(self._node_busy_buttons.values()):
+            btn.setIcon(spinner_icon(self._node_busy.angle, color=Theme.BLUE, size=13))
 
     def load_schema(self, rows: list[dict[str, Any]], *, error: str = "") -> None:
         self._rows = rows
@@ -225,6 +254,7 @@ class Sidebar(QWidget):
 
     def _attach_row_actions(self) -> None:
         from dbaide.i18n import t
+        self._node_busy_buttons.clear()
         stack = [self.tree.topLevelItem(i) for i in range(self.tree.topLevelItemCount())]
         while stack:
             item = stack.pop()
@@ -252,7 +282,14 @@ class Sidebar(QWidget):
         from PyQt6.QtWidgets import QMenu
         from dbaide.desktop.components.menu import _style_menu
 
+        path = str(data.get("path") or "")
         btn = self._button_base("more-horizontal", t("schema.more"))
+        if path in self._node_refreshing:
+            btn.setIcon(spinner_icon(self._node_busy.angle, color=Theme.BLUE, size=13))
+            btn.setToolTip(t("status.syncing"))
+            btn.setEnabled(False)
+            self._node_busy_buttons[path] = btn
+            return btn
         menu = QMenu(btn)
         _style_menu(menu)
         menu.addAction(t("schema.edit_note"), lambda d=data: self.edit_note.emit(d))

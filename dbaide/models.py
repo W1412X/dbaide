@@ -32,6 +32,7 @@ class ConnectionConfig:
         password: str = "",
         path: str = "",
         load_profile: str = "production",
+        session_timezone: str = "UTC",
     ) -> None:
         self.name = str(name or "").strip()
         self.type = str(type or "").strip().lower()
@@ -54,6 +55,7 @@ class ConnectionConfig:
         # Default to the conservative production profile: an AI assistant must not
         # hammer a live database by accident.
         self.load_profile = profile if profile in _VALID_LOAD_PROFILES else "production"
+        self.session_timezone = str(session_timezone or "UTC").strip() or "UTC"
 
 
 class ModelConfig:

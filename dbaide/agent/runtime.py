@@ -24,7 +24,7 @@ class AgentRuntime:
     - Supports cancellation
     """
 
-    MAX_STEPS = 12  # default; overridable per-run via the ``max_steps`` argument
+    MAX_STEPS = 32  # default; overridable per-run via the ``max_steps`` argument
 
     def __init__(
         self,

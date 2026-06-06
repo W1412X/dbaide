@@ -19,7 +19,7 @@ class QueryTools:
         if default_limit is None:
             default_limit = policy.default_row_limit if policy else 100
         if timeout_seconds is None:
-            timeout_seconds = policy.statement_timeout_seconds if policy else 10
+            timeout_seconds = policy.statement_timeout_seconds if policy else 60
         if max_row_limit is None:
             max_row_limit = policy.max_row_limit if policy else 1000
         self.sql_guard = SQLGuard(

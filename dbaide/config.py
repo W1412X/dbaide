@@ -16,7 +16,10 @@ DEFAULT_CONFIG_PATH = DEFAULT_CONFIG_DIR / "config.toml"
 DEFAULT_MAX_CONCURRENT_RUNS = 3
 
 # Valid keys for ConnectionConfig and ModelConfig
-_CONNECTION_KEYS = {"name", "type", "database", "host", "port", "user", "password_env", "password", "path", "load_profile"}
+_CONNECTION_KEYS = {
+    "name", "type", "database", "host", "port", "user", "password_env", "password", "path",
+    "load_profile", "session_timezone",
+}
 _MODEL_KEYS = {"name", "provider", "base_url", "api_key_env", "api_key", "model", "timeout_seconds"}
 
 

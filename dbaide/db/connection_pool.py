@@ -20,6 +20,7 @@ class PoolKey:
     instance: str
     kind: str
     database: str
+    session_timezone: str = ""
 
 
 class PooledConnection:

@@ -145,7 +145,7 @@ class WorkflowRequest:
         mode: str = "ask",
         execution_policy: ExecutionPolicy = ExecutionPolicy.SAFE_AUTO,
         limit: int = 100,
-        timeout_seconds: int = 10,
+        timeout_seconds: int = 60,
         model_name: str = "",
         show_trace: bool = False,
         resume_state: dict[str, Any] | None = None,

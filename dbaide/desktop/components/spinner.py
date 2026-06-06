@@ -18,10 +18,6 @@ from dbaide.desktop.theme import Theme
 
 # Degrees advanced per tick — 30° × ~70ms ≈ a smooth ~0.8s revolution.
 _ANGLE_STEP = 30
-# Kept for any text-only consumer (e.g. plain-text logs).
-SPINNER_FRAMES = ("◐", "◓", "◑", "◒")
-
-
 def spinner_pixmap(angle: float, *, size: int = 14, color: str = Theme.BLUE, width: float = 2.0) -> QPixmap:
     """The loader arc rotated to ``angle`` — crisp vector, HiDPI-aware."""
     return svg_pixmap("loader", color=color, size=size, width=width, angle=angle)
@@ -45,10 +41,6 @@ class BusyAnimator(QObject):
     @property
     def angle(self) -> float:
         return self._angle
-
-    @property
-    def frame(self) -> str:
-        return SPINNER_FRAMES[int(self._angle // 90) % len(SPINNER_FRAMES)]
 
     @property
     def active(self) -> bool:

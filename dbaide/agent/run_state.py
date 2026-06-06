@@ -48,6 +48,11 @@ class RunState:
     query_result: Any = None                                # QueryResult | None
     answer: str = ""
 
+    # Pending risk confirmation for a generated SQL. When the user approves, the SQL
+    # hash is added to confirmed_risk_sqls so the next execute_sql call can run it.
+    risk_confirmation: dict[str, Any] = field(default_factory=dict)
+    confirmed_risk_sqls: list[str] = field(default_factory=list)
+
     # Pause/resume: a pending clarification awaiting the user.
     pending_question: str = ""
     pending_options: list[Any] = field(default_factory=list)

@@ -455,7 +455,10 @@ class DesktopService:
                 | {db for (db, _t) in diff.removed_tables} | set(diff.added_dbs)
             for db in touched:
                 if db not in diff.removed_dbs:
-                    self._rewrite_db_rollup(summarizer, instance, db, self._stored_table_names(instance, db))
+                    table_names = set(self._stored_table_names(instance, db))
+                    table_names.update(new_snap.get(db, {}).keys())
+                    table_names.difference_update(t for d, t in diff.removed_tables if d == db)
+                    self._rewrite_db_rollup(summarizer, instance, db, sorted(table_names))
             self._rewrite_instance_rollup(summarizer, instance, self._stored_database_names(instance))
             return {"instance": instance, "summary": diff.summary(),
                     "added_tables": len(diff.added_tables), "removed_tables": len(diff.removed_tables),
@@ -514,6 +517,9 @@ class DesktopService:
         for db in diff.removed_dbs:
             self.store.delete_database(instance, db)
             self.annotations.delete_under(instance, database=db)
+        for db in diff.added_dbs:
+            for table, doc in new_snap.get(db, {}).items():
+                self.store.write_json(self.store.table_dir(instance, db, table) / "table.json", doc)
         for (db, table) in diff.removed_tables:
             self.store.delete_table(instance, db, table)
             self.annotations.delete_under(instance, database=db, table=table)
@@ -765,7 +771,7 @@ class DesktopService:
             database_scope=[database] if database else [],
             execution_policy=policy,
             limit=int(payload.get("limit") or 100),
-            timeout_seconds=int(payload.get("timeout_seconds") or 10),
+            timeout_seconds=int(payload.get("timeout_seconds") or 60),
             show_trace=bool(payload.get("show_trace", True)),
             resume_state=payload.get("resume_state"),
             user_reply=str(payload.get("user_reply") or ""),
@@ -1126,6 +1132,7 @@ class DesktopService:
             password=str(payload.get("password") or ""),
             path=str(payload.get("path") or "").strip(),
             load_profile=str(payload.get("load_profile") or "production").strip(),
+            session_timezone=str(payload.get("session_timezone") or "UTC").strip(),
         )
 
     def list_joins(self, payload: dict[str, Any]) -> dict[str, Any]:

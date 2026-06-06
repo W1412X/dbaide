@@ -33,7 +33,7 @@ class MySQLAdapter(DatabaseAdapter):
             raise RuntimeError("Install MySQL support with `pip install dbaide[mysql]`.") from exc
         password = self.config.password or (os.environ.get(self.config.password_env) if self.config.password_env else "")
         db = database or self.config.database or None
-        return pymysql.connect(
+        conn = pymysql.connect(
             host=self.config.host or "localhost",
             port=int(self.config.port or 3306),
             user=self.config.user,
@@ -43,6 +43,21 @@ class MySQLAdapter(DatabaseAdapter):
             cursorclass=pymysql.cursors.DictCursor,
             autocommit=False,
         )
+        self._set_session_timezone(conn)
+        return conn
+
+    def _mysql_session_timezone(self) -> str:
+        tz = str(getattr(self.config, "session_timezone", "") or "UTC").strip() or "UTC"
+        return "+00:00" if tz.upper() == "UTC" else tz
+
+    def _set_session_timezone(self, conn) -> None:
+        tz = self._mysql_session_timezone()
+        with conn.cursor() as cur:
+            cur.execute("SET time_zone = %s", (tz,))
+        try:
+            conn.commit()
+        except Exception:
+            pass
 
     def _connect(self, database: str = ""):
         db = database or self.config.database or ""
@@ -57,7 +72,7 @@ class MySQLAdapter(DatabaseAdapter):
             return True
 
         return connection_pool_for_key(
-            PoolKey(self.config.name, self.config.type or "mysql", db),
+            PoolKey(self.config.name, self.config.type or "mysql", db, self._mysql_session_timezone()),
             max_size=self.policy.max_inflight_queries,
             factory=factory,
             validator=validator,

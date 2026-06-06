@@ -52,7 +52,6 @@ class RiskController:
         join_confidence: float = 1.0,
         estimated_rows: int | None = None,
         explain_max_rows: int = 0,
-        max_join_tables: int = 2,
     ) -> RiskDecision:
         """Decide whether to execute, confirm, or reject."""
 
@@ -85,15 +84,6 @@ class RiskController:
                 "confirm",
                 f"High risk: {'; '.join(validation.warnings[:3])}",
                 "high",
-                requires_confirmation=True,
-            )
-
-        # Complex query: too many joined tables.
-        if table_count > max(1, max_join_tables):
-            return RiskDecision(
-                "confirm",
-                f"Query involves {table_count} tables (max {max_join_tables})",
-                "medium",
                 requires_confirmation=True,
             )
 

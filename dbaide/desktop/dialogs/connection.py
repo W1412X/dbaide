@@ -67,6 +67,13 @@ class ConnectionForm(QWidget):
             "production: lowest DB load (light profiling, low concurrency, strict limits).\n"
             "staging: balanced. dev: highest concurrency and limits."
         )
+        self.session_timezone = QLineEdit("UTC")
+        self.session_timezone.setFixedHeight(26)
+        self.session_timezone.setPlaceholderText("UTC, +00:00, +08:00")
+        self.session_timezone.setToolTip(
+            "Session time zone applied after connecting. MySQL accepts offsets like +00:00; "
+            "PostgreSQL also accepts names like UTC."
+        )
 
         from dbaide.i18n import t
         browse = compact_button(t("conn.browse"), width=88)
@@ -88,7 +95,8 @@ class ConnectionForm(QWidget):
         form.addRow(form_label(t("conn.database")), self.database)
         form.addRow(form_label(t("conn.user")), self.user)
         form.addRow(form_label(t("conn.password")), self.password)
-        self._rows_server = (3, 4, 5, 6, 7)  # host, port, database, user, password
+        form.addRow(form_label(t("conn.session_timezone")), self.session_timezone)
+        self._rows_server = (3, 4, 5, 6, 7, 8)  # host, port, database, user, password, timezone
         form.addRow(form_label(t("conn.load_profile")), self.load_profile)
         scroll.setWidget(inner)
         outer.addWidget(scroll)
@@ -113,6 +121,7 @@ class ConnectionForm(QWidget):
         self.database.setText(str(payload.get("database") or ""))
         self.user.setText(str(payload.get("user") or ""))
         self.password.clear()
+        self.session_timezone.setText(str(payload.get("session_timezone") or "UTC"))
         self.load_profile.setCurrentText(str(payload.get("load_profile") or "production"))
         self._sync_fields(self.type_select.currentText(), reset_port=port in (None, ""))
 
@@ -124,6 +133,7 @@ class ConnectionForm(QWidget):
         self.database.clear()
         self.user.clear()
         self.password.clear()
+        self.session_timezone.setText("UTC")
         self.load_profile.setCurrentText("production")
         self._sync_fields(conn_type, reset_port=True)
 
@@ -169,6 +179,7 @@ class ConnectionForm(QWidget):
             "database": self.database.text().strip(),
             "user": self.user.text().strip(),
             "password": self.password.text(),
+            "session_timezone": self.session_timezone.text().strip() or "UTC",
             "load_profile": self.load_profile.currentText().strip(),
             "make_default": make_default,
         }

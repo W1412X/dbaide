@@ -20,6 +20,24 @@ class _Mock(LLMClient):
         return "OK"
 
 
+class _SeqMock(LLMClient):
+    def __init__(self, payloads):
+        self.payloads = list(payloads)
+        self.calls = 0
+        self.last_user = ""
+
+    def complete_json(self, messages, *, schema_hint=""):
+        self.calls += 1
+        self.last_user = messages[-1].content
+        item = self.payloads.pop(0)
+        if isinstance(item, Exception):
+            raise item
+        return item
+
+    def complete_text(self, messages):
+        return "OK"
+
+
 def _disclosed():
     return [("analysis", "orders", [
         ColumnInfo(name="id", data_type="int", primary_key=True),
@@ -98,9 +116,22 @@ def test_dropped_when_no_ask_text():
     assert [q["ask"] for q in plan.questions] == ["real?"]
 
 
-def test_malformed_payload_is_safe():
-    assert SemanticClarifier(_Mock(None)).analyze("q", _disclosed()).is_empty()
-    assert SemanticClarifier(_Mock("nope")).analyze("q", _disclosed()).is_empty()
+def test_malformed_payload_retries_then_succeeds():
+    mock = _SeqMock([None, {"questions": [{"ask": "Which timezone?", "options": ["UTC"]}], "assumptions": []}])
+
+    plan = SemanticClarifier(mock).analyze("q", _disclosed())
+
+    assert mock.calls == 2
+    assert "Previous clarification response was invalid" in mock.last_user
+    assert plan.questions[0]["ask"] == "Which timezone?"
+
+
+def test_clarifier_raises_after_retry_exhaustion():
+    mock = _SeqMock([ValueError("bad json"), "nope"])
+    import pytest
+
+    with pytest.raises(RuntimeError, match="clarification model failed"):
+        SemanticClarifier(mock, max_attempts=2).analyze("q", _disclosed())
 
 
 def test_options_are_passed_through_unchanged():

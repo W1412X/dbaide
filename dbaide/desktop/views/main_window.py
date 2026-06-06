@@ -76,6 +76,7 @@ class MainWindow(QMainWindow):
         self._slot_trace: dict[str, list[dict[str, Any]]] = {}    # slot key → accumulated trace events
         self._slot_question: dict[str, str] = {}                  # slot key → last question (for resume label)
         self._slot_session: dict[str, str] = {}                   # slot key → server session_id (once known)
+        self._slot_connection: dict[str, str] = {}                # slot key → connection that launched the run
         self._new_counter = 0                                     # source of "new:N" temp keys
         self._active_key = ""                                     # the slot currently on screen
         # Background workers (bootstrap / schema / sessions / asset preview) kept
@@ -84,6 +85,11 @@ class MainWindow(QMainWindow):
         # One-off non-conversation action (build assets / run SQL / etc.).
         self._oneoff_worker: ServiceWorker | None = None
         self._oneoff_action = ""
+        self._oneoff_sql_doc = None
+        self._oneoff_data_doc = None
+        self._oneoff_sql = ""
+        self._oneoff_connection = ""
+        self._oneoff_database = ""
         self._building = False
         self._last_question = ""
         # The active chat session (会话) — the server id of the visible slot.
@@ -129,9 +135,13 @@ class MainWindow(QMainWindow):
         # tree / history / joins for the current connection.
         self.bus.subscribe(MODELS_CHANGED, lambda _p: self._refresh_models_only())
         self.bus.subscribe(JOINS_CHANGED, lambda _p: self.refresh_joins())
-        self.bus.subscribe(QUERY_COMPLETED, lambda _p: self._on_query_completed())
+        self.bus.subscribe(QUERY_COMPLETED, self._on_query_completed)
 
-    def _on_query_completed(self) -> None:
+    def _on_query_completed(self, payload: dict[str, Any] | None = None) -> None:
+        if isinstance(payload, dict):
+            instance = str(payload.get("instance") or "")
+            if instance and instance != self.current_connection():
+                return
         # Chats (sessions) are the surfaced history now; refresh that list.
         self._load_sessions(self.current_connection())
 
@@ -305,6 +315,7 @@ class MainWindow(QMainWindow):
             self.sidebar.load_schema([])
             self.sidebar.chats.load([])
             self.topbar.set_databases([])
+            self._restore_status_badge()
 
     def _run_background(
         self,
@@ -409,6 +420,7 @@ class MainWindow(QMainWindow):
         self._slot_trace.clear()
         self._slot_question.clear()
         self._slot_session.clear()
+        self._slot_connection.clear()
         self.ask_tab.reset_all()
         self._active_key = ""
         self.current_session_id = ""
@@ -439,6 +451,8 @@ class MainWindow(QMainWindow):
             return
 
         def on_loaded(entries: list[dict[str, Any]]) -> None:
+            if name != self.current_connection():
+                return
             self.sidebar.chats.load(entries or [])
             self.sidebar.chats.set_current(self.current_session_id)
         self._run_background("list_sessions", {"connection_name": name}, on_loaded)
@@ -742,6 +756,8 @@ class MainWindow(QMainWindow):
         default_workers = {"production": 1, "staging": 2, "dev": 4}.get(load_profile, 1)
 
         def on_loaded(result: dict[str, Any]) -> None:
+            if conn != self.current_connection():
+                return
             databases = list(result.get("databases") or [])
             if not databases:
                 self.toast(_i18n_t("toast.no_databases"))
@@ -936,12 +952,16 @@ class MainWindow(QMainWindow):
         self.topbar.set_global_status(_i18n_t("status.syncing"), "building")
 
         def done(result: object) -> None:
+            if conn != self.current_connection():
+                return
             summary = (result or {}).get("summary", "") if isinstance(result, dict) else ""
             self.toast(_i18n_t("toast.synced", summary=summary))
             self._restore_status_badge()
             self.bus.emit(ASSETS_CHANGED, {"instance": conn})
 
         def fail(exc: object) -> None:
+            if conn != self.current_connection():
+                return
             self.toast(_i18n_t("toast.sync_failed", error=str(exc)))
             self._restore_status_badge()
 
@@ -966,9 +986,14 @@ class MainWindow(QMainWindow):
         payload: dict[str, Any] = {"name": conn, "database": database}
         if table:
             payload["table"] = table
+        self.sidebar.set_node_refreshing(node, True)
 
         def done(result: object) -> None:
+            if conn != self.current_connection():
+                self.sidebar.set_node_refreshing(node, False)
+                return
             summary = (result or {}).get("summary", "") if isinstance(result, dict) else ""
+            self.sidebar.set_node_refreshing(node, False)
             self.toast(_i18n_t("toast.synced", summary=summary or target))
             self._restore_status_badge()
             self.bus.emit(ASSETS_CHANGED, {"instance": conn})
@@ -976,6 +1001,10 @@ class MainWindow(QMainWindow):
             self._refresh_doc_if_open(doc_path)
 
         def fail(exc: object) -> None:
+            if conn != self.current_connection():
+                self.sidebar.set_node_refreshing(node, False)
+                return
+            self.sidebar.set_node_refreshing(node, False)
             self.toast(_i18n_t("toast.sync_failed", error=str(exc)))
             self._restore_status_badge()
 
@@ -1007,11 +1036,15 @@ class MainWindow(QMainWindow):
         self.topbar.set_global_status(_i18n_t("status.enriching"), "building")
 
         def done(_r: object) -> None:
+            if conn != self.current_connection():
+                return
             self.toast(_i18n_t("toast.enriched", target=target))
             self._restore_status_badge()
             self.bus.emit(ASSETS_CHANGED, {"instance": conn})
 
         def fail(exc: object) -> None:
+            if conn != self.current_connection():
+                return
             self.toast(_i18n_t("toast.enrich_failed", error=str(exc)))
             self._restore_status_badge()
 
@@ -1117,6 +1150,10 @@ class MainWindow(QMainWindow):
             self._active_sql_doc = None
         if widget is self._active_data_doc:
             self._active_data_doc = None
+        if widget is self._oneoff_sql_doc:
+            self._oneoff_sql_doc = None
+        if widget is self._oneoff_data_doc:
+            self._oneoff_data_doc = None
 
     def _safe_sql_doc(self):
         """Return the active SQL doc only if it's still alive (not deleteLater'd)."""
@@ -1134,6 +1171,20 @@ class MainWindow(QMainWindow):
         self._active_data_doc = None
         return None
 
+    def _safe_oneoff_sql_doc(self):
+        d = self._oneoff_sql_doc
+        if d is not None and not sip.isdeleted(d):
+            return d
+        self._oneoff_sql_doc = None
+        return None
+
+    def _safe_oneoff_data_doc(self):
+        d = self._oneoff_data_doc
+        if d is not None and not sip.isdeleted(d):
+            return d
+        self._oneoff_data_doc = None
+        return None
+
     def execute_sql(self, sql: str) -> None:
         if not sql.strip():
             return
@@ -1146,15 +1197,19 @@ class MainWindow(QMainWindow):
 
     # ── Query history ─────────────────────────────────────────────────────────
 
-    def _record_query(self, sql: str, *, ok: bool, row_count=None, elapsed_ms=None) -> None:
+    def _record_query(self, sql: str, *, ok: bool, row_count=None, elapsed_ms=None,
+                      connection: str = "", database: str = "") -> None:
         if not (sql or "").strip():
             return
+        conn = connection or self.current_connection()
+        db = database if database != "" else self.current_database()
         self.query_history_store.record(
-            self.current_connection(), sql, ok=ok,
+            conn, sql, ok=ok,
             row_count=row_count, elapsed_ms=elapsed_ms,
-            database=self.current_database(),
+            database=db,
         )
-        self._refresh_query_history()
+        if conn == self.current_connection():
+            self._refresh_query_history()
 
     def _refresh_query_history(self) -> None:
         self.history_panel.load(self.query_history_store.recent(self.current_connection()))
@@ -1445,6 +1500,8 @@ class MainWindow(QMainWindow):
             return
 
         def on_loaded(data: dict[str, Any]) -> None:
+            if conn != self.current_connection():
+                return
             sid = str(data.get("session_id") or session_id)
             turns = data.get("turns") or []
             self.ask_tab.load_session(sid, turns, connection=conn)
@@ -1513,10 +1570,17 @@ class MainWindow(QMainWindow):
             self.toast(_i18n_t("toast.task_running"))
             return
         self._oneoff_action = action
+        self._oneoff_sql_doc = self._safe_sql_doc() if action in ("execute_sql", "explain_sql") else None
+        self._oneoff_data_doc = self._safe_data_doc() if action in ("browse_table", "count_table") else None
+        self._oneoff_sql = str(payload.get("sql") or self._last_sql or "")
+        self._oneoff_connection = str(
+            payload.get("connection_name") or payload.get("name") or self.current_connection() or ""
+        )
+        self._oneoff_database = str(payload.get("database") or self.current_database() or "")
         if action == "build_assets":
             self._building = True
-        sql_doc = self._safe_sql_doc()
-        data_doc = self._safe_data_doc()
+        sql_doc = self._safe_oneoff_sql_doc()
+        data_doc = self._safe_oneoff_data_doc()
         if action in ("execute_sql", "explain_sql") and sql_doc is not None:
             sql_doc.set_running(True)
         if action in ("browse_table", "count_table") and data_doc is not None:
@@ -1538,19 +1602,33 @@ class MainWindow(QMainWindow):
         self.statusbar.showMessage(progress_label(message if isinstance(message, dict) else str(message or "")))
 
     def _on_oneoff_done(self, action: str, result: Any) -> None:
+        expected_action = self._oneoff_action
+        sql_text = self._oneoff_sql
+        run_connection = self._oneoff_connection
+        run_database = self._oneoff_database
+        sql_doc = self._safe_oneoff_sql_doc()
+        data_doc = self._safe_oneoff_data_doc()
         self._oneoff_worker = None
         self._oneoff_action = ""
+        self._oneoff_sql_doc = None
+        self._oneoff_data_doc = None
+        self._oneoff_sql = ""
+        self._oneoff_connection = ""
+        self._oneoff_database = ""
         self._building = False
-        sql_doc = self._safe_sql_doc()
-        data_doc = self._safe_data_doc()
         if sql_doc is not None:
             sql_doc.set_running(False)
         if data_doc is not None:
             data_doc.set_running(False)
         self._sync_active_ui()
         self._refresh_run_status()
+        action = expected_action or action
         if action == "build_assets":
             stats = result.get("stats", {}) or {}
+            if run_connection != self.current_connection():
+                if not stats.get("estimated_queries"):
+                    self.bus.emit(ASSETS_CHANGED, {"instance": run_connection})
+                return
             self.ask_tab.append_note(
                 self._active_or_new_key(),
                 _i18n_t("note.assets_built"),
@@ -1568,6 +1646,8 @@ class MainWindow(QMainWindow):
                 )
             return
         if action == "search_assets":
+            if run_connection != self.current_connection():
+                return
             key = self._active_or_new_key()
             self.ask_tab.set_active(key)
             self._active_key = key
@@ -1578,17 +1658,23 @@ class MainWindow(QMainWindow):
             if sql_doc is not None:
                 sql_doc.show_result(result)
             self._record_query(
-                self._last_sql, ok=True,
+                sql_text, ok=True,
                 row_count=result.get("row_count"),
                 elapsed_ms=result.get("elapsed_ms"),
+                connection=run_connection,
+                database=run_database,
             )
-            self.bus.emit(QUERY_COMPLETED, {"instance": self.current_connection()})
+            self.bus.emit(QUERY_COMPLETED, {"instance": run_connection})
             return
         if action == "browse_table":
+            if run_connection != self.current_connection():
+                return
             if data_doc is not None:
                 data_doc.show_result(result)
             return
         if action == "count_table":
+            if run_connection != self.current_connection():
+                return
             if data_doc is not None:
                 data_doc.show_count(int(result.get("count") or 0))
             return
@@ -1597,15 +1683,25 @@ class MainWindow(QMainWindow):
                 sql_doc.show_result(result)
             return
         if action == "test_connection":
+            if run_connection != self.current_connection():
+                return
             self.toast(str(result.get("message") or _i18n_t("toast.connection_ok")))
 
     def _on_oneoff_failed(self, exc: object) -> None:
         action = self._oneoff_action
+        sql_text = self._oneoff_sql
+        run_connection = self._oneoff_connection
+        run_database = self._oneoff_database
+        sql_doc = self._safe_oneoff_sql_doc()
+        data_doc = self._safe_oneoff_data_doc()
         self._oneoff_worker = None
         self._oneoff_action = ""
+        self._oneoff_sql_doc = None
+        self._oneoff_data_doc = None
+        self._oneoff_sql = ""
+        self._oneoff_connection = ""
+        self._oneoff_database = ""
         self._building = False
-        sql_doc = self._safe_sql_doc()
-        data_doc = self._safe_data_doc()
         if sql_doc is not None:
             sql_doc.set_running(False)
         if data_doc is not None:
@@ -1615,16 +1711,21 @@ class MainWindow(QMainWindow):
         if isinstance(exc, CancelledError):
             self.toast(_i18n_t("toast.cancelled"))
             return
+        stale_connection = bool(run_connection and run_connection != self.current_connection())
+        if stale_connection and action not in ("execute_sql", "explain_sql"):
+            return
         if action == "execute_sql":
             if sql_doc is not None:
                 sql_doc.show_error(str(exc))
-            self._record_query(self._last_sql, ok=False)
-            self.toast(str(exc))
+            self._record_query(sql_text, ok=False, connection=run_connection, database=run_database)
+            if not stale_connection:
+                self.toast(str(exc))
             return
         if action == "explain_sql":
             if sql_doc is not None:
                 sql_doc.show_error(str(exc))
-            self.toast(str(exc))
+            if not stale_connection:
+                self.toast(str(exc))
             return
         if action in ("browse_table", "count_table"):
             self.toast(str(exc))  # e.g. a bad WHERE filter; controls already re-enabled
@@ -1666,6 +1767,7 @@ class MainWindow(QMainWindow):
         worker.signals.done.connect(lambda *_a, w=worker: self._release_bg_worker(w))
         worker.signals.failed.connect(lambda *_a, w=worker: self._release_bg_worker(w))
         self._runs[key] = worker
+        self._slot_connection[key] = str(payload.get("connection_name") or self.current_connection() or "")
         self._sync_active_ui()
         self._refresh_run_status()
         self.pool.start(worker)
@@ -1696,6 +1798,9 @@ class MainWindow(QMainWindow):
                     self.statusbar.showMessage(progress_label(text))
 
     def _on_ask_done(self, key: str, result: Any) -> None:
+        if key not in self._runs:
+            return
+        run_connection = self._slot_connection.get(key) or self.current_connection()
         self._runs.pop(key, None)
         server_id = str(result.get("session_id") or self._slot_session.get(key) or "")
         # A new chat's temp key becomes its server session_id once known.
@@ -1720,18 +1825,23 @@ class MainWindow(QMainWindow):
         else:
             self._pending_resume.pop(key, None)
             self.ask_tab.append_result(key, result)
-            self.bus.emit(QUERY_COMPLETED, {"instance": self.current_connection()})
+            self.bus.emit(QUERY_COMPLETED, {"instance": run_connection})
         if key == self._active_key:
             self.current_session_id = server_id or self.current_session_id
         # A new session was persisted → refresh the Chats list so it appears.
-        if server_id:
-            self._load_sessions(self.current_connection())
+        if server_id and run_connection == self.current_connection():
+            self._load_sessions(run_connection)
+        if status != "wait_user":
+            self._slot_connection.pop(key, None)
         self._drain_queue()
         self._sync_active_ui()
         self._refresh_run_status()
 
     def _on_ask_failed(self, key: str, exc: object) -> None:
+        if key not in self._runs:
+            return
         self._runs.pop(key, None)
+        self._slot_connection.pop(key, None)
         self._pending_resume.pop(key, None)
         if self.ask_tab.turn_open(key):
             msg = ("**Cancelled**: Task stopped by user."
@@ -1744,7 +1854,14 @@ class MainWindow(QMainWindow):
 
     def _migrate_slot(self, old: str, new: str) -> None:
         self.ask_tab.remap(old, new)
-        for d in (self._pending_resume, self._slot_question, self._slot_session, self._slot_trace, self._runs):
+        for d in (
+            self._pending_resume,
+            self._slot_question,
+            self._slot_session,
+            self._slot_trace,
+            self._slot_connection,
+            self._runs,
+        ):
             if old in d:
                 d[new] = d.pop(old)
         self._run_queue = [(new if k == old else k, p) for k, p in self._run_queue]

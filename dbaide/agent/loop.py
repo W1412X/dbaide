@@ -41,6 +41,16 @@ def _executed_sql(tool_name: str, orch, result) -> str:
     if isinstance(data, dict) and data.get("sql"):
         return str(data["sql"]).strip()
     return str(orch.run_state.sql or "").strip()
+
+
+def _risk_reply_confirms(reply: str) -> bool:
+    text = str(reply or "").strip().lower()
+    if not text:
+        return False
+    return any(token in text for token in (
+        "execute", "proceed", "confirm", "approve", "yes", "run it",
+        "继续", "确认", "执行", "运行", "同意",
+    ))
 RESULT_PREVIEW_LIMIT = 3500
 
 
@@ -71,6 +81,7 @@ class AskAgentLoop:
         self.orchestrator = orchestrator
         self.progress = progress or orchestrator.progress
         self.registry = build_tool_registry(orchestrator)
+        self.allowed_tool_names = frozenset(s.name for s in loop_tool_specs(self.registry))
         self._trace_parent = ""
 
     def _ns_step(self, event: dict) -> dict:
@@ -104,6 +115,7 @@ class AskAgentLoop:
         orch = self.orchestrator
         self._trace_parent = trace_parent
         transcript: list[str] = []
+        approved_risk_sql = ""
 
         if resume_state:
             transcript, execute = restore_loop_state(orch, resume_state)
@@ -118,6 +130,28 @@ class AskAgentLoop:
                         f"User's answer: {reply}"
                     )
                     orch.run_state.clarify_questions = ""
+                if orch.run_state.risk_confirmation:
+                    risk = dict(orch.run_state.risk_confirmation)
+                    if _risk_reply_confirms(reply):
+                        sql_hash = str(risk.get("sql_hash") or "").strip()
+                        approved_risk_sql = str(risk.get("sql") or orch.run_state.sql or "").strip()
+                        if sql_hash and sql_hash not in orch.run_state.confirmed_risk_sqls:
+                            orch.run_state.confirmed_risk_sqls.append(sql_hash)
+                        orch.run_state.risk_confirmation = {}
+                        orch.run_state.pending_question = ""
+                        orch.run_state.pending_options = []
+                        orch.run_state.pending_questions = []
+                        transcript.append("Risk confirmation: user approved execution.")
+                    else:
+                        sql = str(risk.get("sql") or orch.run_state.sql or "").strip()
+                        orch.run_state.answer = (
+                            "Execution cancelled.\n\n"
+                            f"SQL:\n```sql\n{sql}\n```"
+                        )
+                        orch.run_state.risk_confirmation = {}
+                        orch.run_state.pending_question = ""
+                        orch.run_state.pending_options = []
+                        orch.run_state.pending_questions = []
                 self.progress(
                     progress_event(stage="user", title=f"Reply: {reply[:120]}", status="completed", kind="user"),
                 )
@@ -129,6 +163,8 @@ class AskAgentLoop:
             self.progress(
                 progress_event(stage="loop", title="Resuming agent loop", status="running", kind="agent"),
             )
+            if orch.run_state.answer and not orch.run_state.query_result:
+                return self._build_response(orch, orch.run_state.answer, disclosures_before or [])
         else:
             orch._reset_loop_state(question, database, execute)
             orch.schema.disclose_instance()
@@ -147,6 +183,37 @@ class AskAgentLoop:
             trace_sink=self._trace_sink,
             max_steps=orch.session.agent_max_steps,
         )
+
+        if approved_risk_sql:
+            self.progress(
+                self._ns_step(progress_event(
+                    stage="execute_sql",
+                    title="Executing confirmed SQL",
+                    status="running",
+                    kind="tool",
+                    detail=approved_risk_sql[:240],
+                    step=1,
+                )),
+            )
+            result = runtime.call_tool("execute_sql", {"sql": approved_risk_sql}, tool_ctx)
+            done_event = self._ns_step(progress_event(
+                stage="execute_sql",
+                title="execute_sql done",
+                status="completed" if result.ok else "failed",
+                kind="tool",
+                detail=brief_tool_summary("execute_sql", result),
+                step=1,
+            ))
+            if result.ok:
+                done_event["sql"] = approved_risk_sql
+                data = result.data if isinstance(result.data, dict) else {}
+                if data.get("row_count") is not None:
+                    done_event["row_count"] = data.get("row_count")
+            self.progress(done_event)
+            if result.ok and orch.run_state.query_result:
+                return self._build_response(orch, self._answer_from_state(orch), disclosures_before or [])
+            reason = result.error or brief_tool_summary("execute_sql", result) or "confirmed_execution_failed"
+            return self._build_failed_response(orch, reason, disclosures_before or [])
 
         step_no = 0
         recorder = getattr(orch, "llm_recorder", None)
@@ -195,8 +262,12 @@ class AskAgentLoop:
                 continue
 
             tool_name = str(decision.get("tool") or "").strip()
-            if tool_name not in self.registry._handlers:  # noqa: SLF001
-                transcript.append(f"Error: unknown tool {tool_name!r}. Use a registered tool name.")
+            if tool_name not in self.allowed_tool_names:
+                allowed = ", ".join(sorted(self.allowed_tool_names))
+                transcript.append(
+                    f"Error: tool {tool_name!r} is not available in this loop. "
+                    f"Use one of the advertised tools: {allowed}."
+                )
                 runtime.consume_step()  # charge budget so a repeated bad name can't loop forever
                 continue
 
@@ -457,8 +528,8 @@ class AskAgentLoop:
             "- resolve_schema returns the MINIMAL tables/columns + joins in ONE step; generate_sql then uses exactly that. Prefer it over manual discover/describe for data queries — don't re-explore what it already resolved.\n"
             "- clarify_semantics: ALWAYS resolve_schema FIRST so clarification is grounded in the real tables/columns/values — never clarify before the relevant schema is in hand (an ungrounded question invites guessing). It inspects the resolved schema (and the real observed values of its columns) and surfaces EVERY genuinely-uncertain interpretation as a question for the user — open-ended, whatever applies (value encodings, which column, time/timezone, metric definition, scope, …), with its candidate options drawn from the actual schema/values. If it pauses, wait for the reply; if it returns clear, proceed. You may also call it again later if new uncertainty appears (e.g. after inspecting more data). Do not substitute your own guess for it.\n"
             "- Only fall back to manual describe_table/get_relations if resolve_schema is insufficient or validate_sql reports a missing table/column.\n"
-            "- get_relations already includes sample evidence; do not call validate_joins unless user explicitly asks to re-check joins.\n"
-            "- Saved joins (user catalog) are loaded automatically inside get_relations — no join CRUD during queries.\n"
+            "- get_relations already includes sample evidence; call validate_joins only when the user explicitly asks to re-check joins.\n"
+            "- Saved joins (user catalog) are loaded automatically inside get_relations; use list_joins only when the user asks to inspect saved joins.\n"
             "- If schema is ambiguous or multiple valid interpretations exist, call ask_user before guessing — and GROUND it in the schema: when the uncertainty is which column/table/value, pass the actual candidate column names, table names, or observed values (from the resolved schema you already have) as `options` so the user just picks one. Never ask an open 'which field?' question when the candidates are already in the schema; leave options empty only when the answer is genuinely outside the schema (e.g. a timezone).\n"
             "- ask_user pauses the run until the user replies; the next user message resumes the same workflow.\n"
             "- If validate_sql reports unknown tables/columns, describe_table then retry generate_sql.\n"

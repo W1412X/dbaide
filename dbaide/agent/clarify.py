@@ -106,8 +106,9 @@ def _values_digest(observed_values: dict[str, list[str]] | None) -> str:
 class SemanticClarifier:
     """Surfaces every genuinely-uncertain interpretation for a question + schema."""
 
-    def __init__(self, llm: "LLMClient") -> None:
+    def __init__(self, llm: "LLMClient", *, max_attempts: int = 3) -> None:
         self.llm = llm
+        self.max_attempts = max(1, int(max_attempts))
 
     def analyze(
         self,
@@ -183,15 +184,30 @@ class SemanticClarifier:
             + '\nReturn {"questions":[{"ask":"...","options":["..."]}], "assumptions":["..."]}. '
             "Empty questions means every interpretation is already unambiguous."
         )
-        try:
-            payload = self.llm.complete_json(
-                [LLMMessage("system", system), LLMMessage("user", user)],
-                schema_hint='{"questions":[{"ask","options"}],"assumptions":[]}',
-            )
-        except Exception:
-            return ClarificationPlan()
+        last_error = ""
+        payload = None
+        for attempt in range(self.max_attempts):
+            messages = [LLMMessage("system", system), LLMMessage("user", user)]
+            if last_error:
+                messages.append(LLMMessage(
+                    "user",
+                    f"Previous clarification response was invalid: {last_error}. "
+                    "Return ONLY a JSON object with keys questions and assumptions.",
+                ))
+            try:
+                payload = self.llm.complete_json(
+                    messages,
+                    schema_hint='{"questions":[{"ask","options"}],"assumptions":[]}',
+                )
+            except Exception as exc:
+                last_error = str(exc) or type(exc).__name__
+                continue
+            if isinstance(payload, dict):
+                break
+            last_error = f"expected JSON object, got {type(payload).__name__}"
+            payload = None
         if not isinstance(payload, dict):
-            return ClarificationPlan()
+            raise RuntimeError(f"clarification model failed after {self.max_attempts} attempt(s): {last_error}")
         questions = []
         for q in (payload.get("questions") or [])[:_MAX_QUESTIONS]:
             if not isinstance(q, dict):

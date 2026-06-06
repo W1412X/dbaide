@@ -25,7 +25,7 @@ class MultiInstanceAssistant:
     events. Cross-instance joins are not attempted.
     """
 
-    def __init__(self, targets: list[InstanceTarget], llm: LLMClient | None = None, *, default_limit: int = 100, timeout_seconds: int = 10) -> None:
+    def __init__(self, targets: list[InstanceTarget], llm: LLMClient | None = None, *, default_limit: int = 100, timeout_seconds: int = 60) -> None:
         if not targets:
             raise ValueError("MultiInstanceAssistant requires at least one target")
         self.targets = targets
@@ -70,4 +70,3 @@ class MultiInstanceAssistant:
             disclosures=disclosures,
             warnings=list(dict.fromkeys(warnings)),
         )
-

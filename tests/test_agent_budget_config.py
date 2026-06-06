@@ -1,5 +1,4 @@
-"""The agent reasoning budget (step / SQL-retry / disclosed-tables) is now a
-user-configurable ResourcePolicy knob that flows policy → session → runtime."""
+"""The agent reasoning budget flows policy -> session -> runtime."""
 
 from dbaide.agent.runtime import AgentRuntime
 from dbaide.config import ConfigManager
@@ -10,9 +9,8 @@ from dbaide.session import Session
 
 def test_resource_policy_has_agent_budget_defaults():
     p = ResourcePolicy()
-    assert p.agent_max_steps == 12
+    assert p.agent_max_steps == 32
     assert p.agent_sql_retries == 2
-    assert p.agent_max_disclosed_tables == 4
 
 
 def test_user_overrides_flow_through_resolve_policy():
@@ -23,17 +21,14 @@ def test_user_overrides_flow_through_resolve_policy():
     )
     assert policy.agent_max_steps == 30
     assert policy.agent_sql_retries == 5
-    # untouched knob keeps its preset value
-    assert policy.agent_max_disclosed_tables == 4
 
 
 def test_session_from_policy_carries_agent_budget():
     conn = ConnectionConfig(name="x", type="sqlite", path=":memory:")
-    policy = ResourcePolicy(agent_max_steps=7, agent_sql_retries=1, agent_max_disclosed_tables=2)
+    policy = ResourcePolicy(agent_max_steps=7, agent_sql_retries=1)
     session = Session.from_policy(conn, policy)
     assert session.agent_max_steps == 7
     assert session.agent_sql_retries == 1
-    assert session.agent_max_disclosed_tables == 2
 
 
 def test_runtime_step_budget_is_overridable():

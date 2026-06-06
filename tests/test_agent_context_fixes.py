@@ -101,6 +101,36 @@ def test_sanitize_note_flattens_injection():
     assert len(sanitize_note("x" * 1000)) <= 300
 
 
+def test_loop_allowed_tools_match_advertised_specs(tmp_path):
+    from dbaide.agent.loop import AskAgentLoop
+    from dbaide.agent.toolkit import loop_tool_specs
+
+    orch = _orch(tmp_path)
+    loop = AskAgentLoop(orch)
+    advertised = {spec.name for spec in loop_tool_specs(loop.registry)}
+
+    assert loop.allowed_tool_names == advertised
+    assert {"list_databases", "list_tables", "describe_table", "list_joins", "validate_joins"} <= advertised
+    assert "delete_join" not in advertised
+
+
+def test_workflow_request_limit_and_timeout_override_session(tmp_path):
+    from dbaide.core.result import WorkflowRequest
+    from dbaide.core.workflow import WorkflowEngine
+
+    db = tmp_path / "limits.db"
+    sqlite3.connect(db).close()
+    conn = ConnectionConfig(name="local", type="sqlite", path=str(db))
+    engine = WorkflowEngine(conn, _MockLLM())
+
+    assistant = engine._build_assistant(WorkflowRequest(question="q", limit=321, timeout_seconds=17))
+
+    assert assistant.session.default_limit == 321
+    assert assistant.session.timeout_seconds == 17
+    assert assistant._orchestrator.query.sql_guard.default_limit == 321
+    assert assistant._orchestrator.query.timeout_seconds == 17
+
+
 def test_continue_multi_repause_keeps_plan(tmp_path):
     from dbaide.agent.intent import SubIntent
 

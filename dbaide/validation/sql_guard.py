@@ -96,14 +96,7 @@ class SQLGuard:
 
         issues.extend(self._dialect_issues(stripped))
 
-        # Hard cap: explicit LIMIT above the configured maximum is rejected.
         explicit_limit = _explicit_limit(stripped)
-        if explicit_limit is not None and explicit_limit > self.max_row_limit:
-            issues.append(ValidationIssue(
-                "LIMIT_TOO_LARGE",
-                f"LIMIT {explicit_limit} exceeds the maximum allowed ({self.max_row_limit}). "
-                f"Reduce the LIMIT or narrow the query.",
-            ))
 
         if not issues and first in {"select", "with"}:
             # SELECT * without WHERE is forced to a small bound regardless of add_limit.
@@ -180,19 +173,19 @@ class SQLGuard:
             if risk_level == "low":
                 risk_level = "medium"
 
-        # Check: large limit (anything above max_row_limit was already rejected by validate)
+        # Check: large limit. This used to be a hard cap; now it asks for user
+        # confirmation so a deliberate large export/query is still possible.
         limit_val = _explicit_limit(stripped)
-        if limit_val is not None and limit_val > max(1000, self.max_row_limit // 2):
+        if limit_val is not None and limit_val > self.max_row_limit:
+            warnings.append(
+                f"LIMIT {limit_val} exceeds the configured confirmation threshold ({self.max_row_limit})"
+            )
+            risk_level = "high"
+            requires_confirmation = True
+        elif limit_val is not None and limit_val > max(1000, self.max_row_limit // 2):
             warnings.append(f"Large LIMIT ({limit_val}) may cause performance issues")
             if risk_level == "low":
                 risk_level = "medium"
-
-        # Check: many joined tables
-        join_count = len(re.findall(r"\bjoin\b", stripped))
-        if join_count >= 3:
-            warnings.append(f"Query joins many tables ({join_count + 1})")
-            risk_level = "high"
-            requires_confirmation = True
 
         # Check: UNION fan-out
         union_count = len(re.findall(r"\bunion\b", stripped))

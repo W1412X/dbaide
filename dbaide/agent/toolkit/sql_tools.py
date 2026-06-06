@@ -1,6 +1,7 @@
 """Clarification, SQL generation, validation and execution tools."""
 from __future__ import annotations
 
+import hashlib
 import logging
 from typing import Any
 
@@ -228,9 +229,7 @@ def register(registry: ToolRegistry, orchestrator) -> None:
             else 1.0
         )
         # Pre-execution cost gate: estimate the scan size via EXPLAIN.
-        policy_obj = getattr(orchestrator.adapter, "policy", None)
         explain_max_rows = getattr(orchestrator.query, "explain_max_rows", 0)
-        max_join_tables = policy_obj.max_join_tables if policy_obj else 2
         estimated_rows = None
         if explain_max_rows:
             estimated_rows = orchestrator.query.estimate_rows(validation.normalized_sql, database=database)
@@ -253,7 +252,6 @@ def register(registry: ToolRegistry, orchestrator) -> None:
             join_confidence=join_conf,
             estimated_rows=estimated_rows,
             explain_max_rows=explain_max_rows,
-            max_join_tables=max_join_tables,
         )
         orchestrator.progress(
             subagent_event(
@@ -265,17 +263,40 @@ def register(registry: ToolRegistry, orchestrator) -> None:
             ),
         )
         if risk.action != "auto_execute":
-            return ToolResult(
-                ok=False,
-                data={
-                    "blocked": True,
+            sql_hash = _sql_hash(validation.normalized_sql)
+            if sql_hash not in orchestrator.run_state.confirmed_risk_sqls:
+                question = _risk_confirmation_question(
+                    sql=validation.normalized_sql,
+                    reason=risk.reason,
+                    warnings=validation_report.warnings,
+                    estimated_rows=estimated_rows,
+                )
+                options = ["Execute anyway", "Cancel"]
+                orchestrator.run_state.pending_question = question
+                orchestrator.run_state.pending_options = options
+                orchestrator.run_state.pending_questions = [{"ask": question, "options": options}]
+                orchestrator.run_state.risk_confirmation = {
+                    "sql": validation.normalized_sql,
+                    "sql_hash": sql_hash,
                     "reason": risk.reason,
                     "risk_action": risk.action,
                     "risk_level": risk.risk_level,
-                    "sql": validation.normalized_sql,
                     "warnings": validation_report.warnings,
-                },
-            )
+                    "estimated_rows": estimated_rows,
+                }
+                return ToolResult(
+                    ok=True,
+                    data={
+                        "pending": True,
+                        "question": question,
+                        "options": options,
+                        "reason": risk.reason,
+                        "risk_action": risk.action,
+                        "risk_level": risk.risk_level,
+                        "sql": validation.normalized_sql,
+                        "warnings": validation_report.warnings,
+                    },
+                )
 
         try:
             result = orchestrator.query.execute_sql(
@@ -331,3 +352,29 @@ def register(registry: ToolRegistry, orchestrator) -> None:
     registry.register(EXECUTE_READONLY_SQL, _execute_sql)
     registry.register(EXECUTE_SQL, _execute_sql)
     registry.register(EXPLAIN_SQL, _explain_sql)
+
+
+def _sql_hash(sql: str) -> str:
+    return hashlib.sha1(" ".join(str(sql or "").split()).encode("utf-8")).hexdigest()
+
+
+def _risk_confirmation_question(
+    *,
+    sql: str,
+    reason: str,
+    warnings: list[str],
+    estimated_rows: int | None,
+) -> str:
+    lines = [
+        "This query may be expensive or risky. Confirm before executing.",
+        "",
+        f"Reason: {reason}",
+    ]
+    if estimated_rows is not None:
+        lines.append(f"Estimated rows from EXPLAIN: ~{estimated_rows:,}")
+    if warnings:
+        lines.append("")
+        lines.append("Warnings:")
+        lines.extend(f"- {w}" for w in warnings[:5])
+    lines += ["", "SQL:", "```sql", sql, "```"]
+    return "\n".join(lines)

@@ -1,3 +1,8 @@
+import pytest
+
+pytest.importorskip("PyQt6")
+
+from PyQt6.QtCore import Qt
 from PyQt6.QtWidgets import QApplication
 from PyQt6.QtWidgets import QToolButton
 
@@ -60,6 +65,23 @@ def test_sidebar_schema_row_actions_use_more_menu():
     assert len(db_buttons) == 2
     assert db_buttons[0].toolTip() == "View doc"
     assert [a.text() for a in db_buttons[1].menu().actions()] == ["Edit note", "Update from database"]
+
+    sidebar.set_node_refreshing(db_item.data(0, Qt.ItemDataRole.UserRole), True)
+    app.processEvents()
+    busy_actions = sidebar.tree.itemWidget(db_item, 1)
+    busy_buttons = busy_actions.findChildren(QToolButton)
+    assert len(busy_buttons) == 2
+    assert busy_buttons[1].isEnabled() is False
+    assert busy_buttons[1].menu() is None
+    assert sidebar._node_busy.active is True
+
+    sidebar.set_node_refreshing(db_item.data(0, Qt.ItemDataRole.UserRole), False)
+    app.processEvents()
+    restored_actions = sidebar.tree.itemWidget(db_item, 1)
+    restored_buttons = restored_actions.findChildren(QToolButton)
+    assert restored_buttons[1].isEnabled() is True
+    assert [a.text() for a in restored_buttons[1].menu().actions()] == ["Edit note", "Update from database"]
+    assert sidebar._node_busy.active is False
 
     col_item = db_item.child(0).child(0)
     col_actions = sidebar.tree.itemWidget(col_item, 1)

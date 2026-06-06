@@ -21,7 +21,7 @@ class PostgresAdapter(DatabaseAdapter):
         except ImportError as exc:
             raise RuntimeError("Install PostgreSQL support with `pip install dbaide[postgres]`.") from exc
         password = self.config.password or (os.environ.get(self.config.password_env) if self.config.password_env else "")
-        return psycopg.connect(
+        conn = psycopg.connect(
             host=self.config.host or "localhost",
             port=int(self.config.port or 5432),
             user=self.config.user or None,
@@ -29,6 +29,18 @@ class PostgresAdapter(DatabaseAdapter):
             dbname=database or self.config.database or "postgres",
             row_factory=dict_row,
         )
+        self._set_session_timezone(conn)
+        return conn
+
+    def _session_timezone(self) -> str:
+        return str(getattr(self.config, "session_timezone", "") or "UTC").strip() or "UTC"
+
+    def _set_session_timezone(self, conn) -> None:
+        conn.execute("SELECT set_config('TimeZone', %s, false)", (self._session_timezone(),))
+        try:
+            conn.commit()
+        except Exception:
+            pass
 
     def _connect(self, database: str = ""):
         db = database or self.config.database or "postgres"
@@ -40,7 +52,7 @@ class PostgresAdapter(DatabaseAdapter):
             return not bool(getattr(conn, "closed", False))
 
         return connection_pool_for_key(
-            PoolKey(self.config.name, self.config.type or "postgres", db),
+            PoolKey(self.config.name, self.config.type or "postgres", db, self._session_timezone()),
             max_size=self.policy.max_inflight_queries,
             factory=factory,
             validator=validator,

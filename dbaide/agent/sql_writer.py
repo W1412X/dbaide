@@ -25,10 +25,11 @@ class SQLWriter:
     """LLM-only SQL generation with validation-oriented output parsing."""
 
     def __init__(self, llm: LLMClient | None = None, *, dialect: str = "generic",
-                 server_version: str = "") -> None:
+                 server_version: str = "", session_timezone: str = "UTC") -> None:
         self.llm = llm or NullLLMClient()
         self.dialect = dialect
         self.server_version = str(server_version or "")
+        self.session_timezone = str(session_timezone or "UTC")
 
     def write(
         self,
@@ -141,25 +142,31 @@ class SQLWriter:
 
     def _dialect_rules(self) -> str:
         version = f" Server version: {self.server_version}." if self.server_version else ""
+        tz = (
+            f" Connection session time zone: {self.session_timezone or 'unknown'}; use it for SQL runtime "
+            "semantics such as NOW(), CURRENT_DATE, TIMESTAMP display/conversion and date truncation, "
+            "but do not assume it is the business timezone of every stored column."
+        )
         if self.dialect == "mysql":
             return (
-                f" Target SQL dialect: MySQL/MariaDB.{version} "
+                f" Target SQL dialect: MySQL/MariaDB.{version}{tz} "
                 "Use only syntax supported by MySQL/MariaDB. MySQL does NOT support "
                 "FULL OUTER JOIN; emulate it with LEFT JOIN UNION/UNION ALL RIGHT JOIN "
                 "and an anti-duplicate WHERE clause. Do not output unsupported standard "
                 "SQL and assume the execution layer will rewrite it. "
             )
         if self.dialect == "postgres":
-            return f" Target SQL dialect: PostgreSQL.{version} Use PostgreSQL-compatible syntax. "
+            return f" Target SQL dialect: PostgreSQL.{version}{tz} Use PostgreSQL-compatible syntax. "
         if self.dialect == "sqlite":
-            return f" Target SQL dialect: SQLite.{version} Use SQLite-compatible syntax. "
-        return f" Target SQL dialect: {self.dialect or 'generic'}.{version} "
+            return f" Target SQL dialect: SQLite.{version}{tz} Use SQLite-compatible syntax. "
+        return f" Target SQL dialect: {self.dialect or 'generic'}.{version}{tz} "
 
     def _user_prompt(self, question: str, table: str, columns: list[ColumnInfo], context: dict) -> str:
         col_lines = self._format_columns(columns)
         blocks = [
             f"Dialect: {self.dialect}",
             f"Server version: {self.server_version or 'unknown'}",
+            f"Connection session time zone: {self.session_timezone or 'unknown'}",
             f"Question: {question}",
         ]
         notes = self._format_object_notes(context)
@@ -190,6 +197,7 @@ class SQLWriter:
         blocks: list[str] = [
             f"Dialect: {self.dialect}",
             f"Server version: {self.server_version or 'unknown'}",
+            f"Connection session time zone: {self.session_timezone or 'unknown'}",
             f"Question: {question}",
         ]
         notes = self._format_object_notes(context)

@@ -124,6 +124,14 @@ def test_connection_form_includes_load_profile(qapp):
     assert form.payload()["load_profile"] == "dev"
 
 
+def test_connection_form_includes_session_timezone(qapp):
+    from dbaide.desktop.dialogs.connection import ConnectionForm
+
+    form = ConnectionForm(conn_type="mysql")
+    form.load({"type": "mysql", "session_timezone": "+08:00"})
+    assert form.payload()["session_timezone"] == "+08:00"
+
+
 def test_main_window_constructs_and_bus_wired(qapp, tmp_path):
     from dbaide.assets import AssetStore
     from dbaide.config import ConfigManager

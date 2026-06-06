@@ -211,6 +211,10 @@ class WorkflowEngine:
     def _build_assistant(self, request: WorkflowRequest) -> DataAssistant:
         adapter = self._get_adapter()
         session = self._get_session()
+        if request.limit:
+            session.default_limit = max(1, int(request.limit))
+        if request.timeout_seconds:
+            session.timeout_seconds = max(1, int(request.timeout_seconds))
         return DataAssistant(
             adapter,
             session,

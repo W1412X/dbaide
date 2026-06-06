@@ -34,7 +34,7 @@ class ResourcePolicy:
 
     # Concurrency (enforced by QueryBudget; one slot == one query == one connection).
     max_inflight_queries: int = 16
-    statement_timeout_seconds: int = 8
+    statement_timeout_seconds: int = 60
 
     # Asset build.
     build_max_workers: int = 1
@@ -45,14 +45,12 @@ class ResourcePolicy:
     max_row_limit: int = 1000
 
     # Agent reasoning budget (how hard the agent is allowed to work per question).
-    agent_max_steps: int = 12            # tool-loop iterations before the agent must answer
+    agent_max_steps: int = 32            # tool-loop iterations before the agent must answer
     agent_sql_retries: int = 2           # SQL generate→validate retries before giving up
-    agent_max_disclosed_tables: int = 4  # tables explored/disclosed to the model per question
 
     # Cost gates.
     big_table_rows: int = 1_000_000      # estimated rows above which profiling drops to metadata-only
     explain_max_rows: int = 5_000_000    # EXPLAIN estimate above which execution is blocked
-    max_join_tables: int = 3             # joins beyond this require confirmation
 
     # Join sampling (rows sampled from the left table when probing a join).
     join_sample_size: int = 150
@@ -82,47 +80,41 @@ class ResourcePolicy:
 LOAD_PROFILES: dict[str, ResourcePolicy] = {
     "production": ResourcePolicy(
         max_inflight_queries=16,
-        statement_timeout_seconds=8,
+        statement_timeout_seconds=60,
         build_max_workers=1,
         build_profile_mode="light",
         default_row_limit=100,
         max_row_limit=1000,
-        agent_max_steps=12,
+        agent_max_steps=32,
         agent_sql_retries=2,
-        agent_max_disclosed_tables=4,
         big_table_rows=1_000_000,
         explain_max_rows=5_000_000,
-        max_join_tables=3,
         join_sample_size=150,
     ),
     "staging": ResourcePolicy(
         max_inflight_queries=16,
-        statement_timeout_seconds=10,
+        statement_timeout_seconds=60,
         build_max_workers=2,
         build_profile_mode="auto",
         default_row_limit=100,
         max_row_limit=5000,
-        agent_max_steps=16,
+        agent_max_steps=32,
         agent_sql_retries=3,
-        agent_max_disclosed_tables=6,
         big_table_rows=5_000_000,
         explain_max_rows=20_000_000,
-        max_join_tables=4,
         join_sample_size=150,
     ),
     "dev": ResourcePolicy(
         max_inflight_queries=16,
-        statement_timeout_seconds=30,
+        statement_timeout_seconds=60,
         build_max_workers=4,
         build_profile_mode="auto",
         default_row_limit=200,
         max_row_limit=50000,
-        agent_max_steps=24,
+        agent_max_steps=32,
         agent_sql_retries=4,
-        agent_max_disclosed_tables=8,
         big_table_rows=50_000_000,
         explain_max_rows=200_000_000,
-        max_join_tables=6,
         join_sample_size=200,
     ),
 }

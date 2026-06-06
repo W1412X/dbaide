@@ -8,7 +8,7 @@ device-pixel-ratio so it stays sharp on HiDPI, tinted to the requested colour.
 from __future__ import annotations
 
 from PyQt6.QtCore import QByteArray, QRectF, QSize, Qt
-from PyQt6.QtGui import QColor, QGuiApplication, QIcon, QPainter, QPixmap
+from PyQt6.QtGui import QGuiApplication, QIcon, QPainter, QPixmap
 from PyQt6.QtSvg import QSvgRenderer
 
 from dbaide.desktop.theme import Theme
@@ -120,23 +120,7 @@ def panel_icon(*, color: str = Theme.MUTED, size: int = 18) -> QIcon:
 
 
 def more_icon(*, color: str = Theme.MUTED, size: int = 18) -> QIcon:
-    dpr = _dpr()
-    px = QPixmap(int(round(size * dpr)), int(round(size * dpr)))
-    px.fill(Qt.GlobalColor.transparent)
-    painter = QPainter(px)
-    painter.setRenderHint(QPainter.RenderHint.Antialiasing)
-    painter.scale(dpr, dpr)
-    painter.setPen(Qt.PenStyle.NoPen)
-    painter.setBrush(QColor(color))
-    radius = max(1.35, size * 0.105)
-    cy = size / 2
-    gap = size * 0.28
-    cx = size / 2
-    for x in (cx - gap, cx, cx + gap):
-        painter.drawEllipse(QRectF(x - radius, cy - radius, radius * 2, radius * 2))
-    painter.end()
-    px.setDevicePixelRatio(dpr)
-    return QIcon(px)
+    return svg_icon("more-horizontal", color=color, size=size, width=2.4)
 
 
 def plus_icon(*, color: str = Theme.MUTED, size: int = 18) -> QIcon:

@@ -82,6 +82,7 @@ def build_parser() -> argparse.ArgumentParser:
     add.add_argument("--user", default="")
     add.add_argument("--password-env", default="")
     add.add_argument("--password", default="")
+    add.add_argument("--session-timezone", default="UTC", help="Session time zone set after connecting. Default: UTC.")
     add.add_argument("--default", action="store_true")
     add.add_argument("--skip-assets", action="store_true", help="Save connection without building offline schema assets.")
     add.add_argument("--asset-database", action="append", default=[], help="Database/schema to initialize. Repeatable. Default: all visible databases.")
@@ -236,7 +237,7 @@ def add_common_conn_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--conn", default="", help="Connection name, comma-separated names, or `all`")
     parser.add_argument("--database", default="", help="Database/schema override. For multiple connections use conn=db pairs: local=main,prod=app")
     parser.add_argument("--limit", type=lambda v: _bounded_int(v, min_val=1, max_val=1_000_000, name="limit"), default=100)
-    parser.add_argument("--timeout", type=lambda v: _bounded_int(v, min_val=1, max_val=3600, name="timeout"), default=10)
+    parser.add_argument("--timeout", type=lambda v: _bounded_int(v, min_val=1, max_val=3600, name="timeout"), default=60)
 
 
 def dispatch(args: argparse.Namespace, cfg: ConfigManager) -> int:
@@ -476,9 +477,10 @@ def dispatch_connect(args: argparse.Namespace, cfg: ConfigManager) -> int:
             password_env=args.password_env,
             password=args.password,
             load_profile=getattr(args, "load_profile", "production"),
+            session_timezone=getattr(args, "session_timezone", "UTC"),
         )
         cfg.upsert_connection(conn, make_default=args.default)
-        print(f"saved connection: {args.name} (load_profile={conn.load_profile})")
+        print(f"saved connection: {args.name} (load_profile={conn.load_profile}, session_timezone={conn.session_timezone})")
         if not args.skip_assets:
             build_connection_assets(
                 cfg,
