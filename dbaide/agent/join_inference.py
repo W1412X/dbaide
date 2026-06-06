@@ -23,12 +23,13 @@ INFER_RETRIES = 2
 class SemanticJoinInferencer:
     """Propose JOIN edges from schema semantics, types, and the user question."""
 
-    def __init__(self, llm: LLMClient, store: AssetStore, instance: str) -> None:
+    def __init__(self, llm: LLMClient, store: AssetStore, instance: str, *, fingerprint: str = "") -> None:
         if isinstance(llm, NullLLMClient):
             raise ModelRequiredError("LLM is required for semantic join inference.")
         self.llm = llm
         self.store = store
         self.instance = instance
+        self.fingerprint = fingerprint
 
     def infer(
         self,
@@ -94,7 +95,9 @@ class SemanticJoinInferencer:
         blocks.append("Disclosed tables (use ONLY these names and columns):")
         for database, table, columns in disclosed:
             label = f"{database}.{table}" if database else table
-            table_doc = self.store.table_doc(self.instance, database, table) if database else None
+            table_doc = self.store.table_doc(
+                self.instance, database, table, fingerprint=self.fingerprint,
+            ) if database else None
             table_summary = ""
             if table_doc:
                 table_summary = str(
@@ -135,12 +138,12 @@ class SemanticJoinInferencer:
 
     def _column_asset_doc(self, database: str, table: str, col_name: str) -> dict[str, Any] | None:
         if database:
-            table_doc = self.store.table_doc(self.instance, database, table)
+            table_doc = self.store.table_doc(self.instance, database, table, fingerprint=self.fingerprint)
             if table_doc:
                 for col in table_doc.get("columns") or []:
                     if str(col.get("name") or col.get("column") or "") == col_name:
                         return col
-            for doc in self.store.column_docs(self.instance, database, table):
+            for doc in self.store.column_docs(self.instance, database, table, fingerprint=self.fingerprint):
                 if str(doc.get("name") or doc.get("column") or "") == col_name:
                     return doc
         return None

@@ -23,22 +23,22 @@ class AssetSearch:
     def __init__(self, store: AssetStore | None = None) -> None:
         self.store = store or AssetStore()
 
-    def search(self, query: str, *, instances: list[str], limit: int = 12) -> list[AssetSearchHit]:
+    def search(self, query: str, *, instances: list[str], limit: int = 12, fingerprint: str = "") -> list[AssetSearchHit]:
         tokens = query_terms(query)
         hits: list[AssetSearchHit] = []
         for instance in instances:
-            inst = self.store.instance_doc(instance)
+            inst = self.store.instance_doc(instance, fingerprint=fingerprint)
             if inst:
                 self._add_hit(hits, tokens, "instance", instance, inst)
-            for db in self.store.database_docs(instance):
+            for db in self.store.database_docs(instance, fingerprint=fingerprint):
                 db_name = str(db.get("name") or "")
                 db_path = self.store.database_dir(instance, db_name) / "database.json"
                 db_doc = self.store._read_optional(db_path) or db
                 self._add_hit(hits, tokens, "database", f"{instance}.{db_name}", db_doc)
-                for table_doc in self.store.table_docs(instance, db_name):
+                for table_doc in self.store.table_docs(instance, db_name, fingerprint=fingerprint):
                     table = str(table_doc.get("name") or table_doc.get("table") or "")
                     self._add_hit(hits, tokens, "table", f"{instance}.{db_name}.{table}", table_doc)
-                    for col_doc in self.store.column_docs(instance, db_name, table):
+                    for col_doc in self.store.column_docs(instance, db_name, table, fingerprint=fingerprint):
                         col = str(col_doc.get("name") or col_doc.get("column") or "")
                         self._add_hit(hits, tokens, "column", f"{instance}.{db_name}.{table}.{col}", col_doc)
         hits.sort(key=lambda hit: (-hit.score, hit.path))

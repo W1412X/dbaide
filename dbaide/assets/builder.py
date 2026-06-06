@@ -147,7 +147,13 @@ class AssetBuilder:
         saved = 0
         for rel in rels:
             try:
-                self.join_catalog.add(instance, rel, source="foreign_key", database=rel.get("database") or "")
+                self.join_catalog.add(
+                    instance,
+                    rel,
+                    source="foreign_key",
+                    database=rel.get("database") or "",
+                    fingerprint=self.store.connection_metadata(self.connection)["connection_fingerprint"],
+                )
                 saved += 1
             except Exception as exc:  # pragma: no cover - defensive
                 logger.debug("fk join persist failed: %s", exc)
@@ -253,7 +259,11 @@ class AssetBuilder:
         if not partial:
             self.store.write_json(
                 self.store.instance_dir(instance) / "databases.json",
-                {"instance": instance, "databases": [{"name": db} for db in db_names]},
+                {
+                    "instance": instance,
+                    **self.store.connection_metadata(self.connection),
+                    "databases": [{"name": db} for db in db_names],
+                },
             )
 
         # Step 3: Build databases. A single shared worker pool (sized by the
@@ -275,7 +285,7 @@ class AssetBuilder:
         )
 
         # Step 4: Write instance-level documents (depends on all databases)
-        existing_instance = self.store.instance_doc(instance) if partial else None
+        existing_instance = self.store.instance_doc(instance, connection=self.connection) if partial else None
         built_at = float(existing_instance.get("built_at") or started) if existing_instance else started
         instance_stats = self._instance_stats(instance, database_docs, build_stats=stats, partial=partial)
 
@@ -293,6 +303,7 @@ class AssetBuilder:
         instance_doc["built_at"] = built_at
         instance_doc["completed_at"] = time.time()
         instance_doc["connection_type"] = self.connection.type
+        instance_doc.update(self.store.connection_metadata(self.connection))
         instance_doc["database_count"] = len(database_docs)
         instance_doc["build_options"] = asdict(options)
         instance_doc["stats"] = instance_stats
@@ -309,6 +320,7 @@ class AssetBuilder:
             {
                 "asset_schema_version": ASSET_SCHEMA_VERSION,
                 "instance": instance,
+                **self.store.connection_metadata(self.connection),
                 "built_at": built_at,
                 "completed_at": instance_doc["completed_at"],
                 "connection_type": self.connection.type,
@@ -381,7 +393,7 @@ class AssetBuilder:
 
     def _load_existing_database_docs(self, instance: str) -> list[dict]:
         docs: list[dict] = []
-        for entry in self.store.database_docs(instance):
+        for entry in self.store.database_docs(instance, connection=self.connection):
             name = str(entry.get("name") or "")
             if not name:
                 continue
@@ -426,7 +438,7 @@ class AssetBuilder:
             db_name = str(db_doc.get("name") or db_doc.get("database") or "")
             if not db_name:
                 continue
-            for table_doc in self.store.table_docs(instance, db_name):
+            for table_doc in self.store.table_docs(instance, db_name, connection=self.connection):
                 tables += 1
                 columns += int(table_doc.get("column_count") or len(table_doc.get("columns") or []))
         stats = {
@@ -441,7 +453,7 @@ class AssetBuilder:
             "elapsed_seconds": build_stats.elapsed_seconds,
         }
         if partial:
-            prior_errors = (self.store.instance_doc(instance) or {}).get("stats", {}).get("errors") or []
+            prior_errors = (self.store.instance_doc(instance, connection=self.connection) or {}).get("stats", {}).get("errors") or []
             if isinstance(prior_errors, list):
                 stats["errors"] = list(prior_errors) + list(build_stats.errors)
         return stats
@@ -479,7 +491,7 @@ class AssetBuilder:
         preserved_table_docs: list[dict] = []
         if only_tables is not None:
             preserved_table_docs = [
-                td for td in self.store.table_docs(instance, database)
+                td for td in self.store.table_docs(instance, database, connection=self.connection)
                 if str(td.get("name") or td.get("table") or "") not in only_tables
             ]
             tables = [t for t in tables if t.name in only_tables]
@@ -514,10 +526,16 @@ class AssetBuilder:
         # Write database-level document (depends on all tables)
         self.store.write_json(
             self.store.database_dir(instance, database) / "tables.json",
-            {"instance": instance, "database": database, "tables": table_docs},
+            {
+                "instance": instance,
+                "database": database,
+                **self.store.connection_metadata(self.connection),
+                "tables": table_docs,
+            },
         )
         database_doc = self.summarizer.database_doc(instance=instance, database=database, tables=table_docs)
         database_doc["table_count"] = len(table_docs)
+        database_doc.update(self.store.connection_metadata(self.connection))
         database_doc["build_options"] = asdict(options)
         self.store.write_json(self.store.database_dir(instance, database) / "database.json", database_doc)
         return database_doc
@@ -604,6 +622,7 @@ class AssetBuilder:
             row_count=row_count, sample_rows=sample_rows,
         )
         table_doc["column_count"] = len(columns)
+        table_doc.update(self.store.connection_metadata(self.connection))
         self._bump(stats, columns=len(columns))
         self.store.write_json(self.store.table_dir(instance, database, table.name) / "table.json", table_doc)
         return table_doc

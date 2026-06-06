@@ -39,6 +39,7 @@ def relation_to_catalog_record(
     database: str = "",
     source: str = "agent",
     join_id: str = "",
+    fingerprint: str = "",
 ) -> dict[str, Any]:
     now = _utc_now()
     conf = float(rel.get("confidence") or 0.0)
@@ -47,6 +48,7 @@ def relation_to_catalog_record(
     return {
         "id": join_id or str(rel.get("id") or uuid.uuid4().hex[:12]),
         "instance": instance,
+        "connection_fingerprint": fingerprint or str(rel.get("connection_fingerprint") or ""),
         "database": str(rel.get("database") or database or ""),
         "table": str(rel.get("table") or ""),
         "column": str(rel.get("column") or ""),
@@ -111,6 +113,7 @@ class JoinCatalogStore:
         tables: list[str] | None = None,
         min_confidence: float = 0.0,
         endpoint: dict[str, str] | None = None,
+        fingerprint: str = "",
     ) -> list[dict[str, Any]]:
         records = self._load(instance)
         table_set = {t.strip().lower() for t in (tables or []) if str(t).strip()}
@@ -124,6 +127,8 @@ class JoinCatalogStore:
             )
         out: list[dict[str, Any]] = []
         for rec in records:
+            if fingerprint and str(rec.get("connection_fingerprint") or "") != fingerprint:
+                continue
             if database and str(rec.get("database") or "") not in {"", database}:
                 continue
             if float(rec.get("confidence") or 0) < float(min_confidence):
@@ -152,9 +157,10 @@ class JoinCatalogStore:
         tables: list[tuple[str, str]],
         *,
         database: str = "",
+        fingerprint: str = "",
     ) -> list[dict[str, Any]]:
         names = [table for _, table in tables]
-        records = self.list_records(instance, database=database, tables=names)
+        records = self.list_records(instance, database=database, tables=names, fingerprint=fingerprint)
         seen: set[tuple[str, str, str, str]] = set()
         relations: list[dict[str, Any]] = []
         table_set = {t.lower() for t in names}
@@ -183,9 +189,16 @@ class JoinCatalogStore:
         *,
         source: str = "user",
         database: str = "",
+        fingerprint: str = "",
     ) -> dict[str, Any]:
         records = self._load(instance)
-        record = relation_to_catalog_record(rel, instance=instance, database=database, source=source)
+        record = relation_to_catalog_record(
+            rel,
+            instance=instance,
+            database=database,
+            source=source,
+            fingerprint=fingerprint,
+        )
         key = relation_endpoint_key(record["table"], record["column"], record["ref_table"], record["ref_column"])
         replaced = False
         for index, existing in enumerate(records):
@@ -195,6 +208,8 @@ class JoinCatalogStore:
                 str(existing.get("ref_table") or ""),
                 str(existing.get("ref_column") or ""),
             )
+            if fingerprint and str(existing.get("connection_fingerprint") or "") != fingerprint:
+                continue
             if existing_key == key:
                 record["id"] = existing.get("id") or record["id"]
                 record["created_at"] = existing.get("created_at") or record["created_at"]
@@ -212,10 +227,12 @@ class JoinCatalogStore:
         self._save(instance, records)
         return dict(record)
 
-    def update(self, instance: str, join_id: str, fields: dict[str, Any]) -> dict[str, Any] | None:
+    def update(self, instance: str, join_id: str, fields: dict[str, Any], *, fingerprint: str = "") -> dict[str, Any] | None:
         records = self._load(instance)
         for index, rec in enumerate(records):
             if str(rec.get("id") or "") != str(join_id):
+                continue
+            if fingerprint and str(rec.get("connection_fingerprint") or "") != fingerprint:
                 continue
             updated = dict(rec)
             for key in ("database", "table", "column", "ref_table", "ref_column", "join_type", "reason"):
@@ -231,10 +248,17 @@ class JoinCatalogStore:
             return dict(updated)
         return None
 
-    def delete(self, instance: str, *, join_id: str = "", endpoint: dict[str, str] | None = None) -> bool:
+    def delete(self, instance: str, *, join_id: str = "", endpoint: dict[str, str] | None = None,
+               fingerprint: str = "") -> bool:
         records = self._load(instance)
         if join_id:
-            new_records = [r for r in records if str(r.get("id") or "") != str(join_id)]
+            new_records = [
+                r for r in records
+                if not (
+                    str(r.get("id") or "") == str(join_id)
+                    and (not fingerprint or str(r.get("connection_fingerprint") or "") == fingerprint)
+                )
+            ]
             if len(new_records) == len(records):
                 return False
             self._save(instance, new_records)
@@ -249,13 +273,16 @@ class JoinCatalogStore:
             new_records = [
                 r
                 for r in records
-                if relation_endpoint_key(
-                    str(r.get("table") or ""),
-                    str(r.get("column") or ""),
-                    str(r.get("ref_table") or ""),
-                    str(r.get("ref_column") or ""),
+                if not (
+                    relation_endpoint_key(
+                        str(r.get("table") or ""),
+                        str(r.get("column") or ""),
+                        str(r.get("ref_table") or ""),
+                        str(r.get("ref_column") or ""),
+                    )
+                    == key
+                    and (not fingerprint or str(r.get("connection_fingerprint") or "") == fingerprint)
                 )
-                != key
             ]
             if len(new_records) == len(records):
                 return False
@@ -270,6 +297,7 @@ class JoinCatalogStore:
         *,
         database: str = "",
         min_confidence: float = AGENT_PERSIST_MIN_CONFIDENCE,
+        fingerprint: str = "",
     ) -> list[dict[str, Any]]:
         saved: list[dict[str, Any]] = []
         for rel in relations:
@@ -286,6 +314,7 @@ class JoinCatalogStore:
                 {**rel, "database": rel.get("database") or database},
                 source="agent",
                 database=database,
+                fingerprint=fingerprint,
             )
             saved.append(record)
         return saved
@@ -311,6 +340,11 @@ class JoinCatalogStore:
         payload = {
             "instance": instance,
             "schema_version": 1,
+            "connection_fingerprints": sorted({
+                str(rec.get("connection_fingerprint") or "")
+                for rec in records
+                if str(rec.get("connection_fingerprint") or "")
+            }),
             "updated_at": _utc_now(),
             "joins": records,
         }

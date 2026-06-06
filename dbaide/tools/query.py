@@ -79,11 +79,14 @@ class QueryTools:
         database: str = "",
         limit: int = 100,
         preflight_explain: bool = False,
+        confirmed: bool = False,
     ) -> QueryResult:
-        validation = self.validate_sql(sql, add_limit=True)
-        if not validation.ok:
-            raise ValueError("; ".join(issue.message for issue in validation.issues))
-        normalized = validation.normalized_sql
+        report = self.validate_sql_report(sql, add_limit=True)
+        if not report.ok:
+            raise ValueError("; ".join(report.issues))
+        if report.requires_confirmation and not confirmed:
+            raise PermissionError("; ".join(report.warnings) or "SQL requires confirmation")
+        normalized = report.normalized_sql
         if preflight_explain:
             explain_target = _strip_leading_explain(normalized)
             try:

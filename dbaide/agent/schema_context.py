@@ -74,7 +74,12 @@ def table_targets_from_discovery(
 def foreign_keys_for_table(orchestrator: AskOrchestrator, database: str, table: str) -> list[dict[str, Any]]:
     """Load declared foreign keys from offline assets or live catalog."""
     if database:
-        doc = orchestrator.asset_store.table_doc(orchestrator.instance, database, table)
+        doc = orchestrator.asset_store.table_doc(
+            orchestrator.instance,
+            database,
+            table,
+            fingerprint=getattr(orchestrator, "connection_fingerprint", ""),
+        )
         if doc and doc.get("foreign_keys"):
             return [dict(item) for item in doc["foreign_keys"]]
     fks = orchestrator.schema.foreign_keys(table, database=database)
@@ -118,6 +123,7 @@ def collect_relations(
             orchestrator.instance,
             tables,
             database=active_db,
+            fingerprint=getattr(orchestrator, "connection_fingerprint", ""),
         )
 
     declared: list[dict[str, Any]] = []
@@ -148,7 +154,12 @@ def collect_relations(
         from dbaide.agent.join_inference import SemanticJoinInferencer, merge_relation_lists
 
         try:
-            inferencer = SemanticJoinInferencer(orchestrator.llm, orchestrator.asset_store, orchestrator.instance)
+            inferencer = SemanticJoinInferencer(
+                orchestrator.llm,
+                orchestrator.asset_store,
+                orchestrator.instance,
+                fingerprint=getattr(orchestrator, "connection_fingerprint", ""),
+            )
             semantic = inferencer.infer(
                 question or orchestrator.run_state.question or "",
                 schemas,

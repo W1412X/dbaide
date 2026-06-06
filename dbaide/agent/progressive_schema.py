@@ -50,14 +50,15 @@ class ModelRequiredError(RuntimeError):
 class ProgressiveSchemaAgent:
     """Navigate offline assets level-by-level using LLM relevance judgments."""
 
-    def __init__(self, llm: LLMClient, store: AssetStore, instance: str) -> None:
+    def __init__(self, llm: LLMClient, store: AssetStore | None, instance: str, *, fingerprint: str = "") -> None:
         if isinstance(llm, NullLLMClient):
             raise ModelRequiredError(
                 "A configured LLM is required. Open Settings → Models and set provider, base URL, API key, and model ID."
             )
         self.llm = llm
-        self.store = store
+        self.store = store or AssetStore()
         self.instance = instance
+        self.fingerprint = fingerprint
 
     def discover(
         self,
@@ -77,7 +78,7 @@ class ProgressiveSchemaAgent:
         scope = scope or {}
         scope_tables = scope.get("tables") or []
         scope_dbs = scope.get("databases") or []
-        if self.store.has_instance(self.instance):
+        if self.store.has_instance(self.instance, fingerprint=self.fingerprint):
             # User pinned a db/table → prioritise that scope; only broaden to the full
             # progressive crawl if the scope can't yield anything usable.
             if scope_tables or scope_dbs:
@@ -102,9 +103,9 @@ class ProgressiveSchemaAgent:
         """Locate which database a bare table name lives in (first match)."""
         if not table:
             return ""
-        for db_doc in self.store.database_docs(self.instance):
+        for db_doc in self.store.database_docs(self.instance, fingerprint=self.fingerprint):
             db_name = str(db_doc.get("name") or "")
-            for td in self.store.table_docs(self.instance, db_name):
+            for td in self.store.table_docs(self.instance, db_name, fingerprint=self.fingerprint):
                 if str(td.get("name") or td.get("table") or "") == table:
                     return db_name
         return ""
@@ -154,7 +155,7 @@ class ProgressiveSchemaAgent:
                 kind="table", path=f"{self.instance}.{db}.{tbl}", name=tbl,
                 database=db, table=tbl, reason="user-provided",
             ))
-            for cdoc in self.store.column_docs(self.instance, db, tbl)[:48]:
+            for cdoc in self.store.column_docs(self.instance, db, tbl, fingerprint=self.fingerprint)[:48]:
                 cn = str(cdoc.get("name") or cdoc.get("column") or "")
                 if cn:
                     result.hits.append(SchemaHit(
@@ -174,11 +175,11 @@ class ProgressiveSchemaAgent:
         restrict_databases: set[str] | None = None,
     ) -> DiscoveryResult:
         result = DiscoveryResult(question=question)
-        if not self.store.has_instance(self.instance):
+        if not self.store.has_instance(self.instance, fingerprint=self.fingerprint):
             result.trace.append("No offline assets for this connection — build assets first.")
             return result
 
-        databases = self.store.database_docs(self.instance)
+        databases = self.store.database_docs(self.instance, fingerprint=self.fingerprint)
         if not databases:
             result.trace.append("Asset index has no databases.")
             return result
@@ -229,7 +230,7 @@ class ProgressiveSchemaAgent:
 
         def _scan_database(db_index: int) -> tuple[list[SchemaHit], list[SchemaHit], str]:
             db_name = db_items[db_index]["name"]
-            tables = self.store.table_docs(self.instance, db_name)
+            tables = self.store.table_docs(self.instance, db_name, fingerprint=self.fingerprint)
             if not tables:
                 return [], [], f"{db_name}: no tables"
             table_items = [
@@ -266,7 +267,7 @@ class ProgressiveSchemaAgent:
                     )
                 )
                 if column_detail and len(local_tables) <= MAX_COLUMN_TABLES:
-                    cols = self.store.column_docs(self.instance, db_name, table_name)
+                    cols = self.store.column_docs(self.instance, db_name, table_name, fingerprint=self.fingerprint)
                     if not cols:
                         continue
                     col_items = [

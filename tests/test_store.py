@@ -1,5 +1,6 @@
 import pytest
 from dbaide.assets.store import AssetStore, safe_name
+from dbaide.models import ConnectionConfig
 from pathlib import Path
 import tempfile
 
@@ -96,3 +97,20 @@ class TestAssetStore:
     def test_column_docs_missing(self, tmp_path):
         store = AssetStore(base_dir=tmp_path)
         assert store.column_docs("nonexistent", "main", "users") == []
+
+    def test_connection_fingerprint_blocks_stale_instance(self, tmp_path):
+        store = AssetStore(base_dir=tmp_path)
+        conn1 = ConnectionConfig(name="local", type="sqlite", path=str(tmp_path / "one.db"))
+        conn2 = ConnectionConfig(name="local", type="sqlite", path=str(tmp_path / "two.db"))
+        store.write_json(
+            store.instance_dir("local") / "instance.json",
+            {"kind": "instance", **store.connection_metadata(conn1)},
+        )
+        store.write_json(
+            store.instance_dir("local") / "databases.json",
+            {"instance": "local", **store.connection_metadata(conn1), "databases": [{"name": "main"}]},
+        )
+        assert store.instance_doc("local", connection=conn1) is not None
+        assert store.database_docs("local", connection=conn1) == [{"name": "main"}]
+        assert store.instance_doc("local", connection=conn2) is None
+        assert store.database_docs("local", connection=conn2) == []

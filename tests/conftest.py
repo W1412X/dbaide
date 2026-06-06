@@ -14,16 +14,22 @@ import pytest
 
 
 @pytest.fixture(autouse=True)
-def isolated_join_catalog(tmp_path: Path) -> None:
-    """Keep join catalog writes out of ~/.dbaide during tests."""
-    root = tmp_path / "dbaide_joins"
-    previous = os.environ.get("DBAIDE_JOINS")
-    os.environ["DBAIDE_JOINS"] = str(root)
+def isolated_local_state(tmp_path: Path) -> None:
+    """Keep asset, join and annotation stores out of ~/.dbaide during tests."""
+    keys = {
+        "DBAIDE_ASSETS": tmp_path / "dbaide_assets",
+        "DBAIDE_JOINS": tmp_path / "dbaide_joins",
+        "DBAIDE_ANNOTATIONS": tmp_path / "dbaide_annotations",
+    }
+    previous = {key: os.environ.get(key) for key in keys}
+    for key, path in keys.items():
+        os.environ[key] = str(path)
     yield
-    if previous is None:
-        os.environ.pop("DBAIDE_JOINS", None)
-    else:
-        os.environ["DBAIDE_JOINS"] = previous
+    for key, old_value in previous.items():
+        if old_value is None:
+            os.environ.pop(key, None)
+        else:
+            os.environ[key] = old_value
 
 
 @pytest.fixture(autouse=True)

@@ -40,7 +40,9 @@ def test_limit_bypass_and_offset():
     assert outer_limit_value("SELECT * FROM t LIMIT 10") == 10
     assert outer_limit_value("SELECT * FROM t LIMIT 0, 999999") == 999999  # offset,count
     g = SQLGuard(default_limit=100, max_row_limit=1000)
-    assert g.validate("SELECT * FROM t LIMIT 0, 999999").ok is False  # cap not bypassed
+    report = g.validate_with_report("SELECT * FROM t LIMIT 0, 999999")
+    assert report.ok is True
+    assert report.requires_confirmation is True  # cap not bypassed; execution must pause
     assert g.validate("SELECT id FROM t LIMIT 0, 50").ok is True
 
 

@@ -303,6 +303,7 @@ def register(registry: ToolRegistry, orchestrator) -> None:
                 validation.normalized_sql,
                 database=database,
                 limit=orchestrator.session.default_limit,
+                confirmed=True,
             )
             orchestrator.run_state.query_result = result
             orchestrator.run_state.sql = validation.normalized_sql

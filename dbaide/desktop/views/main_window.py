@@ -1655,6 +1655,20 @@ class MainWindow(QMainWindow):
             self.switch_tab("Ask")
             return
         if action == "execute_sql":
+            if isinstance(result, dict) and result.get("pending_confirmation"):
+                warnings = "\n".join(str(w) for w in (result.get("warnings") or []))
+                message = "This SQL may be expensive or risky. Execute anyway?"
+                if warnings:
+                    message += f"\n\n{warnings}"
+                if QMessageBox.question(self, "Confirm SQL execution", message) == QMessageBox.StandardButton.Yes:
+                    confirmed_sql = str(result.get("normalized_sql") or sql_text)
+                    self.run_action("execute_sql", {
+                        "connection_name": run_connection,
+                        "database": run_database,
+                        "sql": confirmed_sql,
+                        "confirmed_sql": confirmed_sql,
+                    })
+                return
             if sql_doc is not None:
                 sql_doc.show_result(result)
             self._record_query(

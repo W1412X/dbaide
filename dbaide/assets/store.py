@@ -9,6 +9,7 @@ import tempfile
 from pathlib import Path
 from typing import Any
 
+from dbaide.connection_identity import connection_fingerprint, connection_identity, fingerprint_matches
 from dbaide.models import ColumnInfo, TableInfo
 
 logger = logging.getLogger("dbaide.assets")
@@ -18,7 +19,8 @@ DEFAULT_ASSET_DIR = Path.home() / ".dbaide" / "assets"
 
 class AssetStore:
     def __init__(self, base_dir: Path | None = None) -> None:
-        self.base_dir = Path(os.environ.get("DBAIDE_ASSETS", base_dir or DEFAULT_ASSET_DIR)).expanduser()
+        root = base_dir if base_dir is not None else os.environ.get("DBAIDE_ASSETS", DEFAULT_ASSET_DIR)
+        self.base_dir = Path(root).expanduser()
 
     def instance_dir(self, instance: str) -> Path:
         return self.base_dir / "instances" / safe_name(instance)
@@ -81,31 +83,58 @@ class AssetStore:
         with path.open("r", encoding="utf-8") as fh:
             return json.load(fh)
 
-    def has_instance(self, instance: str) -> bool:
-        return (self.instance_dir(instance) / "instance.json").exists()
+    def has_instance(self, instance: str, *, connection=None, fingerprint: str = "") -> bool:
+        return self.instance_doc(instance, connection=connection, fingerprint=fingerprint) is not None
 
-    def instance_doc(self, instance: str) -> dict[str, Any] | None:
-        return self._read_optional(self.instance_dir(instance) / "instance.json")
+    def instance_doc(self, instance: str, *, connection=None, fingerprint: str = "") -> dict[str, Any] | None:
+        doc = self._read_optional(self.instance_dir(instance) / "instance.json")
+        if not isinstance(doc, dict):
+            return None
+        expected = fingerprint or connection_fingerprint(connection)
+        if expected and not fingerprint_matches(str(doc.get("connection_fingerprint") or ""), expected):
+            return None
+        return doc
 
-    def database_docs(self, instance: str) -> list[dict[str, Any]]:
+    def connection_matches(self, instance: str, *, connection=None, fingerprint: str = "") -> bool:
+        return self.instance_doc(instance, connection=connection, fingerprint=fingerprint) is not None
+
+    def connection_metadata(self, connection) -> dict[str, Any]:
+        return {
+            "connection_identity": connection_identity(connection),
+            "connection_fingerprint": connection_fingerprint(connection),
+        }
+
+    def database_docs(self, instance: str, *, connection=None, fingerprint: str = "") -> list[dict[str, Any]]:
+        if (connection is not None or fingerprint) and not self.connection_matches(
+            instance, connection=connection, fingerprint=fingerprint,
+        ):
+            return []
         path = self.instance_dir(instance) / "databases.json"
         data = self._read_optional(path)
         if isinstance(data, dict):
             return list(data.get("databases") or [])
         return []
 
-    def table_docs(self, instance: str, database: str) -> list[dict[str, Any]]:
+    def table_docs(self, instance: str, database: str, *, connection=None, fingerprint: str = "") -> list[dict[str, Any]]:
+        if (connection is not None or fingerprint) and not self.connection_matches(
+            instance, connection=connection, fingerprint=fingerprint,
+        ):
+            return []
         path = self.database_dir(instance, database) / "tables.json"
         data = self._read_optional(path)
         if isinstance(data, dict):
             return list(data.get("tables") or [])
         return []
 
-    def column_docs(self, instance: str, database: str, table: str) -> list[dict[str, Any]]:
+    def column_docs(self, instance: str, database: str, table: str, *, connection=None, fingerprint: str = "") -> list[dict[str, Any]]:
+        if (connection is not None or fingerprint) and not self.connection_matches(
+            instance, connection=connection, fingerprint=fingerprint,
+        ):
+            return []
         """Derive per-column views from the table doc (the disclosure leaf). There
         are no per-column files anymore; this keeps a stable shape for callers that
         iterate columns (schema tree, describe_table, search, dev tools)."""
-        tdoc = self.table_doc(instance, database, table)
+        tdoc = self.table_doc(instance, database, table, connection=connection, fingerprint=fingerprint)
         if not tdoc:
             return []
         indexed: set[str] = set()
@@ -131,7 +160,11 @@ class AssetStore:
             })
         return out
 
-    def table_doc(self, instance: str, database: str, table: str) -> dict[str, Any] | None:
+    def table_doc(self, instance: str, database: str, table: str, *, connection=None, fingerprint: str = "") -> dict[str, Any] | None:
+        if (connection is not None or fingerprint) and not self.connection_matches(
+            instance, connection=connection, fingerprint=fingerprint,
+        ):
+            return None
         return self._read_optional(self.table_dir(instance, database, table) / "table.json")
 
     def to_table_info(self, doc: dict[str, Any]) -> TableInfo:
@@ -170,4 +203,3 @@ def safe_name(value: str) -> str:
     if not text or text == "." or text == "..":
         return "default"
     return text
-

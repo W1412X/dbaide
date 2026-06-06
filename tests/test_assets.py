@@ -4,7 +4,9 @@ from dbaide.adapters import build_adapter
 from dbaide.adapters.base import DatabaseAdapter, rows_to_result
 from dbaide.assets import AssetBuilder, AssetStore
 from dbaide.assets.summarizer import ASSET_SCHEMA_VERSION
+from dbaide.context.disclosure import DisclosureContext
 from dbaide.models import ColumnInfo, ColumnProfile, ConnectionConfig, TableInfo
+from dbaide.tools.schema import SchemaTools
 
 
 def make_db(path):
@@ -60,6 +62,30 @@ def test_asset_builder_creates_hierarchy(tmp_path):
     assert table_doc["row_count_exact"] is True
     assert table_doc["sample_rows"] and len(table_doc["sample_rows"]) <= 5
     assert instance_doc["asset_schema_version"] == ASSET_SCHEMA_VERSION
+
+
+def test_asset_describe_records_database_and_table_disclosures(tmp_path):
+    db = tmp_path / "app.db"
+    make_db(db)
+    conn = ConnectionConfig(name="local", type="sqlite", path=str(db))
+    adapter = build_adapter(conn)
+    store = AssetStore(tmp_path / "assets")
+    AssetBuilder(connection=conn, adapter=adapter, store=store).build(profile_mode="none", sample=False)
+
+    context = DisclosureContext()
+    schema = SchemaTools(adapter, context, assets=store)
+    cols = schema.describe_table("orders")
+
+    assert [c.name for c in cols]
+    assert any("L1 databases disclosed" in event for event in context.events)
+    assert any("L2 tables disclosed" in event for event in context.events)
+    assert any("L3 columns disclosed" in event for event in context.events)
+    assert context.events.index(next(e for e in context.events if "L1 databases disclosed" in e)) < context.events.index(
+        next(e for e in context.events if "L3 columns disclosed" in e)
+    )
+    assert context.events.index(next(e for e in context.events if "L2 tables disclosed" in e)) < context.events.index(
+        next(e for e in context.events if "L3 columns disclosed" in e)
+    )
 
 
 def test_table_doc_stores_only_declared_foreign_keys():

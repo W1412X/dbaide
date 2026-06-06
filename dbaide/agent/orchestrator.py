@@ -16,6 +16,7 @@ from dbaide.agent.sql_writer import SQLWriter
 from dbaide.joins import JoinCatalogStore
 from dbaide.annotations import AnnotationStore
 from dbaide.assets import AssetStore
+from dbaide.connection_identity import connection_fingerprint
 from dbaide.core.result import ExecutionPolicy
 from dbaide.i18n import t as _i18n_t
 from dbaide.llm import LLMClient, NullLLMClient
@@ -67,6 +68,7 @@ class AskOrchestrator:
         self.adapter = adapter
         self.session = session
         self.instance = session.connection.name
+        self.connection_fingerprint = connection_fingerprint(session.connection)
         llm = llm or NullLLMClient()
         # Debug trace: wrap a real client so every model call (full prompt+response)
         # is captured and attached to the trace. Gated by env so normal runs are lean.
@@ -322,7 +324,12 @@ class AskOrchestrator:
     # ─── Schema ─────────────────────────────────────────────────────────────
 
     def _discover(self, question: str, *, parent: str = "", column_detail: bool = True):
-        agent = ProgressiveSchemaAgent(self.llm, self.asset_store, self.instance)
+        agent = ProgressiveSchemaAgent(
+            self.llm,
+            self.asset_store,
+            self.instance,
+            fingerprint=self.connection_fingerprint,
+        )
         progress_cb = self.progress if parent else None
         # Prioritise the user's pinned scope on the first discovery; broaden afterwards
         # so the agent can recover if the pinned tables don't actually answer the

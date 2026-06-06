@@ -91,7 +91,12 @@ def register(registry: ToolRegistry, orchestrator) -> None:
             return ToolResult(ok=False, error=_err("synthesize_schema_answer", "question is required"))
         try:
             discovery = orchestrator.run_state.discovery or orchestrator._discover(question, parent=orchestrator.run_state.trace_node)
-            agent = ProgressiveSchemaAgent(orchestrator.llm, orchestrator.asset_store, orchestrator.instance)
+            agent = ProgressiveSchemaAgent(
+                orchestrator.llm,
+                orchestrator.asset_store,
+                orchestrator.instance,
+                fingerprint=getattr(orchestrator, "connection_fingerprint", ""),
+            )
             pairs = list({
                 (str(getattr(h, "database", "") or ""), str(getattr(h, "table", "") or ""))
                 for h in discovery.hits if getattr(h, "table", "")

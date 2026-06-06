@@ -6,6 +6,7 @@ from dbaide.adapters.base import DatabaseAdapter, quote_identifier
 from dbaide.assets import AssetStore
 from dbaide.assets.profiler import kind_from_type
 from dbaide.assets.summarizer import truncate_cell
+from dbaide.connection_identity import connection_fingerprint
 from dbaide.context.disclosure import DisclosureContext
 from dbaide.models import ColumnInfo, ColumnProfile, QueryResult
 
@@ -44,6 +45,7 @@ class ProfileTools:
         self.context = context
         self.instance = instance or adapter.config.name
         self.assets = assets or AssetStore()
+        self.fingerprint = connection_fingerprint(adapter.config)
 
     def sample_rows(self, table: str, *, database: str = "", limit: int = 20) -> QueryResult:
         result = self.adapter.sample_rows(table, database=database, limit=limit)
@@ -52,7 +54,7 @@ class ProfileTools:
 
     def profile_column(self, table: str, column: str, *, database: str = "", top_k: int = 10) -> ColumnProfile:
         database = database or self._asset_database_for_table(table) or self._default_asset_database()
-        for doc in self.assets.column_docs(self.instance, database, table) if database else []:
+        for doc in self.assets.column_docs(self.instance, database, table, fingerprint=self.fingerprint) if database else []:
             if doc.get("name") == column or doc.get("column") == column:
                 cached = self._profile_from_doc(table, column, doc)
                 if cached is not None:
@@ -221,14 +223,14 @@ class ProfileTools:
         return profiles
 
     def _default_asset_database(self) -> str:
-        docs = self.assets.database_docs(self.instance)
+        docs = self.assets.database_docs(self.instance, fingerprint=self.fingerprint)
         if len(docs) == 1:
             return str(docs[0].get("name") or "")
         return ""
 
     def _asset_database_for_table(self, table: str) -> str:
-        for db_doc in self.assets.database_docs(self.instance):
+        for db_doc in self.assets.database_docs(self.instance, fingerprint=self.fingerprint):
             db_name = str(db_doc.get("name") or "")
-            if any((doc.get("name") == table or doc.get("table") == table) for doc in self.assets.table_docs(self.instance, db_name)):
+            if any((doc.get("name") == table or doc.get("table") == table) for doc in self.assets.table_docs(self.instance, db_name, fingerprint=self.fingerprint)):
                 return db_name
         return ""

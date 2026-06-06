@@ -32,6 +32,7 @@ def _persist_agent_joins(
             orchestrator.instance,
             relations,
             database=database or orchestrator.run_state.database or "",
+            fingerprint=getattr(orchestrator, "connection_fingerprint", ""),
         )
         if saved:
             orchestrator.progress(
@@ -275,4 +276,3 @@ def _tables_in_sql(sql: str) -> list[str]:
             if table and table.lower() not in {"select", "where"} and table not in tables:
                 tables.append(table)
     return tables
-

@@ -90,6 +90,7 @@ def register(registry: ToolRegistry, orchestrator) -> None:
             tables=tables,
             min_confidence=min_conf,
             endpoint=endpoint,
+            fingerprint=getattr(orchestrator, "connection_fingerprint", ""),
         )
         return ToolResult(ok=True, data={"joins": records, "count": len(records)})
 
@@ -116,6 +117,7 @@ def register(registry: ToolRegistry, orchestrator) -> None:
             rel,
             source=source,
             database=database,
+            fingerprint=getattr(orchestrator, "connection_fingerprint", ""),
         )
         return ToolResult(ok=True, data={"join": record, "relation": catalog_record_to_relation(record)})
 
@@ -123,7 +125,12 @@ def register(registry: ToolRegistry, orchestrator) -> None:
         join_id = str(args.get("id") or args.get("join_id") or "").strip()
         if not join_id:
             return ToolResult(ok=False, error=_err("update_join", "id is required"))
-        updated = orchestrator.join_catalog.update(orchestrator.instance, join_id, args)
+        updated = orchestrator.join_catalog.update(
+            orchestrator.instance,
+            join_id,
+            args,
+            fingerprint=getattr(orchestrator, "connection_fingerprint", ""),
+        )
         if updated is None:
             return ToolResult(ok=False, error=_err("update_join", f"join not found: {join_id}"))
         return ToolResult(ok=True, data={"join": updated, "relation": catalog_record_to_relation(updated)})
@@ -140,7 +147,12 @@ def register(registry: ToolRegistry, orchestrator) -> None:
             }
         if not join_id and not endpoint:
             return ToolResult(ok=False, error=_err("delete_join", "id or full endpoint required"))
-        ok = orchestrator.join_catalog.delete(orchestrator.instance, join_id=join_id, endpoint=endpoint)
+        ok = orchestrator.join_catalog.delete(
+            orchestrator.instance,
+            join_id=join_id,
+            endpoint=endpoint,
+            fingerprint=getattr(orchestrator, "connection_fingerprint", ""),
+        )
         if not ok:
             return ToolResult(ok=False, error=_err("delete_join", "join not found"))
         return ToolResult(ok=True, data={"deleted": True, "id": join_id or "endpoint"})

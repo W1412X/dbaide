@@ -8,6 +8,7 @@ from dbaide.adapters import build_adapter
 from dbaide.agent.orchestrator import AskOrchestrator
 from dbaide.agent.schema_context import collect_relations
 from dbaide.agent.toolkit import build_tool_registry
+from dbaide.connection_identity import connection_fingerprint
 from dbaide.joins import JoinCatalogStore, USER_JOIN_CONFIDENCE
 from dbaide.llm import LLMClient, LLMMessage
 from dbaide.models import ConnectionConfig
@@ -45,6 +46,22 @@ def test_user_join_confidence_and_priority(tmp_path):
     assert rels[0]["source"] == "user"
 
 
+def test_join_catalog_fingerprint_blocks_stale_relations(tmp_path):
+    store = JoinCatalogStore(tmp_path / "joins")
+    conn1 = ConnectionConfig(name="local", type="sqlite", path=str(tmp_path / "one.db"))
+    conn2 = ConnectionConfig(name="local", type="sqlite", path=str(tmp_path / "two.db"))
+    fp1 = connection_fingerprint(conn1)
+    fp2 = connection_fingerprint(conn2)
+    store.add(
+        "local",
+        {"table": "orders", "column": "user_id", "ref_table": "users", "ref_column": "id"},
+        source="user",
+        fingerprint=fp1,
+    )
+    assert len(store.relations_for_tables("local", [("", "orders"), ("", "users")], fingerprint=fp1)) == 1
+    assert store.relations_for_tables("local", [("", "orders"), ("", "users")], fingerprint=fp2) == []
+
+
 def test_collect_relations_prefers_user_catalog(tmp_path):
     db = tmp_path / "app.db"
     conn = sqlite3.connect(db)
@@ -65,6 +82,7 @@ def test_collect_relations_prefers_user_catalog(tmp_path):
         "local",
         {"table": "orders", "column": "user_id", "ref_table": "users", "ref_column": "id"},
         source="user",
+        fingerprint=connection_fingerprint(cfg),
     )
     orch = AskOrchestrator(adapter, Session(connection=cfg), JoinInferMockLLM(), join_catalog=catalog)
     relations = collect_relations(orch, [("", "orders"), ("", "users")])
