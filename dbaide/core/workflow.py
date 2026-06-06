@@ -128,6 +128,7 @@ class WorkflowEngine:
                 progress(msg)
 
         assistant._orchestrator.progress = on_progress  # noqa: SLF001
+        assistant._orchestrator.cancel_check = cancel_check  # noqa: SLF001
         # User-pinned schema scope (composer attachments) → discovery prioritises it.
         assistant._orchestrator.schema_scope = request.schema_scope or {}  # noqa: SLF001
         # Stream the final answer token-by-token when the user enabled it.

@@ -100,10 +100,19 @@ def test_collect_relations_adds_semantic_when_no_fk(tmp_path):
     ctx = ToolContext()
     registry.invoke("describe_table", {"table": "assets"}, ctx)
     registry.invoke("describe_table", {"table": "asset_sensors"}, ctx)
-    result = registry.invoke("get_relations", {}, ctx)
+    result = registry.invoke(
+        "retrieve_join_context",
+        {
+            "request": "sensors without reading",
+            "tables": ["assets", "asset_sensors"],
+            "infer_semantic": True,
+            "validate_sample": True,
+        },
+        ctx,
+    )
     assert result.ok
     rels = result.data["relations"]
-    assert result.data["semantic_count"] == 1
+    assert len([r for r in rels if r.get("source") == "semantic"]) == 1
     assert rels[0]["source"] == "semantic"
     assert rels[0]["column"] == "asset_id"
     assert rels[0].get("validated") is True
@@ -130,7 +139,7 @@ def test_collect_relations_skips_semantic_when_fk_connects(tmp_path):
     cfg = ConnectionConfig(name="local", type="sqlite", path=str(db))
     adapter = build_adapter(cfg)
     orch = AskOrchestrator(adapter, Session(connection=cfg), JoinInferMockLLM())
-    relations = collect_relations(orch, [("", "orders"), ("", "users")])
+    relations = collect_relations(orch, [("", "orders"), ("", "users")], validate_sample=True)
     assert len(relations) == 1
     assert relations[0]["source"] == "foreign_key"
     assert relations[0].get("validated") is True

@@ -1,24 +1,8 @@
-"""Schema Linker — a lightweight sub-agent that resolves a *minimal-necessary*
-schema for a question before SQL generation.
+"""Schema evidence retrieval for the single-brain Ask agent.
 
-Why this exists (validated, not speculative): injecting the full schema into the
-SQL prompt hurts accuracy because the irrelevant tables/columns enlarge the search
-space and scatter attention (see the thesis ablation 5.7 — incremental, minimal
-schema beats full-schema injection, with the largest gap on *simple* questions).
-So instead of feeding everything the agent has described, we run a short, isolated
-linking loop that:
-
-  1. discovers candidate tables,
-  2. asks the model to pick the MINIMAL set of tables + the columns that matter,
-  3. confirms each pick against the real catalog (existence + consistency — a
-     picked column that doesn't exist is dropped, never written),
-  4. maps joins among the confirmed tables,
-  5. accumulates monotonically and stops when the schema covers the question.
-
-It hands the main loop ONE compact ``ResolvedSchema`` instead of a long transcript
-of exploration steps, keeping the SQL-generation context clean. Codex-style: the
-model drives the choice; the harness only confirms and validates (cheap, no RA,
-no embeddings, no multi-stage pipeline).
+This module intentionally does not decide the final schema. It gathers only
+schema evidence the main loop can reason over: candidate tables, user notes,
+columns, asset metadata, conflicts, and missing signals.
 """
 
 from __future__ import annotations
@@ -26,9 +10,10 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
+from dbaide.agent.memory import SchemaCandidate, SchemaEvidenceReport
 from dbaide.agent.progress_events import child_node, subagent_event
-from dbaide.agent.schema_context import collect_relations
-from dbaide.llm import LLMMessage, NullLLMClient
+from dbaide.agent.schema_context import sanitize_note
+from dbaide.agent.toolkit.support import _remember_table_schema
 from dbaide.models import ColumnInfo
 
 if TYPE_CHECKING:
@@ -36,269 +21,347 @@ if TYPE_CHECKING:
 
 
 @dataclass(slots=True)
-class ResolvedSchema:
-    """The minimal-necessary schema for a question: a few tables, only the columns
-    that matter, the joins between them. Compact by construction."""
+class SchemaContextReport:
+    id: str
+    request: str
+    actions_taken: list[str] = field(default_factory=list)
+    candidates: list[SchemaCandidate] = field(default_factory=list)
+    conflicts: list[dict[str, Any]] = field(default_factory=list)
+    missing: list[str] = field(default_factory=list)
+    source_summary: str = ""
 
-    tables: list[dict[str, Any]] = field(default_factory=list)   # {database, table, columns:[ColumnInfo], reason}
-    joins: list[dict[str, Any]] = field(default_factory=list)
-    notes: str = ""
-    sufficient: bool = True
-    pending_question: str = ""
-    pending_options: list[str] = field(default_factory=list)
+    def to_memory_report(self) -> SchemaEvidenceReport:
+        return SchemaEvidenceReport(
+            id=self.id,
+            request=self.request,
+            actions_taken=list(self.actions_taken),
+            candidates=list(self.candidates),
+            joins=[],
+            conflicts=list(self.conflicts),
+            missing=list(self.missing),
+            source_summary=self.source_summary,
+        )
 
-    def is_empty(self) -> bool:
-        return not self.tables
+    def to_tool_data(self) -> dict[str, Any]:
+        return {
+            "report_id": self.id,
+            "request": self.request,
+            "actions_taken": list(self.actions_taken),
+            "candidates": [_candidate_to_dict(c) for c in self.candidates],
+            "conflicts": list(self.conflicts),
+            "missing": list(self.missing),
+            "source_summary": self.source_summary,
+            "instruction": (
+                "This is evidence, not a final schema decision. The main LLM must decide "
+                "whether to ask the user, inspect more tables/columns, call retrieve_join_context, "
+                "generate SQL, or run exploratory SQL."
+            ),
+        }
 
-    def to_disclosed(self) -> list[tuple[str, str, list[ColumnInfo]]]:
-        """Shape the SQL writer consumes: (database, table, columns) with only the
-        resolved columns — this is the minimal context that gets generated on."""
-        return [(t["database"], t["table"], list(t["columns"])) for t in self.tables]
 
-    def summary_line(self) -> str:
-        parts = []
-        for t in self.tables:
-            cols = ", ".join(c.name for c in t["columns"][:8])
-            parts.append(f"{t['table']}({cols})")
-        suffix = f" · {len(self.joins)} join(s)" if self.joins else ""
-        return "; ".join(parts) + suffix
-
-
-class SchemaLinker:
-    PARENT = "resolve_schema"
+class SchemaEvidenceRetriever:
+    PARENT = "retrieve_schema_context"
 
     def __init__(self, orchestrator: "AskOrchestrator") -> None:
         self.orch = orchestrator
 
-    def resolve(self, question: str, *, database: str = "", max_rounds: int = 2) -> ResolvedSchema:
-        orch = self.orch
-        if isinstance(orch.llm, NullLLMClient):
-            # No model: fall back to "all discovered tables" (the old behaviour).
-            return self._deterministic(question, database)
+    def retrieve(
+        self,
+        request: str,
+        *,
+        database: str = "",
+        focus_terms: list[str] | None = None,
+        scope: dict[str, Any] | None = None,
+        need: str = "",
+        limit: int = 8,
+    ) -> SchemaContextReport:
+        base = self.orch.run_state.trace_node or self.PARENT
+        report_id = f"schema:{len(self.orch.run_state.memory.schema_reports) + 1}"
+        actions: list[str] = []
+        candidates: list[SchemaCandidate] = []
+        missing: list[str] = []
 
-        # Base trace node = the resolve_schema tool step; the linker's activities
-        # (discovery, selection, relations) nest under it as a true call tree.
-        base = orch.run_state.trace_node or self.PARENT
-        self._base = base
-        confirmed: dict[tuple[str, str], dict[str, Any]] = {}  # (db,table) → {columns, reason}
-        joins: list[dict[str, Any]] = []
-        dropped: list[str] = []
-        refine = ""
-        sufficient = True
-        for round_index in range(max_rounds):
-            # Big direction first: discover the RELEVANT tables (assets-first,
-            # progressive) — tables only, no per-column LLM pass. The single _select
-            # call below confirms tables + columns in one shot (the "detail" step).
-            discover_node = child_node(base, f"discover {round_index + 1}")
-            self.orch.progress(subagent_event(
-                agent="", parent_id=base, node_id=discover_node,
-                title=f"Schema discovery (round {round_index + 1})", status="running",
-            ))
-            discovery = orch._discover(question + refine, parent=discover_node, column_detail=False)
-            candidates = self._candidate_view(discovery, database)
-            self.orch.progress(subagent_event(
-                agent="", parent_id=base, node_id=discover_node, status="completed",
-                title=f"Schema discovery (round {round_index + 1})",
-                detail=f"{len(candidates)} candidate table(s)",
-            ))
-            if not candidates:
-                break
-            decision = self._select(question, candidates, confirmed)
-            ask = decision.get("ask")
-            if isinstance(ask, dict) and str(ask.get("question") or "").strip():
-                return ResolvedSchema(
-                    tables=self._as_tables(confirmed), joins=joins,
-                    notes="; ".join(dropped), sufficient=False,
-                    pending_question=str(ask["question"]).strip(),
-                    pending_options=[str(o) for o in (ask.get("options") or [])],
+        search_text = _request_text(request, focus_terms or [], need)
+        discover_node = child_node(base, "candidate recall")
+        self.orch.progress(subagent_event(
+            agent="schema_link",
+            parent_id=base,
+            node_id=discover_node,
+            title="Recall schema candidates",
+            status="running",
+            detail=search_text[:160],
+        ))
+        try:
+            discovery = self.orch._discover(search_text, parent=discover_node, column_detail=False)
+            actions.append(f"progressive discovery for: {search_text}")
+        except Exception as exc:
+            discovery = None
+            missing.append(f"progressive discovery failed: {exc}")
+
+        targets = _targets_from_scope(scope, database)
+        if discovery is not None:
+            for hit in discovery.hits:
+                if hit.kind == "table" and hit.table:
+                    db = hit.database or database or ""
+                    key = (db, hit.table)
+                    if key not in targets:
+                        targets.append(key)
+                if len(targets) >= max(1, limit):
+                    break
+
+        self.orch.progress(subagent_event(
+            agent="schema_link",
+            parent_id=base,
+            node_id=discover_node,
+            title="Recall schema candidates",
+            status="completed",
+            detail=f"{len(targets)} candidate target(s)",
+        ))
+
+        notes = self._notes_for_targets(targets)
+        for db, table in targets[:max(1, limit)]:
+            candidate = self._candidate(db, table, notes)
+            candidates.append(candidate)
+            if candidate.columns:
+                cols = [_column_from_payload(c) for c in candidate.columns]
+                _remember_table_schema(self.orch, table, db, cols)
+            if candidate.status != "active":
+                actions.append(f"kept excluded/deprecated evidence for {db}.{table}")
+            else:
+                actions.append(f"loaded table evidence for {db}.{table}")
+
+        conflicts = _detect_conflicts(candidates)
+        source_summary = (
+            f"{len(candidates)} candidate table(s), "
+            f"{sum(1 for c in candidates if c.status == 'active')} active, "
+            f"{len(conflicts)} conflict(s)."
+        )
+        report = SchemaContextReport(
+            id=report_id,
+            request=request,
+            actions_taken=actions,
+            candidates=candidates,
+            conflicts=conflicts,
+            missing=missing,
+            source_summary=source_summary,
+        )
+        self.orch.run_state.memory.add_schema_report(report.to_memory_report())
+        return report
+
+    def _candidate(
+        self,
+        database: str,
+        table: str,
+        notes: dict[tuple[str, str], dict[str, Any]],
+    ) -> SchemaCandidate:
+        db_l = database.strip().lower()
+        tbl_l = table.strip().lower()
+        note_entry = notes.get((db_l, tbl_l)) or {}
+        table_note = sanitize_note(str(note_entry.get("table") or ""))
+        column_notes = note_entry.get("columns") or {}
+        status = "active"
+        exclusion_reason = ""
+        if _is_deprecated_note(table_note):
+            status = "deprecated"
+            exclusion_reason = table_note
+
+        columns: list[dict[str, Any]] = []
+        row_count = None
+        indexes: list[Any] = []
+        foreign_keys: list[Any] = []
+        summary = ""
+        tdoc = self.orch.asset_store.table_doc(
+            self.orch.instance,
+            database,
+            table,
+            fingerprint=getattr(self.orch, "connection_fingerprint", ""),
+        )
+        if tdoc:
+            summary = str(tdoc.get("summary") or tdoc.get("comment") or "")[:240]
+            row_count = tdoc.get("row_count")
+            indexes = list(tdoc.get("indexes") or [])
+            foreign_keys = list(tdoc.get("foreign_keys") or [])
+            for col in (tdoc.get("columns") or [])[:80]:
+                name = str(col.get("name") or "")
+                note = sanitize_note(str(column_notes.get(name.lower()) or ""))
+                columns.append({
+                    "name": name,
+                    "data_type": str(col.get("data_type") or col.get("type") or ""),
+                    "primary_key": bool(col.get("primary_key")),
+                    "indexed": bool(col.get("indexed")),
+                    "comment": str(col.get("comment") or "")[:160],
+                    "note": note,
+                })
+        if not columns:
+            try:
+                live_cols = self.orch.schema.describe_table(table, database=database)
+            except Exception as exc:
+                return SchemaCandidate(
+                    database=database,
+                    table=table,
+                    columns=[],
+                    summary=summary,
+                    notes={"table": table_note, "columns": column_notes},
+                    status="missing",
+                    exclusion_reason=f"describe_table failed: {exc}",
                 )
-            for sel in decision.get("tables") or []:
-                self._confirm(sel, database, confirmed, dropped)
-            targets = list(confirmed.keys())
-            if len(targets) >= 2:
-                rel_node = child_node(base, "relations")
-                self.orch.progress(subagent_event(
-                    agent="", parent_id=base, node_id=rel_node,
-                    title="Map relations", status="running",
-                ))
-                joins = collect_relations(orch, targets, question=question, parent=rel_node)
-                self.orch.progress(subagent_event(
-                    agent="", parent_id=base, node_id=rel_node, status="completed",
-                    title="Map relations", detail=f"{len(joins)} join(s)",
-                ))
-            sufficient = bool(decision.get("sufficient", True))
-            if sufficient or not confirmed:
-                break
-            refine = f"\n(still missing: {str(decision.get('missing') or '').strip()})"
-
-        return ResolvedSchema(
-            tables=self._as_tables(confirmed), joins=joins,
-            notes="; ".join(dropped), sufficient=sufficient and bool(confirmed),
+            for col in live_cols[:80]:
+                note = sanitize_note(str(column_notes.get(col.name.lower()) or ""))
+                columns.append({
+                    "name": col.name,
+                    "data_type": col.data_type,
+                    "primary_key": col.primary_key,
+                    "indexed": col.indexed,
+                    "comment": (col.comment or "")[:160],
+                    "note": note,
+                })
+        if not indexes:
+            try:
+                indexes = [idx.to_dict() if hasattr(idx, "to_dict") else idx for idx in self.orch.adapter.indexes(table, database=database)]
+            except Exception:
+                indexes = []
+        if not foreign_keys:
+            try:
+                foreign_keys = [
+                    {
+                        "table": fk.table,
+                        "column": fk.column,
+                        "ref_table": fk.ref_table,
+                        "ref_column": fk.ref_column,
+                        "source": "foreign_key",
+                    }
+                    for fk in self.orch.schema.foreign_keys(table, database=database)
+                ]
+            except Exception:
+                foreign_keys = []
+        return SchemaCandidate(
+            database=database,
+            table=table,
+            columns=columns,
+            summary=summary,
+            notes={"table": table_note, "columns": column_notes},
+            status=status,
+            exclusion_reason=exclusion_reason,
+            row_count=row_count,
+            indexes=indexes,
+            foreign_keys=foreign_keys,
         )
 
-    # ── internals ────────────────────────────────────────────────────────────
-
-    def _candidate_view(self, discovery, database: str) -> list[dict[str, Any]]:
-        seen: dict[tuple[str, str], dict[str, Any]] = {}
-        for h in discovery.hits:
-            if h.kind != "table" or not h.table:
-                continue
-            db = h.database or database or ""
-            key = (db, h.table)
-            if key in seen:
-                continue
-            tdoc = self.orch.asset_store.table_doc(self.orch.instance, db, h.table)
-            cols = [str(c.get("name")) for c in (tdoc.get("columns") if tdoc else [])][:40]
-            if not cols:
-                # Thin assets (built without column detail) would leave the linker
-                # judging table relevance and picking columns blind — fall back to the
-                # live catalog so it always sees the real columns.
-                try:
-                    cols = [c.name for c in self.orch.schema.describe_table(h.table, database=db)][:40]
-                except Exception:  # noqa: BLE001 — best-effort enrichment, never fatal
-                    cols = []
-            seen[key] = {
-                "database": db, "table": h.table,
-                "summary": (h.summary or "")[:160], "columns": cols,
-            }
-        return list(seen.values())
-
-    def _candidate_notes(self, candidates: list[dict[str, Any]]) -> dict[tuple[str, str], dict[str, Any]]:
-        """Authoritative user notes per candidate: the table note (falling back to the
-        db note) and a {column: note} map — so the note travels with each object."""
+    def _notes_for_targets(self, targets: list[tuple[str, str]]) -> dict[tuple[str, str], dict[str, Any]]:
         store = getattr(self.orch, "annotations", None)
-        if store is None or not candidates:
+        if store is None or not targets:
             return {}
         try:
-            view = store.annotations_for_tables(
-                self.orch.instance, [(c["database"], c["table"]) for c in candidates]
-            )
-        except Exception:  # noqa: BLE001 — notes are best-effort, never fatal
+            view = store.annotations_for_tables(self.orch.instance, targets)
+        except Exception:
             return {}
         tnotes = view.get("tables") or {}
         dbnotes = view.get("databases") or {}
         cnotes = view.get("columns") or {}
         out: dict[tuple[str, str], dict[str, Any]] = {}
-        for c in candidates:
-            db, tbl = str(c["database"]).strip().lower(), str(c["table"]).strip().lower()
-            entry: dict[str, Any] = {
-                "table": tnotes.get((db, tbl)) or dbnotes.get(db) or dbnotes.get("") or "",
-                "columns": cnotes.get((db, tbl)) or {},
+        for db, tbl in targets:
+            db_l, tbl_l = db.strip().lower(), tbl.strip().lower()
+            entry = {
+                "table": tnotes.get((db_l, tbl_l)) or dbnotes.get(db_l) or dbnotes.get("") or "",
+                "columns": cnotes.get((db_l, tbl_l)) or {},
             }
-            if entry["table"] or entry["columns"]:
-                out[(db, tbl)] = entry
+            out[(db_l, tbl_l)] = entry
         return out
 
-    def _select(self, question: str, candidates: list[dict[str, Any]],
-                confirmed: dict[tuple[str, str], dict[str, Any]]) -> dict[str, Any]:
-        from dbaide.agent.schema_context import sanitize_note
-        notes = self._candidate_notes(candidates)
-        lines = []
-        for c in candidates:
-            db_l, tbl_l = str(c["database"]).strip().lower(), str(c["table"]).strip().lower()
-            entry = notes.get((db_l, tbl_l)) or {}
-            col_notes = entry.get("columns") or {}
-            # Annotate any column that carries a note, inline with the column it belongs to.
-            cols = ", ".join(
-                f"{col}(📝{sanitize_note(col_notes[col.strip().lower()])})"
-                if col.strip().lower() in col_notes else col
-                for col in c["columns"][:25]
-            )
-            summary = f" — {c['summary']}" if c["summary"] else ""
-            note_tag = (f"  📝 TABLE NOTE (authoritative): {sanitize_note(entry['table'])}"
-                        if entry.get("table") else "")
-            lines.append(f"- {c['database']}.{c['table']} [{cols}]{summary}{note_tag}")
-        already = ", ".join(f"{db}.{t}" for (db, t) in confirmed) or "(none)"
-        system = (
-            "You are a schema linker for Text-to-SQL. From the candidate tables (each shown with "
-            "its columns), pick the MINIMAL set of tables and the specific columns needed to answer "
-            "the question — fewer is better, irrelevant schema hurts SQL accuracy. Decide in ONE "
-            "shot: you already have the candidates and their columns, so confirm everything you need "
-            "now and set sufficient=true. Only set sufficient=false (with `missing`) if a needed "
-            "table is clearly absent from the candidates. If the question is genuinely ambiguous "
-            "about which table/field is meant, return an ask.\n"
-            "A 📝 USER NOTE on a candidate is AUTHORITATIVE and OVERRIDES its summary: if a note "
-            "says a table is deprecated/wrong or names a replacement, you MUST NOT pick that table — "
-            "pick the replacement the note points to (it is among the candidates). Return JSON only."
-        )
-        user = (
-            f"Question:\n{question}\n\nAlready confirmed: {already}\n\n"
-            f"Candidate tables:\n" + "\n".join(lines) + "\n\n"
-            'Return {"tables":[{"database":"","table":"","columns":["..."],"reason":"..."}],'
-            ' "sufficient":true, "missing":"", "ask":null}. '
-            'Set ask={"question":"...","options":["..."]} only when truly ambiguous.'
-        )
-        try:
-            payload = self.orch.llm.complete_json(
-                [LLMMessage("system", system), LLMMessage("user", user)],
-                schema_hint='{"tables":[{"database","table","columns","reason"}],"sufficient":bool,"missing":str,"ask":null}',
-            )
-            return payload if isinstance(payload, dict) else {}
-        except Exception:
-            return {}
 
-    def _confirm(self, sel: dict[str, Any], database: str,
-                 confirmed: dict[tuple[str, str], dict[str, Any]], dropped: list[str]) -> None:
-        table = str(sel.get("table") or "").strip()
+def _request_text(request: str, focus_terms: list[str], need: str) -> str:
+    parts = [str(request or "").strip()]
+    if focus_terms:
+        parts.append("Focus terms: " + ", ".join(str(x) for x in focus_terms if str(x).strip()))
+    if need:
+        parts.append("Need: " + str(need).strip())
+    return "\n".join(p for p in parts if p)
+
+
+def _targets_from_scope(scope: dict[str, Any] | None, database: str) -> list[tuple[str, str]]:
+    if not isinstance(scope, dict):
+        return []
+    out: list[tuple[str, str]] = []
+    for raw in scope.get("tables") or []:
+        if not isinstance(raw, dict):
+            continue
+        table = str(raw.get("table") or "").strip()
         if not table:
-            return
-        db = str(sel.get("database") or database or "").strip()
-        # The model often echoes the display name "db.table" into the table field with
-        # an empty database — split it so describe_table hits the real catalog entry
-        # (otherwise it confirms a table with zero columns and a misleading note).
-        from dbaide.agent.schema_context import normalize_db_table
-        db, table = normalize_db_table(table, db)
-        try:
-            cols = self.orch.schema.describe_table(table, database=db)  # existence (real catalog)
-        except Exception:
-            dropped.append(f"table {db}.{table} not found")
-            return
-        by_name = {c.name: c for c in cols}
-        wanted = [str(x).strip() for x in (sel.get("columns") or []) if str(x).strip()]
-        chosen: list[ColumnInfo] = []
-        for name in wanted:
-            if name in by_name:                       # existence + consistency
-                chosen.append(by_name[name])
-            else:
-                dropped.append(f"{table}.{name} (not a column)")
-        if not chosen:
-            chosen = cols  # no valid pick → keep the whole table rather than nothing
-        key = (db, table)
-        prior = confirmed.get(key)
-        if prior:  # monotonic union — never remove a confirmed column
-            names = {c.name for c in prior["columns"]}
-            prior["columns"].extend(c for c in chosen if c.name not in names)
-        else:
-            confirmed[key] = {"columns": list(chosen), "reason": str(sel.get("reason") or "")}
-        self.orch.progress(subagent_event(
-            agent="", parent_id=getattr(self, "_base", self.PARENT),
-            node_id=child_node(getattr(self, "_base", self.PARENT), f"confirm {table}"),
-            status="completed",
-            title=f"confirmed {table}: {len(confirmed[key]['columns'])} col(s)",
-            detail=str(sel.get("reason") or "")[:120],
-        ))
+            continue
+        db = str(raw.get("database") or database or "").strip()
+        out.append((db, table))
+    return out
 
-    def _as_tables(self, confirmed: dict[tuple[str, str], dict[str, Any]]) -> list[dict[str, Any]]:
-        return [
-            {"database": db, "table": table, "columns": info["columns"], "reason": info["reason"]}
-            for (db, table), info in confirmed.items()
-        ]
 
-    def _deterministic(self, question: str, database: str) -> ResolvedSchema:
-        """No-LLM fallback: take the discovered tables as-is (full columns)."""
-        base = self.orch.run_state.trace_node or self.PARENT
-        discovery = self.orch._discover(question, parent=child_node(base, "discover"))
-        confirmed: dict[tuple[str, str], dict[str, Any]] = {}
-        for h in discovery.hits:
-            if h.kind != "table" or not h.table:
-                continue
-            db = h.database or database or ""
-            try:
-                cols = self.orch.schema.describe_table(h.table, database=db)
-            except Exception:
-                continue
-            confirmed[(db, h.table)] = {"columns": cols, "reason": ""}
-        joins = collect_relations(self.orch, list(confirmed.keys()), question=question,
-                                  parent=child_node(base, "relations")) if len(confirmed) >= 2 else []
-        return ResolvedSchema(tables=self._as_tables(confirmed), joins=joins,
-                              sufficient=bool(confirmed))
+def _candidate_to_dict(c: SchemaCandidate) -> dict[str, Any]:
+    return {
+        "database": c.database,
+        "table": c.table,
+        "columns": c.columns,
+        "summary": c.summary,
+        "notes": c.notes,
+        "status": c.status,
+        "exclusion_reason": c.exclusion_reason,
+        "row_count": c.row_count,
+        "indexes": c.indexes,
+        "foreign_keys": c.foreign_keys,
+    }
+
+
+def _column_from_payload(data: dict[str, Any]) -> ColumnInfo:
+    return ColumnInfo(
+        name=str(data.get("name") or ""),
+        data_type=str(data.get("data_type") or ""),
+        comment=str(data.get("comment") or ""),
+        primary_key=bool(data.get("primary_key")),
+        indexed=bool(data.get("indexed")),
+        note=str(data.get("note") or ""),
+    )
+
+
+def _detect_conflicts(candidates: list[SchemaCandidate]) -> list[dict[str, Any]]:
+    conflicts: list[dict[str, Any]] = []
+    active = [c for c in candidates if c.status == "active"]
+    by_metric: dict[str, list[str]] = {}
+    for c in active:
+        label = f"{c.database}.{c.table}" if c.database else c.table
+        for col in c.columns:
+            name = str(col.get("name") or "").lower()
+            if _is_metric_column(name):
+                by_metric.setdefault(name, []).append(label)
+    for name, tables in by_metric.items():
+        if len(tables) >= 2:
+            conflicts.append({
+                "type": "metric_grain_choice",
+                "column": name,
+                "tables": tables,
+                "reason": (
+                    f"Multiple active candidate tables expose metric-like column `{name}`; "
+                    "table/grain choice may change the answer."
+                ),
+            })
+    deprecated = [c for c in candidates if c.status != "active"]
+    for c in deprecated:
+        conflicts.append({
+            "type": c.status,
+            "table": f"{c.database}.{c.table}" if c.database else c.table,
+            "reason": c.exclusion_reason or c.status,
+        })
+    return conflicts
+
+
+def _is_metric_column(name: str) -> bool:
+    if not name:
+        return False
+    if name in {"id", "dt", "date", "created_at", "updated_at"} or name.endswith("_id"):
+        return False
+    return any(token in name for token in (
+        "amount", "quantity", "qty", "count", "cnt", "num", "total", "sum",
+        "price", "cost", "sales", "orders", "pieces", "refund", "delivered",
+        "units", "revenue", "gmv",
+    ))
+
+
+def _is_deprecated_note(note: str) -> bool:
+    text = str(note or "").lower()
+    return any(token in text for token in ("弃用", "停用", "deprecated", "wrong", "do not use"))

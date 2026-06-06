@@ -8,13 +8,13 @@ from dbaide.core.events import TraceEvent
 
 TOOL_TRACE_STAGES = frozenset({
     "discover_schema",
-    "resolve_schema",
+    "retrieve_schema_context",
     "clarify_semantics",
     "describe_table",
+    "retrieve_join_context",
     "generate_sql",
     "validate_sql",
     "execute_sql",
-    "get_relations",
     "validate_joins",
     "list_joins",
     "add_join",
@@ -32,12 +32,12 @@ TOOL_TRACE_STAGES = frozenset({
 # Human-readable phase for each tool stage — what the agent is *doing* right now.
 PHASE_LABELS: dict[str, str] = {
     "discover_schema": "Exploring schema",
-    "resolve_schema": "Linking schema",
+    "retrieve_schema_context": "Reading schema evidence",
     "clarify_semantics": "Confirming criteria",
     "list_databases": "Exploring schema",
     "list_tables": "Exploring schema",
     "describe_table": "Reading tables",
-    "get_relations": "Mapping relations",
+    "retrieve_join_context": "Mapping relations",
     "validate_joins": "Mapping relations",
     "list_joins": "Mapping relations",
     "add_join": "Mapping relations",
@@ -242,23 +242,16 @@ def brief_tool_summary(tool: str, result: Any) -> str:
     if tool == "discover_schema":
         count = data.get("count", len(data.get("hits") or []))
         return f"{count} schema hit(s)"
+    if tool == "retrieve_schema_context":
+        return str(data.get("source_summary") or f"{len(data.get('candidates') or [])} candidate(s)")[:200]
     if tool == "describe_table":
         tables = data.get("disclosed_tables") or []
         cols = data.get("columns") or []
         if tables:
             return f"disclosed {', '.join(str(t) for t in tables)}"
         return f"{len(cols)} column(s)"
-    if tool == "get_relations":
-        rels = data.get("relations") or []
-        declared = sum(1 for r in rels if r.get("source") != "semantic")
-        semantic = sum(1 for r in rels if r.get("source") == "semantic")
-        validated = data.get("validated_count", sum(1 for r in rels if r.get("validated")))
-        parts = [f"{validated}/{len(rels)} validated"]
-        if semantic:
-            parts.append(f"{declared} FK + {semantic} semantic")
-        else:
-            parts.append(f"{len(rels)} relation(s)")
-        return ", ".join(parts)
+    if tool == "retrieve_join_context":
+        return str(data.get("source_summary") or f"{len(data.get('relations') or [])} relation candidate(s)")[:200]
     if tool == "validate_joins":
         rels = data.get("relations") or []
         validated = data.get("validated_count", sum(1 for r in rels if r.get("validated")))
@@ -279,10 +272,6 @@ def brief_tool_summary(tool: str, result: Any) -> str:
         return f"{data.get('row_count', '?')} rows"
     if tool == "ask_user":
         return str(data.get("question") or "waiting for user")[:160]
-    if tool == "resolve_schema":
-        if data.get("pending"):
-            return str(data.get("question") or "needs clarification")[:160]
-        return str(data.get("summary") or f"{len(data.get('tables') or [])} table(s)")[:200]
     if tool == "synthesize_schema_answer":
         return "schema answer ready"
     if tool == "profile_table":
@@ -325,8 +314,7 @@ def trace_dedupe_keys(event: dict[str, Any]) -> frozenset[str]:
 
 def _stage_title(stage: str, title: str) -> str:
     """Combine a stage id and a human title without doubling — when the title
-    already echoes the stage (e.g. stage='resolve_schema', title='resolve_schema'
-    or 'resolve_schema done') the stage prefix is dropped."""
+    already echoes the stage, the stage prefix is dropped."""
     if not title:
         return stage
     if not stage:
@@ -388,4 +376,3 @@ def conversation_trace_step(event: dict[str, Any]) -> tuple[str, str, str] | Non
         return message, step_kind, step_detail
 
     return None
-

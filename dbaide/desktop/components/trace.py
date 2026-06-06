@@ -25,6 +25,7 @@ from dbaide.agent.trace_model import TraceModel, TraceNode
 from dbaide.desktop.components.icons import svg_icon
 from dbaide.desktop.components.inputs import configure_readonly_text_view
 from dbaide.desktop.components.spinner import BusyAnimator, spinner_icon
+from dbaide.desktop.trace_state import InlineTraceState
 from dbaide.desktop.theme import Theme
 
 # Types that get a leading category chip in the tree (plain tool/substep don't —
@@ -104,8 +105,7 @@ class InlineTrace(QFrame):
         self._tree.itemClicked.connect(self._on_click)
         layout.addWidget(self._tree, 1)
 
-        self._model: TraceModel | None = None
-        self._selected_id: str = ""
+        self._state = InlineTraceState()
         # Running rows show a spinning circle (instead of a static ▶) until they
         # resolve. We update just those rows' glyph on each tick — no full re-render.
         self._running_items: list[QTreeWidgetItem] = []
@@ -122,13 +122,7 @@ class InlineTrace(QFrame):
     def set_events(self, events: list[dict[str, Any]], *, live: bool = False) -> None:
         """Rebuild from a list of events. ``live=True`` leaves the model un-finalized
         (the run is still going); ``live=False`` finalizes it."""
-        model = TraceModel()
-        for event in events or []:
-            model.ingest(event)
-        if not live:
-            model.finalize()
-        self._model = model
-        self._selected_id = ""
+        self._state.set_events(events, live=live)
         self._render()
 
     # Back-compat alias used by some callers/tests.
@@ -136,38 +130,32 @@ class InlineTrace(QFrame):
         self.set_events(events, live=False)
 
     def begin_live(self) -> None:
-        self._model = TraceModel()
-        self._selected_id = ""
+        self._state.begin_live()
         self._render()
 
     def append_live_event(self, event: dict[str, Any]) -> None:
-        if self._model is None:
-            self.begin_live()
-        assert self._model is not None
-        self._model.ingest(event)
+        self._state.append_live_event(event)
         if not self._render_timer.isActive():
             self._render_timer.start()  # coalesce bursts into one render per ~60ms
 
     def end_live(self) -> None:
         self._render_timer.stop()
-        if self._model is not None:
-            self._model.finalize()
+        self._state.end_live()
         self._render()
 
     def clear_trace(self) -> None:
-        self._model = None
-        self._selected_id = ""
+        self._state.clear()
         self._running_items = []
         self._busy.stop()
         self._tree.clear()
 
     def is_empty(self) -> bool:
-        return self._model is None or not self._model.steps
+        return self._state.is_empty()
 
     def copy_text(self) -> str:
         """Readable, structured export of this run (steps + SQL, nothing elided)."""
         from dbaide.agent.trace_model import render_trace_text
-        return render_trace_text(self._model) if self._model is not None else ""
+        return render_trace_text(self._state.model) if self._state.model is not None else ""
 
     # ── Rendering ─────────────────────────────────────────────────────────────
 
@@ -182,7 +170,7 @@ class InlineTrace(QFrame):
     def _render(self) -> None:
         self._tree.clear()
         self._running_items = []
-        model = self._model
+        model = self._state.model
         if model is None:
             self._busy.stop()
             return
@@ -274,11 +262,27 @@ class InlineTrace(QFrame):
         data = item.data(0, _NODE_ROLE)
         if not isinstance(data, dict) or data.get("__summary__"):
             return
-        self._selected_id = str(data.get("node_id") or "")
+        self._state.selected_id = str(data.get("node_id") or "")
         dialog = TraceDetailDialog(data, parent=self.window())
         dialog.show()
         dialog.raise_()
         dialog.activateWindow()
+
+    @property
+    def _model(self) -> TraceModel | None:
+        return self._state.model
+
+    @_model.setter
+    def _model(self, value: TraceModel | None) -> None:
+        self._state.model = value
+
+    @property
+    def _selected_id(self) -> str:
+        return self._state.selected_id
+
+    @_selected_id.setter
+    def _selected_id(self, value: str) -> None:
+        self._state.selected_id = str(value or "")
 
 
 class TraceDetailDialog(QDialog):

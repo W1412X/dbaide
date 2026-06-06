@@ -1,7 +1,7 @@
 """Per-run state of a single Ask execution.
 
 One ``RunState`` holds everything the tool loop accumulates while answering one
-question — the discovered/resolved schema, the draft SQL and its confidence, the
+question — discovered schema evidence, the draft SQL and its confidence, the
 pending clarification, confirmed business criteria, etc. It is created fresh at
 the start of every run (``AskOrchestrator._reset_loop_state``) and serialized for
 pause/resume (``dbaide.agent.loop_state``).
@@ -17,6 +17,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any
 
+from dbaide.agent.memory import AgentMemory
 from dbaide.models import ColumnInfo
 
 
@@ -35,10 +36,12 @@ class RunState:
     schemas: dict[str, list[ColumnInfo]] = field(default_factory=dict)
     schema_db: dict[str, str] = field(default_factory=dict)
     relations: list[dict[str, Any]] = field(default_factory=list)
-    resolved_schema: Any = None                             # ResolvedSchema (minimal-necessary) | None
 
     # Trace: node id of the tool step currently running (for nested traces).
     trace_node: str = ""
+
+    # Compressed action-oriented working memory for the single-brain agent loop.
+    memory: AgentMemory = field(default_factory=AgentMemory)
 
     # SQL draft + outcome.
     sql: str = ""

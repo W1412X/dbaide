@@ -173,12 +173,9 @@ class SQLWriter:
         if notes:
             blocks.append(notes)
         blocks += [
-            f"Table: {table}",
+            f"Table: {self._format_table_label(table)}",
             f"Columns:\n{col_lines}",
         ]
-        reasons = self._format_schema_reasons(context)
-        if reasons:
-            blocks.append(reasons)
         rel = self._format_relations(context)
         if rel:
             blocks.append(rel)
@@ -207,13 +204,11 @@ class SQLWriter:
             blocks.append(f"Active database: {next(iter(distinct_dbs))} (reference tables by bare name)")
         blocks.append("Disclosed schemas (use ONLY these tables and columns):")
         for database, table, columns in disclosed_schemas:
-            label = f"{database}.{table}" if (cross_db and database) else table
+            table_label = self._format_table_label(table)
+            label = f"{self._format_table_label(database)}.{table_label}" if (cross_db and database) else table_label
             blocks.append(f"Table: {label}")
             blocks.append("Columns:")
             blocks.append(self._format_columns(columns))
-        reasons = self._format_schema_reasons(context)
-        if reasons:
-            blocks.append(reasons)
         rel = self._format_relations(context)
         if rel:
             blocks.append(rel)
@@ -225,25 +220,21 @@ class SQLWriter:
 
     @staticmethod
     def _prompt_context(context: dict) -> dict:
-        # `tables` is the FULL disclosure dump (every table seen this turn, with all
-        # columns+profiles). The prompt already lists the exact disclosed/resolved
-        # tables above; re-dumping the full set here re-introduces the irrelevant-schema
-        # noise that resolve_schema exists to remove — so drop it.
-        skip = ("foreign_keys", "criteria", "object_notes", "schema_reasons", "tables")
+        # `tables` is the full disclosure dump. The prompt already lists the exact
+        # schemas passed to SQL generation, so re-dumping the full set here can
+        # re-introduce irrelevant evidence the main loop did not select for SQL.
+        skip = ("foreign_keys", "criteria", "object_notes", "tables")
         return {k: v for k, v in context.items() if k not in skip}
 
-    @staticmethod
-    def _format_schema_reasons(context: dict) -> str:
-        """Why the schema linker chose these tables/columns — grounding the SQL writer
-        should honour (e.g. 'picked orders_v2 because orders is deprecated')."""
-        reasons = [r for r in (context.get("schema_reasons") or [])
-                   if str(r.get("reason") or "").strip()]
-        if not reasons:
-            return ""
-        lines = ["Why these tables were chosen (schema linker — honour this intent):"]
-        for r in reasons:
-            lines.append(f"- {r.get('table')}: {str(r.get('reason')).strip()}")
-        return "\n".join(lines)
+    def _format_table_label(self, name: str) -> str:
+        text = str(name or "").strip()
+        if not text:
+            return text
+        if text.replace("_", "").isalnum() and not text[0].isdigit():
+            return text
+        quote = "`" if self.dialect in {"mysql", "mariadb"} else '"'
+        escaped = text.replace(quote, quote + quote)
+        return f"{quote}{escaped}{quote}"
 
     @staticmethod
     def _format_object_notes(context: dict) -> str:

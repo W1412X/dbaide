@@ -165,43 +165,36 @@ class _FakeOrch:
 
 
 def test_schema_linker_sees_table_note(tmp_path):
-    # Reproduces the deprecated-table miss: the linker must SEE the note so it can
-    # avoid the deprecated table. Previously the candidate lines carried only the
-    # asset summary, so the note never reached the table-selecting LLM.
-    from dbaide.agent.schema_link import SchemaLinker
+    # The schema evidence layer must SEE the note and preserve it as excluded
+    # evidence for the main LLM; it no longer chooses the replacement itself.
+    from dbaide.agent.progressive_schema import DiscoveryResult, SchemaHit
+    from dbaide.agent.schema_link import SchemaEvidenceRetriever
 
-    store = AnnotationStore(tmp_path / "ann")
-    store.add("demo", scope="table",
-              note="deprecated; use product_data.product_attributes instead",
-              database="data_analysis", table="product_attributes")
-    llm = _CapturingLLM({
-        "tables": [{"database": "product_data", "table": "product_attributes",
-                    "columns": ["spu_id"], "reason": "current"}],
-        "sufficient": True, "missing": "", "ask": None,
-    })
-    linker = SchemaLinker(_FakeOrch(llm, store))
-    candidates = [
-        {"database": "data_analysis", "table": "product_attributes",
-         "columns": ["id", "design"], "summary": "product attribute details"},
-        {"database": "product_data", "table": "product_attributes",
-         "columns": ["spu_id", "attr_value"], "summary": "attribute values linked to SPU"},
-    ]
-    linker._select("产品的属性在哪个表能找到？", candidates, {})
-    assert "TABLE NOTE" in llm.last_user
-    assert "deprecated; use product_data.product_attributes" in llm.last_user
+    orch, store = _orch(tmp_path)
+    store.add("local", scope="table", note="deprecated; use orders_v2 instead", table="orders")
+    orch._discover = lambda q, *, parent="", column_detail=True: DiscoveryResult(
+        question=q,
+        hits=[SchemaHit(kind="table", path="local.orders", name="orders", table="orders", summary="orders")],
+    )
+    report = SchemaEvidenceRetriever(orch).retrieve("orders")
+    orders = report.candidates[0]
+    assert orders.status == "deprecated"
+    assert "deprecated; use orders_v2 instead" in orders.exclusion_reason
 
 
 def test_schema_linker_shows_column_notes(tmp_path):
-    from dbaide.agent.schema_link import SchemaLinker
+    from dbaide.agent.progressive_schema import DiscoveryResult, SchemaHit
+    from dbaide.agent.schema_link import SchemaEvidenceRetriever
 
-    store = AnnotationStore(tmp_path / "ann")
-    store.add("demo", scope="column", note="UTC; +8 on display",
-              database="shop", table="orders", column="paid_at")
-    llm = _CapturingLLM({"tables": [], "sufficient": True})
-    linker = SchemaLinker(_FakeOrch(llm, store))
-    linker._select("q", [{"database": "shop", "table": "orders",
-                          "columns": ["id", "paid_at"], "summary": "orders"}], {})
-    assert "paid_at(📝UTC; +8 on display)" in llm.last_user
+    orch, store = _orch(tmp_path)
+    store.add("local", scope="column", note="UTC; +8 on display", table="orders", column="paid_at")
+    orch._discover = lambda q, *, parent="", column_detail=True: DiscoveryResult(
+        question=q,
+        hits=[SchemaHit(kind="table", path="local.orders", name="orders", table="orders", summary="orders")],
+    )
+    report = SchemaEvidenceRetriever(orch).retrieve("orders")
+    paid_at = next(col for col in report.candidates[0].columns if col["name"] == "paid_at")
+    assert paid_at["note"] == "UTC; +8 on display"
 
 
 def test_attach_notes_to_hits(tmp_path):
@@ -225,7 +218,7 @@ def test_attach_notes_to_hits(tmp_path):
 
 
 def test_synthesize_answer_sees_notes(tmp_path):
-    # The "which table?" answer path bypasses the schema linker — it must also see
+    # The schema answer path must also see
     # notes or it will point the user at the deprecated table.
     from dbaide.agent.progressive_schema import ProgressiveSchemaAgent, DiscoveryResult, SchemaHit
 

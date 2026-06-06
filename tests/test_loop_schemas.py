@@ -69,6 +69,26 @@ def test_describe_table_accumulates_schemas(tmp_path):
     assert orch.run_state.columns == orch.run_state.schemas["users"]
 
 
+def test_describe_table_returns_table_metadata(tmp_path):
+    db = tmp_path / "app.db"
+    make_multi_db(db)
+    conn = sqlite3.connect(db)
+    conn.execute("CREATE INDEX idx_orders_user ON orders(user_id)")
+    conn.commit()
+    conn.close()
+    cfg = ConnectionConfig(name="local", type="sqlite", path=str(db))
+    orch = AskOrchestrator(build_adapter(cfg), Session(connection=cfg), PromptCaptureLLM())
+    registry = build_tool_registry(orch)
+    orch._reset_loop_state("describe orders", "", True)
+
+    result = registry.invoke("describe_table", {"table": "orders"}, ToolContext())
+
+    assert result.ok
+    assert result.data["indexes"]
+    assert result.data["foreign_keys"]
+    assert result.data["foreign_keys"][0]["ref_table"] == "users"
+
+
 def test_generate_sql_uses_all_disclosed_schemas(tmp_path):
     db = tmp_path / "app.db"
     make_multi_db(db)

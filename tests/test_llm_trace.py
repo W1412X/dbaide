@@ -9,13 +9,13 @@ class _Echo(LLMClient):
 def test_recorder_captures_with_stage():
     rec = RecordingLLMClient(_Echo())
     start = rec.snapshot_len()
-    with llm_stage("resolve_schema"):
-        rec.complete_json([LLMMessage("system", "you are a schema linker"),
+    with llm_stage("retrieve_schema_context"):
+        rec.complete_json([LLMMessage("system", "you retrieve schema evidence"),
                            LLMMessage("user", "Q + candidates")])
     calls = rec.since(start)
     assert len(calls) == 1
-    assert calls[0]["stage"] == "resolve_schema"
-    assert calls[0]["messages"][0]["content"] == "you are a schema linker"
+    assert calls[0]["stage"] == "retrieve_schema_context"
+    assert calls[0]["messages"][0]["content"] == "you retrieve schema evidence"
     assert '"ok": true' in calls[0]["response"]
 
 def test_render_includes_llm_calls():

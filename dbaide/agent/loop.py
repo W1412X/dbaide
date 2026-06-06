@@ -10,7 +10,7 @@ from typing import Any, Callable
 from dbaide.agent.answer_stream import JsonFieldStreamer
 from dbaide.agent.loop_state import dump_loop_state, restore_loop_state
 from dbaide.agent.progress_events import brief_tool_summary, from_trace_event, progress_event
-from dbaide.agent.schema_context import decision_notes_block, disclosed_table_keys
+from dbaide.agent.schema_context import decision_notes_block
 from dbaide.agent.llm_trace import llm_stage
 from dbaide.i18n import answer_language_directive
 from dbaide.agent.runtime import AgentRuntime
@@ -116,6 +116,8 @@ class AskAgentLoop:
         self._trace_parent = trace_parent
         transcript: list[str] = []
         approved_risk_sql = ""
+        sql_failures = 0
+        max_sql_retries = max(0, int(getattr(orch.session, "agent_sql_retries", 0)))
 
         if resume_state:
             transcript, execute = restore_loop_state(orch, resume_state)
@@ -125,10 +127,13 @@ class AskAgentLoop:
                 # If the pause was a business-criteria (口径) clarification, fold the
                 # reply into the confirmed criteria so generate_sql honours it exactly.
                 if orch.run_state.clarify_questions:
-                    orch.run_state.clarifications.append(
+                    fact = (
                         f"User confirmed the following criteria — {orch.run_state.clarify_questions}\n"
                         f"User's answer: {reply}"
                     )
+                    orch.run_state.clarifications.append(fact)
+                    orch.run_state.memory.confirmed_facts.append(fact)
+                    orch.run_state.memory.resolve_open_question(orch.run_state.clarify_questions)
                     orch.run_state.clarify_questions = ""
                 if orch.run_state.risk_confirmation:
                     risk = dict(orch.run_state.risk_confirmation)
@@ -155,6 +160,12 @@ class AskAgentLoop:
                 self.progress(
                     progress_event(stage="user", title=f"Reply: {reply[:120]}", status="completed", kind="user"),
                 )
+                orch.run_state.memory.record_work(
+                    action="user_reply",
+                    args={"reply": reply},
+                    ok=True,
+                    summary="User replied to a pending confirmation/clarification.",
+                )
             state = LoopState(
                 question=str(resume_state.get("question") or question),
                 database=str(resume_state.get("database") or database),
@@ -175,6 +186,7 @@ class AskAgentLoop:
         tool_ctx = ToolContext(
             execution_policy=orch.execution_policy.value,
             trace_sink=self._trace_sink,
+            cancel_check=orch.cancel_check,
         )
         runtime = AgentRuntime(
             llm=orch.llm,
@@ -182,6 +194,7 @@ class AskAgentLoop:
             execution_policy=orch.execution_policy,
             trace_sink=self._trace_sink,
             max_steps=orch.session.agent_max_steps,
+            cancel_check=orch.cancel_check,
         )
 
         if approved_risk_sql:
@@ -226,6 +239,7 @@ class AskAgentLoop:
                 logger.warning("loop_decision_failed: %s", exc)
                 return self._build_failed_response(orch, f"decision_invalid: {exc}", disclosures_before or [])
 
+            self._apply_decision_memory(decision)
             action = str(decision.get("action") or "").strip().lower()
             if action == "finish":
                 answer = str(decision.get("answer") or "").strip()
@@ -299,6 +313,23 @@ class AskAgentLoop:
             brief = brief_tool_summary(tool_name, result)
             state.calls.append(ToolCallRecord(tool=tool_name, args=args, ok=result.ok, summary=summary))
             transcript.append(f"Tool `{tool_name}` → {summary}")
+            artifacts = []
+            data_for_memory = result.data if isinstance(result.data, dict) else {}
+            if isinstance(data_for_memory, dict):
+                for key in ("report_id", "artifact_id"):
+                    if data_for_memory.get(key):
+                        artifacts.append(str(data_for_memory[key]))
+                if data_for_memory.get("pending"):
+                    q = str(data_for_memory.get("question") or orch.run_state.pending_question or "")
+                    if q:
+                        orch.run_state.memory.add_open_question(q)
+            orch.run_state.memory.record_work(
+                action=tool_name,
+                args=args,
+                ok=result.ok,
+                summary=summary,
+                artifacts=artifacts,
+            )
             # Put the exact SQL on the execute/explain step itself, so clicking the
             # step in the trace surfaces the SQL the system ran (full auditability).
             done_detail = brief
@@ -349,20 +380,19 @@ class AskAgentLoop:
                     done_event["database"] = db
             self.progress(done_event)
 
-            # Any tool may pause for the user (ask_user, or resolve_schema when the
-            # question is ambiguous) by returning a pending question.
+            if self._counts_as_sql_failure(tool_name, result):
+                sql_failures += 1
+                if sql_failures > max_sql_retries:
+                    reason = (
+                        f"sql_repair_budget_exhausted after {sql_failures} failed "
+                        f"SQL generation/validation/execution attempt(s)"
+                    )
+                    logger.warning(reason)
+                    return self._build_failed_response(orch, reason, disclosures_before or [])
+
+            # Any tool may pause for the user by returning a pending question.
             if result.ok and isinstance(result.data, dict) and result.data.get("pending"):
                 return self._build_wait_response(orch, state, transcript, disclosures_before or [])
-
-            if tool_name == "describe_table" and result.ok:
-                auto = self._auto_get_relations_if_needed(state, runtime, tool_ctx)
-                if auto is not None:
-                    summary = _summarize_tool_result("get_relations", auto)
-                    brief = brief_tool_summary("get_relations", auto)
-                    state.calls.append(
-                        ToolCallRecord(tool="get_relations", args={}, ok=auto.ok, summary=summary),
-                    )
-                    transcript.append(f"Tool `get_relations` (auto) → {summary}")
 
             if self._stop_after_tool(orch, state, tool_name, result):
                 break
@@ -417,6 +447,18 @@ class AskAgentLoop:
             return True
         return False
 
+    @staticmethod
+    def _counts_as_sql_failure(tool_name: str, result: ToolResult) -> bool:
+        if tool_name not in {"generate_sql", "validate_sql", "execute_sql", "execute_readonly_sql"}:
+            return False
+        if result.ok:
+            return False
+        data = result.data if isinstance(result.data, dict) else {}
+        # Policy blocks are terminal decisions, not failed repair attempts.
+        if data.get("blocked"):
+            return False
+        return True
+
     def _fail(self, reason: str) -> None:
         self.orchestrator.run_state.fail_reason = reason
 
@@ -445,45 +487,6 @@ class AskAgentLoop:
             warnings=[t("agent.loop_failed_reason", reason=reason)],
         )
 
-    def _auto_get_relations_if_needed(
-        self,
-        state: LoopState,
-        runtime: AgentRuntime,
-        tool_ctx: ToolContext,
-    ) -> ToolResult | None:
-        """Codex-style deterministic step: load FKs once multiple tables are disclosed."""
-        orch = self.orchestrator
-        tables = disclosed_table_keys(orch)
-        if len(tables) < 2:
-            return None
-        for call in state.calls:
-            if call.tool == "get_relations" and call.ok:
-                return None
-        self.progress(
-            progress_event(
-                stage="get_relations",
-                title="Auto: loading foreign-key relations",
-                status="running",
-                kind="decision",
-                detail=", ".join(f"{db}.{t}" for db, t in tables),
-            ),
-        )
-        # Cheap auto-load: declared FKs + catalog only. Semantic inference is a
-        # last-resort, on-demand step (generate_sql runs it for the tables it joins).
-        result = runtime.call_tool("get_relations", {"infer_semantic": False}, tool_ctx)
-        brief = brief_tool_summary("get_relations", result)
-        self.progress(
-            progress_event(
-                stage="get_relations",
-                title="get_relations done (auto)",
-                status="completed" if result.ok else "failed",
-                kind="tool",
-                detail=brief,
-                duration_ms=float(getattr(result, "duration_ms", 0) or 0),
-            ),
-        )
-        return result
-
     def _emit_answer_chunk(self, text: str) -> None:
         """Forward a streamed slice of the final answer to the UI. Tagged so the UI
         routes it to the answer block, not the trace."""
@@ -495,47 +498,52 @@ class AskAgentLoop:
         """The static decision-policy system prompt (how the agent should work)."""
         return (
 "You are DBAide, a database assistant operating in a tool loop.\n"
-            "Choose the next action to answer the user.\n\n"
-            "How to work (read carefully):\n"
-            "• Big direction first, then detail — get the relevant tables, THEN their columns. "
-            "Never scan the whole database to find a needle.\n"
-            "• Assets first — discover_schema and resolve_schema read the offline assets and narrow "
-            "by relevance (instance → database → table). They are the default way to learn schema.\n"
-            "• Only touch the live database (list_tables / describe_table / SQL) when the assets can't "
-            "answer it — e.g. assets are missing, or a tool reports a missing table/column. Do NOT open "
-            "with list_tables; it returns everything and wastes steps.\n"
-            "• Be decisive: take the fewest steps. Confirm what you can in one shot; only iterate when the "
-            "task is genuinely progressive (need B's result to do C).\n"
-            "• NEVER GUESS the meaning of the question. A query runs against real data — a wrong "
-            "interpretation gives a confidently wrong number. If ANYTHING about how to answer is uncertain "
-            "and would change the result — which table/column to use, what a status/flag/category value "
-            "means, how time is stored or which timezone a window means, what a metric counts, which rows "
-            "are in scope, units — you MUST confirm with the user (clarify_semantics, or ask_user) rather "
-            "than assume. This is open-ended, not a checklist; it can arise at ANY step (while exploring, "
-            "after seeing a column's values, before writing SQL) and more than once. Never invent a "
-            "default that presumes a business fact (a timezone, a status value, a region, a table).\n\n"
+            "You are the only decision-making brain. Tools collect evidence; they do not decide "
+            "which schema, metric, filter, or final answer is correct. Think, act, incorporate the "
+            "result into memory, then choose the next step until the user's single intent is solved.\n\n"
+            "How to work:\n"
+            "• Keep global sight of the original goal and the compressed memory. Avoid repeating "
+            "actions already listed in the action ledger unless new evidence changes the situation.\n"
+            "• Use retrieve_schema_context first for data questions. It returns only schema evidence: "
+            "candidate tables, user notes, deprecated/excluded paths, conflicts and columns. If it shows "
+            "several plausible active tables/columns/grains whose choice changes the answer, ask_user "
+            "with concrete options or inspect more evidence. Do not silently collapse candidates.\n"
+            "• Join/relation evidence is a separate responsibility. After you have narrowed the relevant "
+            "tables and the SQL needs a join, call retrieve_join_context with those table names. By default "
+            "it reads only user-saved joins and declared FKs. Set infer_semantic=true or validate_sample=true "
+            "only when you explicitly need that extra evidence; you still decide whether the relation matches "
+            "the user's intent and grain.\n"
+            "• User notes are authoritative. If a note says a table/column is deprecated, wrong, has a "
+            "timezone, or defines a status value, obey it and preserve that fact in memory.\n"
+            "• SQL is an exploration tool as well as the final query. You may run multiple focused "
+            "read-only SQL statements to inspect counts, samples, consistency, or compare hypotheses, "
+            "then use their artifact ids and summaries in later reasoning.\n"
+            "• Ask the user whenever an unresolved business choice would change the result. This can "
+            "happen during schema exploration, after profiling values, after seeing SQL results, or "
+            "before final SQL. Prefer exact candidate table/column/value options.\n"
+            "• Do not invent tables, columns, SQL features, status meanings, units, or timezones. The "
+            f"current connection session timezone is configured in the connection; SQL writer also sees it.\n\n"
             f"Execution policy: {policy} (execute_sql is {execute_note})\n\n"
             "Available tools:\n"
             f"{tool_lines}\n\n"
-            "Return JSON only:\n"
-            '  {"action":"call_tool","tool":"resolve_schema","args":{"question":"..."},"thought":"..."}\n'
-            '  {"action":"finish","answer":"markdown answer for the user"}\n\n'
-            "Guidelines:\n"
-            "- Schema / where-is questions: discover_schema → synthesize_schema_answer → finish\n"
-            "- Data queries: resolve_schema → clarify_semantics → generate_sql → validate_sql"
+            "Return JSON only. You may include memory_updates so the next round has compressed context:\n"
+            '  {"action":"call_tool","tool":"retrieve_schema_context","args":{"request":"..."},"thought":"...",'
+            '"memory_updates":{"findings":[],"excluded_paths":[],"open_questions":[]},"next_action_hint":"..."}\n'
+            '  {"action":"finish","answer":"markdown answer for the user","memory_updates":{"findings":[]}}\n\n'
+            "Tool guidance:\n"
+            "- Schema / where-is questions: discover_schema or retrieve_schema_context → synthesize_schema_answer or finish\n"
+            "- Data queries: retrieve_schema_context, inspect/profile/run exploratory SQL as needed, call retrieve_join_context if joins are needed, ask_user if necessary, then generate_sql → validate_sql"
             + (" → execute_sql → finish" if state.execute_allowed and policy not in ("sql_only", "inspect_only") else " → finish")
             + "\n"
-            "- resolve_schema returns the MINIMAL tables/columns + joins in ONE step; generate_sql then uses exactly that. Prefer it over manual discover/describe for data queries — don't re-explore what it already resolved.\n"
-            "- clarify_semantics: ALWAYS resolve_schema FIRST so clarification is grounded in the real tables/columns/values — never clarify before the relevant schema is in hand (an ungrounded question invites guessing). It inspects the resolved schema (and the real observed values of its columns) and surfaces EVERY genuinely-uncertain interpretation as a question for the user — open-ended, whatever applies (value encodings, which column, time/timezone, metric definition, scope, …), with its candidate options drawn from the actual schema/values. If it pauses, wait for the reply; if it returns clear, proceed. You may also call it again later if new uncertainty appears (e.g. after inspecting more data). Do not substitute your own guess for it.\n"
-            "- Only fall back to manual describe_table/get_relations if resolve_schema is insufficient or validate_sql reports a missing table/column.\n"
-            "- get_relations already includes sample evidence; call validate_joins only when the user explicitly asks to re-check joins.\n"
-            "- Saved joins (user catalog) are loaded automatically inside get_relations; use list_joins only when the user asks to inspect saved joins.\n"
-            "- If schema is ambiguous or multiple valid interpretations exist, call ask_user before guessing — and GROUND it in the schema: when the uncertainty is which column/table/value, pass the actual candidate column names, table names, or observed values (from the resolved schema you already have) as `options` so the user just picks one. Never ask an open 'which field?' question when the candidates are already in the schema; leave options empty only when the answer is genuinely outside the schema (e.g. a timezone).\n"
+            "- generate_sql uses all currently disclosed schemas unless you pass tables. If retrieve_schema_context returned many candidates, pass only the table names you intentionally chose; otherwise inspect or ask first.\n"
+            "- retrieve_join_context does not run semantic inference or sample validation unless you ask for those flags. Call validate_joins only when the user explicitly asks to re-check already loaded joins.\n"
+            "- Use list_joins only when the user asks to inspect saved joins.\n"
+            "- If schema is ambiguous or multiple valid interpretations exist at any point, ask before guessing. Ground options in actual candidate table names, column names, or observed values; never ask an open 'which field?' question when the candidates are known.\n"
             "- ask_user pauses the run until the user replies; the next user message resumes the same workflow.\n"
             "- If validate_sql reports unknown tables/columns, describe_table then retry generate_sql.\n"
             "- describe_table returns the table's full structure (columns, types, indexes, FKs) plus a small sample — the table is the lowest pre-built level; there are no per-column docs.\n"
             "- For a column's value ranges / null rate / distinct / length, call column_stats (pick only the metrics you need); for a whole-table overview omit columns. To learn a column's actual values (e.g. which status/flag value means what), use column_stats with metrics=[\"top_values\"].\n"
-            "- Do NOT repeat the same tool call with the same args. If a tool didn't give you what you need (empty/unchanged result, or a `note` that something isn't available), change approach — and if you still can't determine a value's business meaning, ask_user (or clarify_semantics) ONCE rather than profiling again.\n"
+            "- Do NOT repeat the same tool call with the same args. If a tool didn't give you what you need, change approach or ask_user.\n"
             "- Profile questions: discover_schema → describe_table → column_stats → finish\n"
             "- SQL explain: validate_sql or explain_sql as needed → finish\n"
             "- Do not invent tables or columns. Prefer precision over listing everything.\n"
@@ -551,12 +559,12 @@ class AskAgentLoop:
         """Per-step user prompt: question, scope, authoritative notes, confirmed
         criteria, pinned schema, and recent tool history."""
 
-        history = "\n\n".join(transcript[-8:]) if transcript else "(no tool calls yet)"
+        history = "\n\n".join(transcript[-12:]) if transcript else "(no recent raw tool calls)"
         # Surface the user's pinned schema (composer attachments) so the model knows
-        # which tables were explicitly attached and can resolve_schema on them directly
+        # which tables were explicitly attached and can retrieve schema evidence on them directly
         # instead of re-discovering the whole database.
         pins = _pinned_scope_labels(getattr(self.orchestrator, "schema_scope", None))
-        pin_line = (f"User-attached schema (prefer these; resolve_schema on them directly, "
+        pin_line = (f"User-attached schema (prefer these; retrieve_schema_context on them directly, "
                     f"no broad discovery needed): {', '.join(pins)}\n\n") if pins else ""
         notes = decision_notes_block(self.orchestrator, state.database)
         notes_line = f"{notes}\n\n" if notes else ""
@@ -569,19 +577,43 @@ class AskAgentLoop:
                 "Confirmed criteria (already settled with the user — honour these, do NOT re-ask):\n"
                 + "\n".join(f"- {c}" for c in confirmed) + "\n\n"
             )
+        timezone = str(getattr(self.orchestrator.session.connection, "session_timezone", "UTC") or "UTC")
         user = (
             f"User question:\n{state.question}\n\n"
             f"Database scope: {state.database or '(any)'}\n\n"
+            f"Connection session timezone: {timezone}\n\n"
             f"{notes_line}"
             f"{criteria_line}"
             f"{pin_line}"
-            f"Tool history:\n{history}"
+            f"Compressed working memory:\n{self.orchestrator.run_state.memory.prompt_block() or '(empty)'}\n\n"
+            f"Recent raw tool results (only for extra detail; prefer memory):\n{history}"
         )
         return user
 
+    def _apply_decision_memory(self, decision: dict[str, Any]) -> None:
+        mem = self.orchestrator.run_state.memory
+        updates = decision.get("memory_updates") if isinstance(decision.get("memory_updates"), dict) else {}
+        for item in updates.get("findings") or []:
+            if isinstance(item, dict):
+                mem.add_finding(str(item.get("text") or ""), source=str(item.get("source") or "decision"))
+            else:
+                mem.add_finding(str(item), source="decision")
+        for item in updates.get("open_questions") or []:
+            mem.add_open_question(str(item.get("text") if isinstance(item, dict) else item))
+        for item in updates.get("excluded_paths") or []:
+            if isinstance(item, dict):
+                mem.add_exclusion(
+                    str(item.get("target") or ""),
+                    str(item.get("reason") or ""),
+                    evidence_ref=str(item.get("evidence_ref") or "decision"),
+                )
+        hint = str(decision.get("next_action_hint") or "").strip()
+        if hint:
+            mem.next_action_hint = hint[:500]
+
     def _decide(self, state: LoopState, transcript: list[str]) -> dict[str, Any]:
         tools = loop_tool_specs(self.registry)
-        tool_lines = "\n".join(f"- {s.name}: {s.description}" for s in tools)
+        tool_lines = "\n".join(_tool_prompt_line(s) for s in tools)
         policy = self.orchestrator.execution_policy.value
         execute_note = "allowed" if state.execute_allowed else "disabled"
 
@@ -597,17 +629,25 @@ class AskAgentLoop:
                            '"thought":"...","answer":"..."}')
             orch = self.orchestrator
             try:
+                if orch.cancel_check:
+                    orch.cancel_check()
                 if getattr(orch, "stream_answers", False) and orch.llm.supports_streaming():
                     # Stream the decision; surface only the "answer" field's tokens live
                     # so the FINAL answer arrives token-by-token (intermediate call_tool
                     # decisions have no answer field → nothing streams). The full JSON is
                     # still parsed below, so the answer is authoritative regardless.
                     streamer = JsonFieldStreamer(self._emit_answer_chunk, field="answer")
+                    def on_chunk(chunk: str) -> None:
+                        if orch.cancel_check:
+                            orch.cancel_check()
+                        streamer.feed(chunk)
                     payload = orch.llm.complete_json_stream(
-                        messages, schema_hint=schema_hint, on_text_chunk=streamer.feed
+                        messages, schema_hint=schema_hint, on_text_chunk=on_chunk
                     )
                 else:
                     payload = orch.llm.complete_json(messages, schema_hint=schema_hint)
+                if orch.cancel_check:
+                    orch.cancel_check()
             except ValueError as exc:
                 # Malformed JSON (e.g. bad escaping) — don't abort the whole run; feed the
                 # error back and let the model re-emit valid JSON on the next attempt.
@@ -740,3 +780,11 @@ def _summarize_tool_result(tool: str, result: ToolResult) -> str:
     if len(text) > RESULT_PREVIEW_LIMIT:
         return text[:RESULT_PREVIEW_LIMIT] + "…[truncated]"
     return text
+
+
+def _tool_prompt_line(spec) -> str:
+    schema = getattr(spec, "input_schema", None) or {}
+    if schema:
+        args = ", ".join(f"{key}: {value}" for key, value in schema.items())
+        return f"- {spec.name}(args: {{{args}}}): {spec.description}"
+    return f"- {spec.name}(args: {{}}): {spec.description}"

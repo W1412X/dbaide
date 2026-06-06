@@ -4,7 +4,6 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from dbaide.core.errors import DBAideError, ErrorCode, RepairAction
 from dbaide.core.result import ExecutionPolicy, ValidationReport
 
 logger = logging.getLogger("dbaide.agent.controllers")
@@ -219,72 +218,3 @@ def _prefers_chinese(text: str) -> bool:
         return get_language() == "zh"
     except Exception:
         return False
-
-
-# ─────────────────────────────────────────────────────────────────────────────
-# ErrorRouter
-# ─────────────────────────────────────────────────────────────────────────────
-
-class ErrorRouter:
-    """Routes errors to repair actions.
-
-    Inspired by Claude Code's self-correction pattern.
-    """
-
-    # Error code -> repair action mapping
-    REPAIR_MAP = {
-        ErrorCode.UNKNOWN_TABLE: RepairAction.REFRESH_SCHEMA,
-        ErrorCode.UNKNOWN_COLUMN: RepairAction.REFRESH_SCHEMA,
-        ErrorCode.UNSAFE_SQL: RepairAction.STOP,
-        ErrorCode.SQL_EXPLAIN_FAILED: RepairAction.RERENDER_SQL,
-        ErrorCode.SQL_EXECUTION_FAILED: RepairAction.RERENDER_SQL,
-        ErrorCode.QUERY_TIMEOUT: RepairAction.REPLAN,
-        ErrorCode.EMPTY_RESULT: RepairAction.ASK_USER,
-        ErrorCode.ASSET_MISSING: RepairAction.REBUILD_ASSET,
-        ErrorCode.ASSET_STALE: RepairAction.REBUILD_ASSET,
-        ErrorCode.MODEL_UNAVAILABLE: RepairAction.STOP,
-        ErrorCode.LLM_ERROR: RepairAction.REPLAN,
-        ErrorCode.CONNECTION_FAILED: RepairAction.STOP,
-        ErrorCode.PERMISSION_DENIED: RepairAction.STOP,
-        ErrorCode.USER_CANCELLED: RepairAction.STOP,
-    }
-
-    def __init__(self) -> None:
-        self._repair_counts: dict[str, int] = {}
-        self._max_repairs_per_stage = 2
-        self._max_repairs_total = 5
-
-    def route(self, error: DBAideError, stage: str) -> RepairAction:
-        """Determine repair action for an error."""
-        action = self.REPAIR_MAP.get(error.code, RepairAction.STOP)
-
-        # Check repair budget
-        stage_key = f"{stage}:{action.value}"
-        stage_count = self._repair_counts.get(stage_key, 0)
-        total_count = sum(self._repair_counts.values())
-
-        if stage_count >= self._max_repairs_per_stage:
-            logger.warning("repair budget exhausted for stage %s", stage)
-            return RepairAction.STOP
-
-        if total_count >= self._max_repairs_total:
-            logger.warning("total repair budget exhausted")
-            return RepairAction.STOP
-
-        # Record repair attempt
-        self._repair_counts[stage_key] = stage_count + 1
-
-        return action
-
-    def reset(self) -> None:
-        """Reset repair counters for a new workflow."""
-        self._repair_counts.clear()
-
-    def should_retry(self, error: DBAideError) -> bool:
-        """Check if error is retryable."""
-        return error.retryable and error.code in {
-            ErrorCode.SQL_EXECUTION_FAILED,
-            ErrorCode.QUERY_TIMEOUT,
-            ErrorCode.LLM_ERROR,
-            ErrorCode.CONNECTION_FAILED,
-        }

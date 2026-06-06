@@ -68,14 +68,12 @@ class MultiMock(LLMClient):
                 return {"action": "finish", "answer": "orders has id, amount, status."} if n else \
                        {"action": "call_tool", "tool": "discover_schema", "args": {"question": q}}
             seq = [
-                {"action": "call_tool", "tool": "resolve_schema", "args": {"question": q}},
+                {"action": "call_tool", "tool": "retrieve_schema_context", "args": {"request": q}},
                 {"action": "call_tool", "tool": "generate_sql", "args": {}},
                 {"action": "call_tool", "tool": "validate_sql", "args": {}},
                 {"action": "call_tool", "tool": "execute_sql", "args": {}},
             ]
             return seq[n] if n < len(seq) else {"action": "finish", "answer": "Counted paid orders."}
-        if "schema linker" in system:
-            return {"tables": [{"database": "main", "table": "orders", "columns": ["id", "status"]}], "sufficient": True}
         if "generate safe read-only SQL" in system:
             return {"sql": "SELECT COUNT(*) AS n FROM orders WHERE status='paid'", "rationale": "count", "confidence": 0.9}
         return {}

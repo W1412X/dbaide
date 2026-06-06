@@ -45,7 +45,7 @@ class ToolContext:
 
     __slots__ = (
         "workflow_id", "connection", "adapter", "asset_store",
-        "session", "execution_policy", "trace_sink",
+        "session", "execution_policy", "trace_sink", "cancel_check",
     )
 
     def __init__(
@@ -58,6 +58,7 @@ class ToolContext:
         session: Any = None,
         execution_policy: str = "safe_auto",
         trace_sink: Callable[[TraceEvent], None] | None = None,
+        cancel_check: Callable[[], None] | None = None,
     ) -> None:
         self.workflow_id = workflow_id
         self.connection = connection
@@ -66,10 +67,15 @@ class ToolContext:
         self.session = session
         self.execution_policy = execution_policy
         self.trace_sink = trace_sink
+        self.cancel_check = cancel_check
 
     def emit_trace(self, event: TraceEvent) -> None:
         if self.trace_sink:
             self.trace_sink(event)
+
+    def check_cancelled(self) -> None:
+        if self.cancel_check:
+            self.cancel_check()
 
 
 class ToolRegistry:
@@ -101,6 +107,7 @@ class ToolRegistry:
 
     def invoke(self, name: str, arguments: dict[str, Any], ctx: ToolContext) -> ToolResult:
         """Invoke a tool with arguments and context."""
+        ctx.check_cancelled()
         if name not in self._specs:
             return ToolResult(
                 ok=False,
@@ -138,7 +145,9 @@ class ToolRegistry:
         ))
 
         try:
+            ctx.check_cancelled()
             result = handler(arguments, ctx)
+            ctx.check_cancelled()
             elapsed = (time.perf_counter() - start) * 1000
 
             if not isinstance(result, ToolResult):

@@ -2,9 +2,11 @@
 from __future__ import annotations
 
 import hashlib
+import inspect
 import logging
 from typing import Any
 
+from dbaide.agent.memory import SQLArtifact
 from dbaide.core.result import ExecutionPolicy
 from dbaide.tools.registry import ToolContext, ToolRegistry, ToolResult
 from dbaide.tools.specs import (
@@ -13,12 +15,12 @@ from dbaide.tools.specs import (
 )
 from dbaide.agent.progress_events import subagent_event
 from dbaide.agent.schema_context import (
-    apply_column_notes, collect_relations, join_confidence_for_sql,
+    apply_column_notes, join_confidence_for_sql,
     merge_sql_context, object_notes_for_tables, validation_feedback,
 )
 from dbaide.agent.toolkit.support import (
     _collect_disclosed_schemas, _err, _expand_to_full_columns,
-    _note_working_db, _sample_observed_values, _tables_in_sql,
+    _note_working_db, _tables_in_sql,
 )
 
 logger = logging.getLogger("dbaide.agent.toolkit")
@@ -29,11 +31,7 @@ def register(registry: ToolRegistry, orchestrator) -> None:
         from dbaide.agent.clarify import SemanticClarifier
 
         question = str(args.get("question") or orchestrator.run_state.question or "").strip()
-        resolved = orchestrator.run_state.resolved_schema
-        if resolved is not None and not resolved.is_empty():
-            disclosed = resolved.to_disclosed()
-        else:
-            disclosed = _collect_disclosed_schemas(orchestrator, {})
+        disclosed = _collect_disclosed_schemas(orchestrator, {})
         if not disclosed:
             # Nothing resolved yet — resolve the schema first; don't block.
             return ToolResult(ok=True, data={"clear": True, "note": "no schema resolved yet"})
@@ -43,7 +41,9 @@ def register(registry: ToolRegistry, orchestrator) -> None:
         # the cause of fabricated field names. Expand each table to its full columns.
         disclosed = _expand_to_full_columns(orchestrator, disclosed)
         apply_column_notes(orchestrator, disclosed)  # user column notes visible to clarifier
-        observed = _sample_observed_values(orchestrator, disclosed)
+        # Do not perform live value sampling inside clarification. If the main LLM
+        # needs actual values, it must explicitly call column_stats/top_values first.
+        observed: dict[str, list[str]] = {}
         object_notes = object_notes_for_tables(
             orchestrator, [(db, tbl) for db, tbl, _ in disclosed]
         )
@@ -79,47 +79,25 @@ def register(registry: ToolRegistry, orchestrator) -> None:
 
     def _generate_sql(args: dict[str, Any], _ctx: ToolContext) -> ToolResult:
         question = str(args.get("question") or orchestrator.run_state.question or "").strip()
-        # Prefer the minimal-necessary schema from resolve_schema: generating SQL on
-        # only the relevant tables/columns is more accurate than the full disclosure
-        # (the irrelevant schema is noise). Fall back to the full disclosure if the
-        # model named specific tables in args, or no resolved schema exists.
-        resolved = orchestrator.run_state.resolved_schema
-        if resolved is not None and not resolved.is_empty() and not args.get("table") and not args.get("tables"):
-            disclosed = resolved.to_disclosed()
-        else:
-            disclosed = _collect_disclosed_schemas(orchestrator, args)
+        # Generate from the schemas the main brain has explicitly disclosed or named.
+        # retrieve_schema_context is evidence-only; it does not produce a final schema
+        # selection. If several candidates were recalled, the LLM should pass `tables`
+        # for the ones it intentionally chose, ask_user, or inspect more evidence.
+        disclosed = _collect_disclosed_schemas(orchestrator, args)
         if not disclosed:
-            return ToolResult(ok=False, error=_err("generate_sql", "table is required (resolve_schema or describe_table first)"))
+            return ToolResult(ok=False, error=_err("generate_sql", "table is required (retrieve_schema_context or describe_table first)"))
         # Backfill user column notes regardless of how `disclosed` was built (the
-        # resolve_schema fast path bypasses _disclosed_schemas_for_tables).
+        # direct table selection can bypass _disclosed_schemas_for_tables).
         apply_column_notes(orchestrator, disclosed)
         try:
             targets = [(db, table) for db, table, _ in disclosed]
             relations = list(orchestrator.run_state.relations or [])
-            if not relations and len(targets) >= 2:
-                relations = collect_relations(
-                    orchestrator,
-                    targets,
-                    question=question,
-                    disclosed_schemas=disclosed,
-                    parent=orchestrator.run_state.trace_node,
-                )
-                orchestrator.run_state.relations = relations
             ctx = merge_sql_context(orchestrator.session.disclosure.summary(), relations)
             if orchestrator.run_state.clarifications:
                 ctx["criteria"] = list(orchestrator.run_state.clarifications)  # confirmed 口径
             object_notes = object_notes_for_tables(orchestrator, targets)
             if object_notes:
                 ctx["object_notes"] = object_notes  # authoritative db/table user notes
-            # Carry the linker's per-table rationale so the SQL writer honours WHY each
-            # table/column was chosen (e.g. "picked orders_v2 because orders is deprecated").
-            if resolved is not None and not resolved.is_empty():
-                reasons = [
-                    {"table": t.get("table", ""), "reason": t.get("reason", "")}
-                    for t in resolved.tables if str(t.get("reason") or "").strip()
-                ]
-                if reasons:
-                    ctx["schema_reasons"] = reasons
             feedback = orchestrator.run_state.sql_feedback
             table_names = ", ".join(t for _, t, _ in disclosed)
             orchestrator.progress(
@@ -199,6 +177,8 @@ def register(registry: ToolRegistry, orchestrator) -> None:
     def _execute_sql(args: dict[str, Any], ctx: ToolContext) -> ToolResult:
         sql = str(args.get("sql") or orchestrator.run_state.sql or "").strip()
         database = str(args.get("database") or orchestrator.run_state.table_database or orchestrator.run_state.database or "")
+        purpose = str(args.get("purpose") or "").strip()
+        save_as = str(args.get("save_as") or "").strip()
         if not sql:
             return ToolResult(ok=False, error=_err("execute_sql", "sql is required"))
 
@@ -299,15 +279,29 @@ def register(registry: ToolRegistry, orchestrator) -> None:
                 )
 
         try:
-            result = orchestrator.query.execute_sql(
-                validation.normalized_sql,
-                database=database,
-                limit=orchestrator.session.default_limit,
-                confirmed=True,
-            )
+            execute_kwargs = {
+                "database": database,
+                "limit": orchestrator.session.default_limit,
+            }
+            if "confirmed" in inspect.signature(orchestrator.query.execute_sql).parameters:
+                execute_kwargs["confirmed"] = True
+            result = orchestrator.query.execute_sql(validation.normalized_sql, **execute_kwargs)
             orchestrator.run_state.query_result = result
             orchestrator.run_state.sql = validation.normalized_sql
             orchestrator.run_state.sql_feedback = ""
+            artifact_id = save_as or f"sql:{len(orchestrator.run_state.memory.sql_artifacts) + 1}"
+            result_summary = _result_summary(result)
+            orchestrator.run_state.memory.add_sql_artifact(SQLArtifact(
+                id=artifact_id,
+                purpose=purpose or "SQL execution",
+                sql=validation.normalized_sql,
+                database=database,
+                row_count=int(result.row_count or 0),
+                columns=list(result.columns or []),
+                rows_preview=list((result.rows or [])[:10]),
+                result_summary=result_summary,
+                warnings=list(validation_report.warnings or []),
+            ))
             orchestrator.progress(
                 subagent_event(
                     agent="sql",
@@ -325,6 +319,9 @@ def register(registry: ToolRegistry, orchestrator) -> None:
                     "row_count": result.row_count,
                     "truncated": result.truncated,
                     "elapsed_ms": result.elapsed_ms,
+                    "artifact_id": artifact_id,
+                    "purpose": purpose,
+                    "result_summary": result_summary,
                     "sql": validation.normalized_sql,
                 },
             )
@@ -357,6 +354,19 @@ def register(registry: ToolRegistry, orchestrator) -> None:
 
 def _sql_hash(sql: str) -> str:
     return hashlib.sha1(" ".join(str(sql or "").split()).encode("utf-8")).hexdigest()
+
+
+def _result_summary(result: Any) -> str:
+    rows = list(getattr(result, "rows", []) or [])
+    columns = list(getattr(result, "columns", []) or [])
+    if not rows:
+        return "No rows returned."
+    if len(rows) == 1:
+        row = rows[0]
+        if isinstance(row, dict):
+            parts = [f"{col}={row.get(col)!r}" for col in columns[:6]]
+            return "Single row: " + ", ".join(parts)
+    return f"Previewed {min(len(rows), 10)} row(s) with columns: {', '.join(columns[:8])}."
 
 
 def _risk_confirmation_question(

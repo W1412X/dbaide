@@ -104,7 +104,6 @@ def build_parser() -> argparse.ArgumentParser:
     ask.add_argument("question")
     ask.add_argument("--no-execute", action="store_true")
     ask.add_argument("--show-disclosure", action="store_true")
-    ask.add_argument("--show-trace", action="store_true")
     ask.add_argument("--debug-trace", action="store_true",
                      help="Full debug trace: every step's args/output + each LLM call's "
                           "prompt and response (set DBAIDE_TRACE_LLM=1 to capture LLM I/O).")
@@ -259,10 +258,6 @@ def dispatch(args: argparse.Namespace, cfg: ConfigManager) -> int:
                 if not os.environ.get("DBAIDE_TRACE_LLM"):
                     print("\n(LLM prompts/responses not captured — rerun with "
                           "DBAIDE_TRACE_LLM=1 to include them.)")
-            elif args.show_trace:
-                print("\nTrace:")
-                for event in result.trace:
-                    print(f"- {event.kind.value}:{event.stage} {event.title}")
             if args.export_debug:
                 print(f"\nDebug bundle: {create_debug_bundle(result)}")
         return 0
@@ -782,7 +777,6 @@ def run_workflow_cli(cfg: ConfigManager, args: argparse.Namespace):
             execution_policy=policy,
             limit=args.limit,
             timeout_seconds=args.timeout,
-            show_trace=True,
         )
     )
 

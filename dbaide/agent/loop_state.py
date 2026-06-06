@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import asdict
 from typing import Any
 
+from dbaide.agent.memory import AgentMemory
 from dbaide.agent.progressive_schema import DiscoveryResult, SchemaHit
 from dbaide.models import ColumnInfo
 
@@ -56,45 +57,6 @@ def discovery_from_dict(data: dict[str, Any] | None) -> DiscoveryResult | None:
     )
 
 
-def resolved_schema_to_dict(resolved: Any) -> dict[str, Any] | None:
-    if resolved is None:
-        return None
-    return {
-        "tables": [
-            {
-                "database": t.get("database", ""),
-                "table": t.get("table", ""),
-                "columns": [column_to_dict(c) for c in t.get("columns", [])],
-                "reason": t.get("reason", ""),
-            }
-            for t in getattr(resolved, "tables", [])
-        ],
-        "joins": list(getattr(resolved, "joins", [])),
-        "notes": getattr(resolved, "notes", ""),
-        "sufficient": bool(getattr(resolved, "sufficient", True)),
-    }
-
-
-def resolved_schema_from_dict(data: dict[str, Any] | None) -> Any:
-    if not data:
-        return None
-    from dbaide.agent.schema_link import ResolvedSchema
-    return ResolvedSchema(
-        tables=[
-            {
-                "database": str(t.get("database") or ""),
-                "table": str(t.get("table") or ""),
-                "columns": [column_from_dict(c) for c in t.get("columns") or []],
-                "reason": str(t.get("reason") or ""),
-            }
-            for t in data.get("tables") or []
-        ],
-        joins=list(data.get("joins") or []),
-        notes=str(data.get("notes") or ""),
-        sufficient=bool(data.get("sufficient", True)),
-    )
-
-
 def dump_loop_state(
     orchestrator: Any,
     *,
@@ -121,9 +83,6 @@ def dump_loop_state(
             "_loop_schemas": schemas,
             "_loop_schema_db": dict(orchestrator.run_state.schema_db),
             "_loop_relations": list(orchestrator.run_state.relations),
-            "_loop_resolved_schema": resolved_schema_to_dict(
-                orchestrator.run_state.resolved_schema
-            ),
             "_loop_sql": orchestrator.run_state.sql,
             "_loop_sql_rationale": orchestrator.run_state.sql_rationale,
             "_loop_sql_confidence": orchestrator.run_state.sql_confidence,
@@ -133,6 +92,7 @@ def dump_loop_state(
             "_loop_confirmed_risk_sqls": list(orchestrator.run_state.confirmed_risk_sqls),
             "_loop_clarifications": list(orchestrator.run_state.clarifications),
             "_loop_clarify_questions": orchestrator.run_state.clarify_questions,
+            "_loop_memory": orchestrator.run_state.memory.to_dict(),
         },
     }
 
@@ -155,7 +115,6 @@ def restore_loop_state(orchestrator: Any, snapshot: dict[str, Any]) -> tuple[lis
     }
     orchestrator.run_state.schema_db = dict(payload.get("_loop_schema_db") or {})
     orchestrator.run_state.relations = list(payload.get("_loop_relations") or [])
-    orchestrator.run_state.resolved_schema = resolved_schema_from_dict(payload.get("_loop_resolved_schema"))
     orchestrator.run_state.sql = str(payload.get("_loop_sql") or "")
     orchestrator.run_state.sql_rationale = str(payload.get("_loop_sql_rationale") or "")
     _conf = payload.get("_loop_sql_confidence")
@@ -166,6 +125,7 @@ def restore_loop_state(orchestrator: Any, snapshot: dict[str, Any]) -> tuple[lis
     orchestrator.run_state.confirmed_risk_sqls = list(payload.get("_loop_confirmed_risk_sqls") or [])
     orchestrator.run_state.clarifications = list(payload.get("_loop_clarifications") or [])
     orchestrator.run_state.clarify_questions = str(payload.get("_loop_clarify_questions") or "")
+    orchestrator.run_state.memory = AgentMemory.from_dict(payload.get("_loop_memory"))
     orchestrator.run_state.execute_allowed = execute_allowed
     orchestrator.run_state.query_result = None
     orchestrator.run_state.pending_question = ""

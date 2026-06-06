@@ -106,9 +106,9 @@ def test_build_assets_collapses_to_single_step():
 def test_summary_line_lists_active_agents():
     m = TraceModel()
     _feed(m, [
-        progress_event(stage="get_relations", title="rel", status="running", kind="tool", step=1),
-        subagent_event(agent="join_infer", title="inferring", parent="get_relations"),
-        subagent_event(agent="join_validate", title="validating", parent="get_relations"),
+        progress_event(stage="retrieve_join_context", title="rel", status="running", kind="tool", step=1),
+        subagent_event(agent="join_infer", title="inferring", parent="retrieve_join_context"),
+        subagent_event(agent="join_validate", title="validating", parent="retrieve_join_context"),
     ])
     line = m.summary_line(now=1010.0)
     assert "Mapping relations" in line
@@ -233,7 +233,7 @@ def test_render_trace_text_includes_args_output_and_clarification():
     from dbaide.agent.trace_model import render_trace_text
     model = TraceModel()
     _feed(model, [
-        {"stage": "resolve_schema", "title": "resolve_schema done", "status": "completed",
+        {"stage": "retrieve_schema_context", "title": "retrieve_schema_context done", "status": "completed",
          "kind": "tool", "step": 1, "node_id": "step:1",
          "args": {"question": "paid orders"}, "output": "orders(id, amount, status)", "duration_ms": 9},
         {"stage": "ask_user", "title": "Waiting for user clarification", "status": "waiting",

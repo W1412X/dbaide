@@ -84,7 +84,7 @@ def test_collect_relations_from_live_catalog(tmp_path):
     assert relations[0]["ref_table"] == "users"
 
 
-def test_get_relations_tool(tmp_path):
+def test_retrieve_join_context_tool(tmp_path):
     db = tmp_path / "fk.db"
     make_fk_db(db)
     conn = ConnectionConfig(name="local", type="sqlite", path=str(db))
@@ -95,9 +95,13 @@ def test_get_relations_tool(tmp_path):
     orch._reset_loop_state("join", "", True)
     registry.invoke("describe_table", {"table": "orders"}, ctx)
     registry.invoke("describe_table", {"table": "users"}, ctx)
-    result = registry.invoke("get_relations", {}, ctx)
+    result = registry.invoke(
+        "retrieve_join_context",
+        {"request": "join", "tables": ["orders", "users"]},
+        ctx,
+    )
     assert result.ok
-    assert result.data["count"] == 1
+    assert len(result.data["relations"]) == 1
     assert orch.run_state.relations[0]["ref_table"] == "users"
 
 
@@ -113,7 +117,11 @@ def test_generate_sql_prompt_includes_foreign_keys(tmp_path):
     orch._reset_loop_state("count per user", "", True)
     registry.invoke("describe_table", {"table": "orders"}, ctx)
     registry.invoke("describe_table", {"table": "users"}, ctx)
-    registry.invoke("get_relations", {}, ctx)
+    registry.invoke(
+        "retrieve_join_context",
+        {"request": "orders per user", "tables": ["orders", "users"]},
+        ctx,
+    )
     registry.invoke("generate_sql", {"question": "orders per user"}, ctx)
     assert "Declared foreign keys" in llm.last_user
     assert "orders.user_id -> users.id" in llm.last_user

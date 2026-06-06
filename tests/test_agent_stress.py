@@ -28,7 +28,7 @@ from dbaide.session import Session
 
 class _StressMock(LLMClient):
     """Deterministic stand-in for the LLM. Loop decisions read TRUE orchestrator
-    state (resolved schema / sql / result) the way a real agent reasons over what
+    state (schema evidence / sql / result) the way a real agent reasons over what
     it has, so the matrix exercises real control flow rather than a scripted path."""
 
     def __init__(self, orch_ref: dict, ambiguous: bool = False) -> None:
@@ -53,8 +53,6 @@ class _StressMock(LLMClient):
             return self._loop(system, user)
         if "Classify a database assistant" in system:
             return self._route(user)
-        if "schema linker for Text-to-SQL" in system:
-            return self._link(user)
         if "generate safe read-only SQL" in system:
             return self._sql(user)
         if "relevant_indices" in system:
@@ -66,22 +64,6 @@ class _StressMock(LLMClient):
         if any(k in user for k in ("有哪些表", "字段", "在哪里", "结构")):
             return {"task": "schema_explore"}
         return {"task": "data_query"}
-
-    def _link(self, user: str) -> dict[str, Any]:
-        section = user.split("Candidate tables:\n", 1)[-1]
-        question = user.split("Question:", 1)[-1].strip().split("\n", 1)[0] if "Question:" in user else ""
-        tables = []
-        for m in re.finditer(r'^-\s+([^\s.]+)\.("[^"]+"|[^\s\[]+)\s*\[([^\]]*)\]', section, re.MULTILINE):
-            db, tbl, cols = m.group(1), m.group(2).strip('"'), m.group(3)
-            # A column may carry an inline note annotation ("total(📝note)") — strip it.
-            col_names = [c.split("(")[0].split()[0] for c in cols.split(",") if c.strip()]
-            tables.append({"database": db, "table": tbl, "columns": col_names, "reason": "stress"})
-        if self.ambiguous and len(tables) >= 2:
-            return {"ask": {"question": "Which table?", "options": [t["table"] for t in tables[:3]]}}
-        # Join intent → keep two tables so the multi-table generate_sql + join-inference
-        # path runs (single-table questions keep just one).
-        n = 2 if (any(k in question for k in ("每个", "关联", "join")) and len(tables) >= 2) else 1
-        return {"tables": tables[:n], "sufficient": bool(tables), "missing": "", "ask": None}
 
     def _sql(self, user: str) -> dict[str, Any]:
         m = re.search(r'^Table:\s*("[^"]+"|\S+)', user, re.MULTILINE) or \
@@ -108,8 +90,26 @@ class _StressMock(LLMClient):
                 return {"action": "call_tool", "tool": "synthesize_schema_answer", "args": {"question": q}}
             return {"action": "finish", "answer": "Schema answer."}
         rs = self.orch.run_state
-        if rs.resolved_schema is None or rs.resolved_schema.is_empty():
-            return {"action": "call_tool", "tool": "resolve_schema", "args": {"question": q}}
+        active_tables = self._active_candidate_tables()
+        if not active_tables:
+            return {"action": "call_tool", "tool": "retrieve_schema_context", "args": {"request": q}}
+        if self.ambiguous and "User reply:" not in user and user.count("Tool `ask_user`") == 0:
+            return {
+                "action": "call_tool",
+                "tool": "ask_user",
+                "args": {"question": "Which table should be used?", "options": ["orders", "users"]},
+            }
+        if (
+            len(active_tables) >= 2
+            and not rs.relations
+            and user.count("Tool `retrieve_join_context`") == 0
+            and any(k in q for k in ("每个", "关联", "join"))
+        ):
+            return {
+                "action": "call_tool",
+                "tool": "retrieve_join_context",
+                "args": {"request": q, "tables": active_tables[:2]},
+            }
         if not rs.sql:
             return {"action": "call_tool", "tool": "generate_sql", "args": {"question": q}}
         if not self._validated:
@@ -118,6 +118,16 @@ class _StressMock(LLMClient):
         if execute_allowed and rs.query_result is None:
             return {"action": "call_tool", "tool": "execute_sql", "args": {}}
         return {"action": "finish", "answer": ""}
+
+    def _active_candidate_tables(self) -> list[str]:
+        reports = self.orch.run_state.memory.schema_reports
+        if not reports:
+            return []
+        out = []
+        for candidate in reports[-1].candidates:
+            if candidate.status == "active":
+                out.append(candidate.table)
+        return out
 
 
 _SCHEMAS = {
@@ -207,9 +217,10 @@ def test_join_question_exercises_multi_table_path(_connections):
                            execution_policy=ExecutionPolicy.SAFE_AUTO)
     ref["orch"] = orch
     resp = AskAgentLoop(orch).run("统计每个用户的订单数", execute=True)
-    assert orch.run_state.resolved_schema is not None
-    assert len(orch.run_state.resolved_schema.tables) == 2     # two tables resolved
-    assert len(orch.run_state.relations or []) >= 1            # FK inferred between them
+    active = [c for c in orch.run_state.memory.schema_reports[-1].candidates if c.status == "active"]
+    assert len(active) >= 2
+    assert len(orch.run_state.relations or []) >= 1            # FK retrieved by join evidence tool
+    assert orch.run_state.memory.join_reports                  # separate relation evidence path
     assert resp.result is not None
 
 

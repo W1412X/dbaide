@@ -16,8 +16,9 @@ from dbaide.agent.toolkit.support import (  # noqa: F401
 
 # Tools exposed to the Ask loop LLM (catalog CRUD stays on GUI/service only).
 LOOP_DECISION_TOOL_NAMES = frozenset({
-    "discover_schema", "resolve_schema", "synthesize_schema_answer",
-    "list_databases", "list_tables", "describe_table", "get_relations", "list_joins", "validate_joins",
+    "discover_schema", "retrieve_schema_context", "synthesize_schema_answer",
+    "list_databases", "list_tables", "describe_table", "retrieve_join_context",
+    "list_joins", "validate_joins",
     "clarify_semantics", "generate_sql", "validate_sql", "execute_sql",
     "execute_readonly_sql", "explain_sql", "profile_table", "column_stats",
     "ask_user", "annotate_object",

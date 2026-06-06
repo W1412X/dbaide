@@ -13,6 +13,14 @@ def qapp():
     return QApplication.instance() or QApplication([])
 
 
+@pytest.fixture(autouse=True)
+def cleanup_qt_widgets(qapp):
+    before = set(QApplication.topLevelWidgets())
+    yield
+    for widget in list(set(QApplication.topLevelWidgets()) - before):
+        widget.close()
+
+
 def _wb(qapp):
     from dbaide.desktop.views.query_history import QueryHistoryPanel
     from dbaide.desktop.views.workbench import WorkbenchView

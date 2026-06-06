@@ -38,17 +38,24 @@ def test_language_change_persists_and_prompts_restart(qapp, tmp_path, monkeypatc
     monkeypatch.setattr(mw.QMessageBox, "information", lambda *a, **k: prompts.append(a[-1]))
     i18n.set_language("en")
     win = mw.MainWindow(DesktopService(cfg, AssetStore(tmp_path / "assets")))
-    assert win.tabbar.tabText(0) == "Chat"
+    win2 = None
+    try:
+        assert win.tabbar.tabText(0) == "Chat"
 
-    win._change_language("zh")
-    assert ConfigManager(path=tmp_path / "config.toml").ui_language() == "zh"
-    assert win.tabbar.tabText(0) == "Chat"
-    assert win.sidebar.context_tabs.tabText(0) == "Chats"
-    assert prompts and "重启" in prompts[-1]
+        win._change_language("zh")
+        assert ConfigManager(path=tmp_path / "config.toml").ui_language() == "zh"
+        assert win.tabbar.tabText(0) == "Chat"
+        assert win.sidebar.context_tabs.tabText(0) == "Chats"
+        assert prompts and "重启" in prompts[-1]
 
-    # Startup in zh still renders Chinese:
-    i18n.set_language("zh")
-    win2 = mw.MainWindow(DesktopService(ConfigManager(path=tmp_path / "config.toml"),
-                                        AssetStore(tmp_path / "assets")))
-    assert win2.tabbar.tabText(0) == "对话"
-    i18n.set_language("en")
+        # Startup in zh still renders Chinese:
+        i18n.set_language("zh")
+        win2 = mw.MainWindow(DesktopService(ConfigManager(path=tmp_path / "config.toml"),
+                                            AssetStore(tmp_path / "assets")))
+        assert win2.tabbar.tabText(0) == "对话"
+    finally:
+        if win2 is not None:
+            win2.deleteLater()
+        win.deleteLater()
+        qapp.processEvents()
+        i18n.set_language("en")

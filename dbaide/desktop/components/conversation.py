@@ -25,6 +25,7 @@ from PyQt6.QtCore import QSize
 
 from dbaide.agent.progress_events import conversation_trace_step, phase_for
 from dbaide.desktop.components.base import AgentButton, compact_button
+from dbaide.desktop.conversation_state import ThinkingUiState, TurnTraceState
 from dbaide.desktop.components.icons import svg_icon
 from dbaide.desktop.components.inputs import configure_readonly_text_view, configure_wrapped_label
 from dbaide.desktop.components.spinner import BusyAnimator, spinner_icon
@@ -135,13 +136,7 @@ class _ThinkingIndicator(QPushButton):
         self.setCursor(Qt.CursorShape.PointingHandCursor)
         self.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Fixed)
         self.setFont(QFont("Inter", 11, QFont.Weight.DemiBold))
-        self._running = False
-        self._waiting = False
-        self._phase = "Thinking…"
-        self._events: list[dict[str, Any]] = []
-        self._ok = True
-        self._step_count = 0
-        self._expanded = False
+        self._state = ThinkingUiState(phase="Thinking...")
         self._busy = BusyAnimator(self._tick)
         self.clicked.connect(self._on_click)
         self._sync()
@@ -149,9 +144,7 @@ class _ThinkingIndicator(QPushButton):
     # ── state transitions ──────────────────────────────────────────────────--
 
     def start(self, phase: str = "Thinking…") -> None:
-        self._running, self._waiting = True, False
-        if phase:
-            self._phase = phase
+        self._state.start(phase)
         if not self._busy.active:
             self._busy.start()
         self._sync()
@@ -160,31 +153,30 @@ class _ThinkingIndicator(QPushButton):
         if not phase:
             return
         # A live event arrived — (re)enter the running state and show the phase.
-        self._running, self._waiting = True, False
-        self._phase = phase if len(phase) <= 60 else phase[:59] + "…"
+        self._state.set_phase(phase)
         if not self._busy.active:
             self._busy.start()
         self._sync()
 
     def set_waiting(self, text: str = "Waiting for your reply…") -> None:
-        self._running, self._waiting = False, True
+        self._state.set_waiting(text)
         self._busy.stop()
-        self._phase = text
         self._sync()
 
     def set_done(self, *, ok: bool, step_count: int, events: list[dict[str, Any]]) -> None:
-        self._running, self._waiting = False, False
+        self._state.set_done(ok=ok, step_count=step_count, events=events)
         self._busy.stop()
-        self._ok = ok
-        self._step_count = max(0, int(step_count))
-        self._events = list(events or [])
         self._sync()
 
     # ── internals ──────────────────────────────────────────────────────────--
 
     def set_expanded(self, expanded: bool) -> None:
-        self._expanded = expanded
+        self._state.set_expanded(expanded)
         self._sync()
+
+    @property
+    def _expanded(self) -> bool:
+        return self._state.expanded
 
     def _on_click(self) -> None:
         # Toggle the turn's inline trace (works live or after completion — the
@@ -195,26 +187,27 @@ class _ThinkingIndicator(QPushButton):
         self.setIcon(spinner_icon(self._busy.angle, color=Theme.BLUE))
 
     def _sync(self) -> None:
-        if self._running:
+        state = self._state
+        if state.running:
             color = Theme.BLUE
-            phase = self._phase if self._phase.endswith("…") else f"{self._phase}…"
+            phase = state.phase if state.phase.endswith("…") else f"{state.phase}…"
             self.setIcon(spinner_icon(self._busy.angle, color=Theme.BLUE))
             self.setText(f"  {phase}")
             self.show()
-        elif self._waiting:
+        elif state.waiting:
             color = Theme.YELLOW
             self.setIcon(QIcon())
-            self.setText(self._phase)
+            self.setText(state.phase)
             self.show()
         else:
             self.setIcon(QIcon())
-            if self._step_count <= 0:
+            if state.step_count <= 0:
                 self.hide()  # nothing to reveal — don't show a hollow chip
                 return
-            color = Theme.MUTED if self._ok else Theme.RED
+            color = Theme.MUTED if state.ok else Theme.RED
             from dbaide.i18n import t
-            base = t("trace.view") if self._ok else t("trace.view_failed")
-            caret = " ⌄" if self._expanded else " ›"
+            base = t("trace.view") if state.ok else t("trace.view_failed")
+            caret = " ⌄" if state.expanded else " ›"
             self.setText(base + caret)
             self.show()
         self.setStyleSheet(
@@ -530,9 +523,8 @@ class TurnBlock(QFrame):
 
         # The inline trace is created lazily on first expand (most turns are never
         # expanded — no point building a tree widget for each).
-        self._events: list[dict[str, Any]] = []
+        self.trace_state = TurnTraceState()
         self._trace_box: InlineTrace | None = None
-        self._trace_final = False
 
         self._content_host = QWidget()
         self._content_host.setStyleSheet("background: transparent;")
@@ -572,16 +564,15 @@ class TurnBlock(QFrame):
 
     def add_live_event(self, event: dict[str, Any]) -> None:
         """Accumulate a streamed event; feed the inline trace if it's open."""
-        self._events.append(event)
+        self.trace_state.append(event)
         if self._trace_open():
             self._trace_box.append_live_event(event)
 
     def set_trace(self, events: list[dict[str, Any]]) -> None:
         """Final, authoritative trace for this turn (from the persisted result)."""
-        self._events = list(events or [])
-        self._trace_final = True
+        self.trace_state.set_final(events)
         if self._trace_open():
-            self._trace_box.set_events(self._events, live=False)
+            self._trace_box.set_events(self.trace_state.events, live=False)
 
     def _toggle_trace(self) -> None:
         if self._trace_box is None:
@@ -594,9 +585,25 @@ class TurnBlock(QFrame):
             self._trace_box.hide()
             self.status.set_expanded(False)
         else:
-            self._trace_box.set_events(self._events, live=not self._trace_final)
+            self._trace_box.set_events(self.trace_state.events, live=not self.trace_state.final)
             self._trace_box.show()
             self.status.set_expanded(True)
+
+    @property
+    def _events(self) -> list[dict[str, Any]]:
+        return self.trace_state.events
+
+    @_events.setter
+    def _events(self, value: list[dict[str, Any]]) -> None:
+        self.trace_state.events = list(value or [])
+
+    @property
+    def _trace_final(self) -> bool:
+        return self.trace_state.final
+
+    @_trace_final.setter
+    def _trace_final(self, value: bool) -> None:
+        self.trace_state.final = bool(value)
 
 
 class ConversationView(QScrollArea):

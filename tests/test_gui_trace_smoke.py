@@ -196,7 +196,7 @@ def test_copy_text_exports_structured_trace_with_sql(qapp):
     panel = InlineTrace()
     panel.begin_live()
     panel.append_live_event(progress_event(stage="decision", title="count paid", status="completed", kind="decision"))
-    panel.append_live_event(progress_event(stage="resolve_schema", title="resolve_schema done", status="completed",
+    panel.append_live_event(progress_event(stage="retrieve_schema_context", title="retrieve_schema_context done", status="completed",
                                            kind="tool", step=1, detail="orders(id, amount)"))
     panel.append_live_event({"stage": "execute_sql", "title": "execute_sql done", "status": "completed",
                              "kind": "tool", "step": 2, "sql": "SELECT COUNT(*)\nFROM orders\nWHERE status='paid'",
@@ -204,7 +204,7 @@ def test_copy_text_exports_structured_trace_with_sql(qapp):
     panel.end_live()
     text = panel.copy_text()
     assert "✓" in text
-    assert "resolve_schema" in text or "Linking schema" in text
+    assert "retrieve_schema_context" in text or "Reading schema evidence" in text
     assert "orders(id, amount)" in text          # detail included
     assert "SELECT COUNT(*)" in text and "WHERE status='paid'" in text  # full SQL, multi-line
     # empty trace → empty export

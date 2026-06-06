@@ -133,7 +133,7 @@ class WorkflowRequest:
     __slots__ = (
         "question", "connection_name", "database_scope", "mode",
         "execution_policy", "limit", "timeout_seconds", "model_name",
-        "show_trace", "resume_state", "user_reply", "schema_scope", "stream_answers",
+        "resume_state", "user_reply", "schema_scope", "stream_answers",
     )
 
     def __init__(
@@ -147,7 +147,6 @@ class WorkflowRequest:
         limit: int = 100,
         timeout_seconds: int = 60,
         model_name: str = "",
-        show_trace: bool = False,
         resume_state: dict[str, Any] | None = None,
         user_reply: str = "",
         schema_scope: dict[str, Any] | None = None,
@@ -161,7 +160,6 @@ class WorkflowRequest:
         self.limit = limit
         self.timeout_seconds = timeout_seconds
         self.model_name = model_name
-        self.show_trace = show_trace
         self.resume_state = resume_state
         self.user_reply = user_reply
         # User-pinned schema (composer attachments): {"databases": [...],

@@ -16,8 +16,6 @@ from typing import Any
 from PyQt6.QtCore import QSize, Qt, pyqtSignal
 from PyQt6.QtWidgets import (
     QHBoxLayout,
-    QProxyStyle,
-    QStyle,
     QTabBar,
     QTabWidget,
     QToolButton,
@@ -31,23 +29,6 @@ from dbaide.desktop.views.doc_tab import DocTab
 from dbaide.desktop.views.query_history import QueryHistoryPanel
 
 
-class _RightCloseTabStyle(QProxyStyle):
-    """Forces tab close buttons onto the right side. The native macOS style puts
-    them on the LEFT (Safari convention), which looks wrong for document tabs and
-    breaks our right-side pinning logic."""
-
-    def styleHint(self, hint, option=None, widget=None, returnData=None):  # noqa: N802
-        if hint == QStyle.StyleHint.SH_TabBar_CloseButtonPosition:
-            return QTabBar.ButtonPosition.RightSide.value
-        return super().styleHint(hint, option, widget, returnData)
-
-    def pixelMetric(self, metric, option=None, widget=None):  # noqa: N802
-        # Pin the close-button indicator to one size — the native (macOS) metric is
-        # inconsistent, so close buttons rendered at slightly different sizes per tab.
-        if metric in (QStyle.PixelMetric.PM_TabCloseIndicatorWidth,
-                      QStyle.PixelMetric.PM_TabCloseIndicatorHeight):
-            return 16
-        return super().pixelMetric(metric, option, widget)
 from dbaide.desktop.views.sql_tab import SqlTab
 from dbaide.desktop.views.table_document import TableDocument
 
@@ -79,12 +60,6 @@ class WorkbenchView(QWidget):
         self.tabs.setMovable(True)
         self.tabs.setTabsClosable(True)
         self.tabs.tabBar().setProperty("panelTabs", True)
-        # Force close buttons to the right (native macOS puts them left). No-arg
-        # QProxyStyle wraps the app's default style WITHOUT owning it (passing an
-        # existing style double-frees it on teardown → crash). Keep a Python ref so
-        # the style outlives the tab bar's use of it.
-        self._tab_close_style = _RightCloseTabStyle()
-        self.tabs.tabBar().setStyle(self._tab_close_style)
         self.tabs.tabCloseRequested.connect(self._on_close)
         self.tabs.tabBar().setUsesScrollButtons(True)
         self.tabs.tabBar().setElideMode(Qt.TextElideMode.ElideRight)
@@ -173,6 +148,7 @@ class WorkbenchView(QWidget):
                             break
                 self.tabs.removeTab(i)
                 self.doc_closed.emit(w)
+                w.setParent(None)
                 w.deleteLater()
 
     # ── SQL editors ─────────────────────────────────────────────────────────────
@@ -340,4 +316,6 @@ class WorkbenchView(QWidget):
                     break
         self.tabs.removeTab(index)
         self.doc_closed.emit(widget)
-        widget.deleteLater()
+        if widget is not None:
+            widget.setParent(None)
+            widget.deleteLater()

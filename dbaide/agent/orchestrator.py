@@ -8,7 +8,7 @@ from typing import Any, Callable
 
 from dbaide.adapters.base import DatabaseAdapter
 from dbaide.agent.answerer import AnswerFormatter
-from dbaide.agent.controllers import ErrorRouter, ResultInterpreter, RiskController
+from dbaide.agent.controllers import ResultInterpreter, RiskController
 from dbaide.agent.progress_events import progress_event
 from dbaide.agent.progressive_schema import ProgressiveSchemaAgent
 from dbaide.agent.run_state import RunState
@@ -51,8 +51,6 @@ class AgentContext:
 class AskOrchestrator:
     """Codex-style Ask agent: route → discover → act → validate → execute (with risk gate)."""
 
-    MAX_SQL_RETRIES = 2  # default; the effective value comes from session.agent_sql_retries
-
     def __init__(
         self,
         adapter: DatabaseAdapter,
@@ -88,6 +86,7 @@ class AskOrchestrator:
         self.schema_scope: dict[str, Any] = {}
         # Stream the final answer token-by-token (set by the workflow from config).
         self.stream_answers: bool = False
+        self.cancel_check: Callable[[], None] | None = None
 
         self.schema = SchemaTools(adapter, session.disclosure, instance=self.instance, assets=self.asset_store)
         self.profile = ProfileTools(adapter, session.disclosure, instance=self.instance, assets=self.asset_store)
@@ -112,7 +111,6 @@ class AskOrchestrator:
         )
         self.formatter = AnswerFormatter()
         self.risk = RiskController()
-        self.error_router = ErrorRouter()
         self.interpreter = ResultInterpreter()
         self._reset_loop_state("", "", False)
 
@@ -124,6 +122,7 @@ class AskOrchestrator:
             execute_allowed=execute,
             table_database=database,
         )
+        self.run_state.memory.reset_goal(question, database=database, execute_allowed=execute)
 
     def run(
         self,
@@ -188,7 +187,6 @@ class AskOrchestrator:
         user_reply: str = "",
         trace_parent: str = "",
     ) -> AssistantResponse:
-        self.error_router.reset()
         self.run_state.fail_reason = ""  # fresh per run (never carry a stale reason)
         disclosures = list(self.session.disclosure.events)
 

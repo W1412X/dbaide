@@ -60,6 +60,9 @@ class ProgressiveSchemaAgent:
         self.instance = instance
         self.fingerprint = fingerprint
 
+    def _asset_fingerprint(self) -> str:
+        return str(getattr(self, "fingerprint", "") or "")
+
     def discover(
         self,
         question: str,
@@ -73,12 +76,12 @@ class ProgressiveSchemaAgent:
         # Assets first: navigate the offline docs by relevance (instance → database →
         # table). Only fall back to the live catalog when there are no assets — never
         # blind-list the whole database. ``column_detail=False`` returns just the
-        # relevant tables (the "big direction") and skips the per-column LLM pass,
-        # which the schema linker does in a single shot instead.
+        # relevant tables (the "big direction") and skips the per-column LLM pass.
         scope = scope or {}
         scope_tables = scope.get("tables") or []
         scope_dbs = scope.get("databases") or []
-        if self.store.has_instance(self.instance, fingerprint=self.fingerprint):
+        fingerprint = self._asset_fingerprint()
+        if self.store.has_instance(self.instance, fingerprint=fingerprint):
             # User pinned a db/table → prioritise that scope; only broaden to the full
             # progressive crawl if the scope can't yield anything usable.
             if scope_tables or scope_dbs:
@@ -103,9 +106,10 @@ class ProgressiveSchemaAgent:
         """Locate which database a bare table name lives in (first match)."""
         if not table:
             return ""
-        for db_doc in self.store.database_docs(self.instance, fingerprint=self.fingerprint):
+        fingerprint = self._asset_fingerprint()
+        for db_doc in self.store.database_docs(self.instance, fingerprint=fingerprint):
             db_name = str(db_doc.get("name") or "")
-            for td in self.store.table_docs(self.instance, db_name, fingerprint=self.fingerprint):
+            for td in self.store.table_docs(self.instance, db_name, fingerprint=fingerprint):
                 if str(td.get("name") or td.get("table") or "") == table:
                     return db_name
         return ""
@@ -155,7 +159,7 @@ class ProgressiveSchemaAgent:
                 kind="table", path=f"{self.instance}.{db}.{tbl}", name=tbl,
                 database=db, table=tbl, reason="user-provided",
             ))
-            for cdoc in self.store.column_docs(self.instance, db, tbl, fingerprint=self.fingerprint)[:48]:
+            for cdoc in self.store.column_docs(self.instance, db, tbl, fingerprint=self._asset_fingerprint())[:48]:
                 cn = str(cdoc.get("name") or cdoc.get("column") or "")
                 if cn:
                     result.hits.append(SchemaHit(
@@ -175,11 +179,12 @@ class ProgressiveSchemaAgent:
         restrict_databases: set[str] | None = None,
     ) -> DiscoveryResult:
         result = DiscoveryResult(question=question)
-        if not self.store.has_instance(self.instance, fingerprint=self.fingerprint):
+        fingerprint = self._asset_fingerprint()
+        if not self.store.has_instance(self.instance, fingerprint=fingerprint):
             result.trace.append("No offline assets for this connection — build assets first.")
             return result
 
-        databases = self.store.database_docs(self.instance, fingerprint=self.fingerprint)
+        databases = self.store.database_docs(self.instance, fingerprint=fingerprint)
         if not databases:
             result.trace.append("Asset index has no databases.")
             return result
@@ -230,7 +235,7 @@ class ProgressiveSchemaAgent:
 
         def _scan_database(db_index: int) -> tuple[list[SchemaHit], list[SchemaHit], str]:
             db_name = db_items[db_index]["name"]
-            tables = self.store.table_docs(self.instance, db_name, fingerprint=self.fingerprint)
+            tables = self.store.table_docs(self.instance, db_name, fingerprint=self._asset_fingerprint())
             if not tables:
                 return [], [], f"{db_name}: no tables"
             table_items = [
@@ -267,7 +272,7 @@ class ProgressiveSchemaAgent:
                     )
                 )
                 if column_detail and len(local_tables) <= MAX_COLUMN_TABLES:
-                    cols = self.store.column_docs(self.instance, db_name, table_name, fingerprint=self.fingerprint)
+                    cols = self.store.column_docs(self.instance, db_name, table_name, fingerprint=self._asset_fingerprint())
                     if not cols:
                         continue
                     col_items = [

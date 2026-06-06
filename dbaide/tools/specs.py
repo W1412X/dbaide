@@ -81,24 +81,47 @@ LIST_TABLES = ToolSpec(
 
 DESCRIBE_TABLE = ToolSpec(
     name="describe_table",
-    description="Get column metadata for a table (accumulates in loop context for multi-table SQL)",
+    description="Get full table metadata: columns, indexes, declared FKs and available asset row/sample metadata",
     input_schema={"table": "string", "database": "string"},
-    output_schema={"columns": "list[ColumnInfo]", "disclosed_tables": "list[string]"},
+    output_schema={
+        "columns": "list[ColumnInfo]",
+        "indexes": "list[dict]",
+        "foreign_keys": "list[dict]",
+        "row_count": "integer",
+        "sample_rows": "list[dict]",
+        "disclosed_tables": "list[string]",
+    },
     permission_level=SAFE_METADATA,
     timeout_seconds=10,
     safe_for_auto_call=True,
 )
 
-GET_RELATIONS = ToolSpec(
-    name="get_relations",
+RETRIEVE_JOIN_CONTEXT = ToolSpec(
+    name="retrieve_join_context",
     description=(
-        "Join hints for disclosed tables: declared FKs plus LLM semantic inference when needed. "
-        "Returns confidence-ranked edges with optional sample evidence."
+        "Retrieve join evidence for selected tables without deciding the final join. "
+        "By default reads only user-saved join catalog entries and declared foreign keys. "
+        "Set infer_semantic=true and/or validate_sample=true only when the main LLM explicitly "
+        "needs that extra evidence. Use after the main LLM "
+        "has narrowed candidate tables and needs relation evidence for SQL planning."
     ),
-    input_schema={"tables": "list[string]", "table": "string", "database": "string", "sample_size": "integer"},
-    output_schema={"relations": "list[dict]", "count": "integer", "validated_count": "integer"},
+    input_schema={
+        "request": "string",
+        "tables": "list[string]",
+        "database": "string",
+        "infer_semantic": "boolean",
+        "validate_sample": "boolean",
+        "sample_size": "integer",
+    },
+    output_schema={
+        "report_id": "string",
+        "tables": "list[string]",
+        "relations": "list[dict]",
+        "source_summary": "string",
+        "warnings": "list[string]",
+    },
     permission_level=SAFE_PROFILE,
-    timeout_seconds=30,
+    timeout_seconds=60,
     safe_for_auto_call=True,
 )
 
@@ -240,9 +263,16 @@ EXPLAIN_SQL = ToolSpec(
 
 EXECUTE_READONLY_SQL = ToolSpec(
     name="execute_readonly_sql",
-    description="Execute a validated read-only SQL query",
-    input_schema={"sql": "string", "database": "string", "limit": "integer", "timeout_seconds": "integer"},
-    output_schema={"rows": "list[dict]", "columns": "list[string]", "row_count": "integer"},
+    description="Execute a validated read-only SQL query; may be used for final answers or exploratory evidence",
+    input_schema={
+        "sql": "string",
+        "database": "string",
+        "purpose": "string",
+        "save_as": "string",
+        "limit": "integer",
+        "timeout_seconds": "integer",
+    },
+    output_schema={"artifact_id": "string", "rows": "list[dict]", "columns": "list[string]", "row_count": "integer"},
     permission_level=SQL_EXECUTE,
     timeout_seconds=30,
     max_rows=10000,
@@ -251,9 +281,9 @@ EXECUTE_READONLY_SQL = ToolSpec(
 
 EXECUTE_SQL = ToolSpec(
     name="execute_sql",
-    description="Alias for execute_readonly_sql — run validated read-only SQL",
-    input_schema={"sql": "string", "database": "string"},
-    output_schema={"rows": "list[dict]", "columns": "list[string]", "row_count": "integer"},
+    description="Alias for execute_readonly_sql — run validated read-only SQL for final or exploratory evidence",
+    input_schema={"sql": "string", "database": "string", "purpose": "string", "save_as": "string"},
+    output_schema={"artifact_id": "string", "rows": "list[dict]", "columns": "list[string]", "row_count": "integer"},
     permission_level=SQL_EXECUTE,
     timeout_seconds=30,
     max_rows=10000,
@@ -306,17 +336,29 @@ DISCOVER_SCHEMA = ToolSpec(
     safe_for_auto_call=True,
 )
 
-RESOLVE_SCHEMA = ToolSpec(
-    name="resolve_schema",
+RETRIEVE_SCHEMA_CONTEXT = ToolSpec(
+    name="retrieve_schema_context",
     description=(
-        "Resolve the MINIMAL schema needed for a data query: a sub-agent discovers "
-        "candidate tables, picks only the tables/columns that matter, confirms them "
-        "against the catalog, and maps the joins. Prefer this over manual "
-        "discover_schema+describe_table for data queries — it keeps SQL generation "
-        "focused. May pause to ask the user if the question is ambiguous."
+        "Retrieve schema evidence for the current question without deciding the final schema. "
+        "Returns candidate tables, columns, authoritative user notes, deprecated/excluded "
+        "paths, conflicts, and missing information. It does NOT retrieve join relations; "
+        "it also does not profile/sample rows or validate relationships. "
+        "call retrieve_join_context after the main LLM decides relation evidence is needed. Use this as the default "
+        "schema evidence tool for data questions; the main LLM must decide what to do next."
     ),
-    input_schema={"question": "string", "database": "string"},
-    output_schema={"tables": "list[dict]", "joins": "list[dict]", "sufficient": "bool"},
+    input_schema={
+        "request": "string",
+        "database": "string",
+        "focus_terms": "list[string]",
+        "need": "string",
+        "limit": "integer",
+    },
+    output_schema={
+        "report_id": "string",
+        "candidates": "list[dict]",
+        "conflicts": "list[dict]",
+        "missing": "list[string]",
+    },
     permission_level=SAFE_METADATA,
     timeout_seconds=90,
     safe_for_auto_call=True,
@@ -326,10 +368,11 @@ CLARIFY_SEMANTICS = ToolSpec(
     name="clarify_semantics",
     description=(
         "Pin down the business definition (口径) of a data query before generating SQL: "
-        "check the resolved schema for material ambiguities in TIME/timezone, METRIC "
+        "check disclosed schema evidence for material ambiguities in TIME/timezone, METRIC "
         "definition, NULL handling, and scope/filters. If any would change the result, "
         "it PAUSES to confirm the exact criteria with the user; otherwise it records the "
-        "assumptions and returns clear. Run it after resolve_schema, before generate_sql."
+        "assumptions and returns clear. It does not sample live values; call column_stats "
+        "explicitly first if actual value encodings are needed. Run it after schema evidence, before generate_sql."
     ),
     input_schema={"question": "string"},
     output_schema={"clear": "bool", "pending": "bool", "assumptions": "list[string]"},
@@ -340,7 +383,7 @@ CLARIFY_SEMANTICS = ToolSpec(
 
 GENERATE_SQL = ToolSpec(
     name="generate_sql",
-    description="Generate read-only SQL using disclosed table column metadata (all describe_table results, or tables arg)",
+    description="Generate read-only SQL using disclosed table column metadata (all described/retrieved tables, or explicit tables arg)",
     input_schema={"question": "string", "table": "string", "tables": "list[string]", "database": "string"},
     output_schema={"sql": "string", "rationale": "string", "confidence": "float", "tables": "list[string]"},
     permission_level=SAFE_METADATA,

@@ -7,7 +7,6 @@ from typing import TYPE_CHECKING, Any
 
 from dbaide.core.errors import DBAideError, ErrorCode
 from dbaide.models import ColumnInfo
-from dbaide.agent.progress_events import subagent_event
 
 if TYPE_CHECKING:
     from dbaide.agent.orchestrator import AskOrchestrator
@@ -16,34 +15,6 @@ logger = logging.getLogger("dbaide.agent.toolkit")
 
 
 _CATEGORICAL_TYPES = ("char", "text", "string", "enum", "varchar", "nchar", "nvarchar", "tinytext")
-
-
-def _persist_agent_joins(
-    orchestrator: AskOrchestrator,
-    relations: list[dict[str, Any]],
-    *,
-    database: str = "",
-) -> None:
-    catalog = getattr(orchestrator, "join_catalog", None)
-    if catalog is None:
-        return
-    try:
-        saved = catalog.persist_agent_candidates(
-            orchestrator.instance,
-            relations,
-            database=database or orchestrator.run_state.database or "",
-            fingerprint=getattr(orchestrator, "connection_fingerprint", ""),
-        )
-        if saved:
-            orchestrator.progress(
-                subagent_event(
-                    agent="join_catalog",
-                    title=f"Saved {len(saved)} join candidate(s)",
-                    parent="get_relations",
-                ),
-            )
-    except Exception as exc:
-        logger.warning("persist_agent_joins_failed: %s", exc)
 
 
 def _relations_payload(relations: list[dict[str, Any]]) -> dict[str, Any]:
@@ -228,11 +199,13 @@ def _collect_disclosed_schemas(
     selected: list[tuple[str, str, list[ColumnInfo]]] = []
 
     if isinstance(tables_arg, list) and tables_arg:
+        from dbaide.agent.schema_context import normalize_db_table
+
         for raw in tables_arg:
             name = str(raw).strip()
             if not name:
                 continue
-            db = database_default
+            db, name = normalize_db_table(name, database_default)
             columns = _find_schema_columns(orchestrator, name, db)
             if columns is None:
                 columns = orchestrator.schema.describe_table(name, database=db)

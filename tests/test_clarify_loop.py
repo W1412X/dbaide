@@ -1,4 +1,4 @@
-"""End-to-end: the loop runs clarify_semantics after resolve_schema; a material
+"""End-to-end: the loop runs clarify_semantics after schema evidence; a material
 ambiguity pauses (wait_user); on resume the user's answer becomes confirmed
 criteria that reach SQL generation."""
 
@@ -21,14 +21,11 @@ class ClarifyLoopMock(LLMClient):
         system = messages[0].content if messages else ""
         user = messages[-1].content if messages else ""
         if "tool loop" in system.lower():
-            order = ["resolve_schema", "clarify_semantics", "generate_sql", "validate_sql", "execute_sql"]
+            order = ["retrieve_schema_context", "clarify_semantics", "generate_sql", "validate_sql", "execute_sql"]
             for name in order:
                 if user.count(f"`{name}`") == 0:  # not yet called
                     return {"action": "call_tool", "tool": name, "args": {}}
             return {"action": "finish", "answer": "Done."}
-        if "schema linker" in system:
-            return {"tables": [{"database": "main", "table": "orders", "columns": ["id", "amount", "status", "created_at"]}],
-                    "sufficient": True}
         if "rigorous data analyst" in system:  # the clarifier
             return {"questions": [{"ask": "created_at is a timestamp — which timezone defines the window?",
                                    "options": ["UTC", "America/New_York"]}],

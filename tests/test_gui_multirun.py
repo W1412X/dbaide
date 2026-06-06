@@ -186,13 +186,15 @@ def test_oneoff_sql_result_routes_to_originating_editor(monkeypatch):
     other = _FakeDoc()
     history = _FakeHistoryStore()
     bus = _FakeBus()
-    win._oneoff_action = "execute_sql"
+    win._oneoff = mw.OneOffState(
+        action="execute_sql",
+        sql_doc=origin,
+        data_doc=None,
+        sql="select 1",
+        connection="old",
+        database="main",
+    )
     win._oneoff_worker = object()
-    win._oneoff_sql_doc = origin
-    win._oneoff_data_doc = None
-    win._oneoff_sql = "select 1"
-    win._oneoff_connection = "old"
-    win._oneoff_database = "main"
     win._active_sql_doc = other
     win._active_data_doc = None
     win._building = False
@@ -218,7 +220,7 @@ def test_oneoff_sql_result_routes_to_originating_editor(monkeypatch):
     })]
     assert bus.events[-1][1] == {"instance": "old"}
     assert win._oneoff_worker is None
-    assert win._oneoff_sql_doc is None
+    assert win._oneoff == mw.OneOffState()
 
 
 def test_query_completed_event_ignores_other_connections():

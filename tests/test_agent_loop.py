@@ -1,11 +1,9 @@
 import sqlite3
 
 from dbaide.adapters import build_adapter
-from dbaide.agent.loop import AskAgentLoop, LoopState, ToolCallRecord
+from dbaide.agent.loop import AskAgentLoop
 from dbaide.agent.orchestrator import AskOrchestrator
-from dbaide.agent.runtime import AgentRuntime
 from dbaide.agent.toolkit import build_tool_registry
-from dbaide.core.result import ExecutionPolicy
 from dbaide.models import ColumnInfo, ConnectionConfig
 from dbaide.session import Session
 from dbaide.tools.registry import ToolContext
@@ -107,13 +105,16 @@ def test_orchestrator_returns_honest_failure_no_staged_degrade(tmp_path):
     assert resp.result is None and not resp.sql        # no fabricated staged result
 
 
-def test_auto_get_relations_after_multi_describe(tmp_path):
+def test_join_relations_require_explicit_tool_call_after_multi_describe(tmp_path):
     db = tmp_path / "multi.db"
     conn = sqlite3.connect(db)
     conn.executescript(
         """
         CREATE TABLE assets (id INTEGER PRIMARY KEY, name TEXT);
-        CREATE TABLE asset_sensors (id INTEGER PRIMARY KEY, asset_id INTEGER);
+        CREATE TABLE asset_sensors (
+            id INTEGER PRIMARY KEY,
+            asset_id INTEGER REFERENCES assets(id)
+        );
         """
     )
     conn.commit()
@@ -128,17 +129,15 @@ def test_auto_get_relations_after_multi_describe(tmp_path):
         "asset_sensors": [ColumnInfo(name="asset_id", data_type="INTEGER")],
     }
     orch.run_state.schema_db = {"assets": "", "asset_sensors": ""}
-    loop = AskAgentLoop(orch)
-    state = LoopState(question="sensor query", database="", execute_allowed=True)
     registry = build_tool_registry(orch)
-    runtime = AgentRuntime(
-        llm=orch.llm,
-        tool_registry=registry,
-        execution_policy=ExecutionPolicy.SAFE_AUTO,
-    )
     ctx = ToolContext()
-    first = loop._auto_get_relations_if_needed(state, runtime, ctx)
-    assert first is not None
-    assert first.ok
-    state.calls.append(ToolCallRecord(tool="get_relations", args={}, ok=True, summary="ok"))
-    assert loop._auto_get_relations_if_needed(state, runtime, ctx) is None
+    assert orch.run_state.relations == []
+
+    result = registry.invoke(
+        "retrieve_join_context",
+        {"request": "sensor query", "tables": ["assets", "asset_sensors"]},
+        ctx,
+    )
+    assert result.ok
+    assert result.data["relations"]
+    assert orch.run_state.relations == result.data["relations"]

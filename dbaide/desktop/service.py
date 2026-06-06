@@ -804,7 +804,6 @@ class DesktopService:
             execution_policy=policy,
             limit=int(payload.get("limit") or 100),
             timeout_seconds=int(payload.get("timeout_seconds") or 60),
-            show_trace=bool(payload.get("show_trace", True)),
             resume_state=payload.get("resume_state"),
             user_reply=str(payload.get("user_reply") or ""),
             schema_scope=payload.get("schema_scope") or {},
@@ -1114,7 +1113,6 @@ class DesktopService:
             parts.append(f"--database {database}")
         if policy and policy != "safe_auto":
             parts.append(f"--policy {policy}")
-        parts.append("--show-trace")
         return " ".join(parts)
 
     def _query_tools(self, conn: ConnectionConfig) -> QueryTools:

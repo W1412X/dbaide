@@ -21,7 +21,7 @@ MAX_DISCLOSED_TABLES = 4
 def normalize_db_table(table: str, database: str = "") -> tuple[str, str]:
     """Split a db-qualified table name into (database, table).
 
-    The schema linker and the model often hand back a display name like
+    The model may hand back a display name like
     ``platform.sys_user`` in the *table* field with an empty database — describing a
     table literally named "platform.sys_user" then finds nothing. When the table
     carries a dot and no explicit database is given, treat the prefix as the database.
@@ -101,12 +101,12 @@ def collect_relations(
     *,
     question: str = "",
     disclosed_schemas: list[tuple[str, str, list[ColumnInfo]]] | None = None,
-    infer_semantic: bool = True,
-    validate_sample: bool = True,
+    infer_semantic: bool = False,
+    validate_sample: bool = False,
     sample_size: int = 150,
     parent: str = "",
 ) -> list[dict[str, Any]]:
-    """Catalog (user/agent) → FK → LLM semantic; sample evidence adjusts confidence."""
+    """Catalog (user/agent) → FK, with optional LLM semantic and sample evidence."""
     from dbaide.joins.catalog import merge_relation_layers
     from dbaide.agent.join_inference import tables_fully_connected
 
@@ -288,8 +288,7 @@ def apply_column_notes(
 ) -> None:
     """Public: backfill user column notes onto disclosed ColumnInfo objects.
 
-    Called on every path that feeds generate_sql — including the resolve_schema
-    fast path, which does not go through ``_disclosed_schemas_for_tables``."""
+    Called on every path that feeds generate_sql."""
     _apply_column_notes(orchestrator, schemas)
 
 

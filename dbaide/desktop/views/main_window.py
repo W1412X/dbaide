@@ -5,7 +5,7 @@ import sys
 from typing import Any, Callable
 
 from PyQt6 import sip
-from PyQt6.QtCore import Qt, QSettings, QThreadPool
+from PyQt6.QtCore import Qt, QSettings
 from PyQt6.QtGui import QKeySequence, QShortcut
 from PyQt6.QtWidgets import (
     QApplication,
@@ -50,7 +50,17 @@ from dbaide.desktop.views.workbench import WorkbenchView
 from dbaide.desktop.views.query_history import QueryHistoryPanel
 from dbaide.history.query_store import QueryHistoryStore
 from dbaide.desktop.views.topbar import TopBar
-from dbaide.desktop.workers import CancelledError, ServiceWorker
+from dbaide.desktop.task_manager import TaskHandle, TaskManager
+from dbaide.desktop.ui_state import (
+    ComposerUiState,
+    ConversationRunState,
+    ModeUiState,
+    OneOffRunState,
+    OneOffState,
+    RunStatusUiState,
+    UiStateBinder,
+)
+from dbaide.desktop.workers import CancelledError
 
 
 class MainWindow(QMainWindow):
@@ -58,37 +68,11 @@ class MainWindow(QMainWindow):
         super().__init__()
         self.service = service
         self.bus = EventBus()
-        self.pool = QThreadPool.globalInstance()
+        self.tasks = TaskManager(service, self)
+        self.run_state = ConversationRunState(max_runs=self.service.cfg.max_concurrent_runs())
+        self.oneoff_state = OneOffRunState()
         self.bootstrap: dict[str, Any] = {}
         self.schema_rows: list[dict[str, Any]] = []
-        # ── Multi-run state ──────────────────────────────────────────────────
-        # Each conversation (session) runs in its own worker; up to
-        # max_concurrent_runs run at once, the rest queue. Everything is keyed by a
-        # stable *slot key* — the server session_id once known, or a temporary
-        # "new:N" key for a brand-new, not-yet-saved chat — so a run's progress and
-        # result always land in the right session even when it isn't on screen.
-        self._max_runs = self.service.cfg.max_concurrent_runs()
-        self._runs: dict[str, ServiceWorker] = {}                 # slot key → active ask worker
-        self._run_queue: list[tuple[str, dict[str, Any]]] = []    # (slot key, payload) waiting for a slot
-        self._pending_resume: dict[str, dict[str, Any]] = {}      # slot key → clarification resume_state
-        self._slot_trace: dict[str, list[dict[str, Any]]] = {}    # slot key → accumulated trace events
-        self._slot_question: dict[str, str] = {}                  # slot key → last question (for resume label)
-        self._slot_session: dict[str, str] = {}                   # slot key → server session_id (once known)
-        self._slot_connection: dict[str, str] = {}                # slot key → connection that launched the run
-        self._new_counter = 0                                     # source of "new:N" temp keys
-        self._active_key = ""                                     # the slot currently on screen
-        # Background workers (bootstrap / schema / sessions / asset preview) kept
-        # alive until they finish — see _run_background.
-        self._bg_workers: list[ServiceWorker] = []
-        # One-off non-conversation action (build assets / run SQL / etc.).
-        self._oneoff_worker: ServiceWorker | None = None
-        self._oneoff_action = ""
-        self._oneoff_sql_doc = None
-        self._oneoff_data_doc = None
-        self._oneoff_sql = ""
-        self._oneoff_connection = ""
-        self._oneoff_database = ""
-        self._building = False
         self._last_question = ""
         # The active chat session (会话) — the server id of the visible slot.
         self.current_session_id = ""
@@ -99,9 +83,133 @@ class MainWindow(QMainWindow):
         self.setMinimumSize(1000, 720)
         self.setStyleSheet(app_style())
         self._build()
+        self.ui_state = UiStateBinder(self)
         self._install_shortcuts()
         self._wire_bus()
         self.refresh_all()
+
+    def closeEvent(self, event) -> None:  # noqa: N802
+        self.tasks.cancel_all()
+        super().closeEvent(event)
+
+    def _ensure_run_state(self) -> ConversationRunState:
+        if "run_state" not in self.__dict__:
+            self.run_state = ConversationRunState()
+        return self.run_state
+
+    def _ensure_oneoff_state(self) -> OneOffRunState:
+        if "oneoff_state" not in self.__dict__:
+            self.oneoff_state = OneOffRunState()
+        return self.oneoff_state
+
+    def _ensure_ui_state(self) -> UiStateBinder:
+        if "ui_state" not in self.__dict__:
+            self.ui_state = UiStateBinder(self)
+        return self.ui_state
+
+    @property
+    def _max_runs(self) -> int:
+        return self._ensure_run_state().max_runs
+
+    @_max_runs.setter
+    def _max_runs(self, value: int) -> None:
+        self._ensure_run_state().max_runs = int(value)
+
+    @property
+    def _runs(self) -> dict[str, TaskHandle]:
+        return self._ensure_run_state().runs
+
+    @_runs.setter
+    def _runs(self, value: dict[str, TaskHandle]) -> None:
+        self._ensure_run_state().runs = value
+
+    @property
+    def _run_queue(self) -> list[tuple[str, dict[str, Any]]]:
+        return self._ensure_run_state().queue
+
+    @_run_queue.setter
+    def _run_queue(self, value: list[tuple[str, dict[str, Any]]]) -> None:
+        self._ensure_run_state().queue = value
+
+    @property
+    def _pending_resume(self) -> dict[str, dict[str, Any]]:
+        return self._ensure_run_state().pending_resume
+
+    @_pending_resume.setter
+    def _pending_resume(self, value: dict[str, dict[str, Any]]) -> None:
+        self._ensure_run_state().pending_resume = value
+
+    @property
+    def _slot_trace(self) -> dict[str, list[dict[str, Any]]]:
+        return self._ensure_run_state().slot_trace
+
+    @_slot_trace.setter
+    def _slot_trace(self, value: dict[str, list[dict[str, Any]]]) -> None:
+        self._ensure_run_state().slot_trace = value
+
+    @property
+    def _slot_question(self) -> dict[str, str]:
+        return self._ensure_run_state().slot_question
+
+    @_slot_question.setter
+    def _slot_question(self, value: dict[str, str]) -> None:
+        self._ensure_run_state().slot_question = value
+
+    @property
+    def _slot_session(self) -> dict[str, str]:
+        return self._ensure_run_state().slot_session
+
+    @_slot_session.setter
+    def _slot_session(self, value: dict[str, str]) -> None:
+        self._ensure_run_state().slot_session = value
+
+    @property
+    def _slot_connection(self) -> dict[str, str]:
+        return self._ensure_run_state().slot_connection
+
+    @_slot_connection.setter
+    def _slot_connection(self, value: dict[str, str]) -> None:
+        self._ensure_run_state().slot_connection = value
+
+    @property
+    def _new_counter(self) -> int:
+        return self._ensure_run_state().new_counter
+
+    @_new_counter.setter
+    def _new_counter(self, value: int) -> None:
+        self._ensure_run_state().new_counter = int(value)
+
+    @property
+    def _active_key(self) -> str:
+        return self._ensure_run_state().active_key
+
+    @_active_key.setter
+    def _active_key(self, value: str) -> None:
+        self._ensure_run_state().active_key = str(value or "")
+
+    @property
+    def _oneoff(self) -> OneOffState:
+        return self._ensure_oneoff_state().current
+
+    @_oneoff.setter
+    def _oneoff(self, value: OneOffState) -> None:
+        self._ensure_oneoff_state().current = value
+
+    @property
+    def _oneoff_worker(self) -> TaskHandle | None:
+        return self._ensure_oneoff_state().handle
+
+    @_oneoff_worker.setter
+    def _oneoff_worker(self, value: TaskHandle | None) -> None:
+        self._ensure_oneoff_state().handle = value
+
+    @property
+    def _building(self) -> bool:
+        return self._ensure_oneoff_state().building
+
+    @_building.setter
+    def _building(self, value: bool) -> None:
+        self._ensure_oneoff_state().building = bool(value)
 
     def _install_shortcuts(self) -> None:
         """Global accelerators (⌘ on macOS maps from Ctrl in QKeySequence)."""
@@ -259,21 +367,21 @@ class MainWindow(QMainWindow):
         self.setCentralWidget(root)
         self.statusbar = QStatusBar()
         self.setStatusBar(self.statusbar)
-        self.statusbar.showMessage("Ready")
+        self._ensure_ui_state().statusbar_message("Ready")
         self._on_tab_changed(self.tabbar.currentIndex())
         # Land focus in the composer so the cursor is ready to type on launch
         # (and the topbar selectors don't show a stray focus ring at rest).
         self.composer.input.setFocus()
 
     def refresh_all(self) -> None:
-        self.statusbar.showMessage("Loading…")
+        self._ensure_ui_state().statusbar_message("Loading…")
         self._run_background("bootstrap", {}, self._on_bootstrap_loaded)
 
     def _on_bootstrap_loaded(self, bootstrap: dict[str, Any]) -> None:
         try:
             self.bootstrap = bootstrap
             self._apply_bootstrap_ui()
-            self.statusbar.showMessage("Ready")
+            self._ensure_ui_state().statusbar_message("Ready")
         except Exception as exc:
             self.fail(exc)
 
@@ -295,13 +403,12 @@ class MainWindow(QMainWindow):
         has_conn = bool(conn_name)
         self.ask_tab.set_has_connection(has_conn)
         self.ask_tab.set_empty_context(has_conn, bool(models))
-        self.composer.set_disabled_no_connection(not has_conn)
+        self._sync_active_ui()
         if has_conn:
             self._refresh_connection_context(conn_name)
         else:
             # No connection left (e.g. the current one was deleted) — clear the
             # per-connection views so a deleted connection's schema/sessions don't linger.
-            self.composer.set_placeholder(_i18n_t("composer.placeholder.no_conn"))
             self.schema_rows = []
             self.sidebar.load_schema([])
             self.sidebar.chats.load([])
@@ -317,29 +424,13 @@ class MainWindow(QMainWindow):
         on_error: Callable[[object], None] | None = None,
         on_progress: Callable[[object], None] | None = None,
     ) -> None:
-        worker = ServiceWorker(self.service, action, payload)
-        # Retain a reference until the worker finishes. Without this the local
-        # `worker` (and its WorkerSignals QObject) can be garbage-collected while the
-        # pool thread is still running, so the thread emits on a deleted signals
-        # object → hard crash ("WorkerSignals has been deleted"). Released on finish.
-        self._bg_workers.append(worker)
-
-        def _release(*_a) -> None:
-            try:
-                self._bg_workers.remove(worker)
-            except ValueError:
-                pass
-
-        worker.signals.done.connect(lambda act, result: on_success(result) if act == action else None)
-        if on_error:
-            worker.signals.failed.connect(on_error)
-        else:
-            worker.signals.failed.connect(self._background_failed)
-        if on_progress:
-            worker.signals.progress.connect(on_progress)
-        worker.signals.done.connect(_release)
-        worker.signals.failed.connect(_release)
-        self.pool.start(worker)
+        self.tasks.start(
+            action,
+            payload,
+            on_done=on_success,
+            on_failed=on_error or self._background_failed,
+            on_progress=on_progress,
+        )
 
     def _background_failed(self, exc: object) -> None:
         self.toast(str(exc))
@@ -373,10 +464,7 @@ class MainWindow(QMainWindow):
 
     def _on_tab_changed(self, index: int) -> None:
         if 0 <= index < self.stack.count():
-            self.stack.setCurrentIndex(index)
-            mode = self._tab_names[index]
-            self.sidebar.set_mode(mode)
-            self.composer.setVisible(mode == "Assistant")
+            self._ensure_ui_state().apply_mode(ModeUiState(index=index, mode=self._tab_names[index]))
 
     def switch_tab(self, name: str) -> None:
         """Route the old per-tab names to the new Assistant/Workbench modes."""
@@ -407,15 +495,8 @@ class MainWindow(QMainWindow):
         for worker in list(self._runs.values()):
             if not worker.is_cancelled:
                 worker.cancel()
-        self._runs.clear()
-        self._run_queue.clear()
-        self._pending_resume.clear()
-        self._slot_trace.clear()
-        self._slot_question.clear()
-        self._slot_session.clear()
-        self._slot_connection.clear()
+        self.run_state.reset()
         self.ask_tab.reset_all()
-        self._active_key = ""
         self.current_session_id = ""
         self._refresh_run_status()
 
@@ -435,8 +516,7 @@ class MainWindow(QMainWindow):
                 asset_status = c.get("asset_status") or "missing"
                 break
         self.topbar.set_asset_status(asset_status)
-        key = "composer.placeholder.ready" if asset_status == "ready" else "composer.placeholder.build"
-        self.composer.set_placeholder(_i18n_t(key))
+        self._sync_active_ui()
 
     def _load_sessions(self, name: str) -> None:
         if not name:
@@ -447,7 +527,7 @@ class MainWindow(QMainWindow):
             if name != self.current_connection():
                 return
             self.sidebar.chats.load(entries or [])
-            self.sidebar.chats.set_current(self.current_session_id)
+            self._sync_chat_selection()
         self._run_background("list_sessions", {"connection_name": name}, on_loaded)
 
     def _load_schema(self, name: str) -> None:
@@ -455,9 +535,7 @@ class MainWindow(QMainWindow):
             self.sidebar.load_schema([])
             return
         loading = _i18n_t("schema.loading")
-        self.sidebar.set_loading(loading)  # visible state while the (possibly slow) fetch runs
-        self.topbar.set_global_status(loading, "building")
-        self.statusbar.showMessage(loading)
+        self._ensure_ui_state().schema_loading(loading)
         self._run_background(
             "schema_tree",
             {"name": name},
@@ -473,9 +551,7 @@ class MainWindow(QMainWindow):
         if not rows and name not in self._projected:
             self._projected.add(name)
             projecting = _i18n_t("schema.projecting")
-            self.sidebar.set_loading(projecting)
-            self.topbar.set_global_status(projecting, "building")
-            self.statusbar.showMessage(projecting)
+            self._ensure_ui_state().schema_loading(projecting)
             self._run_background(
                 "project_instance", {"name": name},
                 lambda _r: self._fetch_schema_after_project(name),
@@ -495,9 +571,7 @@ class MainWindow(QMainWindow):
         elif message is not None:
             title = str(message).strip()
         text = f"{base} · {title}" if title else base
-        self.sidebar.update_loading(text)
-        self.topbar.set_global_status(text, "building")
-        self.statusbar.showMessage(text)
+        self._ensure_ui_state().schema_loading(text, update=True)
 
     def _project_failed(self, name: str, message: str) -> None:
         self._projected.discard(name)  # allow a retry on the next select (e.g. DB was down)
@@ -512,9 +586,7 @@ class MainWindow(QMainWindow):
                 break
         self.topbar.set_asset_status("ready")
         loading = _i18n_t("schema.loading")
-        self.sidebar.update_loading(loading)
-        self.topbar.set_global_status(loading, "building")
-        self.statusbar.showMessage(loading)
+        self._ensure_ui_state().schema_loading(loading, update=True)
         self._run_background(
             "schema_tree", {"name": name},
             lambda rows: self._apply_schema_loaded(name, rows),
@@ -525,12 +597,9 @@ class MainWindow(QMainWindow):
         if name != self.current_connection():
             return
         self.schema_rows = rows
-        dbs = [row["name"] for row in self.schema_rows]
-        self.topbar.set_databases(dbs)
-        self.sidebar.load_schema(self.schema_rows)
-        self.workbench.set_sql_schema(self._schema_completion())
+        self._ensure_ui_state().schema_loaded(self.schema_rows, self._schema_completion())
         self._restore_status_badge()
-        self.statusbar.showMessage(_i18n_t("status.ready"))
+        self._ensure_ui_state().statusbar_message(_i18n_t("status.ready"))
 
     def _schema_completion(self) -> dict[str, Any]:
         """Structured schema for context-aware SQL completion: database names, table
@@ -568,11 +637,10 @@ class MainWindow(QMainWindow):
         if name != self.current_connection():
             return
         self.schema_rows = []
-        self.sidebar.load_schema([], error=message)
-        self.topbar.set_databases([])
+        self._ensure_ui_state().schema_error(message)
         self.toast(f"Schema load failed: {message}")
         self._restore_status_badge()
-        self.statusbar.showMessage(f"Schema load failed: {message}")
+        self._ensure_ui_state().statusbar_message(f"Schema load failed: {message}")
 
     def refresh_joins(self) -> None:
         conn = self.current_connection()
@@ -682,7 +750,6 @@ class MainWindow(QMainWindow):
             "question": question,
             "database": database,
             "execution_policy": policy,
-            "show_trace": True,
             "session_id": self._slot_session.get(key, ""),
             "schema_scope": schema_scope,
         })
@@ -719,23 +786,11 @@ class MainWindow(QMainWindow):
             "resume_state": resume_state,
             "database": database,
             "execution_policy": policy,
-            "show_trace": True,
             "session_id": self._slot_session.get(key, ""),
         })
 
     def _restore_composer_placeholder(self) -> None:
-        conn = self.current_connection()
-        if not conn:
-            self.composer.set_placeholder(_i18n_t("composer.placeholder.no_conn"))
-            return
-        conns = self.bootstrap.get("connections") or []
-        asset_status = "missing"
-        for c in conns:
-            if c["name"] == conn:
-                asset_status = c.get("asset_status") or "missing"
-                break
-        key = "composer.placeholder.ready" if asset_status == "ready" else "composer.placeholder.build"
-        self.composer.set_placeholder(_i18n_t(key))
+        self._sync_active_ui()
 
     def build_assets(self) -> None:
         conn = self.current_connection()
@@ -775,7 +830,7 @@ class MainWindow(QMainWindow):
 
     def _start_build_assets(self, conn: str, databases: list[str], options: dict[str, Any] | None = None) -> None:
         self.topbar.set_asset_status("building")
-        self.topbar.set_global_status("Building assets", "building")
+        self._ensure_ui_state().global_status("Building assets", "building")
         payload: dict[str, Any] = {"name": conn}
         if databases:
             payload["databases"] = databases
@@ -900,13 +955,13 @@ class MainWindow(QMainWindow):
             self.fail(exc)
 
     def _settings_save_connection(self, dialog: SettingsDialog, payload: dict[str, Any]) -> None:
-        dialog.set_save_busy(True, target="connection")
+        self._ensure_ui_state().set_settings_busy(dialog, "save", True, target="connection")
 
         name = str(payload.get("name") or "")
         was_new = name not in {c.get("name") for c in (self.bootstrap.get("connections") or [])}
 
         def on_done(result: object) -> None:
-            dialog.set_save_busy(False, target="connection")
+            self._ensure_ui_state().set_settings_busy(dialog, "save", False, target="connection")
             dialog._connections[payload["name"]] = dict(payload)
             if payload.get("make_default"):
                 dialog._default_connection = payload["name"]
@@ -919,7 +974,7 @@ class MainWindow(QMainWindow):
             self.bus.emit(CONNECTIONS_CHANGED, {"instance": payload.get("name")})
 
         def on_fail(exc: object) -> None:
-            dialog.set_save_busy(False, target="connection")
+            self._ensure_ui_state().set_settings_busy(dialog, "save", False, target="connection")
             dialog.show_test_result(False, str(exc), target="connection")
 
         self._run_background("save_connection", payload, on_done, on_error=on_fail)
@@ -935,7 +990,7 @@ class MainWindow(QMainWindow):
         self.toast(_i18n_t("toast.syncing"))
         # Persistent badge for the whole (possibly slow, remote) sync — a transient
         # toast alone leaves no indication once it fades while work continues.
-        self.topbar.set_global_status(_i18n_t("status.syncing"), "building")
+        self._ensure_ui_state().global_status(_i18n_t("status.syncing"), "building")
 
         def done(result: object) -> None:
             if conn != self.current_connection():
@@ -968,18 +1023,18 @@ class MainWindow(QMainWindow):
             return
         target = ".".join(p for p in (database, table) if p)
         self.toast(_i18n_t("toast.syncing"))
-        self.topbar.set_global_status(_i18n_t("status.syncing"), "building")
+        self._ensure_ui_state().global_status(_i18n_t("status.syncing"), "building")
         payload: dict[str, Any] = {"name": conn, "database": database}
         if table:
             payload["table"] = table
-        self.sidebar.set_node_refreshing(node, True)
+        self._ensure_ui_state().set_node_refreshing(node, True)
 
         def done(result: object) -> None:
             if conn != self.current_connection():
-                self.sidebar.set_node_refreshing(node, False)
+                self._ensure_ui_state().set_node_refreshing(node, False)
                 return
             summary = (result or {}).get("summary", "") if isinstance(result, dict) else ""
-            self.sidebar.set_node_refreshing(node, False)
+            self._ensure_ui_state().set_node_refreshing(node, False)
             self.toast(_i18n_t("toast.synced", summary=summary or target))
             self._restore_status_badge()
             self.bus.emit(ASSETS_CHANGED, {"instance": conn})
@@ -988,9 +1043,9 @@ class MainWindow(QMainWindow):
 
         def fail(exc: object) -> None:
             if conn != self.current_connection():
-                self.sidebar.set_node_refreshing(node, False)
+                self._ensure_ui_state().set_node_refreshing(node, False)
                 return
-            self.sidebar.set_node_refreshing(node, False)
+            self._ensure_ui_state().set_node_refreshing(node, False)
             self.toast(_i18n_t("toast.sync_failed", error=str(exc)))
             self._restore_status_badge()
 
@@ -1019,7 +1074,7 @@ class MainWindow(QMainWindow):
         self.toast(_i18n_t("toast.enriching", target=target))
         # Enrichment runs the LLM + sampling + profiling — slow enough that the start
         # toast fades long before it finishes; keep a persistent badge meanwhile.
-        self.topbar.set_global_status(_i18n_t("status.enriching"), "building")
+        self._ensure_ui_state().global_status(_i18n_t("status.enriching"), "building")
 
         def done(_r: object) -> None:
             if conn != self.current_connection():
@@ -1045,23 +1100,23 @@ class MainWindow(QMainWindow):
             self.fail(exc)
 
     def _settings_test_connection(self, dialog: SettingsDialog, payload: dict[str, Any]) -> None:
-        dialog.set_test_busy(True, target="connection")
+        self._ensure_ui_state().set_settings_busy(dialog, "test", True, target="connection")
 
         def on_done(result: dict[str, Any]) -> None:
-            dialog.set_test_busy(False, target="connection")
+            self._ensure_ui_state().set_settings_busy(dialog, "test", False, target="connection")
             dialog.show_test_result(True, str(result.get("message") or _i18n_t("toast.connection_ok")), target="connection")
 
         def on_fail(exc: object) -> None:
-            dialog.set_test_busy(False, target="connection")
+            self._ensure_ui_state().set_settings_busy(dialog, "test", False, target="connection")
             dialog.show_test_result(False, str(exc), target="connection")
 
         self._run_background("test_connection", payload, on_done, on_error=on_fail)
 
     def _settings_save_model(self, dialog: SettingsDialog, payload: dict[str, Any]) -> None:
-        dialog.set_save_busy(True, target="model")
+        self._ensure_ui_state().set_settings_busy(dialog, "save", True, target="model")
 
         def on_done(_result: object) -> None:
-            dialog.set_save_busy(False, target="model")
+            self._ensure_ui_state().set_settings_busy(dialog, "save", False, target="model")
             dialog._models[payload["name"]] = dict(payload)
             if payload.get("make_default"):
                 dialog._default_model = payload["name"]
@@ -1070,7 +1125,7 @@ class MainWindow(QMainWindow):
             self.bus.emit(MODELS_CHANGED, {"model": payload.get("name")})
 
         def on_fail(exc: object) -> None:
-            dialog.set_save_busy(False, target="model")
+            self._ensure_ui_state().set_settings_busy(dialog, "save", False, target="model")
             dialog.show_test_result(False, str(exc), target="model")
 
         self._run_background("save_model", payload, on_done, on_error=on_fail)
@@ -1084,14 +1139,14 @@ class MainWindow(QMainWindow):
             self.fail(exc)
 
     def _settings_test_model(self, dialog: SettingsDialog, payload: dict[str, Any]) -> None:
-        dialog.set_test_busy(True, target="model")
+        self._ensure_ui_state().set_settings_busy(dialog, "test", True, target="model")
 
         def on_done(result: dict[str, Any]) -> None:
-            dialog.set_test_busy(False, target="model")
+            self._ensure_ui_state().set_settings_busy(dialog, "test", False, target="model")
             dialog.show_test_result(bool(result.get("ok")), str(result.get("message") or "OK"), target="model")
 
         def on_fail(exc: object) -> None:
-            dialog.set_test_busy(False, target="model")
+            self._ensure_ui_state().set_settings_busy(dialog, "test", False, target="model")
             dialog.show_test_result(False, str(exc), target="model")
 
         self._run_background("test_model_profile", payload, on_done, on_error=on_fail)
@@ -1136,10 +1191,10 @@ class MainWindow(QMainWindow):
             self._active_sql_doc = None
         if widget is self._active_data_doc:
             self._active_data_doc = None
-        if widget is self._oneoff_sql_doc:
-            self._oneoff_sql_doc = None
-        if widget is self._oneoff_data_doc:
-            self._oneoff_data_doc = None
+        if widget is self._oneoff.sql_doc:
+            self._oneoff.sql_doc = None
+        if widget is self._oneoff.data_doc:
+            self._oneoff.data_doc = None
 
     def _safe_sql_doc(self):
         """Return the active SQL doc only if it's still alive (not deleteLater'd)."""
@@ -1158,17 +1213,17 @@ class MainWindow(QMainWindow):
         return None
 
     def _safe_oneoff_sql_doc(self):
-        d = self._oneoff_sql_doc
+        d = self._oneoff.sql_doc
         if d is not None and not sip.isdeleted(d):
             return d
-        self._oneoff_sql_doc = None
+        self._oneoff.sql_doc = None
         return None
 
     def _safe_oneoff_data_doc(self):
-        d = self._oneoff_data_doc
+        d = self._oneoff.data_doc
         if d is not None and not sip.isdeleted(d):
             return d
-        self._oneoff_data_doc = None
+        self._oneoff.data_doc = None
         return None
 
     def execute_sql(self, sql: str) -> None:
@@ -1470,7 +1525,7 @@ class MainWindow(QMainWindow):
         self.current_session_id = ""
         self.ask_tab.set_active(key)
         self.ask_tab.set_has_connection(bool(self.current_connection()))
-        self.sidebar.chats.set_current("")
+        self._sync_chat_selection()
         self._sync_active_ui()
         self.composer.input.setFocus()
 
@@ -1555,57 +1610,52 @@ class MainWindow(QMainWindow):
         if self._oneoff_worker is not None:
             self.toast(_i18n_t("toast.task_running"))
             return
-        self._oneoff_action = action
-        self._oneoff_sql_doc = self._safe_sql_doc() if action in ("execute_sql", "explain_sql") else None
-        self._oneoff_data_doc = self._safe_data_doc() if action in ("browse_table", "count_table") else None
-        self._oneoff_sql = str(payload.get("sql") or self._last_sql or "")
-        self._oneoff_connection = str(
-            payload.get("connection_name") or payload.get("name") or self.current_connection() or ""
-        )
-        self._oneoff_database = str(payload.get("database") or self.current_database() or "")
-        if action == "build_assets":
-            self._building = True
+        self.oneoff_state.begin(OneOffState(
+            action=action,
+            sql_doc=self._safe_sql_doc() if action in ("execute_sql", "explain_sql") else None,
+            data_doc=self._safe_data_doc() if action in ("browse_table", "count_table") else None,
+            sql=str(payload.get("sql") or self._last_sql or ""),
+            connection=str(payload.get("connection_name") or payload.get("name") or self.current_connection() or ""),
+            database=str(payload.get("database") or self.current_database() or ""),
+        ))
         sql_doc = self._safe_oneoff_sql_doc()
         data_doc = self._safe_oneoff_data_doc()
         if action in ("execute_sql", "explain_sql") and sql_doc is not None:
-            sql_doc.set_running(True)
+            self._ensure_ui_state().set_doc_running(sql_doc, True)
         if action in ("browse_table", "count_table") and data_doc is not None:
-            data_doc.set_running(True)
-        worker = ServiceWorker(self.service, action, payload)
-        worker.signals.progress.connect(self._on_oneoff_progress)
-        worker.signals.done.connect(self._on_oneoff_done)
-        worker.signals.failed.connect(self._on_oneoff_failed)
-        self._oneoff_worker = worker
+            self._ensure_ui_state().set_doc_running(data_doc, True)
+        self.oneoff_state.attach_handle(self.tasks.start(
+            action,
+            payload,
+            on_done=lambda result: self._on_oneoff_done(action, result),
+            on_failed=self._on_oneoff_failed,
+            on_progress=self._on_oneoff_progress,
+        ))
         self._sync_active_ui()
         self._refresh_run_status()
-        self.pool.start(worker)
 
     def _on_oneoff_progress(self, message: object) -> None:
         # Asset builds surface their progress in the status bar (the detailed trace
         # panel is gone — conversation runs now carry their trace inline).
-        if self._oneoff_action != "build_assets":
+        if self._oneoff.action != "build_assets":
             return
-        self.statusbar.showMessage(progress_label(message if isinstance(message, dict) else str(message or "")))
+        self._ensure_ui_state().statusbar_message(
+            progress_label(message if isinstance(message, dict) else str(message or ""))
+        )
 
     def _on_oneoff_done(self, action: str, result: Any) -> None:
-        expected_action = self._oneoff_action
-        sql_text = self._oneoff_sql
-        run_connection = self._oneoff_connection
-        run_database = self._oneoff_database
+        state = self._oneoff
+        expected_action = state.action
+        sql_text = state.sql
+        run_connection = state.connection
+        run_database = state.database
         sql_doc = self._safe_oneoff_sql_doc()
         data_doc = self._safe_oneoff_data_doc()
-        self._oneoff_worker = None
-        self._oneoff_action = ""
-        self._oneoff_sql_doc = None
-        self._oneoff_data_doc = None
-        self._oneoff_sql = ""
-        self._oneoff_connection = ""
-        self._oneoff_database = ""
-        self._building = False
         if sql_doc is not None:
-            sql_doc.set_running(False)
+            self._ensure_ui_state().set_doc_running(sql_doc, False)
         if data_doc is not None:
-            data_doc.set_running(False)
+            self._ensure_ui_state().set_doc_running(data_doc, False)
+        self.oneoff_state.finish()
         self._sync_active_ui()
         self._refresh_run_status()
         action = expected_action or action
@@ -1688,24 +1738,18 @@ class MainWindow(QMainWindow):
             self.toast(str(result.get("message") or _i18n_t("toast.connection_ok")))
 
     def _on_oneoff_failed(self, exc: object) -> None:
-        action = self._oneoff_action
-        sql_text = self._oneoff_sql
-        run_connection = self._oneoff_connection
-        run_database = self._oneoff_database
+        state = self._oneoff
+        action = state.action
+        sql_text = state.sql
+        run_connection = state.connection
+        run_database = state.database
         sql_doc = self._safe_oneoff_sql_doc()
         data_doc = self._safe_oneoff_data_doc()
-        self._oneoff_worker = None
-        self._oneoff_action = ""
-        self._oneoff_sql_doc = None
-        self._oneoff_data_doc = None
-        self._oneoff_sql = ""
-        self._oneoff_connection = ""
-        self._oneoff_database = ""
-        self._building = False
         if sql_doc is not None:
-            sql_doc.set_running(False)
+            self._ensure_ui_state().set_doc_running(sql_doc, False)
         if data_doc is not None:
-            data_doc.set_running(False)
+            self._ensure_ui_state().set_doc_running(data_doc, False)
+        self.oneoff_state.finish()
         self._sync_active_ui()
         self._refresh_run_status()
         if isinstance(exc, CancelledError):
@@ -1735,20 +1779,19 @@ class MainWindow(QMainWindow):
     # ── Conversation runs (one per session, capped + queued) ──────────────────
 
     def _new_slot_key(self) -> str:
-        self._new_counter += 1
-        return f"new:{self._new_counter}"
+        return self.run_state.new_slot_key()
 
     def _active_or_new_key(self) -> str:
         """The active slot key, minting (and activating) a fresh one if there is none."""
         if not self._active_key:
-            self._active_key = self._new_slot_key()
+            self.run_state.active_or_new_key()
             self.current_session_id = ""
             self.ask_tab.set_active(self._active_key)
         return self._active_key
 
     def _start_ask(self, key: str, payload: dict[str, Any]) -> None:
         if len(self._runs) >= self._max_runs:
-            self._run_queue.append((key, payload))   # waits for a free slot
+            self.run_state.queue_run(key, payload)   # waits for a free slot
             self.toast(_i18n_t("toast.run_queued"))
             self._sync_active_ui()
             self._refresh_run_status()
@@ -1756,27 +1799,18 @@ class MainWindow(QMainWindow):
         self._launch_ask(key, payload)
 
     def _launch_ask(self, key: str, payload: dict[str, Any]) -> None:
-        worker = ServiceWorker(self.service, "ask", payload)
-        worker.signals.progress.connect(lambda m, k=key: self._on_ask_progress(k, m))
-        worker.signals.done.connect(lambda _a, r, k=key: self._on_ask_done(k, r))
-        worker.signals.failed.connect(lambda e, k=key: self._on_ask_failed(k, e))
-        # Keep the worker (and its WorkerSignals QObject) referenced independently of
-        # self._runs until it finishes — otherwise clearing _runs while it's still on
-        # a pool thread frees the signals object and the thread crashes on emit.
-        self._bg_workers.append(worker)
-        worker.signals.done.connect(lambda *_a, w=worker: self._release_bg_worker(w))
-        worker.signals.failed.connect(lambda *_a, w=worker: self._release_bg_worker(w))
-        self._runs[key] = worker
+        handle = self.tasks.start(
+            "ask",
+            payload,
+            on_done=lambda result, k=key: self._on_ask_done(k, result),
+            on_failed=lambda exc, k=key: self._on_ask_failed(k, exc),
+            on_progress=lambda message, k=key: self._on_ask_progress(k, message),
+            metadata={"slot": key},
+        )
+        self._runs[key] = handle
         self._slot_connection[key] = str(payload.get("connection_name") or self.current_connection() or "")
         self._sync_active_ui()
         self._refresh_run_status()
-        self.pool.start(worker)
-
-    def _release_bg_worker(self, worker) -> None:
-        try:
-            self._bg_workers.remove(worker)
-        except ValueError:
-            pass
 
     def _on_ask_progress(self, key: str, message: object) -> None:
         if key not in self._runs:
@@ -1789,13 +1823,13 @@ class MainWindow(QMainWindow):
             self._slot_trace.setdefault(key, []).append(message)
             self.ask_tab.append_activity_event(key, message)
             if key == self._active_key:
-                self.statusbar.showMessage(progress_label(message))
+                self._ensure_ui_state().statusbar_message(progress_label(message))
         else:
             text = str(message or "").strip()
             if text:
                 self.ask_tab.append_activity(key, text)
                 if key == self._active_key:
-                    self.statusbar.showMessage(progress_label(text))
+                    self._ensure_ui_state().statusbar_message(progress_label(text))
 
     def _on_ask_done(self, key: str, result: Any) -> None:
         if key not in self._runs:
@@ -1854,19 +1888,7 @@ class MainWindow(QMainWindow):
 
     def _migrate_slot(self, old: str, new: str) -> None:
         self.ask_tab.remap(old, new)
-        for d in (
-            self._pending_resume,
-            self._slot_question,
-            self._slot_session,
-            self._slot_trace,
-            self._slot_connection,
-            self._runs,
-        ):
-            if old in d:
-                d[new] = d.pop(old)
-        self._run_queue = [(new if k == old else k, p) for k, p in self._run_queue]
-        if self._active_key == old:
-            self._active_key = new
+        self.run_state.remap(old, new)
 
     def _drain_queue(self) -> None:
         while self._run_queue and len(self._runs) < self._max_runs:
@@ -1884,7 +1906,7 @@ class MainWindow(QMainWindow):
             return
         # Drop a still-queued active run.
         if key and any(k == key for k, _ in self._run_queue):
-            self._run_queue = [(k, p) for k, p in self._run_queue if k != key]
+            self.run_state.remove_queued(key)
             if self.ask_tab.turn_open(key):
                 self.ask_tab.finish_turn_error(key, "**Cancelled**: Task stopped by user.")
             self._sync_active_ui()
@@ -1899,63 +1921,81 @@ class MainWindow(QMainWindow):
 
     def _sync_active_ui(self) -> None:
         """Reflect the *active* slot's run state in the composer + status."""
-        if not self.current_connection():
-            self.composer.set_disabled_no_connection(True)
-            return
-        self.composer.set_disabled_no_connection(False)
-        key = self._active_key
-        running = bool(key and key in self._runs)
-        queued = any(k == key for k, _ in self._run_queue)
-        waiting = bool(key and key in self._pending_resume)
-        busy = running or queued or self._building
-        self.composer.set_running(busy)
-        if not busy:
-            if waiting:
-                self.composer.set_placeholder(_i18n_t("composer.placeholder.reply"))
-            else:
-                self._restore_composer_placeholder()
+        has_connection = bool(self.current_connection())
+        waiting = self.run_state.is_active_waiting()
+        busy = self.run_state.is_active_running() or self.run_state.is_active_queued() or self._building
+        if not has_connection:
+            placeholder = _i18n_t("composer.placeholder.no_conn")
+        elif waiting and not busy:
+            placeholder = _i18n_t("composer.placeholder.reply")
+        else:
+            placeholder = self._composer_ready_placeholder()
+        self._ensure_ui_state().apply_composer(ComposerUiState(
+            has_connection=has_connection,
+            busy=busy,
+            waiting_for_reply=waiting,
+            placeholder=placeholder,
+        ))
 
     def _refresh_run_status(self) -> None:
-        active = len(self._runs) + len(self._run_queue)
+        active = self.run_state.active_count()
         if self._building:
-            self.topbar.set_global_status("Building assets", "building")
+            text, state = "Building assets", "building"
         elif active > 0:
-            self.topbar.set_global_status(_i18n_t("status.runs_active", n=active), "running")
+            text, state = _i18n_t("status.runs_active", n=active), "running"
         else:
             self._restore_status_badge()
-        keys = list(self._runs.keys()) + [k for k, _ in self._run_queue]
-        running_ids = {(self._slot_session.get(k) or k) for k in keys}
-        self.sidebar.chats.set_running(running_ids)
-        # New (unsaved) chats that are running get an ephemeral row so they stay
-        # reachable mid-run; dedupe by key, label with the question.
-        pending: list[dict[str, Any]] = []
-        seen: set[str] = set()
-        for k in keys:
-            if k.startswith("new:") and k not in seen:
-                seen.add(k)
-                title = (self._slot_question.get(k) or "").strip()
-                pending.append({"key": k, "title": title[:60] or _i18n_t("session.new")})
-        self.sidebar.chats.set_pending(pending)
-        self._sync_chat_selection()
+            text, state = "", ""
+        selected = self._chat_selection_id()
+        pending = self._pending_chat_rows()
+        if text:
+            self._ensure_ui_state().apply_run_status(RunStatusUiState(
+                topbar_text=text,
+                topbar_state=state,
+                running_ids=self.run_state.running_ids(),
+                pending_rows=pending,
+                selected_chat=selected,
+            ))
+        else:
+            self._ensure_ui_state().apply_chat_activity(self.run_state.running_ids(), pending, selected)
 
     def _sync_chat_selection(self) -> None:
         """Highlight the active slot's row — its server id, or the ephemeral key for a
         running new chat."""
-        key = self._active_key
-        sel = key if (key and key.startswith("new:")) else self.current_session_id
-        self.sidebar.chats.set_current(sel)
+        self._ensure_ui_state().apply_chat_activity(
+            self.run_state.running_ids(),
+            self._pending_chat_rows(),
+            self._chat_selection_id(),
+        )
 
-    def _restore_status_badge(self) -> None:
+    def _chat_selection_id(self) -> str:
+        key = self._active_key
+        return key if (key and key.startswith("new:")) else self.current_session_id
+
+    def _pending_chat_rows(self) -> list[dict[str, Any]]:
+        rows: list[dict[str, Any]] = []
+        for row in self.run_state.pending_rows():
+            title = str(row.get("title") or "") or _i18n_t("session.new")
+            rows.append({**row, "title": title})
+        return rows
+
+    def _composer_ready_placeholder(self) -> str:
         conn = self.current_connection()
         if not conn:
-            self.topbar.set_global_status("Idle", "idle")
-            return
+            return _i18n_t("composer.placeholder.no_conn")
         asset_status = "missing"
         for c in self.bootstrap.get("connections") or []:
             if c["name"] == conn:
                 asset_status = c.get("asset_status") or "missing"
                 break
-        self.topbar.set_asset_status(asset_status)
+        key = "composer.placeholder.ready" if asset_status == "ready" else "composer.placeholder.build"
+        return _i18n_t(key)
+
+    def _restore_status_badge(self) -> None:
+        self._ensure_ui_state().restore_connection_status(
+            self.current_connection(),
+            self.bootstrap.get("connections") or [],
+        )
 
     def copy_conversation(self) -> None:
         text = self.ask_tab.copy_text()
@@ -1972,7 +2012,7 @@ class MainWindow(QMainWindow):
             self.refresh_all()
 
     def toast(self, message: str) -> None:
-        self.statusbar.showMessage(message, 4000)
+        self._ensure_ui_state().toast(message)
 
     def fail(self, exc: object, *, modal: bool = True) -> None:
         msg = f"**{type(exc).__name__}**: {exc}"

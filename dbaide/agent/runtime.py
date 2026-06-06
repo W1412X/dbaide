@@ -34,12 +34,14 @@ class AgentRuntime:
         execution_policy: ExecutionPolicy = ExecutionPolicy.SAFE_AUTO,
         trace_sink: Callable[[TraceEvent], None] | None = None,
         max_steps: int | None = None,
+        cancel_check: Callable[[], None] | None = None,
     ) -> None:
         self.llm = llm or NullLLMClient()
         self.tool_registry = tool_registry or ToolRegistry()
         self.execution_policy = execution_policy
         self.trace_sink = trace_sink or (lambda _: None)
         self.max_steps = max(1, int(max_steps)) if max_steps else self.MAX_STEPS
+        self.cancel_check = cancel_check
         self._step_count = 0
         self._cancelled = False
         self._start_time = time.perf_counter()
@@ -58,10 +60,17 @@ class AgentRuntime:
 
     def check_budget(self) -> None:
         """Check if execution budget is exhausted."""
+        self.check_cancelled()
         if self._cancelled:
             raise RuntimeError("Execution cancelled by user")
         if self._step_count >= self.max_steps:
             raise RuntimeError(f"Execution budget exhausted ({self.max_steps} steps)")
+
+    def check_cancelled(self) -> None:
+        if self.cancel_check:
+            self.cancel_check()
+        if self._cancelled:
+            raise RuntimeError("Execution cancelled by user")
 
     def emit_trace(self, event: TraceEvent) -> None:
         """Emit a trace event."""
@@ -86,6 +95,7 @@ class AgentRuntime:
         return ToolContext(
             trace_sink=self.trace_sink,
             execution_policy=self.execution_policy.value,
+            cancel_check=self.cancel_check,
         )
 
     def call_tool(self, name: str, args: dict[str, Any], ctx: ToolContext) -> ToolResult:
@@ -93,11 +103,14 @@ class AgentRuntime:
         agent loop (driven by ``steps_remaining``) is actually bounded by MAX_STEPS."""
         self.check_budget()
         self._step_count += 1
-        return self.tool_registry.invoke(name, args, ctx)
+        result = self.tool_registry.invoke(name, args, ctx)
+        self.check_cancelled()
+        return result
 
     def consume_step(self) -> None:
         """Charge one step without invoking a tool (e.g. an unknown-tool attempt),
         so non-tool iterations of the loop still count against the budget."""
+        self.check_budget()
         self._step_count += 1
 
     def elapsed_ms(self) -> float:

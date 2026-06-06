@@ -27,7 +27,7 @@ class TraceKind(str, Enum):
 class TraceEvent:
     """Single trace event in a workflow execution.
 
-    Used by GUI Trace panel and CLI --show-trace.
+    Used by GUI trace display, JSON output and debug bundles.
     """
 
     __slots__ = (

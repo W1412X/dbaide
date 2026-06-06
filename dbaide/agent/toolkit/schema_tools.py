@@ -6,7 +6,7 @@ from typing import Any
 
 from dbaide.tools.registry import ToolContext, ToolRegistry, ToolResult
 from dbaide.tools.specs import (
-    DISCOVER_SCHEMA, RESOLVE_SCHEMA, SYNTHESIZE_SCHEMA_ANSWER,
+    DISCOVER_SCHEMA, RETRIEVE_SCHEMA_CONTEXT, SYNTHESIZE_SCHEMA_ANSWER,
     LIST_DATABASES, LIST_TABLES, DESCRIBE_TABLE,
 )
 from dbaide.agent.schema_context import normalize_db_table, object_notes_for_tables
@@ -39,49 +39,26 @@ def register(registry: ToolRegistry, orchestrator) -> None:
             logger.warning("discover_schema_failed: %s", exc)
             return ToolResult(ok=False, error=_err("discover_schema", str(exc), retryable=True))
 
-    def _resolve_schema(args: dict[str, Any], _ctx: ToolContext) -> ToolResult:
-        from dbaide.agent.schema_link import SchemaLinker
+    def _retrieve_schema_context(args: dict[str, Any], _ctx: ToolContext) -> ToolResult:
+        from dbaide.agent.schema_link import SchemaEvidenceRetriever
 
-        question = str(args.get("question") or orchestrator.run_state.question or "").strip()
+        request = str(args.get("request") or args.get("question") or orchestrator.run_state.question or "").strip()
         database = str(args.get("database") or orchestrator.run_state.database or "")
-        if not question:
-            return ToolResult(ok=False, error=_err("resolve_schema", "question is required"))
+        if not request:
+            return ToolResult(ok=False, error=_err("retrieve_schema_context", "request is required"))
         try:
-            resolved = SchemaLinker(orchestrator).resolve(question, database=database)
+            report = SchemaEvidenceRetriever(orchestrator).retrieve(
+                request,
+                database=database,
+                focus_terms=[str(x) for x in (args.get("focus_terms") or [])],
+                scope=args.get("scope") if isinstance(args.get("scope"), dict) else None,
+                need=str(args.get("need") or ""),
+                limit=int(args.get("limit") or 8),
+            )
         except Exception as exc:
-            logger.warning("resolve_schema_failed: %s", exc)
-            return ToolResult(ok=False, error=_err("resolve_schema", str(exc), retryable=True))
-        # Ambiguous → surface as a user question (same pause/resume path as ask_user).
-        if resolved.pending_question:
-            orchestrator.run_state.pending_question = resolved.pending_question
-            orchestrator.run_state.pending_options = list(resolved.pending_options)
-            orchestrator.run_state.pending_questions = [
-                {"ask": resolved.pending_question, "options": list(resolved.pending_options)}
-            ]
-            return ToolResult(ok=True, data={
-                "pending": True, "question": resolved.pending_question,
-                "options": resolved.pending_options,
-            })
-        orchestrator.run_state.resolved_schema = resolved
-        orchestrator.run_state.relations = list(resolved.joins)
-        # Remember the resolved tables so generate_sql / validation see them.
-        for db, table, columns in resolved.to_disclosed():
-            _remember_table_schema(orchestrator, table, db, columns)
-        tables_payload = [
-            {
-                "database": t["database"], "table": t["table"],
-                "columns": [c.name for c in t["columns"]],
-                "reason": t.get("reason", ""),
-            }
-            for t in resolved.tables
-        ]
-        return ToolResult(ok=True, data={
-            "tables": tables_payload,
-            "joins": resolved.joins,
-            "sufficient": resolved.sufficient,
-            "summary": resolved.summary_line(),
-            "notes": resolved.notes,
-        })
+            logger.warning("retrieve_schema_context_failed: %s", exc)
+            return ToolResult(ok=False, error=_err("retrieve_schema_context", str(exc), retryable=True))
+        return ToolResult(ok=True, data=report.to_tool_data())
 
     def _synthesize_schema_answer(args: dict[str, Any], _ctx: ToolContext) -> ToolResult:
         from dbaide.agent.progressive_schema import ProgressiveSchemaAgent
@@ -153,9 +130,15 @@ def register(registry: ToolRegistry, orchestrator) -> None:
             "columns": payload,
             "disclosed_tables": _disclosed_table_names(orchestrator),
         }
-        # The table is the disclosure leaf: surface its indexes, FKs, row-count and
-        # a small sample from the offline doc in this one call, when assets exist.
-        tdoc = orchestrator.asset_store.table_doc(orchestrator.instance, database, table)
+        # Full table description includes intrinsic table metadata. This is not an
+        # automatic relation workflow: it is the expected payload for a direct
+        # describe_table request.
+        tdoc = orchestrator.asset_store.table_doc(
+            orchestrator.instance,
+            database,
+            table,
+            fingerprint=getattr(orchestrator, "connection_fingerprint", ""),
+        )
         if tdoc:
             if tdoc.get("indexes"):
                 data["indexes"] = tdoc["indexes"]
@@ -165,10 +148,32 @@ def register(registry: ToolRegistry, orchestrator) -> None:
                 data["row_count"] = tdoc["row_count"]
             if tdoc.get("sample_rows"):
                 data["sample_rows"] = tdoc["sample_rows"]
+        else:
+            try:
+                indexes = [idx.to_dict() if hasattr(idx, "to_dict") else idx for idx in orchestrator.adapter.indexes(table, database=database)]
+                if indexes:
+                    data["indexes"] = indexes
+            except Exception:
+                pass
+            try:
+                fks = [
+                    {
+                        "table": fk.table,
+                        "column": fk.column,
+                        "ref_table": fk.ref_table,
+                        "ref_column": fk.ref_column,
+                        "source": "foreign_key",
+                    }
+                    for fk in orchestrator.schema.foreign_keys(table, database=database)
+                ]
+                if fks:
+                    data["foreign_keys"] = fks
+            except Exception:
+                pass
         return ToolResult(ok=True, data=data)
 
     registry.register(DISCOVER_SCHEMA, _discover_schema)
-    registry.register(RESOLVE_SCHEMA, _resolve_schema)
+    registry.register(RETRIEVE_SCHEMA_CONTEXT, _retrieve_schema_context)
     registry.register(SYNTHESIZE_SCHEMA_ANSWER, _synthesize_schema_answer)
     registry.register(LIST_DATABASES, _list_databases)
     registry.register(LIST_TABLES, _list_tables)

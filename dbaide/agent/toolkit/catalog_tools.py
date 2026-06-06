@@ -5,61 +5,45 @@ from typing import Any
 
 from dbaide.tools.registry import ToolContext, ToolRegistry, ToolResult
 from dbaide.tools.specs import (
-    GET_RELATIONS, VALIDATE_JOINS, LIST_JOINS, ADD_JOIN, UPDATE_JOIN, DELETE_JOIN, ANNOTATE_OBJECT,
+    RETRIEVE_JOIN_CONTEXT, VALIDATE_JOINS, LIST_JOINS,
+    ADD_JOIN, UPDATE_JOIN, DELETE_JOIN, ANNOTATE_OBJECT,
 )
-from dbaide.agent.schema_context import collect_relations, disclosed_schemas_for_tables
+from dbaide.agent.schema_context import disclosed_schemas_for_tables
 from dbaide.agent.join_validation import validate_join_relations
 from dbaide.joins import USER_JOIN_CONFIDENCE, catalog_record_to_relation
-from dbaide.agent.toolkit.support import (
-    _err, _persist_agent_joins, _relations_payload, _targets_from_relations,
-)
+from dbaide.agent.toolkit.support import _err, _relations_payload, _targets_from_relations
 
 
 def register(registry: ToolRegistry, orchestrator) -> None:
-    def _get_relations(args: dict[str, Any], _ctx: ToolContext) -> ToolResult:
-        database_default = str(args.get("database") or orchestrator.run_state.table_database or orchestrator.run_state.database or "")
+    def _retrieve_join_context(args: dict[str, Any], _ctx: ToolContext) -> ToolResult:
+        from dbaide.agent.join_evidence import JoinEvidenceRetriever
+
+        request = str(args.get("request") or orchestrator.run_state.question or "").strip()
         tables_arg = args.get("tables")
-        targets: list[tuple[str, str]] = []
-        if isinstance(tables_arg, list) and tables_arg:
-            for raw in tables_arg:
-                name = str(raw).strip()
-                if name:
-                    targets.append((database_default, name))
-        elif orchestrator.run_state.schemas:
-            for key in orchestrator.run_state.schemas:
-                db = orchestrator.run_state.schema_db.get(key, database_default)
-                table = key.split(".", 1)[1] if "." in key else key
-                targets.append((db, table))
-        else:
-            table = str(args.get("table") or orchestrator.run_state.table or "").strip()
-            if table:
-                targets.append((database_default, table))
-        if not targets:
-            return ToolResult(ok=False, error=_err("get_relations", "tables required (describe_table first)"))
-        schemas = disclosed_schemas_for_tables(orchestrator, targets)
+        tables = [str(t).strip() for t in tables_arg if str(t).strip()] if isinstance(tables_arg, list) else []
+        database = str(args.get("database") or orchestrator.run_state.table_database or orchestrator.run_state.database or "")
+        # Default to catalog/FK evidence only. Semantic inference and sample validation
+        # are extra work and must be explicitly requested by the main LLM.
+        infer_semantic = bool(args.get("infer_semantic", False))
+        validate_sample = bool(args.get("validate_sample", False))
         sample_size = int(args.get("sample_size") or 150)
-        # Eager auto-loading passes infer_semantic=False: declared FKs + catalog are
-        # cheap, but LLM semantic inference is expensive (~tens of seconds) and must
-        # not run just because two tables happen to be disclosed — only on demand for
-        # the tables a query actually joins (generate_sql triggers that itself).
-        infer_semantic = bool(args.get("infer_semantic", True))
-        relations = collect_relations(
-            orchestrator,
-            targets,
-            question=orchestrator.run_state.question,
-            disclosed_schemas=schemas,
-            sample_size=sample_size,
-            infer_semantic=infer_semantic,
-            parent=orchestrator.run_state.trace_node,
-        )
-        orchestrator.run_state.relations = relations
-        _persist_agent_joins(orchestrator, relations, database=targets[0][0] if targets else "")
-        return ToolResult(ok=True, data=_relations_payload(relations))
+        try:
+            report = JoinEvidenceRetriever(orchestrator).retrieve(
+                request,
+                tables=tables,
+                database=database,
+                infer_semantic=infer_semantic,
+                validate_sample=validate_sample,
+                sample_size=sample_size,
+            )
+        except Exception as exc:
+            return ToolResult(ok=False, error=_err("retrieve_join_context", str(exc), retryable=True))
+        return ToolResult(ok=True, data=report.to_tool_data())
 
     def _validate_joins(args: dict[str, Any], _ctx: ToolContext) -> ToolResult:
         relations = list(orchestrator.run_state.relations or [])
         if not relations:
-            return ToolResult(ok=False, error=_err("validate_joins", "no relations; call get_relations first"))
+            return ToolResult(ok=False, error=_err("validate_joins", "no relations; call retrieve_join_context first"))
         targets = _targets_from_relations(orchestrator, relations)
         if len({t for _, t in targets}) < 2:
             return ToolResult(ok=False, error=_err("validate_joins", "need at least two tables"))
@@ -73,7 +57,6 @@ def register(registry: ToolRegistry, orchestrator) -> None:
             parent="validate_joins",
         )
         orchestrator.run_state.relations = validated
-        _persist_agent_joins(orchestrator, validated, database=targets[0][0] if targets else "")
         return ToolResult(ok=True, data=_relations_payload(validated))
 
     def _list_joins(args: dict[str, Any], _ctx: ToolContext) -> ToolResult:
@@ -183,7 +166,7 @@ def register(registry: ToolRegistry, orchestrator) -> None:
             return ToolResult(ok=False, error=_err("annotate_object", str(exc)))
         return ToolResult(ok=True, data={"annotation": record, "saved": True})
 
-    registry.register(GET_RELATIONS, _get_relations)
+    registry.register(RETRIEVE_JOIN_CONTEXT, _retrieve_join_context)
     registry.register(VALIDATE_JOINS, _validate_joins)
     registry.register(LIST_JOINS, _list_joins)
     registry.register(ADD_JOIN, _add_join)

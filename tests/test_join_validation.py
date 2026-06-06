@@ -113,9 +113,18 @@ def test_validate_joins_tool(tmp_path):
     orch._reset_loop_state("sensor stats", "", True)
     registry.invoke("describe_table", {"table": "assets"}, ctx)
     registry.invoke("describe_table", {"table": "asset_sensors"}, ctx)
-    rel_result = registry.invoke("get_relations", {}, ctx)
+    rel_result = registry.invoke(
+        "retrieve_join_context",
+        {
+            "request": "sensor stats",
+            "tables": ["assets", "asset_sensors"],
+            "infer_semantic": True,
+            "validate_sample": True,
+        },
+        ctx,
+    )
     assert rel_result.ok
-    assert rel_result.data["validated_count"] >= 1
+    assert len(rel_result.data["relations"]) >= 1
     rels = rel_result.data["relations"]
     assert rels[0].get("join_type") in {"many_to_one", "one_to_many", "one_to_one"}
     revalidate = registry.invoke("validate_joins", {"sample_size": 80}, ctx)
