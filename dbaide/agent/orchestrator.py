@@ -98,7 +98,11 @@ class AskOrchestrator:
         )
         self.diagnose = DiagnoseTools(self.query)
 
-        self.sql_writer = SQLWriter(llm, dialect=adapter.dialect)
+        try:
+            server_version = adapter.server_version()
+        except Exception:
+            server_version = ""
+        self.sql_writer = SQLWriter(llm, dialect=adapter.dialect, server_version=server_version)
         self.formatter = AnswerFormatter()
         self.risk = RiskController()
         self.error_router = ErrorRouter()

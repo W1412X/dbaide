@@ -24,6 +24,7 @@ class TestResourcePolicy:
     def test_default_is_production(self):
         p = resolve_policy(load_profile=None)
         assert p == LOAD_PROFILES[DEFAULT_LOAD_PROFILE]
+        assert p.max_inflight_queries == 16
         assert p.build_max_workers == 1
         assert p.build_profile_mode == "light"
 
@@ -33,7 +34,7 @@ class TestResourcePolicy:
     def test_dev_is_looser_than_production(self):
         dev = resolve_policy(load_profile="dev")
         prod = resolve_policy(load_profile="production")
-        assert dev.max_inflight_queries > prod.max_inflight_queries
+        assert dev.max_inflight_queries >= prod.max_inflight_queries
         assert dev.max_row_limit > prod.max_row_limit
 
     def test_overrides_apply_with_type_coercion(self):

@@ -46,6 +46,7 @@ def drain_qt_pool():
 def isolated_query_log(tmp_path: Path) -> None:
     """Redirect query-log writes to a temp dir and reset resource registries."""
     from dbaide.db import budget as budget_mod
+    from dbaide.db import connection_pool as pool_mod
     from dbaide.db import policy as policy_mod
     from dbaide.observability import query_log
 
@@ -53,10 +54,12 @@ def isolated_query_log(tmp_path: Path) -> None:
     previous = os.environ.get("DBAIDE_LOG_DIR")
     os.environ["DBAIDE_LOG_DIR"] = str(root)
     budget_mod.reset_registry()
+    pool_mod.reset_registry()
     policy_mod.clear_cache()
     query_log.reset_registry()
     yield
     budget_mod.reset_registry()
+    pool_mod.reset_registry()
     policy_mod.clear_cache()
     query_log.reset_registry()
     if previous is None:

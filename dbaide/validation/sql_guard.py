@@ -57,8 +57,10 @@ SENSITIVE_COLUMN_PATTERNS = [
 class SQLGuard:
     """SQL validation guard with safety checks and risk assessment."""
 
-    def __init__(self, *, default_limit: int = 100, max_row_limit: int = 1000) -> None:
+    def __init__(self, *, default_limit: int = 100, max_row_limit: int = 1000,
+                 dialect: str = "generic") -> None:
         self.default_limit = default_limit
+        self.dialect = str(dialect or "generic").lower()
         # Hard ceiling: a LIMIT above this is rejected outright (not merely warned).
         self.max_row_limit = max(1, int(max_row_limit))
         # SELECT * without WHERE is forced to at most this many rows.
@@ -92,6 +94,8 @@ class SQLGuard:
             if pattern.search(normalized):
                 issues.append(ValidationIssue("FORBIDDEN_FUNCTION", f"Forbidden SQL pattern: {pattern.pattern}"))
 
+        issues.extend(self._dialect_issues(stripped))
+
         # Hard cap: explicit LIMIT above the configured maximum is rejected.
         explicit_limit = _explicit_limit(stripped)
         if explicit_limit is not None and explicit_limit > self.max_row_limit:
@@ -109,6 +113,16 @@ class SQLGuard:
                 normalized = self.ensure_limit(normalized, self.default_limit)
 
         return ValidationResult(ok=not issues, issues=issues, normalized_sql=normalized.rstrip(";"))
+
+    def _dialect_issues(self, stripped_sql: str) -> list[ValidationIssue]:
+        issues: list[ValidationIssue] = []
+        if self.dialect in {"mysql", "mariadb"} and re.search(r"\bfull\s+(?:outer\s+)?join\b", stripped_sql):
+            issues.append(ValidationIssue(
+                "UNSUPPORTED_DIALECT_SYNTAX",
+                "MySQL/MariaDB does not support FULL OUTER JOIN. Rewrite it as a UNION of "
+                "LEFT JOIN and RIGHT JOIN, with an anti-duplicate filter such as WHERE left_key IS NULL.",
+            ))
+        return issues
 
     def validate_with_report(
         self,

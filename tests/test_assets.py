@@ -57,6 +57,7 @@ def test_asset_builder_creates_hierarchy(tmp_path):
     assert "indexes" in table_doc
     # row count + truncated sample.
     assert table_doc["row_count"] == 2
+    assert table_doc["row_count_exact"] is True
     assert table_doc["sample_rows"] and len(table_doc["sample_rows"]) <= 5
     assert instance_doc["asset_schema_version"] == ASSET_SCHEMA_VERSION
 

@@ -172,6 +172,7 @@ class MainWindow(QMainWindow):
         self.sidebar.schema_selected.connect(self.open_schema_asset)
         self.sidebar.generate_sql.connect(self._generate_sql)
         self.sidebar.edit_note.connect(self._edit_note)
+        self.sidebar.refresh_requested.connect(self._refresh_schema_node)
         self.sidebar.enrich_requested.connect(self._enrich_node)
         self.sidebar.semantic_search_requested.connect(self.search_assets)
         self.sidebar.settings_requested.connect(lambda: self.open_settings("connections"))
@@ -312,6 +313,7 @@ class MainWindow(QMainWindow):
         on_success: Callable[[Any], None],
         *,
         on_error: Callable[[object], None] | None = None,
+        on_progress: Callable[[object], None] | None = None,
     ) -> None:
         worker = ServiceWorker(self.service, action, payload)
         # Retain a reference until the worker finishes. Without this the local
@@ -331,6 +333,8 @@ class MainWindow(QMainWindow):
             worker.signals.failed.connect(on_error)
         else:
             worker.signals.failed.connect(self._background_failed)
+        if on_progress:
+            worker.signals.progress.connect(on_progress)
         worker.signals.done.connect(_release)
         worker.signals.failed.connect(_release)
         self.pool.start(worker)
@@ -443,7 +447,10 @@ class MainWindow(QMainWindow):
         if not name:
             self.sidebar.load_schema([])
             return
-        self.sidebar.set_loading()  # visible state while the (possibly slow) fetch runs
+        loading = _i18n_t("schema.loading")
+        self.sidebar.set_loading(loading)  # visible state while the (possibly slow) fetch runs
+        self.topbar.set_global_status(loading, "building")
+        self.statusbar.showMessage(loading)
         self._run_background(
             "schema_tree",
             {"name": name},
@@ -458,14 +465,32 @@ class MainWindow(QMainWindow):
         # keeping a visible loading state, then re-fetch the tree.
         if not rows and name not in self._projected:
             self._projected.add(name)
-            self.sidebar.set_loading(_i18n_t("schema.projecting"))
+            projecting = _i18n_t("schema.projecting")
+            self.sidebar.set_loading(projecting)
+            self.topbar.set_global_status(projecting, "building")
+            self.statusbar.showMessage(projecting)
             self._run_background(
                 "project_instance", {"name": name},
                 lambda _r: self._fetch_schema_after_project(name),
                 on_error=lambda exc: self._project_failed(name, str(exc)),
+                on_progress=lambda msg: self._on_schema_project_progress(name, msg),
             )
             return
         self._apply_schema_loaded(name, rows)
+
+    def _on_schema_project_progress(self, name: str, message: object) -> None:
+        if name != self.current_connection():
+            return
+        base = _i18n_t("schema.projecting")
+        title = ""
+        if isinstance(message, dict):
+            title = str(message.get("title") or "").strip()
+        elif message is not None:
+            title = str(message).strip()
+        text = f"{base} · {title}" if title else base
+        self.sidebar.update_loading(text)
+        self.topbar.set_global_status(text, "building")
+        self.statusbar.showMessage(text)
 
     def _project_failed(self, name: str, message: str) -> None:
         self._projected.discard(name)  # allow a retry on the next select (e.g. DB was down)
@@ -474,7 +499,15 @@ class MainWindow(QMainWindow):
     def _fetch_schema_after_project(self, name: str) -> None:
         if name != self.current_connection():
             return
+        for conn in self.bootstrap.get("connections") or []:
+            if conn.get("name") == name:
+                conn["asset_status"] = "ready"
+                break
         self.topbar.set_asset_status("ready")
+        loading = _i18n_t("schema.loading")
+        self.sidebar.update_loading(loading)
+        self.topbar.set_global_status(loading, "building")
+        self.statusbar.showMessage(loading)
         self._run_background(
             "schema_tree", {"name": name},
             lambda rows: self._apply_schema_loaded(name, rows),
@@ -489,6 +522,8 @@ class MainWindow(QMainWindow):
         self.topbar.set_databases(dbs)
         self.sidebar.load_schema(self.schema_rows)
         self.workbench.set_sql_schema(self._schema_completion())
+        self._restore_status_badge()
+        self.statusbar.showMessage(_i18n_t("status.ready"))
 
     def _schema_completion(self) -> dict[str, Any]:
         """Structured schema for context-aware SQL completion: database names, table
@@ -529,6 +564,8 @@ class MainWindow(QMainWindow):
         self.sidebar.load_schema([], error=message)
         self.topbar.set_databases([])
         self.toast(f"Schema load failed: {message}")
+        self._restore_status_badge()
+        self.statusbar.showMessage(f"Schema load failed: {message}")
 
     def refresh_joins(self) -> None:
         conn = self.current_connection()
@@ -909,6 +946,40 @@ class MainWindow(QMainWindow):
             self._restore_status_badge()
 
         self._run_background("refresh_instance", {"name": conn}, done, on_error=fail)
+
+    def _refresh_schema_node(self, node: dict[str, Any]) -> None:
+        conn = self.current_connection()
+        if not conn:
+            self.toast(_i18n_t("toast.select_connection"))
+            return
+        kind = str(node.get("kind") or "")
+        if kind not in ("database", "table"):
+            return
+        parts = str(node.get("path") or "").split(".")
+        database = parts[1] if len(parts) > 1 else ""
+        table = parts[2] if kind == "table" and len(parts) > 2 else ""
+        if not database:
+            return
+        target = ".".join(p for p in (database, table) if p)
+        self.toast(_i18n_t("toast.syncing"))
+        self.topbar.set_global_status(_i18n_t("status.syncing"), "building")
+        payload: dict[str, Any] = {"name": conn, "database": database}
+        if table:
+            payload["table"] = table
+
+        def done(result: object) -> None:
+            summary = (result or {}).get("summary", "") if isinstance(result, dict) else ""
+            self.toast(_i18n_t("toast.synced", summary=summary or target))
+            self._restore_status_badge()
+            self.bus.emit(ASSETS_CHANGED, {"instance": conn})
+            doc_path = f"{conn}.{database}.{table}" if table else f"{conn}.{database}"
+            self._refresh_doc_if_open(doc_path)
+
+        def fail(exc: object) -> None:
+            self.toast(_i18n_t("toast.sync_failed", error=str(exc)))
+            self._restore_status_badge()
+
+        self._run_background("refresh_instance", payload, done, on_error=fail)
 
     def _enrich_node(self, node: dict[str, Any]) -> None:
         """Build the optional enrichment (LLM summary + sample + profile) for a table

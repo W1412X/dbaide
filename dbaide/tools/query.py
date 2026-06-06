@@ -22,7 +22,11 @@ class QueryTools:
             timeout_seconds = policy.statement_timeout_seconds if policy else 10
         if max_row_limit is None:
             max_row_limit = policy.max_row_limit if policy else 1000
-        self.sql_guard = SQLGuard(default_limit=default_limit, max_row_limit=max_row_limit)
+        self.sql_guard = SQLGuard(
+            default_limit=default_limit,
+            max_row_limit=max_row_limit,
+            dialect=getattr(adapter, "dialect", "generic"),
+        )
         self.schema_guard = SchemaGuard()
         self.timeout_seconds = timeout_seconds
         self.explain_max_rows = policy.explain_max_rows if policy else 0

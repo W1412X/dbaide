@@ -56,6 +56,10 @@ class DatabaseAdapter(ABC):
             self.caller = caller
         return self
 
+    def server_version(self) -> str:
+        """Best-effort database server version for dialect-specific SQL guidance."""
+        return ""
+
     # ── Abstract surface ──────────────────────────────────────────────────────
 
     @abstractmethod

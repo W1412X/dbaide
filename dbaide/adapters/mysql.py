@@ -2,9 +2,11 @@ from __future__ import annotations
 
 import logging
 import os
+import threading
 import time
 
 from dbaide.adapters.base import DatabaseAdapter, append_limit, quote_identifier, rows_to_result
+from dbaide.db.connection_pool import PoolKey, for_key as connection_pool_for_key
 from dbaide.models import ColumnInfo, ColumnProfile, ForeignKeyInfo, IndexInfo, QueryResult, TableInfo
 
 logger = logging.getLogger("dbaide.mysql")
@@ -13,11 +15,18 @@ logger = logging.getLogger("dbaide.mysql")
 class MySQLAdapter(DatabaseAdapter):
     dialect = "mysql"
 
+    def __init__(self, config) -> None:
+        super().__init__(config)
+        self._catalog_lock = threading.Lock()
+        self._columns_by_db: dict[str, dict[str, list[ColumnInfo]]] = {}
+        self._foreign_keys_by_db: dict[str, dict[str, list[ForeignKeyInfo]]] = {}
+        self._indexes_by_db: dict[str, dict[str, list[IndexInfo]]] = {}
+
     @property
     def _is_mariadb(self) -> bool:
         return self.config.type == "mariadb"
 
-    def _connect(self, database: str = ""):
+    def _open_connection(self, database: str = ""):
         try:
             import pymysql
         except ImportError as exc:
@@ -35,6 +44,25 @@ class MySQLAdapter(DatabaseAdapter):
             autocommit=False,
         )
 
+    def _connect(self, database: str = ""):
+        db = database or self.config.database or ""
+
+        def factory():
+            return self._open_connection(db)
+
+        def validator(conn) -> bool:
+            if not getattr(conn, "open", False):
+                return False
+            conn.ping(reconnect=False)
+            return True
+
+        return connection_pool_for_key(
+            PoolKey(self.config.name, self.config.type or "mysql", db),
+            max_size=self.policy.max_inflight_queries,
+            factory=factory,
+            validator=validator,
+        ).acquire()
+
     def _set_timeout(self, cur, timeout_seconds: int) -> None:
         """Set per-statement timeout using the correct variable for the engine."""
         ms = max(1, int(timeout_seconds * 1000))
@@ -49,6 +77,12 @@ class MySQLAdapter(DatabaseAdapter):
             with conn.cursor() as cur:
                 cur.execute("SELECT 1")
                 cur.fetchone()
+
+    def server_version(self) -> str:
+        with self._connect() as conn, conn.cursor() as cur:
+            cur.execute("SELECT VERSION() AS version")
+            row = cur.fetchone() or {}
+        return str(row.get("version") or "")
 
     def list_databases(self) -> list[str]:
         with self._connect() as conn, conn.cursor() as cur:
@@ -87,73 +121,108 @@ class MySQLAdapter(DatabaseAdapter):
         db = database or self.config.database
         if not db:
             raise ValueError("Database is required for MySQL. Specify --database or set database in connection config.")
-        sql = """
-        SELECT COLUMN_NAME, DATA_TYPE, IS_NULLABLE, COLUMN_DEFAULT, COLUMN_COMMENT, COLUMN_KEY
-        FROM information_schema.COLUMNS
-        WHERE TABLE_SCHEMA = %s AND TABLE_NAME = %s
-        ORDER BY ORDINAL_POSITION
-        """
-        with self._connect(db) as conn, conn.cursor() as cur:
-            cur.execute(sql, (db, table))
-            return [
-                ColumnInfo(
-                    name=row["COLUMN_NAME"],
-                    data_type=row.get("DATA_TYPE") or "",
-                    nullable=row.get("IS_NULLABLE") == "YES",
-                    default=row.get("COLUMN_DEFAULT"),
-                    comment=row.get("COLUMN_COMMENT") or "",
-                    primary_key=row.get("COLUMN_KEY") == "PRI",
-                    indexed=bool(row.get("COLUMN_KEY")),
-                )
-                for row in cur.fetchall()
-            ]
+        return list(self._load_columns(db).get(table, []))
+
+    def _load_columns(self, db: str) -> dict[str, list[ColumnInfo]]:
+        with self._catalog_lock:
+            cached = self._columns_by_db.get(db)
+            if cached is not None:
+                return cached
+            sql = """
+            SELECT TABLE_NAME, COLUMN_NAME, DATA_TYPE, IS_NULLABLE, COLUMN_DEFAULT, COLUMN_COMMENT, COLUMN_KEY
+            FROM information_schema.COLUMNS
+            WHERE TABLE_SCHEMA = %s
+            ORDER BY TABLE_NAME, ORDINAL_POSITION
+            """
+            grouped: dict[str, list[ColumnInfo]] = {}
+            with self._connect(db) as conn, conn.cursor() as cur:
+                cur.execute(sql, (db,))
+                for row in cur.fetchall():
+                    grouped.setdefault(str(row["TABLE_NAME"]), []).append(
+                        ColumnInfo(
+                            name=row["COLUMN_NAME"],
+                            data_type=row.get("DATA_TYPE") or "",
+                            nullable=row.get("IS_NULLABLE") == "YES",
+                            default=row.get("COLUMN_DEFAULT"),
+                            comment=row.get("COLUMN_COMMENT") or "",
+                            primary_key=row.get("COLUMN_KEY") == "PRI",
+                            indexed=bool(row.get("COLUMN_KEY")),
+                        )
+                    )
+            self._columns_by_db.setdefault(db, grouped)
+            return self._columns_by_db[db]
 
     def foreign_keys(self, table: str, database: str = "") -> list[ForeignKeyInfo]:
         db = database or self.config.database
         if not db:
             raise ValueError("Database is required for MySQL. Specify --database or set database in connection config.")
-        sql = """
-        SELECT COLUMN_NAME, REFERENCED_TABLE_NAME, REFERENCED_COLUMN_NAME
-        FROM information_schema.KEY_COLUMN_USAGE
-        WHERE TABLE_SCHEMA = %s AND TABLE_NAME = %s AND REFERENCED_TABLE_NAME IS NOT NULL
-        """
-        with self._connect(db) as conn, conn.cursor() as cur:
-            cur.execute(sql, (db, table))
-            return [
-                ForeignKeyInfo(
-                    table=table,
-                    column=row["COLUMN_NAME"],
-                    ref_table=row["REFERENCED_TABLE_NAME"],
-                    ref_column=row["REFERENCED_COLUMN_NAME"],
-                )
-                for row in cur.fetchall()
-            ]
+        return list(self._load_foreign_keys(db).get(table, []))
+
+    def _load_foreign_keys(self, db: str) -> dict[str, list[ForeignKeyInfo]]:
+        with self._catalog_lock:
+            cached = self._foreign_keys_by_db.get(db)
+            if cached is not None:
+                return cached
+            sql = """
+            SELECT TABLE_NAME, COLUMN_NAME, REFERENCED_TABLE_NAME, REFERENCED_COLUMN_NAME
+            FROM information_schema.KEY_COLUMN_USAGE
+            WHERE TABLE_SCHEMA = %s AND REFERENCED_TABLE_NAME IS NOT NULL
+            ORDER BY TABLE_NAME, ORDINAL_POSITION
+            """
+            grouped: dict[str, list[ForeignKeyInfo]] = {}
+            with self._connect(db) as conn, conn.cursor() as cur:
+                cur.execute(sql, (db,))
+                for row in cur.fetchall():
+                    table = str(row["TABLE_NAME"])
+                    grouped.setdefault(table, []).append(
+                        ForeignKeyInfo(
+                            table=table,
+                            column=row["COLUMN_NAME"],
+                            ref_table=row["REFERENCED_TABLE_NAME"],
+                            ref_column=row["REFERENCED_COLUMN_NAME"],
+                        )
+                    )
+            self._foreign_keys_by_db.setdefault(db, grouped)
+            return self._foreign_keys_by_db[db]
 
     def indexes(self, table: str, database: str = "") -> list[IndexInfo]:
         db = database or self.config.database
         if not db:
             raise ValueError("Database is required for MySQL. Specify --database or set database in connection config.")
-        sql = """
-        SELECT INDEX_NAME, NON_UNIQUE, SEQ_IN_INDEX, COLUMN_NAME, INDEX_TYPE
-        FROM information_schema.STATISTICS
-        WHERE TABLE_SCHEMA = %s AND TABLE_NAME = %s
-        ORDER BY INDEX_NAME, SEQ_IN_INDEX
-        """
-        grouped: dict[str, dict] = {}
-        with self._connect(db) as conn, conn.cursor() as cur:
-            cur.execute(sql, (db, table))
-            for row in cur.fetchall():
-                name = row["INDEX_NAME"]
-                entry = grouped.setdefault(name, {
-                    "columns": [], "unique": not bool(row["NON_UNIQUE"]),
-                    "type": (row.get("INDEX_TYPE") or "").lower(),
-                })
-                entry["columns"].append(row["COLUMN_NAME"])
-        return [
-            IndexInfo(name=name, columns=info["columns"], unique=info["unique"],
-                      type=info["type"], primary=(name == "PRIMARY"))
-            for name, info in grouped.items()
-        ]
+        return list(self._load_indexes(db).get(table, []))
+
+    def _load_indexes(self, db: str) -> dict[str, list[IndexInfo]]:
+        with self._catalog_lock:
+            cached = self._indexes_by_db.get(db)
+            if cached is not None:
+                return cached
+            sql = """
+            SELECT TABLE_NAME, INDEX_NAME, NON_UNIQUE, SEQ_IN_INDEX, COLUMN_NAME, INDEX_TYPE
+            FROM information_schema.STATISTICS
+            WHERE TABLE_SCHEMA = %s
+            ORDER BY TABLE_NAME, INDEX_NAME, SEQ_IN_INDEX
+            """
+            grouped: dict[str, dict[str, dict]] = {}
+            with self._connect(db) as conn, conn.cursor() as cur:
+                cur.execute(sql, (db,))
+                for row in cur.fetchall():
+                    table = str(row["TABLE_NAME"])
+                    name = row["INDEX_NAME"]
+                    table_group = grouped.setdefault(table, {})
+                    entry = table_group.setdefault(name, {
+                        "columns": [], "unique": not bool(row["NON_UNIQUE"]),
+                        "type": (row.get("INDEX_TYPE") or "").lower(),
+                    })
+                    entry["columns"].append(row["COLUMN_NAME"])
+            out: dict[str, list[IndexInfo]] = {}
+            for table, indexes in grouped.items():
+                out[table] = [
+                    IndexInfo(name=name, columns=info["columns"], unique=info["unique"],
+                              type=info["type"], primary=(name == "PRIMARY"))
+                    for name, info in indexes.items()
+                ]
+            self._indexes_by_db.setdefault(db, out)
+            return self._indexes_by_db[db]
 
     def get_table_ddl(self, table: str, database: str = "") -> str:
         db = database or self.config.database

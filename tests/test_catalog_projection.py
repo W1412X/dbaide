@@ -43,7 +43,9 @@ def test_project_instance_builds_base_from_catalog(tmp_path, monkeypatch):
     assert svc.dispatch("schema_tree", {"name": "shop"}) == []
 
     # Project from the live catalog (no model configured → no LLM either way).
-    svc.dispatch("project_instance", {"name": "shop"})
+    events = []
+    svc.dispatch("project_instance", {"name": "shop", "progress": events.append})
+    assert any(isinstance(e, dict) and e.get("stage") == "build_assets" for e in events)
 
     tree = svc.dispatch("schema_tree", {"name": "shop"})
     tables = {t["name"] for db in tree for t in db["children"]}
@@ -58,6 +60,7 @@ def test_project_instance_builds_base_from_catalog(tmp_path, monkeypatch):
     assert odoc.get("foreign_keys"), "FKs come from the catalog"
     # Enrichment fields are NOT built (no sampling / no profiling at base layer).
     assert not odoc.get("sample_rows")
+    assert odoc.get("row_count_exact") is False
     assert all("profile" not in c and "semantic_summary" not in c for c in odoc.get("columns", []))
 
 
@@ -91,3 +94,36 @@ def test_enrich_table_is_granular_and_preserves_others(tmp_path, monkeypatch):
     tree = svc.dispatch("schema_tree", {"name": "shop"})
     tables = {t["name"] for d in tree for t in d["children"]}
     assert {"users", "orders"} <= tables
+
+
+def test_refresh_single_table_updates_structure_without_dropping_others(tmp_path, monkeypatch):
+    db = tmp_path / "shop.db"
+    conn = sqlite3.connect(db)
+    conn.executescript(
+        """
+        CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT);
+        CREATE TABLE orders (id INTEGER PRIMARY KEY, amount REAL);
+        """
+    )
+    conn.commit(); conn.close()
+
+    svc = _service(tmp_path, monkeypatch)
+    svc.dispatch("save_connection", {"name": "shop", "type": "sqlite", "path": str(db)})
+    svc.dispatch("project_instance", {"name": "shop"})
+
+    conn = sqlite3.connect(db)
+    conn.execute("ALTER TABLE orders ADD COLUMN status TEXT")
+    conn.commit(); conn.close()
+
+    result = svc.dispatch("refresh_instance", {"name": "shop", "database": "main", "table": "orders"})
+    assert result["changed_tables"] == 1
+
+    store = AssetStore()
+    orders = store.table_doc("shop", "main", "orders")
+    users = store.table_doc("shop", "main", "users")
+    assert {c["name"] for c in orders.get("columns", [])} >= {"id", "amount", "status"}
+    assert users is not None
+
+    tree = svc.dispatch("schema_tree", {"name": "shop"})
+    tables = {t["name"] for d in tree for t in d["children"]}
+    assert tables == {"users", "orders"}

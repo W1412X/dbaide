@@ -24,9 +24,11 @@ class SQLDraft:
 class SQLWriter:
     """LLM-only SQL generation with validation-oriented output parsing."""
 
-    def __init__(self, llm: LLMClient | None = None, *, dialect: str = "generic") -> None:
+    def __init__(self, llm: LLMClient | None = None, *, dialect: str = "generic",
+                 server_version: str = "") -> None:
         self.llm = llm or NullLLMClient()
         self.dialect = dialect
+        self.server_version = str(server_version or "")
 
     def write(
         self,
@@ -126,6 +128,7 @@ class SQLWriter:
             "Return confidence 0.0-1.0 based on how sure you are about the mapping. "
             "User notes are AUTHORITATIVE: they override DB comments and any inference — "
             "if a note says an object is deprecated/wrong, do NOT use it. "
+            + self._dialect_rules()
             + answer_language_directive()
         )
         if multi_table:
@@ -136,10 +139,27 @@ class SQLWriter:
             )
         return base
 
+    def _dialect_rules(self) -> str:
+        version = f" Server version: {self.server_version}." if self.server_version else ""
+        if self.dialect == "mysql":
+            return (
+                f" Target SQL dialect: MySQL/MariaDB.{version} "
+                "Use only syntax supported by MySQL/MariaDB. MySQL does NOT support "
+                "FULL OUTER JOIN; emulate it with LEFT JOIN UNION/UNION ALL RIGHT JOIN "
+                "and an anti-duplicate WHERE clause. Do not output unsupported standard "
+                "SQL and assume the execution layer will rewrite it. "
+            )
+        if self.dialect == "postgres":
+            return f" Target SQL dialect: PostgreSQL.{version} Use PostgreSQL-compatible syntax. "
+        if self.dialect == "sqlite":
+            return f" Target SQL dialect: SQLite.{version} Use SQLite-compatible syntax. "
+        return f" Target SQL dialect: {self.dialect or 'generic'}.{version} "
+
     def _user_prompt(self, question: str, table: str, columns: list[ColumnInfo], context: dict) -> str:
         col_lines = self._format_columns(columns)
         blocks = [
             f"Dialect: {self.dialect}",
+            f"Server version: {self.server_version or 'unknown'}",
             f"Question: {question}",
         ]
         notes = self._format_object_notes(context)
@@ -167,7 +187,11 @@ class SQLWriter:
         # `db.table` prefix is a common cause of "unknown table" at validation.
         distinct_dbs = {db for db, _, _ in disclosed_schemas if db}
         cross_db = len(distinct_dbs) > 1
-        blocks: list[str] = [f"Dialect: {self.dialect}", f"Question: {question}"]
+        blocks: list[str] = [
+            f"Dialect: {self.dialect}",
+            f"Server version: {self.server_version or 'unknown'}",
+            f"Question: {question}",
+        ]
         notes = self._format_object_notes(context)
         if notes:
             blocks.append(notes)

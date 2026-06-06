@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from dbaide.db.budget import BudgetStats, QueryBudget
 from dbaide.db import budget as budget_registry
+from dbaide.db import connection_pool as connection_pool_registry
 from dbaide.db.policy import (
     DEFAULT_LOAD_PROFILE,
     LOAD_PROFILE_NAMES,
@@ -24,6 +25,7 @@ __all__ = [
     "QueryBudget",
     "BudgetStats",
     "budget_registry",
+    "connection_pool_registry",
     "LOAD_PROFILES",
     "LOAD_PROFILE_NAMES",
     "DEFAULT_LOAD_PROFILE",

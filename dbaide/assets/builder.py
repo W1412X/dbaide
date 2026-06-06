@@ -62,6 +62,7 @@ class BuildStats:
 @dataclass(slots=True)
 class BuildOptions:
     sample: bool = True
+    collect_row_counts: bool = True
     profile_mode: str = "auto"
     top_k: int = 30
     sample_limit: int = 50
@@ -189,6 +190,7 @@ class AssetBuilder:
         databases: list[str] | None = None,
         tables: list[str] | None = None,
         sample: bool = True,
+        collect_row_counts: bool = True,
         profile: bool | None = None,
         profile_mode: str | None = None,
         top_k: int = 30,
@@ -210,6 +212,7 @@ class AssetBuilder:
         workers = max_workers if (max_workers and max_workers > 0) else policy.build_max_workers
         options = BuildOptions(
             sample=sample,
+            collect_row_counts=bool(collect_row_counts),
             profile_mode=normalize_profile_mode(profile_mode),
             top_k=top_k,
             sample_limit=sample_limit,
@@ -352,7 +355,7 @@ class AssetBuilder:
                 columns = self.adapter.describe_table(table.name, database=database)
                 stats.columns += len(columns)
                 heavy = self._is_heavy(table, options)
-                if not heavy:
+                if options.collect_row_counts and not heavy:
                     estimated += 1  # COUNT(*)
                 if options.sample:
                     estimated += 1  # sample_rows
@@ -571,8 +574,17 @@ class AssetBuilder:
         heavy = self._is_heavy(table, options)
         if not heavy:
             self._bump(stats, light_tables=1)
-        self._emit_table(database, table.name, status="running", note="sampling…")
-        row_count = self._table_row_count(table, database=database, heavy=heavy)
+        if options.sample:
+            next_step = "sampling…"
+        elif options.collect_row_counts:
+            next_step = "counting rows…"
+        else:
+            next_step = "writing metadata…"
+        self._emit_table(database, table.name, status="running", note=next_step)
+        row_count = (
+            self._table_row_count(table, database=database, heavy=heavy)
+            if options.collect_row_counts else None
+        )
         sample_rows: list[dict] = []
         if options.sample:
             try:

@@ -12,9 +12,11 @@ from dbaide.tools.registry import ToolContext
 
 class PromptCaptureLLM(LLMClient):
     def __init__(self) -> None:
+        self.last_system: str = ""
         self.last_user: str = ""
 
     def complete_json(self, messages: list[LLMMessage], *, schema_hint: str = "") -> dict:
+        self.last_system = messages[0].content
         self.last_user = messages[-1].content
         return {"sql": "SELECT 1", "rationale": "test", "confidence": 0.8}
 
@@ -115,3 +117,17 @@ def test_sql_writer_multi_table_prompt():
     assert "Disclosed schemas" in llm.last_user
     assert "Table: orders" in llm.last_user
     assert "Table: users" in llm.last_user
+
+
+def test_mysql_sql_writer_prompt_includes_version_and_unsupported_syntax_rules():
+    llm = PromptCaptureLLM()
+    writer = SQLWriter(llm, dialect="mysql", server_version="8.0.36")
+    disclosed = [
+        ("stats_data", "daily_stats", [ColumnInfo(name="spu", data_type="varchar")]),
+        ("order_data", "order_based", [ColumnInfo(name="spu", data_type="varchar")]),
+    ]
+    writer.write("compare both sides", disclosed_schemas=disclosed, context={})
+
+    assert "Server version: 8.0.36" in llm.last_user
+    assert "MySQL does NOT support FULL OUTER JOIN" in llm.last_system
+    assert "LEFT JOIN UNION/UNION ALL RIGHT JOIN" in llm.last_system

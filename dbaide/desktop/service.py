@@ -359,7 +359,9 @@ class DesktopService:
             ).build(
                 databases=payload.get("databases") or None,
                 sample=False,
+                collect_row_counts=False,
                 profile_mode="none",
+                max_workers=policy.max_inflight_queries,
             )
         finally:
             self._end_build(conn.name)
@@ -406,27 +408,40 @@ class DesktopService:
 
         conn = self.cfg.get_connection(str(payload.get("name") or payload.get("connection_name") or "") or None)
         instance = conn.name
+        target_db = str(payload.get("database") or "").strip()
+        target_table = str(payload.get("table") or "").strip()
+        only_tables = {target_table} if target_table else None
+        if target_table and not target_db:
+            raise ValueError("database is required when refreshing a table")
         # Never projected yet → a refresh is just the initial base projection.
         if self.store.instance_doc(instance) is None:
-            return self.project_instance({"name": instance})
+            body: dict[str, Any] = {"name": instance}
+            if target_db:
+                body["databases"] = [target_db]
+            return self.project_instance(body)
 
         policy = self.cfg.policy_for(conn)
         adapter = build_adapter(conn, policy=policy, caller="build")
         summarizer = AssetSummarizer(NullLLMClient())
         self._begin_build(instance)
         try:
-            live_db_names = list(adapter.list_databases())  # raises → refresh aborts (no deletes)
+            live_db_names = [target_db] if target_db else list(adapter.list_databases())  # raises → refresh aborts
             store_db_names = [str(d.get("name") or "") for d in self.store.database_docs(instance) if d.get("name")]
-            gone_dbs = [d for d in store_db_names if d not in set(live_db_names)]
+            gone_dbs = [] if target_db else [d for d in store_db_names if d not in set(live_db_names)]
 
             new_snap, failed = self._build_live_snapshot(adapter, summarizer, instance,
-                                                          live_db_names, policy)
+                                                          live_db_names, policy,
+                                                          only_tables=only_tables)
 
             considered = set(new_snap) | set(gone_dbs)
             old_snap: dict[str, dict[str, dict]] = {}
             for db in considered:
-                stored = {str(td.get("name") or td.get("table") or ""): td
-                          for td in self.store.table_docs(instance, db)}
+                if only_tables:
+                    stored_doc = self.store.table_doc(instance, db, target_table)
+                    stored = {target_table: stored_doc} if stored_doc else {}
+                else:
+                    stored = {str(td.get("name") or td.get("table") or ""): td
+                              for td in self.store.table_docs(instance, db)}
                 for (fdb, ft) in failed:
                     if fdb == db:
                         stored.pop(ft, None)  # exclude transiently-undescribable tables from the diff
@@ -439,9 +454,9 @@ class DesktopService:
             touched = {db for (db, _t) in diff.added_tables} | {db for (db, _t) in diff.changed_tables} \
                 | {db for (db, _t) in diff.removed_tables} | set(diff.added_dbs)
             for db in touched:
-                if db in new_snap:
-                    self._rewrite_db_rollup(summarizer, instance, db, sorted(new_snap[db]))
-            self._rewrite_instance_rollup(summarizer, instance, sorted(live_db_names))
+                if db not in diff.removed_dbs:
+                    self._rewrite_db_rollup(summarizer, instance, db, self._stored_table_names(instance, db))
+            self._rewrite_instance_rollup(summarizer, instance, self._stored_database_names(instance))
             return {"instance": instance, "summary": diff.summary(),
                     "added_tables": len(diff.added_tables), "removed_tables": len(diff.removed_tables),
                     "changed_tables": len(diff.changed_tables), "removed_dbs": len(diff.removed_dbs),
@@ -450,7 +465,8 @@ class DesktopService:
             self._end_build(instance)
 
     def _build_live_snapshot(self, adapter, summarizer, instance: str, live_db_names: list[str],
-                             policy) -> tuple[dict[str, dict[str, dict]], set[tuple[str, str]]]:
+                             policy, *,
+                             only_tables: set[str] | None = None) -> tuple[dict[str, dict[str, dict]], set[tuple[str, str]]]:
         """Project the current live catalog into base docs, in memory (no writes).
 
         Returns (snapshot, failed) where snapshot is {db: {table: base_doc}} and failed
@@ -459,9 +475,9 @@ class DesktopService:
         unreachable database is skipped entirely (left untouched downstream).
 
         Per-table metadata is projected concurrently so a sync of a many-table instance
-        isn't latency-bound on sequential round-trips; the pool is bounded by the same
-        policy.build_max_workers the builder uses, so DB load stays capped. Futures
-        resolve in this (caller) thread, so the snapshot dict needs no locking.
+        isn't latency-bound on sequential round-trips; the connection pool and query
+        budget cap real database load at policy.max_inflight_queries. Futures resolve
+        in this (caller) thread, so the snapshot dict needs no locking.
         """
         new_snap: dict[str, dict[str, dict]] = {}
         failed: set[tuple[str, str]] = set()
@@ -472,10 +488,12 @@ class DesktopService:
             except Exception:  # noqa: BLE001 — unreachable db: leave it untouched
                 continue
             new_snap[db] = {}
+            if only_tables is not None:
+                tinfos = [ti for ti in tinfos if ti.name in only_tables]
             work.extend((db, ti) for ti in tinfos)
         if work:
             from concurrent.futures import ThreadPoolExecutor, as_completed
-            workers = max(1, int(getattr(policy, "build_max_workers", 1)))
+            workers = max(1, int(getattr(policy, "max_inflight_queries", 1)))
             with ThreadPoolExecutor(max_workers=workers) as pool:
                 futs = {pool.submit(self._project_table_doc, summarizer, adapter, instance, db, ti):
                         (db, ti) for (db, ti) in work}
@@ -544,6 +562,16 @@ class DesktopService:
                 conn_type = ""
         idoc["connection_type"] = conn_type
         self.store.write_json(self.store.instance_dir(instance) / "instance.json", idoc)
+
+    def _stored_database_names(self, instance: str) -> list[str]:
+        return sorted(str(d.get("name") or "") for d in self.store.database_docs(instance) if d.get("name"))
+
+    def _stored_table_names(self, instance: str, database: str) -> list[str]:
+        return sorted(
+            str(t.get("name") or t.get("table") or "")
+            for t in self.store.table_docs(instance, database)
+            if t.get("name") or t.get("table")
+        )
 
     def enrich_table(self, payload: dict[str, Any]) -> dict[str, Any]:
         """Enrich ONE table's document — LLM summary + sample rows + profiling — from

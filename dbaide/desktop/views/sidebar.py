@@ -21,8 +21,9 @@ from PyQt6.QtWidgets import (
 from PyQt6.QtWidgets import QLabel
 
 from dbaide.desktop.components.base import SectionLabel, compact_button
-from dbaide.desktop.components.icons import svg_icon, svg_pixmap
+from dbaide.desktop.components.icons import more_icon, svg_icon, svg_pixmap
 from dbaide.desktop.components.session_list import SessionList
+from dbaide.desktop.components.spinner import BusyAnimator, spinner_icon
 from dbaide.desktop.theme import Theme
 
 
@@ -33,6 +34,7 @@ class Sidebar(QWidget):
     settings_requested = pyqtSignal()
     generate_sql = pyqtSignal(dict, str)  # (table node, template kind)
     edit_note = pyqtSignal(dict)  # edit the user note for a db/table/column node
+    refresh_requested = pyqtSignal(dict)  # refresh a db/table from the live catalog
     enrich_requested = pyqtSignal(dict)  # build the optional enrichment for a db/table node
 
     def __init__(self, parent=None) -> None:
@@ -81,13 +83,13 @@ class Sidebar(QWidget):
         self.tree.setHeaderHidden(True)
         # Column 0 = the schema name (stretches); column 1 = small per-row action
         # icons. Clicking the row opens its DATA; the doc icon opens the DOC; the
-        # pencil icon edits the object's user note (db/table/column).
+        # overflow menu groups secondary actions such as notes and refresh.
         self.tree.setColumnCount(2)
         header = self.tree.header()
         header.setStretchLastSection(False)
         header.setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
         header.setSectionResizeMode(1, QHeaderView.ResizeMode.Fixed)
-        header.resizeSection(1, 42)
+        header.resizeSection(1, 54)
         self.tree.setIndentation(16)
         self.tree.setAnimated(True)
         # Borderless tree that blends into the sidebar — interactivity comes from the
@@ -125,20 +127,48 @@ class Sidebar(QWidget):
         self.settings_btn.clicked.connect(self.settings_requested.emit)
         layout.addWidget(self.settings_btn)
         self._rows: list[dict[str, Any]] = []
+        self._schema_loading_item: QTreeWidgetItem | None = None
+        self._schema_busy = BusyAnimator(self._tick_schema_loading, parent=self)
 
     def set_loading(self, message: str = "") -> None:
         """Show a non-blocking placeholder while the schema is being loaded/projected,
         so the panel never sits silently empty during a (possibly slow) fetch."""
         from dbaide.i18n import t as _t
+        self._stop_schema_loading()
         self.tree.clear()
         item = QTreeWidgetItem([message or _t("schema.loading")])
         item.setForeground(0, QColor(Theme.MUTED))
         item.setFlags(Qt.ItemFlag.ItemIsEnabled)
+        self._schema_loading_item = item
         self.tree.addTopLevelItem(item)
+        self._schema_busy.start()
+
+    def update_loading(self, message: str) -> None:
+        """Refresh the current schema-loading row without clearing the tree/spinner."""
+        text = str(message or "").strip()
+        if not text:
+            return
+        if self._schema_loading_item is None or not self._schema_busy.active:
+            self.set_loading(text)
+            return
+        self._schema_loading_item.setText(0, text)
+        self._tick_schema_loading()
+
+    def _tick_schema_loading(self) -> None:
+        if self._schema_loading_item is not None:
+            self._schema_loading_item.setIcon(
+                0,
+                spinner_icon(self._schema_busy.angle, color=Theme.BLUE, size=14),
+            )
+
+    def _stop_schema_loading(self) -> None:
+        self._schema_busy.stop()
+        self._schema_loading_item = None
 
     def load_schema(self, rows: list[dict[str, Any]], *, error: str = "") -> None:
         self._rows = rows
         if error:
+            self._stop_schema_loading()
             self.tree.clear()
             from dbaide.i18n import t as _t
             self.tree.addTopLevelItem(QTreeWidgetItem([_t("schema.load_failed", error=error)]))
@@ -147,6 +177,7 @@ class Sidebar(QWidget):
 
     def _render(self, rows: list[dict[str, Any]]) -> None:
         from dbaide.i18n import t as _t
+        self._stop_schema_loading()
         self.tree.clear()
         if not rows:
             item = QTreeWidgetItem([_t("schema.no_assets")])
@@ -187,10 +218,9 @@ class Sidebar(QWidget):
                     table_item.addChild(col_item)
             self.tree.addTopLevelItem(db_item)
             db_item.setExpanded(True)
-        # Add per-row action icons. Databases/tables get a "view doc" icon (they have
-        # an offline doc) plus a "edit note" pencil; columns get just the pencil (their
-        # note shows inside the table's doc). Done after the tree is built so the item
-        # widgets attach to live items.
+        # Add per-row action icons. Databases/tables get a direct "view doc" icon plus
+        # a compact overflow menu; columns only get the overflow menu because their
+        # note is shown inside the parent table document.
         self._attach_row_actions()
 
     def _attach_row_actions(self) -> None:
@@ -208,25 +238,46 @@ class Sidebar(QWidget):
     def _row_actions(self, data: dict[str, Any], t) -> QWidget:
         holder = QWidget()
         lay = QHBoxLayout(holder)
-        lay.setContentsMargins(0, 0, 2, 0)
-        lay.setSpacing(2)
+        lay.setContentsMargins(0, 0, 8, 0)
+        lay.setSpacing(4)
         lay.addStretch(1)
         if data.get("path") and data.get("kind") in ("database", "table"):
             lay.addWidget(self._icon_button(
                 "file-text", t("schema.view_doc"),
                 lambda d=data: self.schema_preview.emit(d)))
-        lay.addWidget(self._icon_button(
-            "pencil", t("schema.edit_note"),
-            lambda d=data: self.edit_note.emit(d)))
+        lay.addWidget(self._more_button(data, t))
         return holder
 
+    def _more_button(self, data: dict[str, Any], t) -> QToolButton:
+        from PyQt6.QtWidgets import QMenu
+        from dbaide.desktop.components.menu import _style_menu
+
+        btn = self._button_base("more-horizontal", t("schema.more"))
+        menu = QMenu(btn)
+        _style_menu(menu)
+        menu.addAction(t("schema.edit_note"), lambda d=data: self.edit_note.emit(d))
+        if data.get("kind") in ("database", "table"):
+            menu.addAction(t("schema.refresh_node"), lambda d=data: self.refresh_requested.emit(d))
+        btn.setMenu(menu)
+        btn.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
+        return btn
+
     def _icon_button(self, icon: str, tooltip: str, on_click) -> QToolButton:
+        btn = self._button_base(icon, tooltip)
+        btn.clicked.connect(lambda _checked=False: on_click())
+        return btn
+
+    def _button_base(self, icon: str, tooltip: str) -> QToolButton:
         btn = QToolButton()
         # TEXT_2 (not MUTED) so the icon is clearly visible at rest — a muted-grey
         # stroke icon at the row's edge reads as "nothing there". Brightens on hover.
         # Small size + thin (1.4px) stroke so the row-edge icons stay unobtrusive.
-        btn.setIcon(svg_icon(icon, color=Theme.TEXT_2, size=13, width=1.4))
-        btn.setIconSize(QSize(13, 13))
+        if icon == "more-horizontal":
+            btn.setIcon(more_icon(color=Theme.TEXT_2, size=13))
+            btn.setIconSize(QSize(13, 13))
+        else:
+            btn.setIcon(svg_icon(icon, color=Theme.TEXT_2, size=13, width=1.4))
+            btn.setIconSize(QSize(13, 13))
         btn.setToolTip(tooltip)
         btn.setCursor(Qt.CursorShape.PointingHandCursor)
         btn.setFixedSize(18, 18)
@@ -236,9 +287,9 @@ class Sidebar(QWidget):
             f"QToolButton {{ background: transparent; border: none; border-radius: 4px;"
             f" padding: 0; margin: 0; min-width: 0; max-width: 18px;"
             f" min-height: 0; max-height: 18px; color: {Theme.TEXT_2}; }}"
+            "QToolButton::menu-indicator { image: none; width: 0px; }"
             f"QToolButton:hover {{ background: {Theme.PANEL_3}; }}"
         )
-        btn.clicked.connect(lambda _checked=False: on_click())
         return btn
 
     def _filter_tree(self, text: str) -> None:

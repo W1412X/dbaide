@@ -27,6 +27,17 @@ def test_quote_identifier_handles_qualified_names():
     assert quote_identifier("shop.orders", "mysql") == "`shop`.`orders`"
 
 
+def test_mysql_validation_rejects_full_outer_join():
+    adapter = ExplainSpyAdapter(ConnectionConfig(name="shop", type="mysql"))
+    adapter.dialect = "mysql"
+    query = QueryTools(adapter, DisclosureContext())
+
+    report = query.validate_sql_report("SELECT * FROM a FULL OUTER JOIN b ON a.id = b.id")
+
+    assert report.ok is False
+    assert any("FULL OUTER JOIN" in issue for issue in report.issues)
+
+
 class ExplainSpyAdapter(DatabaseAdapter):
     dialect = "sqlite"
 

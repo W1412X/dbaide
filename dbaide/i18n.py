@@ -352,6 +352,8 @@ _STRINGS: dict[str, dict[str, str]] = {
     # Object annotations (user notes on db/table/column) — edited from the schema
     # tree's pencil icon, displayed inside the asset document.
     "schema.edit_note": {"en": "Edit note", "zh": "编辑备注"},
+    "schema.more": {"en": "More", "zh": "更多"},
+    "schema.refresh_node": {"en": "Update from database", "zh": "从数据库更新"},
     "notes.edit_title": {"en": "Edit note", "zh": "编辑备注"},
     "notes.editor_hint": {
         "en": "Authoritative note — shown in the document and given to the assistant at "

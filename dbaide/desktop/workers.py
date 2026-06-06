@@ -43,7 +43,7 @@ class ServiceWorker(QRunnable):
 
     def run(self) -> None:
         try:
-            if self.action in ("build_assets", "ask"):
+            if self.action in ("build_assets", "ask", "project_instance", "refresh_instance", "enrich_table"):
                 self.payload.setdefault("progress", self._emit_progress)
                 self.payload.setdefault("cancel_check", self._check_cancelled)
             result = self.service.dispatch(self.action, self.payload)

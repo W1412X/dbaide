@@ -5,6 +5,7 @@ import os
 import time
 
 from dbaide.adapters.base import DatabaseAdapter, append_limit, quote_identifier, rows_to_result
+from dbaide.db.connection_pool import PoolKey, for_key as connection_pool_for_key
 from dbaide.models import ColumnInfo, ColumnProfile, ForeignKeyInfo, IndexInfo, QueryResult, TableInfo
 
 logger = logging.getLogger("dbaide.postgres")
@@ -13,7 +14,7 @@ logger = logging.getLogger("dbaide.postgres")
 class PostgresAdapter(DatabaseAdapter):
     dialect = "postgres"
 
-    def _connect(self, database: str = ""):
+    def _open_connection(self, database: str = ""):
         try:
             import psycopg
             from psycopg.rows import dict_row
@@ -29,9 +30,30 @@ class PostgresAdapter(DatabaseAdapter):
             row_factory=dict_row,
         )
 
+    def _connect(self, database: str = ""):
+        db = database or self.config.database or "postgres"
+
+        def factory():
+            return self._open_connection(db)
+
+        def validator(conn) -> bool:
+            return not bool(getattr(conn, "closed", False))
+
+        return connection_pool_for_key(
+            PoolKey(self.config.name, self.config.type or "postgres", db),
+            max_size=self.policy.max_inflight_queries,
+            factory=factory,
+            validator=validator,
+        ).acquire()
+
     def test(self) -> None:
         with self._connect() as conn:
             conn.execute("SELECT 1").fetchone()
+
+    def server_version(self) -> str:
+        with self._connect() as conn:
+            row = conn.execute("SHOW server_version").fetchone() or {}
+        return str(row.get("server_version") or "")
 
     def list_databases(self) -> list[str]:
         with self._connect() as conn:

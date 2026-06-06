@@ -33,7 +33,7 @@ class ResourcePolicy:
     """
 
     # Concurrency (enforced by QueryBudget; one slot == one query == one connection).
-    max_inflight_queries: int = 2
+    max_inflight_queries: int = 16
     statement_timeout_seconds: int = 8
 
     # Asset build.
@@ -81,7 +81,7 @@ class ResourcePolicy:
 # Three presets. ``production`` is the conservative default.
 LOAD_PROFILES: dict[str, ResourcePolicy] = {
     "production": ResourcePolicy(
-        max_inflight_queries=2,
+        max_inflight_queries=16,
         statement_timeout_seconds=8,
         build_max_workers=1,
         build_profile_mode="light",
@@ -96,7 +96,7 @@ LOAD_PROFILES: dict[str, ResourcePolicy] = {
         join_sample_size=150,
     ),
     "staging": ResourcePolicy(
-        max_inflight_queries=4,
+        max_inflight_queries=16,
         statement_timeout_seconds=10,
         build_max_workers=2,
         build_profile_mode="auto",
@@ -111,7 +111,7 @@ LOAD_PROFILES: dict[str, ResourcePolicy] = {
         join_sample_size=150,
     ),
     "dev": ResourcePolicy(
-        max_inflight_queries=8,
+        max_inflight_queries=16,
         statement_timeout_seconds=30,
         build_max_workers=4,
         build_profile_mode="auto",
