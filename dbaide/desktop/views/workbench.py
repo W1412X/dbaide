@@ -24,7 +24,7 @@ from PyQt6.QtWidgets import (
 )
 
 from dbaide.desktop.components.icons import svg_icon
-from dbaide.desktop.theme import Theme
+from dbaide.desktop.theme import Theme, workbench_tab_stylesheet
 from dbaide.desktop.views.doc_tab import DocTab
 from dbaide.desktop.views.query_history import QueryHistoryPanel
 
@@ -68,11 +68,7 @@ class WorkbenchView(QWidget):
         # The tab bar itself must stay on the global panelTabs stylesheet. Setting
         # a widget-local QTabBar stylesheet here makes Qt drop the app-level tab
         # subcontrol rules, so document tabs fall back to native gray colors.
-        self.tabs.setStyleSheet(
-            f"QTabWidget {{ background: {Theme.SURFACE}; }}"
-            f"QTabWidget::tab-bar {{ background: {Theme.SURFACE}; }}"
-            f"QTabWidget::pane {{ border: none; background: {Theme.SURFACE}; }}"
-        )
+        self.tabs.setStyleSheet(workbench_tab_stylesheet(bordered_pane=False))
         layout.addWidget(self.tabs)
 
         # History opens on demand from the corner icon (it no longer occupies a

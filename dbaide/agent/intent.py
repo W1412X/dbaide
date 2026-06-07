@@ -71,7 +71,7 @@ class SubIntent:
 class IntentDecomposer:
     """Split a question into independent typed sub-intents (single-intent fast path)."""
 
-    MAX_INTENTS = 4
+    MAX_INTENTS = 16
 
     def __init__(self, llm: LLMClient | None = None) -> None:
         self.llm = llm or NullLLMClient()

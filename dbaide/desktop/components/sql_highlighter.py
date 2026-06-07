@@ -1,15 +1,12 @@
-"""Lightweight SQL syntax highlighter for the SQL editor.
+"""Lightweight SQL syntax highlighter for the SQL editor."""
 
-Colours keywords, string/number literals, and `--` / `/* */` comments using the
-app theme. Keyword list is shared with the SQL guard so it stays in sync.
-"""
 from __future__ import annotations
 
 from PyQt6.QtCore import QRegularExpression
 from PyQt6.QtGui import QColor, QFont, QSyntaxHighlighter, QTextCharFormat
 
+from dbaide.rendering.sql_dialect import dialect_functions, dialect_keywords, normalize_dialect
 from dbaide.desktop.theme import Theme
-from dbaide.rendering.sanitize import _SQL_KEYWORDS
 
 
 def _fmt(color: str, *, bold: bool = False, italic: bool = False) -> QTextCharFormat:
@@ -23,24 +20,49 @@ def _fmt(color: str, *, bold: bool = False, italic: bool = False) -> QTextCharFo
 
 
 class SqlHighlighter(QSyntaxHighlighter):
-    def __init__(self, document) -> None:
+    def __init__(self, document, *, dialect: str = "generic") -> None:
         super().__init__(document)
-        ci = QRegularExpression.PatternOption.CaseInsensitiveOption
+        self._dialect = normalize_dialect(dialect)
+        self._rules: list[tuple[QRegularExpression, QTextCharFormat]] = []
+        self._string_rules: list[QRegularExpression] = []
+        self._string_fmt = _fmt(Theme.GREEN)
+        self._comment_fmt = _fmt(Theme.MUTED, italic=True)
+        self._function_fmt = _fmt(Theme.TEXT_2, bold=True)
+        self._operator_fmt = _fmt(Theme.YELLOW)
+        self._identifier_fmt = _fmt(Theme.TEXT)
+        self._block_start = QRegularExpression(r"/\*")
+        self._block_end = QRegularExpression(r"\*/")
+        self._rebuild_rules()
 
-        kws = sorted(_SQL_KEYWORDS, key=len, reverse=True)
-        self._rules: list[tuple[QRegularExpression, QTextCharFormat]] = [
+    def set_dialect(self, dialect: str) -> None:
+        name = normalize_dialect(dialect)
+        if name == self._dialect:
+            return
+        self._dialect = name
+        self._rebuild_rules()
+        self.rehighlight()
+
+    def _rebuild_rules(self) -> None:
+        ci = QRegularExpression.PatternOption.CaseInsensitiveOption
+        kws = sorted(dialect_keywords(self._dialect), key=len, reverse=True)
+        funcs = sorted(dialect_functions(self._dialect), key=len, reverse=True)
+        self._rules = [
             (QRegularExpression(r"\b(?:" + "|".join(kws) + r")\b", ci), _fmt(Theme.BLUE, bold=True)),
-            (QRegularExpression(r"\b\d+(?:\.\d+)?\b"), _fmt(Theme.YELLOW)),
         ]
-        # Strings and comments are applied last so they win over keyword/number rules.
+        if funcs:
+            self._rules.append(
+                (QRegularExpression(r"\b(?:" + "|".join(funcs) + r")\s*(?=\()", ci), self._function_fmt)
+            )
+        self._rules.extend([
+            (QRegularExpression(r"\b\d+(?:\.\d+)?\b"), _fmt(Theme.YELLOW)),
+            (QRegularExpression(r"(::|\|\||&&|<>|!=|<=|>=|:=)"), self._operator_fmt),
+        ])
         self._string_rules = [
             QRegularExpression(r"'(?:[^']|'')*'"),
             QRegularExpression(r'"(?:[^"]|"")*"'),
         ]
-        self._string_fmt = _fmt(Theme.GREEN)
-        self._comment_fmt = _fmt(Theme.MUTED, italic=True)
-        self._block_start = QRegularExpression(r"/\*")
-        self._block_end = QRegularExpression(r"\*/")
+        if self._dialect == "mysql":
+            self._string_rules.append(QRegularExpression(r"`(?:[^`]|``)*`"))
 
     def highlightBlock(self, text: str) -> None:  # noqa: N802 (Qt signature)
         for rx, fmt in self._rules:
@@ -53,14 +75,16 @@ class SqlHighlighter(QSyntaxHighlighter):
             while it.hasNext():
                 m = it.next()
                 self.setFormat(m.capturedStart(), m.capturedLength(), self._string_fmt)
-        # Line comments (-- …) win over everything to the end of the line.
         dash = text.find("--")
         if dash >= 0:
             self.setFormat(dash, len(text) - dash, self._comment_fmt)
+        if self._dialect == "mysql":
+            hash_at = text.find("#")
+            if hash_at >= 0 and (hash_at == 0 or text[hash_at - 1].isspace()):
+                self.setFormat(hash_at, len(text) - hash_at, self._comment_fmt)
         self._highlight_block_comments(text)
 
     def _highlight_block_comments(self, text: str) -> None:
-        # State 1 = "inside a /* */ comment that started on a previous line".
         start = 0
         if self.previousBlockState() != 1:
             m = self._block_start.match(text)

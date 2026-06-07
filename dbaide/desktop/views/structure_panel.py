@@ -23,6 +23,7 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 
+from dbaide.desktop.components.empty_state import EmptyState
 from dbaide.desktop.components.icons import svg_icon
 from dbaide.desktop.components.sql_highlighter import SqlHighlighter
 from dbaide.desktop.components.table import ResultTableWidget
@@ -53,16 +54,18 @@ class StructurePanel(QWidget):
         outer.setSpacing(8)
         self.stack = QStackedWidget()
 
-        empty = QWidget()
-        el = QVBoxLayout(empty)
+        empty_page = QWidget()
+        el = QVBoxLayout(empty_page)
+        el.setContentsMargins(0, 0, 0, 0)
         el.addStretch(1)
-        hint = QLabel(t("structure.empty_hint"))
-        hint.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        hint.setWordWrap(True)
-        hint.setStyleSheet(f"color: {Theme.MUTED}; font-size: 13px;")
-        el.addWidget(hint)
+        self._empty = EmptyState(
+            t("structure.empty_title"),
+            t("structure.empty_hint"),
+            icon="columns",
+        )
+        el.addWidget(self._empty)
         el.addStretch(1)
-        self.stack.addWidget(empty)
+        self.stack.addWidget(empty_page)
 
         page = QWidget()
         pl = QVBoxLayout(page)

@@ -9,7 +9,7 @@ from dbaide.session import Session
 
 def test_resource_policy_has_agent_budget_defaults():
     p = ResourcePolicy()
-    assert p.agent_max_steps == 32
+    assert p.agent_max_steps == 64
 
 
 def test_user_overrides_flow_through_resolve_policy():

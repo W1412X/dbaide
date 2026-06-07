@@ -10,7 +10,6 @@ from PyQt6.QtWidgets import (
     QApplication,
     QDialog,
     QMainWindow,
-    QMessageBox,
     QSplitter,
     QStackedWidget,
     QStatusBar,
@@ -46,6 +45,7 @@ from dbaide.desktop.dialogs.note_editor import NoteEditorDialog
 from dbaide.desktop.views.joins_tab import JoinsTab
 from dbaide.desktop.views.sidebar import Sidebar
 from dbaide.desktop.views.workbench import WorkbenchView
+from dbaide.desktop.dialogs.message_dialog import alert as dialog_alert, warn as dialog_warn
 from dbaide.desktop.views.query_history import QueryHistoryPanel
 from dbaide.history.query_store import QueryHistoryStore
 from dbaide.desktop.views.topbar import TopBar
@@ -71,6 +71,8 @@ class MainWindow(QMainWindow):
         self.oneoff_controller = OneOffActionController(self)
         self.conversation_controller = ConversationRunController(self)
         self._status_owner = ""
+        # (action, connection, label) — background asset/schema work tracked for the top bar.
+        self._asset_work_stack: list[tuple[str, str, str]] = []
         self.bootstrap: dict[str, Any] = {}
         self.schema_rows: list[dict[str, Any]] = []
         self._last_question = ""
@@ -267,7 +269,6 @@ class MainWindow(QMainWindow):
         layout.setSpacing(0)
         self.topbar = TopBar()
         self.topbar.connection_changed.connect(self._connection_changed)
-        self.topbar.database_changed.connect(self._database_changed)
         self.topbar.refresh.connect(self.refresh_all)
         self.topbar.build_assets.connect(self.build_assets)
         self.topbar.settings.connect(lambda: self.open_settings("connections"))
@@ -283,7 +284,10 @@ class MainWindow(QMainWindow):
             "Workbench": "terminal",
         }
         for name in self._tab_names:
-            index = self.tabbar.addTab(svg_icon(mode_icons[name], color=Theme.TEXT_2, size=15), "")
+            index = self.tabbar.addTab(
+                svg_icon(mode_icons[name], color=Theme.TEXT_2, size=15),
+                _tab_label(name),
+            )
             self.tabbar.setTabToolTip(index, _tab_label(name))
         self.tabbar.currentChanged.connect(self._on_tab_changed)
 
@@ -320,6 +324,7 @@ class MainWindow(QMainWindow):
         self.ask_tab.clarification_choice.connect(self._submit_clarification)
         self.query_history_store = QueryHistoryStore()
         self.history_panel = QueryHistoryPanel()
+        self.history_panel.open_editor_requested.connect(self._on_history_open_editor)
         self.history_panel.sql_selected.connect(self._on_history_select)
         self.history_panel.sql_run.connect(self._on_history_run)
         self.history_panel.clear_requested.connect(self._on_history_clear)
@@ -391,7 +396,7 @@ class MainWindow(QMainWindow):
             self.fail(exc)
 
     def _on_bootstrap_failed(self, exc: object) -> None:
-        self._restore_status_badge()
+        self._refresh_topbar_status()
         self._ensure_ui_state().statusbar_message(f"Load failed: {exc}")
         self.toast(str(exc))
 
@@ -422,8 +427,90 @@ class MainWindow(QMainWindow):
             self.schema_rows = []
             self.sidebar.load_schema([])
             self.sidebar.chats.load([])
-            self.topbar.set_databases([])
-            self._restore_status_badge()
+            self._refresh_topbar_status()
+
+    _ASSET_STATUS_ACTIONS = frozenset({
+        "build_assets",
+        "project_instance",
+        "refresh_instance",
+        "enrich_table",
+        "schema_tree",
+    })
+
+    def _asset_status_label(self, action: str) -> str:
+        return {
+            "build_assets": _i18n_t("status.building"),
+            "project_instance": _i18n_t("schema.projecting"),
+            "refresh_instance": _i18n_t("status.syncing"),
+            "enrich_table": _i18n_t("status.enriching"),
+            "schema_tree": _i18n_t("schema.loading"),
+        }.get(action, _i18n_t("status.building"))
+
+    def _asset_work_connection(self, payload: dict[str, Any]) -> str:
+        return str(
+            payload.get("name")
+            or payload.get("connection_name")
+            or self.current_connection()
+            or ""
+        )
+
+    def _push_asset_work(self, action: str, payload: dict[str, Any]) -> None:
+        conn = self._asset_work_connection(payload)
+        label = self._asset_status_label(action)
+        self._asset_work_stack.append((action, conn, label))
+        if conn == self.current_connection():
+            self._ensure_ui_state().global_status(label, "building")
+
+    def _pop_asset_work(self, action: str, payload: dict[str, Any]) -> None:
+        conn = self._asset_work_connection(payload)
+        for index in range(len(self._asset_work_stack) - 1, -1, -1):
+            item_action, item_conn, _label = self._asset_work_stack[index]
+            if item_action != action:
+                continue
+            if conn and item_conn and item_conn != conn:
+                continue
+            self._asset_work_stack.pop(index)
+            break
+        self._refresh_topbar_status()
+
+    def _current_asset_label(self, conn: str | None = None) -> str:
+        conn = conn or self.current_connection()
+        if not conn:
+            return ""
+        for _action, item_conn, label in reversed(self._asset_work_stack):
+            if item_conn == conn:
+                return label
+        oneoff = self._oneoff
+        if self._building and str(oneoff.connection or "") == conn:
+            return _i18n_t("status.building")
+        if self.service._build_active(conn):
+            return _i18n_t("status.building")
+        return ""
+
+    def _assets_busy(self, conn: str | None = None) -> bool:
+        conn = conn or self.current_connection()
+        if not conn:
+            return bool(self._asset_work_stack) or self._building
+        if any(item_conn == conn for _action, item_conn, _label in self._asset_work_stack):
+            return True
+        oneoff = self._oneoff
+        if self._building and str(oneoff.connection or "") == conn:
+            return True
+        return bool(self.service._build_active(conn))
+
+    def _refresh_topbar_status(self) -> None:
+        label = self._current_asset_label()
+        if label:
+            self._ensure_ui_state().global_status(label, "building")
+            return
+        active = self.run_state.active_count()
+        if self._building:
+            self._ensure_ui_state().global_status(_i18n_t("status.building"), "building")
+            return
+        if active > 0:
+            self.conversation_controller.refresh_run_status()
+            return
+        self._restore_status_badge(force=True)
 
     def _run_background(
         self,
@@ -434,11 +521,32 @@ class MainWindow(QMainWindow):
         on_error: Callable[[object], None] | None = None,
         on_progress: Callable[[object], None] | None = None,
     ) -> None:
+        tracks_asset = action in self._ASSET_STATUS_ACTIONS
+        if tracks_asset:
+            self._push_asset_work(action, payload)
+
+        def wrapped_success(result: Any) -> None:
+            try:
+                on_success(result)
+            finally:
+                if tracks_asset:
+                    self._pop_asset_work(action, payload)
+
+        def wrapped_error(exc: object) -> None:
+            try:
+                if on_error is not None:
+                    on_error(exc)
+                else:
+                    self._background_failed(exc)
+            finally:
+                if tracks_asset:
+                    self._pop_asset_work(action, payload)
+
         self.tasks.start(
             action,
             payload,
-            on_done=on_success,
-            on_failed=on_error or self._background_failed,
+            on_done=wrapped_success,
+            on_failed=wrapped_error,
             on_progress=on_progress,
         )
 
@@ -470,7 +578,8 @@ class MainWindow(QMainWindow):
         return self.topbar.connection.current_value()
 
     def current_database(self) -> str:
-        return self.topbar.database.current_value()
+        # Database scope comes from composer attachments, not a global top-bar selector.
+        return ""
 
     def _on_tab_changed(self, index: int) -> None:
         if 0 <= index < self.stack.count():
@@ -509,22 +618,12 @@ class MainWindow(QMainWindow):
         self.current_session_id = ""
         self.conversation_controller.refresh_run_status()
 
-    def _database_changed(self, _text: str) -> None:
-        database = self.current_database()
-        self.toast(_i18n_t("toast.db_scope", scope=database or "auto"))
-
     def _refresh_connection_context(self, conn_name: str) -> None:
-        conns = self.bootstrap.get("connections") or []
         self._load_schema(conn_name)
         self._load_sessions(conn_name)
         self._refresh_query_history()
         self.refresh_joins()
-        asset_status = "missing"
-        for c in conns:
-            if c["name"] == conn_name:
-                asset_status = c.get("asset_status") or "missing"
-                break
-        self.topbar.set_asset_status(asset_status)
+        self._refresh_topbar_status()
         self.conversation_controller.sync_active_ui()
 
     def _load_sessions(self, name: str) -> None:
@@ -593,7 +692,6 @@ class MainWindow(QMainWindow):
             if conn.get("name") == name:
                 conn["asset_status"] = "ready"
                 break
-        self.topbar.set_asset_status("ready")
         loading = _i18n_t("schema.loading")
         self._ensure_ui_state().schema_loading(loading, update=True)
         self._run_background(
@@ -607,7 +705,7 @@ class MainWindow(QMainWindow):
             return
         self.schema_rows = rows
         self._ensure_ui_state().schema_loaded(self.schema_rows, self._schema_completion())
-        self._restore_status_badge()
+        self._refresh_topbar_status()
         self._ensure_ui_state().statusbar_message(_i18n_t("status.ready"))
 
     def _schema_completion(self) -> dict[str, Any]:
@@ -616,8 +714,11 @@ class MainWindow(QMainWindow):
         `db.` → its tables and `table.`/`db.table.` → its columns."""
         databases: list[str] = []
         tables: list[str] = []
+        qualified_tables: list[str] = []
         columns_by_table: dict[str, list[str]] = {}
+        columns_by_qualified: dict[str, list[str]] = {}
         tables_by_database: dict[str, list[str]] = {}
+        column_types: dict[str, str] = {}
         for db in self.schema_rows:
             db_name = str(db.get("name") or "")
             if db_name:
@@ -627,19 +728,39 @@ class MainWindow(QMainWindow):
                 if not tname:
                     continue
                 tables.append(tname)
+                qname = f"{db_name}.{tname}" if db_name else tname
+                if qname not in qualified_tables:
+                    qualified_tables.append(qname)
                 if db_name:
                     tables_by_database.setdefault(db_name, [])
                     if tname not in tables_by_database[db_name]:
                         tables_by_database[db_name].append(tname)
-                cols = [str(c.get("name") or "") for c in table.get("children", []) if c.get("name")]
-                # Merge if the same table name appears in multiple databases.
+                cols: list[str] = []
+                for c in table.get("children", []):
+                    cname = str(c.get("name") or "")
+                    if not cname:
+                        continue
+                    cols.append(cname)
+                    dtype = str(c.get("data_type") or c.get("type") or "").strip()
+                    if dtype:
+                        column_types[f"{tname}.{cname}"] = dtype
+                        column_types[f"{qname}.{cname}"] = dtype
                 columns_by_table.setdefault(tname, [])
                 for c in cols:
                     if c not in columns_by_table[tname]:
                         columns_by_table[tname].append(c)
-        return {"databases": databases, "tables": tables,
-                "columns_by_table": columns_by_table,
-                "tables_by_database": tables_by_database}
+                if cols:
+                    columns_by_qualified[qname] = list(cols)
+        return {
+            "dialect": self._dialect(),
+            "databases": databases,
+            "tables": tables,
+            "qualified_tables": qualified_tables,
+            "columns_by_table": columns_by_table,
+            "columns_by_qualified": columns_by_qualified,
+            "tables_by_database": tables_by_database,
+            "column_types": column_types,
+        }
 
     def _apply_schema_error(self, name: str, message: str) -> None:
         # Don't wipe the current connection's schema because an old one failed.
@@ -648,7 +769,7 @@ class MainWindow(QMainWindow):
         self.schema_rows = []
         self._ensure_ui_state().schema_error(message)
         self.toast(f"Schema load failed: {message}")
-        self._restore_status_badge()
+        self._refresh_topbar_status()
         self._ensure_ui_state().statusbar_message(f"Schema load failed: {message}")
 
     def refresh_joins(self) -> None:
@@ -733,6 +854,9 @@ class MainWindow(QMainWindow):
         if key and key in self._runs:
             self.toast(_i18n_t("toast.task_running"))
             return
+        if self._assets_busy(conn):
+            self.toast(_i18n_t("toast.assets_busy"))
+            return
         # A brand-new chat has no slot yet — mint one and make it active.
         if not key:
             key = self.conversation_controller.new_slot_key()
@@ -775,6 +899,9 @@ class MainWindow(QMainWindow):
         conn = self.current_connection()
         if not conn:
             self.toast(_i18n_t("toast.select_connection"))
+            return
+        if self._assets_busy(conn):
+            self.toast(_i18n_t("toast.assets_busy"))
             return
         database = self.current_database()
         original_question = str(resume_state.get("question") or self._slot_question.get(key, ""))
@@ -834,8 +961,6 @@ class MainWindow(QMainWindow):
         self._run_background("list_databases", {"name": conn}, on_loaded)
 
     def _start_build_assets(self, conn: str, databases: list[str], options: dict[str, Any] | None = None) -> None:
-        self.topbar.set_asset_status("building")
-        self._ensure_ui_state().global_status("Building assets", "building")
         payload: dict[str, Any] = {"name": conn}
         if databases:
             payload["databases"] = databases
@@ -930,7 +1055,7 @@ class MainWindow(QMainWindow):
         code = normalize(lang) if lang is not None else self.service.cfg.ui_language()
         entry = _STRINGS.get("settings.restart_required", {})
         msg = entry.get(code) or entry.get(DEFAULT_LANGUAGE) or "Restart DBAide to apply this setting."
-        QMessageBox.information(self, "DBAide", msg)
+        dialog_alert(self, "DBAide", msg)
 
     def _settings_save_resources(self, payload: dict[str, Any]) -> None:
         try:
@@ -993,27 +1118,18 @@ class MainWindow(QMainWindow):
             self.toast(_i18n_t("toast.select_connection"))
             return
         self.toast(_i18n_t("toast.syncing"))
-        # Persistent badge for the whole (possibly slow, remote) sync — a transient
-        # toast alone leaves no indication once it fades while work continues.
-        owner = f"sync:{conn}"
-        self._status_owner = owner
-        self._ensure_ui_state().global_status(_i18n_t("status.syncing"), "building")
 
         def done(result: object) -> None:
             if conn != self.current_connection():
-                self._restore_status_badge(owner=owner)
                 return
             summary = (result or {}).get("summary", "") if isinstance(result, dict) else ""
             self.toast(_i18n_t("toast.synced", summary=summary))
-            self._restore_status_badge(owner=owner)
             self.bus.emit(ASSETS_CHANGED, {"instance": conn})
 
         def fail(exc: object) -> None:
             if conn != self.current_connection():
-                self._restore_status_badge(owner=owner)
                 return
             self.toast(_i18n_t("toast.sync_failed", error=str(exc)))
-            self._restore_status_badge(owner=owner)
 
         self._run_background("refresh_instance", {"name": conn}, done, on_error=fail)
 
@@ -1030,9 +1146,6 @@ class MainWindow(QMainWindow):
             return
         target = ".".join(p for p in (database, table) if p)
         self.toast(_i18n_t("toast.syncing"))
-        owner = f"refresh:{conn}:{target}"
-        self._status_owner = owner
-        self._ensure_ui_state().global_status(_i18n_t("status.syncing"), "building")
         payload: dict[str, Any] = {"name": conn, "database": database}
         if table:
             payload["table"] = table
@@ -1041,12 +1154,10 @@ class MainWindow(QMainWindow):
         def done(result: object) -> None:
             if conn != self.current_connection():
                 self._ensure_ui_state().set_node_refreshing(node, False)
-                self._restore_status_badge(owner=owner)
                 return
             summary = (result or {}).get("summary", "") if isinstance(result, dict) else ""
             self._ensure_ui_state().set_node_refreshing(node, False)
             self.toast(_i18n_t("toast.synced", summary=summary or target))
-            self._restore_status_badge(owner=owner)
             self.bus.emit(ASSETS_CHANGED, {"instance": conn})
             doc_path = f"{conn}.{database}.{table}" if table else f"{conn}.{database}"
             self._refresh_doc_if_open(doc_path)
@@ -1054,11 +1165,9 @@ class MainWindow(QMainWindow):
         def fail(exc: object) -> None:
             if conn != self.current_connection():
                 self._ensure_ui_state().set_node_refreshing(node, False)
-                self._restore_status_badge(owner=owner)
                 return
             self._ensure_ui_state().set_node_refreshing(node, False)
             self.toast(_i18n_t("toast.sync_failed", error=str(exc)))
-            self._restore_status_badge(owner=owner)
 
         self._run_background("refresh_instance", payload, done, on_error=fail)
 
@@ -1082,26 +1191,17 @@ class MainWindow(QMainWindow):
         else:
             return
         self.toast(_i18n_t("toast.enriching", target=target))
-        # Enrichment runs the LLM + sampling + profiling — slow enough that the start
-        # toast fades long before it finishes; keep a persistent badge meanwhile.
-        owner = f"enrich:{conn}:{target}"
-        self._status_owner = owner
-        self._ensure_ui_state().global_status(_i18n_t("status.enriching"), "building")
 
         def done(_r: object) -> None:
             if conn != self.current_connection():
-                self._restore_status_badge(owner=owner)
                 return
             self.toast(_i18n_t("toast.enriched", target=target))
-            self._restore_status_badge(owner=owner)
             self.bus.emit(ASSETS_CHANGED, {"instance": conn})
 
         def fail(exc: object) -> None:
             if conn != self.current_connection():
-                self._restore_status_badge(owner=owner)
                 return
             self.toast(_i18n_t("toast.enrich_failed", error=str(exc)))
-            self._restore_status_badge(owner=owner)
 
         self._run_background(action, payload, done, on_error=fail)
 
@@ -1282,6 +1382,10 @@ class MainWindow(QMainWindow):
         self.query_history_store.clear(self.current_connection())
         self._refresh_query_history()
 
+    def _on_history_open_editor(self) -> None:
+        self.tabbar.setCurrentIndex(1)
+        self.workbench.focus_sql()
+
     def _show_asset(self, path: str) -> None:
         # Read the doc in the background so it never flips the global status to
         # "running" and works even while a query is in flight.
@@ -1380,7 +1484,13 @@ class MainWindow(QMainWindow):
         conn = self.current_connection()
         for c in (self.bootstrap.get("connections") or []):
             if c.get("name") == conn:
-                return "mysql" if str(c.get("type", "")).lower() in ("mysql", "mariadb") else "generic"
+                t = str(c.get("type", "")).lower()
+                if t in ("mysql", "mariadb"):
+                    return "mysql"
+                if t in ("postgres", "postgresql"):
+                    return "postgres"
+                if t == "sqlite":
+                    return "sqlite"
         return "generic"
 
     # ── Composer context attachment (the "+" button) ──────────────────────────
@@ -1645,8 +1755,10 @@ class MainWindow(QMainWindow):
                 self.conversation_controller.sync_active_ui()
         self._load_sessions(conn)
 
-    def _restore_status_badge(self, *, owner: str = "") -> None:
+    def _restore_status_badge(self, *, owner: str = "", force: bool = False) -> None:
         if owner and getattr(self, "_status_owner", "") != owner:
+            return
+        if not force and self._assets_busy():
             return
         self._status_owner = ""
         self._ensure_ui_state().restore_connection_status(
@@ -1679,7 +1791,7 @@ class MainWindow(QMainWindow):
         else:
             self.ask_tab.append_note(key, _i18n_t("note.error"), msg)
         if modal:
-            QMessageBox.warning(self, "DBAide", str(exc))
+            dialog_warn(self, "DBAide", str(exc))
         else:
             self.toast(str(exc))
 

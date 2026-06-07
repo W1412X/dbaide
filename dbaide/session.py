@@ -14,7 +14,7 @@ class Session:
     timeout_seconds: int = 60
     # Agent reasoning budget — defaults match ResourcePolicy so a directly-built
     # Session (e.g. in tests) behaves like the conservative "production" preset.
-    agent_max_steps: int = 32
+    agent_max_steps: int = 64
 
     @classmethod
     def from_policy(cls, connection: ConnectionConfig, policy, **kwargs) -> "Session":

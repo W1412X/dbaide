@@ -78,6 +78,20 @@ def test_inline_trace_state_live_and_final_model_lifecycle():
     state.clear()
     assert state.model is None
     assert state.is_empty() is True
+    assert state.expanded_node_ids == set()
+    assert state.follow_live is True
+
+
+def test_inline_trace_state_remembers_user_expanded_nodes():
+    state = InlineTraceState()
+    state.expanded_node_ids.add("node-1")
+    state.follow_live = False
+
+    state.begin_live()
+    state.append_live_event({"stage": "execute_sql", "title": "Calling", "status": "running", "kind": "tool"})
+
+    assert "node-1" in state.expanded_node_ids
+    assert state.follow_live is False
 
 
 def test_ui_state_binder_routes_busy_and_refresh_controls(monkeypatch):

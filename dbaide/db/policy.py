@@ -45,7 +45,7 @@ class ResourcePolicy:
     max_row_limit: int = 1000
 
     # Agent reasoning budget (how hard the agent is allowed to work per question).
-    agent_max_steps: int = 32            # tool-loop iterations before the agent must answer
+    agent_max_steps: int = 64            # tool-loop iterations before the agent must answer
 
     # Cost gates.
     big_table_rows: int = 1_000_000      # estimated rows above which profiling drops to metadata-only
@@ -84,7 +84,7 @@ LOAD_PROFILES: dict[str, ResourcePolicy] = {
         build_profile_mode="light",
         default_row_limit=100,
         max_row_limit=1000,
-        agent_max_steps=32,
+        agent_max_steps=64,
         big_table_rows=1_000_000,
         explain_max_rows=5_000_000,
         join_sample_size=150,
@@ -96,7 +96,7 @@ LOAD_PROFILES: dict[str, ResourcePolicy] = {
         build_profile_mode="auto",
         default_row_limit=100,
         max_row_limit=5000,
-        agent_max_steps=32,
+        agent_max_steps=64,
         big_table_rows=5_000_000,
         explain_max_rows=20_000_000,
         join_sample_size=150,
@@ -108,7 +108,7 @@ LOAD_PROFILES: dict[str, ResourcePolicy] = {
         build_profile_mode="auto",
         default_row_limit=200,
         max_row_limit=50000,
-        agent_max_steps=32,
+        agent_max_steps=64,
         big_table_rows=50_000_000,
         explain_max_rows=200_000_000,
         join_sample_size=200,

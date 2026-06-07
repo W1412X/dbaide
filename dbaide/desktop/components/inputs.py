@@ -83,6 +83,19 @@ def configure_wrapped_label(label: QLabel, *, max_width: int | None = None) -> N
         label.setMaximumWidth(max_width)
 
 
+def configure_sql_editor_pane(
+    edit: QPlainTextEdit,
+    *,
+    min_height: int = 100,
+) -> None:
+    """SQL editor inside a splitter — user resizes vertically; no fixed max height."""
+    edit.setLineWrapMode(QPlainTextEdit.LineWrapMode.NoWrap)
+    edit.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+    edit.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+    edit.setMinimumHeight(min_height)
+    edit.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+
+
 def configure_multiline_text_edit(
     edit: QTextEdit | QPlainTextEdit,
     *,

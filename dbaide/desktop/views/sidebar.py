@@ -269,9 +269,12 @@ class Sidebar(QWidget):
                 # so it reads as "structure only, not yet enriched"; enriched → normal.
                 stale = bool(table.get("stale"))
                 enriched = bool(table.get("enriched"))
-                label = f"{table['name']} ({table.get('column_count', 0)})" + (" ⚠" if stale else "")
+                label = f"{table['name']} ({table.get('column_count', 0)})"
                 table_item = QTreeWidgetItem([label])
-                table_item.setIcon(0, tbl_icon)
+                if stale:
+                    table_item.setIcon(0, svg_icon("alert-triangle", color=Theme.YELLOW, size=14))
+                else:
+                    table_item.setIcon(0, tbl_icon)
                 table_item.setData(0, Qt.ItemDataRole.UserRole, table)
                 if stale:
                     table_item.setToolTip(0, _t("schema.status_stale"))

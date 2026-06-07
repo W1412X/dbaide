@@ -57,6 +57,10 @@ _STRINGS: dict[str, dict[str, str]] = {
         "en": "Queries you run appear here. Click to load, double-click to run.",
         "zh": "运行过的查询会显示在这里。单击载入，双击运行。",
     },
+    "history.empty_title": {"en": "No query history yet", "zh": "暂无查询历史"},
+    "history.open_editor": {"en": "Open SQL editor", "zh": "打开 SQL 编辑器"},
+    "data.empty_title": {"en": "No table open", "zh": "尚未打开表"},
+    "structure.empty_title": {"en": "No structure to show", "zh": "暂无结构可显示"},
     "structure.empty_hint": {
         "en": "Double-click a table in the schema (left) to see its structure.",
         "zh": "双击左侧结构树中的表即可查看其结构。",
@@ -76,6 +80,7 @@ _STRINGS: dict[str, dict[str, str]] = {
     "topbar.refresh": {"en": "Refresh", "zh": "刷新"},
     "topbar.connection": {"en": "Connection", "zh": "连接"},
     "topbar.database": {"en": "Database", "zh": "数据库"},
+    "topbar.database_auto": {"en": "Auto", "zh": "自动"},
     # Composer
     "composer.send": {"en": "Send", "zh": "发送"},
     "composer.stop": {"en": "Stop", "zh": "停止"},
@@ -92,6 +97,10 @@ _STRINGS: dict[str, dict[str, str]] = {
     "composer.placeholder.build": {
         "en": "Ask a question, or build assets for better accuracy",
         "zh": "直接提问，或先构建资产以提升准确度",
+    },
+    "composer.placeholder.building": {
+        "en": "Asset work in progress — please wait…",
+        "zh": "资产正在更新，请稍候…",
     },
     "composer.placeholder.no_conn": {
         "en": "Add or select a connection to start",
@@ -182,6 +191,13 @@ _STRINGS: dict[str, dict[str, str]] = {
     "clarify.finish": {"en": "Finish", "zh": "完成"},
     "clarify.back": {"en": "Back", "zh": "上一题"},
     "clarify.type_answer": {"en": "Type your answer…", "zh": "输入你的回答…"},
+    "clarify.type_multi": {
+        "en": "Type your answers (one line covers all the questions)…",
+        "zh": "输入你的回答（一行可覆盖所有问题）…",
+    },
+    "dialog.ok": {"en": "OK", "zh": "确定"},
+    "dialog.cancel": {"en": "Cancel", "zh": "取消"},
+    "dialog.confirm": {"en": "Confirm", "zh": "确认"},
     "risk.confirm_title": {
         "en": "This query may be expensive or risky. Confirm before executing.",
         "zh": "此查询可能较慢或存在风险。请确认是否执行。",
@@ -224,6 +240,38 @@ _STRINGS: dict[str, dict[str, str]] = {
     "settings.more": {"en": "More ▾", "zh": "更多 ▾"},
     "settings.set_default": {"en": "Set as default", "zh": "设为默认"},
     "settings.remove": {"en": "Remove", "zh": "删除"},
+    "settings.err.conn_name": {
+        "en": "Connection name is required.",
+        "zh": "请填写连接名称。",
+    },
+    "settings.err.select_conn_test": {
+        "en": "Select or enter a connection to test.",
+        "zh": "请选择或输入要测试的连接。",
+    },
+    "settings.err.save_conn_first": {
+        "en": "Save the connection first.",
+        "zh": "请先保存连接。",
+    },
+    "settings.confirm.remove_conn": {
+        "en": "Remove connection '{name}'?",
+        "zh": "删除连接「{name}」？",
+    },
+    "settings.err.model_name": {
+        "en": "Profile name is required.",
+        "zh": "请填写模型配置名称。",
+    },
+    "settings.err.select_model_test": {
+        "en": "Select or enter a model profile to test.",
+        "zh": "请选择或输入要测试的模型配置。",
+    },
+    "settings.err.save_model_first": {
+        "en": "Save the model profile first.",
+        "zh": "请先保存模型配置。",
+    },
+    "settings.confirm.remove_model": {
+        "en": "Remove model profile '{name}'?",
+        "zh": "删除模型配置「{name}」？",
+    },
     "settings.language.hint": {
         "en": "Interface language. Answers follow the user's question language.",
         "zh": "界面语言。回答会跟随用户提问语言。",
@@ -272,6 +320,10 @@ _STRINGS: dict[str, dict[str, str]] = {
     "status.syncing": {"en": "Syncing schema…", "zh": "正在同步库结构…"},
     "status.enriching": {"en": "Enriching docs…", "zh": "正在补充文档…"},
     "toast.task_running": {"en": "A task is already running", "zh": "已有任务在运行"},
+    "toast.assets_busy": {
+        "en": "Asset work is still running — please wait before asking",
+        "zh": "资产仍在更新中，请稍后再提问",
+    },
     "toast.cancelling": {"en": "Cancelling…", "zh": "正在取消…"},
     "toast.cancelled": {"en": "Cancelled", "zh": "已取消"},
     "toast.select_connection": {"en": "Select a connection first", "zh": "请先选择一个连接"},
@@ -331,8 +383,8 @@ _STRINGS: dict[str, dict[str, str]] = {
     "sql.messages": {"en": "Messages", "zh": "消息"},
     "sql.run_tooltip": {"en": "Run read-only query", "zh": "运行只读查询"},
     "sql.placeholder": {
-        "en": "Paste SQL here. Only single read-only statements are allowed.",
-        "zh": "在此粘贴 SQL，仅允许单条只读语句。",
+        "en": "Write SQL here. Drag the handle below to resize. Ctrl+Space for suggestions.",
+        "zh": "在此编写 SQL。拖动下方分隔条调整高度；Ctrl+Space 触发补全。",
     },
     # Sidebar
     "sidebar.filter": {"en": "Search schema…", "zh": "搜索结构…"},

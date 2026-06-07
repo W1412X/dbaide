@@ -2,7 +2,6 @@ import sqlite3
 
 from dbaide.adapters import build_adapter
 from dbaide.agent.orchestrator import AskOrchestrator
-from dbaide.agent.loop import _tool_call_key
 from dbaide.agent.sql_writer import SQLWriter
 from dbaide.agent.toolkit import build_tool_registry
 from dbaide.assets import AssetStore
@@ -226,12 +225,6 @@ def test_execute_readonly_sql_honors_tool_limit(tmp_path):
     assert result.data["row_count"] == 2
     assert result.data["sql"].endswith("LIMIT 2")
 
-
-def test_tool_call_key_is_stable_for_duplicate_detection():
-    left = _tool_call_key("describe_table", {"database": "main", "table": "orders"})
-    right = _tool_call_key("describe_table", {"table": "orders", "database": "main"})
-
-    assert left == right
 
 
 def test_generate_sql_splits_direct_qualified_table_arg(tmp_path):

@@ -6,8 +6,8 @@ from __future__ import annotations
 
 from typing import Any
 
-from PyQt6.QtCore import Qt, QTimer, pyqtSignal
-from PyQt6.QtGui import QFont, QIcon
+from PyQt6.QtCore import Qt, QTimer, pyqtSignal, QPropertyAnimation, QEasingCurve
+from PyQt6.QtGui import QFont
 from PyQt6.QtWidgets import (
     QApplication,
     QFrame,
@@ -28,12 +28,16 @@ from PyQt6.QtCore import QSize
 from dbaide.agent.progress_events import conversation_trace_step, phase_for
 from dbaide.desktop.components.base import compact_button
 from dbaide.desktop.conversation_state import ThinkingUiState, TurnTraceState
-from dbaide.desktop.components.icons import svg_icon
+from dbaide.desktop.components.icons import svg_icon, svg_pixmap
 from dbaide.desktop.components.inputs import configure_readonly_text_view, configure_wrapped_label
 from dbaide.desktop.components.menu import _style_menu
-from dbaide.desktop.components.spinner import BusyAnimator, spinner_icon
+from dbaide.desktop.components.spinner import BusyAnimator, SPINNER_SIZE, spinner_pixmap
 from dbaide.desktop.components.trace import InlineTrace
 from dbaide.desktop.theme import Theme
+
+_TRACE_CHEVRON_SIZE = 15
+_TRACE_ANIM_MS = 180
+_TRACE_MAX_H = 340
 from dbaide.rendering.markdown import render_markdown_safe
 
 
@@ -167,24 +171,53 @@ class _Bubble(QFrame):
         _copy_to_clipboard(_selected_label_text(self._label))
 
 
-class _ThinkingIndicator(QPushButton):
+class _ThinkingIndicator(QFrame):
     """Per-turn status chip. While the agent runs it shows a spinner + the current
     phase ("Thinking…", then phase labels); when done it collapses to a muted
-    "View agent trace ›" link. Clicking it expands the run's trace inline, right
-    below the chip (a chevron reflects the expand/collapse state). Emits
-    ``toggled_trace`` so the owning turn shows/hides its inline trace."""
+    "View agent trace" link with a trailing chevron on the right. Clicking it
+    expands the run's trace inline, right below the chip. Emits ``toggled_trace``."""
 
     toggled_trace = pyqtSignal()
 
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
-        self.setFlat(True)
+        self.setObjectName("thinkingIndicator")
         self.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Fixed)
-        self.setFont(QFont("Inter", 11, QFont.Weight.DemiBold))
+        self.setSizePolicy(QSizePolicy.Policy.Minimum, QSizePolicy.Policy.Fixed)
         self._state = ThinkingUiState(phase="Thinking...")
         self._busy = BusyAnimator(self._tick)
-        self.clicked.connect(self._on_click)
+        self._hover = False
+        self._tone = Theme.MUTED
+
+        row = QHBoxLayout(self)
+        row.setContentsMargins(12, 6, 10, 6)
+        row.setSpacing(8)
+
+        self._leading = QLabel()
+        self._leading.setFixedSize(SPINNER_SIZE, SPINNER_SIZE)
+        self._leading.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self._leading.hide()
+
+        self._text = QLabel()
+        self._text.setWordWrap(False)
+        self._text.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
+
+        self._chevron = QLabel()
+        self._chevron.setFixedSize(_TRACE_CHEVRON_SIZE, _TRACE_CHEVRON_SIZE)
+        self._chevron.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self._chevron.hide()
+
+        for label in (self._leading, self._text, self._chevron):
+            label.setAutoFillBackground(False)
+            label.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
+            label.setStyleSheet("background: transparent; border: none;")
+
+        row.addWidget(self._leading, 0, Qt.AlignmentFlag.AlignVCenter)
+        row.addWidget(self._text, 0, Qt.AlignmentFlag.AlignVCenter)
+        row.addWidget(self._chevron, 0, Qt.AlignmentFlag.AlignVCenter)
+
+        self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
+        self._sync_frame()
         self._sync()
 
     # ── state transitions ──────────────────────────────────────────────────--
@@ -198,7 +231,6 @@ class _ThinkingIndicator(QPushButton):
     def set_phase(self, phase: str) -> None:
         if not phase:
             return
-        # A live event arrived — (re)enter the running state and show the phase.
         self._state.set_phase(phase)
         if not self._busy.active:
             self._busy.start()
@@ -225,49 +257,138 @@ class _ThinkingIndicator(QPushButton):
         return self._state.expanded
 
     def _on_click(self) -> None:
-        # Toggle the turn's inline trace (works live or after completion — the
-        # owning turn decides what events to show).
         self.toggled_trace.emit()
 
+    def mousePressEvent(self, event) -> None:
+        if event.button() == Qt.MouseButton.LeftButton:
+            self._on_click()
+        super().mousePressEvent(event)
+
+    def sizeHint(self) -> QSize:
+        if self.layout() is not None:
+            return self.layout().sizeHint()
+        return super().sizeHint()
+
+    def minimumSizeHint(self) -> QSize:
+        return self.sizeHint()
+
+    def enterEvent(self, event) -> None:
+        self._hover = True
+        self._sync_frame()
+        if not self._state.running and not self._state.waiting:
+            self._apply_tone(self._tone)
+        super().enterEvent(event)
+
+    def leaveEvent(self, event) -> None:
+        self._hover = False
+        self._sync_frame()
+        if not self._state.running and not self._state.waiting:
+            self._apply_tone(self._tone)
+        super().leaveEvent(event)
+
+    def _child_label_rule(self) -> str:
+        return (
+            "QFrame#thinkingIndicator QLabel {"
+            " background: transparent; border: none; padding: 0; margin: 0; }"
+        )
+
+    def _sync_frame(self) -> None:
+        state = self._state
+        idle_done = not state.running and not state.waiting and state.step_count > 0
+        child = self._child_label_rule()
+        if self._hover and idle_done:
+            self.setStyleSheet(
+                f"QFrame#thinkingIndicator {{ background: {Theme.PANEL_2};"
+                f" border: 1px solid {Theme.BORDER_SOFT}; border-radius: {Theme.RADIUS_MD}px; }}"
+                f"{child}"
+            )
+        elif idle_done:
+            # Quiet pill at rest — matches hover surface so the chevron never sits on
+            # a different fill than the label (macOS QLabel pixmap boxes read as black).
+            self.setStyleSheet(
+                f"QFrame#thinkingIndicator {{ background: {Theme.PANEL_2};"
+                f" border: 1px solid transparent; border-radius: {Theme.RADIUS_MD}px; }}"
+                f"{child}"
+            )
+        else:
+            self.setStyleSheet(
+                f"QFrame#thinkingIndicator {{ background: transparent; border: none; }}"
+                f"{child}"
+            )
+
+    def _text_style(self, color: str) -> str:
+        return (
+            f"color: {color}; background: transparent; border: none;"
+            f" font-size: 11px; font-weight: 600;"
+        )
+
+    def _fit_text_width(self, *, max_width: int = 0) -> None:
+        """Size the label to its rendered string — global QSS font-size otherwise
+        makes QLabel sizeHint too narrow and the last glyphs clip under the chevron."""
+        text = self._text.text()
+        if not text:
+            return
+        fm = self._text.fontMetrics()
+        pad = 8
+        natural = fm.horizontalAdvance(text) + pad
+        width = min(natural, max_width) if max_width > 0 else natural
+        if max_width > 0 and natural > max_width:
+            self._text.setText(fm.elidedText(text, Qt.TextElideMode.ElideRight, max_width - pad))
+            width = max_width
+        self._text.setFixedWidth(width)
+
     def _tick(self) -> None:
-        self.setIcon(spinner_icon(self._busy.angle, color=Theme.BLUE))
+        if not self._state.running:
+            return
+        self._leading.setPixmap(spinner_pixmap(self._busy.angle, color=Theme.BLUE, size=SPINNER_SIZE))
+
+    def _set_chevron(self, *, expanded: bool, color: str) -> None:
+        name = "chevron-down" if expanded else "chevron-right"
+        self._chevron.setPixmap(svg_pixmap(name, color=color, size=_TRACE_CHEVRON_SIZE))
+
+    def _apply_tone(self, color: str) -> None:
+        self._tone = color
+        show_hover = self._hover and not self._state.running and not self._state.waiting
+        display = Theme.TEXT if show_hover else color
+        self._text.setStyleSheet(self._text_style(display))
+        if not self._state.running and not self._state.waiting and self._state.step_count > 0:
+            self._set_chevron(expanded=self._state.expanded, color=display)
+            self._chevron.setStyleSheet("background: transparent; border: none;")
+            self._fit_text_width()
 
     def _sync(self) -> None:
         state = self._state
         if state.running:
-            color = Theme.BLUE
             phase = state.phase if state.phase.endswith("…") else f"{state.phase}…"
-            self.setIcon(spinner_icon(self._busy.angle, color=Theme.BLUE))
-            self.setText(f"  {phase}")
+            self._leading.show()
+            self._chevron.hide()
+            self._text.setText(phase)
+            self._apply_tone(Theme.BLUE)
+            self._fit_text_width(max_width=420)
+            self._tick()
             self.show()
         elif state.waiting:
-            color = Theme.YELLOW
-            self.setIcon(QIcon())
-            self.setText(state.phase)
+            self._leading.hide()
+            self._chevron.hide()
+            self._text.setText(state.phase)
+            self._apply_tone(Theme.YELLOW)
+            self._fit_text_width(max_width=420)
             self.show()
         else:
-            self.setIcon(QIcon())
             if state.step_count <= 0:
-                self.hide()  # nothing to reveal — don't show a hollow chip
+                self.hide()
                 return
-            color = Theme.MUTED if state.ok else Theme.RED
             from dbaide.i18n import t
             base = t("trace.view") if state.ok else t("trace.view_failed")
-            caret = " ⌄" if state.expanded else " ›"
-            self.setText(base + caret)
+            self._leading.hide()
+            self._chevron.show()
+            self._text.setText(base)
+            self._apply_tone(Theme.MUTED if state.ok else Theme.RED)
+            self._sync_frame()
+            self._fit_text_width()
             self.show()
-        self.setStyleSheet(
-            f"""
-            QPushButton {{
-                color: {color};
-                background: transparent;
-                border: none;
-                text-align: left;
-                padding: 6px 12px;
-            }}
-            QPushButton:hover {{ color: {Theme.TEXT}; }}
-            """
-        )
+        self.adjustSize()
+        self.updateGeometry()
 
 
 class _MarkdownBlock(QFrame):
@@ -413,6 +534,8 @@ class _ClarificationBar(QFrame):
 
     def __init__(self, options: list[str], *, allow_direct_submit: bool = True, parent=None) -> None:
         super().__init__(parent)
+        from dbaide.i18n import t
+        self._t = t
         self.setObjectName("clarificationBar")
         self.setStyleSheet(
             f"""
@@ -447,12 +570,12 @@ class _ClarificationBar(QFrame):
         row.setSpacing(8)
         self._input = QLineEdit()
         self._input.setPlaceholderText(
-            "Type your answer…" if allow_direct_submit else "Type your answers (one line covers all the questions)…"
+            t("clarify.type_answer") if allow_direct_submit else t("clarify.type_multi")
         )
         self._input.setFixedHeight(26)
         self._input.returnPressed.connect(self._on_send)
         row.addWidget(self._input, 1)
-        self._send = compact_button("Send", primary=True, width=72)
+        self._send = compact_button(t("composer.send"), primary=True, width=72)
         self._send.clicked.connect(self._on_send)
         row.addWidget(self._send)
         outer.addLayout(row)
@@ -625,6 +748,7 @@ class TurnBlock(QFrame):
         # expanded — no point building a tree widget for each).
         self.trace_state = TurnTraceState()
         self._trace_box: InlineTrace | None = None
+        self._trace_anim: QPropertyAnimation | None = None
 
         self._content_host = QWidget()
         self._content_host.setStyleSheet("background: transparent;")
@@ -677,17 +801,41 @@ class TurnBlock(QFrame):
     def _toggle_trace(self) -> None:
         if self._trace_box is None:
             self._trace_box = InlineTrace()
-            # Place it directly under the status chip (index of status + 1).
             idx = self._layout.indexOf(self.status)
             self._layout.insertWidget(idx + 1, self._trace_box)
             self._trace_box.hide()
+            self._trace_box.setMaximumHeight(0)
         if self._trace_open():
-            self._trace_box.hide()
+            self._animate_trace(opening=False)
             self.status.set_expanded(False)
         else:
             self._trace_box.set_events(self.trace_state.events, live=not self.trace_state.final)
-            self._trace_box.show()
+            self._animate_trace(opening=True)
             self.status.set_expanded(True)
+
+    def _animate_trace(self, *, opening: bool) -> None:
+        box = self._trace_box
+        if box is None:
+            return
+        end = _TRACE_MAX_H if opening else 0
+        if opening:
+            box.show()
+        anim = QPropertyAnimation(box, b"maximumHeight", self)
+        anim.setDuration(_TRACE_ANIM_MS)
+        anim.setStartValue(box.maximumHeight())
+        anim.setEndValue(end)
+        anim.setEasingCurve(QEasingCurve.Type.OutCubic if opening else QEasingCurve.Type.InCubic)
+
+        def _on_finished() -> None:
+            if opening:
+                box.setMaximumHeight(_TRACE_MAX_H)
+            else:
+                box.hide()
+                box.setMaximumHeight(_TRACE_MAX_H)
+
+        anim.finished.connect(_on_finished)
+        anim.start()
+        self._trace_anim = anim
 
     @property
     def _events(self) -> list[dict[str, Any]]:
@@ -1015,12 +1163,23 @@ class ConversationView(QScrollArea):
         self._sync_viewport_width()
 
     def _scroll_bottom(self) -> None:
+        """Keep the latest turn in view.
+
+        While the thread still fits the viewport the top stretch pins content to the
+        bottom without scrolling; once it overflows the bar stays at 0 unless we
+        explicitly jump to the maximum after layout settles.
+        """
         def _do_scroll() -> None:
             self._sync_viewport_width()
+            self._root.updateGeometry()
+            turn = self._current_turn
+            if turn is not None:
+                self.ensureWidgetVisible(turn, 0, 24)
             bar = self.verticalScrollBar()
             bar.setValue(bar.maximum())
 
         QTimer.singleShot(0, _do_scroll)
+        QTimer.singleShot(32, _do_scroll)
 
     def clear(self) -> None:
         while self._layout.count() > 1:

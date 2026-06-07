@@ -36,6 +36,10 @@ class _DarkTheme:
     RED = "#ff6b6b"
     CODE_BG = "#090b0f"
     NULL = "#515865"
+    RADIUS_SM = 6
+    RADIUS_MD = 8
+    RADIUS_LG = 10
+    RADIUS_XL = 12
 
 
 class _LightTheme:
@@ -60,6 +64,10 @@ class _LightTheme:
     RED = "#ef4444"
     CODE_BG = "#f1f3f5"
     NULL = "#adb5bd"
+    RADIUS_SM = 6
+    RADIUS_MD = 8
+    RADIUS_LG = 10
+    RADIUS_XL = 12
 
 
 # ── Theme accessor / switcher ────────────────────────────────────────────────
@@ -142,6 +150,11 @@ def _icon_svgs() -> dict[str, str]:
             f'<path d="M4.5 4.5 L11.5 11.5 M11.5 4.5 L4.5 11.5" fill="none" stroke="{close_color}"'
             ' stroke-width="1.5" stroke-linecap="round"/></svg>'
         ),
+        "menu-check": (
+            '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 16 16">'
+            f'<path d="M3.5 8.5 L6.5 11.5 L12.5 5" fill="none" stroke="{chevron_color}" stroke-width="2"'
+            ' stroke-linecap="round" stroke-linejoin="round"/></svg>'
+        ),
     }
 
 
@@ -163,12 +176,13 @@ def _materialize_icons() -> dict[str, str]:
 
 def _regenerate_icons() -> None:
     """Re-materialise icon files after a theme switch."""
-    global _ICONS, _CHECK_ICON, _CHEVRON_DOWN, _CHEVRON_UP, _CLOSE_ICON
+    global _ICONS, _CHECK_ICON, _CHEVRON_DOWN, _CHEVRON_UP, _CLOSE_ICON, _MENU_CHECK_ICON
     _ICONS = _materialize_icons()
     _CHECK_ICON = _ICONS.get("check", "")
     _CHEVRON_DOWN = _ICONS.get("chevron-down", "")
     _CHEVRON_UP = _ICONS.get("chevron-up", "")
     _CLOSE_ICON = _ICONS.get("close", "")
+    _MENU_CHECK_ICON = _ICONS.get("menu-check", "")
 
 
 _ICONS = _materialize_icons()
@@ -176,6 +190,7 @@ _CHECK_ICON = _ICONS.get("check", "")
 _CHEVRON_DOWN = _ICONS.get("chevron-down", "")
 _CHEVRON_UP = _ICONS.get("chevron-up", "")
 _CLOSE_ICON = _ICONS.get("close", "")
+_MENU_CHECK_ICON = _ICONS.get("menu-check", "")
 
 
 # ── Stylesheet ───────────────────────────────────────────────────────────────
@@ -256,6 +271,19 @@ QPushButton[primary="true"]:disabled {{
     color: {T.MUTED_2};
     border: 1px solid {T.BORDER};
 }}
+QPushButton:focus-visible, QToolButton:focus-visible {{
+    border: 1px solid {T.FOCUS};
+}}
+QToolButton#modeSwitchButton:focus-visible {{
+    border: 1px solid {T.FOCUS};
+}}
+QTabBar[panelTabs="true"]::tab:focus {{
+    border: 1px solid {T.FOCUS};
+}}
+QListWidget::item:focus {{
+    outline: none;
+    background: {T.PANEL_2};
+}}
 QPushButton[tab="true"] {{
     border-radius: 8px 8px 0 0;
     border-bottom: 2px solid transparent;
@@ -270,17 +298,22 @@ QLineEdit {{
     {_INPUT}
     padding: 0px 12px;
 }}
-QLineEdit:focus, QTextEdit:focus, QPlainTextEdit:focus, QComboBox:focus, QSpinBox:focus {{
+QLineEdit:focus, QTextEdit:focus, QPlainTextEdit:focus, QSpinBox:focus {{
     border: 1px solid {T.FOCUS};
+}}
+QComboBox:focus {{
+    border: 1px solid {T.FOCUS};
+    outline: none;
 }}
 QComboBox {{
     {_INPUT}
     padding: 0px 28px 0px 12px;
+    outline: none;
 }}
 QComboBox::drop-down {{
     subcontrol-origin: padding;
     subcontrol-position: center right;
-    width: 26px;
+    width: 24px;
     border: none;
     background: transparent;
 }}
@@ -289,15 +322,26 @@ QComboBox::down-arrow {{
     width: 14px;
     height: 14px;
 }}
-/* Lighter topbar selectors -- a soft chip (transparent, soft border) rather than a
-   heavy boxed input, so the top bar reads calm. */
+/* Lighter topbar selectors — kept for settings/forms; top bar uses PillSelect now. */
 QComboBox[soft="true"] {{
     background: transparent;
     border: 1px solid {T.BORDER_SOFT};
+    border-radius: {T.RADIUS_MD}px;
+    outline: none;
 }}
 QComboBox[soft="true"]:hover {{
     background: {T.PANEL_2};
     border: 1px solid {T.BORDER};
+}}
+QComboBox[soft="true"]:focus {{
+    background: {T.PANEL_2};
+    border: 1px solid {T.BORDER};
+    outline: none;
+}}
+QComboBox[soft="true"]::drop-down {{
+    width: 22px;
+    border: none;
+    background: transparent;
 }}
 QComboBox QAbstractItemView {{
     background: {T.PANEL};
@@ -568,12 +612,12 @@ QTabBar[panelTabs="true"]::tab {{
 QTabBar[panelTabs="true"]::tab:selected {{
     background: {T.PANEL_3};
     color: {T.TEXT};
-    border-radius: 3px;
+    border-radius: {T.RADIUS_SM}px;
 }}
 QTabBar[panelTabs="true"]::tab:hover:!selected {{
     color: {T.TEXT_2};
     background: {T.PANEL_2};
-    border-radius: 3px;
+    border-radius: {T.RADIUS_SM}px;
 }}
 QTabBar[panelTabs="true"]::close-button {{
     image: url({_CLOSE_ICON});
@@ -636,4 +680,69 @@ QCheckBox::indicator:disabled, QRadioButton::indicator:disabled {{
     border-color: {T.BORDER_SOFT};
 }}
 """
+
+
+def menu_stylesheet() -> str:
+    """Popup menu QSS using the *current* theme (re-read on every open)."""
+    T = Theme
+    check = _MENU_CHECK_ICON or _CHECK_ICON
+    return f"""
+    QMenu {{
+        background-color: {T.PANEL};
+        color: {T.TEXT};
+        border: 1px solid {T.BORDER};
+        border-radius: {T.RADIUS_LG}px;
+        padding: 6px;
+    }}
+    QMenu::item {{
+        background: transparent;
+        padding: 8px 28px 8px 14px;
+        border-radius: {T.RADIUS_SM}px;
+        min-height: 20px;
+    }}
+    QMenu::item:selected {{
+        background: {T.PANEL_3};
+        color: {T.TEXT};
+    }}
+    QMenu::item:disabled {{
+        color: {T.MUTED_2};
+    }}
+    QMenu::separator {{
+        height: 1px;
+        background: {T.BORDER_SOFT};
+        margin: 4px 8px;
+    }}
+    QMenu::indicator {{
+        width: 16px;
+        height: 16px;
+        margin-left: 2px;
+        background: transparent;
+    }}
+    QMenu::indicator:checked {{
+        image: url({check});
+        background: transparent;
+    }}
+    QMenu::right-arrow {{
+        width: 8px;
+        height: 8px;
+        margin-right: 8px;
+    }}
+    """
+
+
+def workbench_tab_stylesheet(*, bordered_pane: bool = False) -> str:
+    """Shared QTabWidget chrome for Workbench document tabs and SQL result panes."""
+    T = Theme
+    if bordered_pane:
+        pane = (
+            f"border: 1px solid {T.BORDER_SOFT}; border-radius: {T.RADIUS_LG}px;"
+            f" top: -1px; background: {T.SURFACE};"
+        )
+    else:
+        pane = f"border: none; background: {T.SURFACE};"
+    return (
+        f"QTabWidget {{ background: {T.SURFACE}; }}"
+        f"QTabWidget::tab-bar {{ background: {T.SURFACE}; }}"
+        f"QTabWidget::pane {{ {pane} }}"
+    )
 

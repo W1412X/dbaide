@@ -12,7 +12,7 @@ from typing import Any
 from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtWidgets import QTabWidget, QVBoxLayout, QWidget
 
-from dbaide.desktop.theme import Theme
+from dbaide.desktop.theme import Theme, workbench_tab_stylesheet
 from dbaide.desktop.views.data_browser import DataBrowser
 from dbaide.desktop.views.structure_panel import StructurePanel
 
@@ -39,11 +39,7 @@ class TableDocument(QWidget):
         self.tabs.tabBar().setProperty("panelTabs", True)
         self.tabs.tabBar().setDrawBase(False)
         self.tabs.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
-        self.tabs.setStyleSheet(
-            f"QTabWidget {{ background: {Theme.SURFACE}; }}"
-            f"QTabWidget::tab-bar {{ background: {Theme.SURFACE}; }}"
-            f"QTabWidget::pane {{ border: none; background: {Theme.SURFACE}; }}"
-        )
+        self.tabs.setStyleSheet(workbench_tab_stylesheet(bordered_pane=False))
         self.data = DataBrowser()
         self.data.query_requested.connect(self.query_requested.emit)
         self.data.count_requested.connect(self.count_requested.emit)

@@ -25,17 +25,13 @@ if True:  # TYPE_CHECKING without circular import at runtime
 
 logger = logging.getLogger("dbaide.agent.loop")
 
-DECISION_RETRIES = 3
+DECISION_RETRIES = 1
 # Both names bind to the same execute handler; the loop must treat them alike.
 _EXECUTE_TOOLS = frozenset({"execute_sql", "execute_readonly_sql"})
 # Tools whose step should carry the exact SQL the system ran/handled, so the trace
 # is a complete, clickable audit of every auto-executed statement.
 _SQL_TOOLS = frozenset({"execute_sql", "execute_readonly_sql", "explain_sql",
                         "generate_sql", "validate_sql"})
-
-
-def _tool_call_key(tool_name: str, args: dict[str, Any]) -> str:
-    return f"{tool_name}:{json.dumps(args or {}, ensure_ascii=False, sort_keys=True, default=str)}"
 
 
 def _executed_sql(tool_name: str, orch, result) -> str:
@@ -51,8 +47,8 @@ def _risk_reply_confirms(reply: str) -> bool:
     text = " ".join(str(reply or "").split()).casefold()
     approved = {"execute anyway", "仍然执行"}
     return text in {item.casefold() for item in approved}
+
 RESULT_PREVIEW_LIMIT = 1400
-MAX_REPEATED_CALL_BLOCKS = 3
 
 
 class LoopDecisionError(RuntimeError):
@@ -74,7 +70,6 @@ class LoopState:
     execute_allowed: bool
     answer_language: str = "en"
     calls: list[ToolCallRecord] = field(default_factory=list)
-    repeated_blocks: dict[str, int] = field(default_factory=dict)
 
 
 class AskAgentLoop:
@@ -308,7 +303,27 @@ class AskAgentLoop:
                     decision = self._decide(state, transcript)
             except LoopDecisionError as exc:
                 logger.warning("loop_decision_failed: %s", exc)
-                return self._build_failed_response(orch, f"decision_invalid: {exc}", disclosures_before or [])
+                transcript.append(
+                    "Error: could not parse a valid decision "
+                    f"({exc}). Return ONLY one JSON object with action='call_tool' "
+                    "(tool + args) or action='finish' (answer)."
+                )
+                self.progress(
+                    progress_event(
+                        stage="decide",
+                        title="Invalid decision",
+                        status="failed",
+                        kind="llm",
+                        detail=str(exc)[:240],
+                        node_id=(
+                            f"{self._trace_parent}:decision:{step_no + 1}"
+                            if self._trace_parent else f"decision:{step_no + 1}"
+                        ),
+                        parent_id=self._agent_loop_node_id,
+                    ),
+                )
+                runtime.consume_step()
+                continue
 
             self._apply_decision_memory(decision)
             tool_llm_start = recorder.snapshot_len() if recorder else 0
@@ -383,36 +398,6 @@ class AskAgentLoop:
                 continue
 
             args = decision.get("args") if isinstance(decision.get("args"), dict) else {}
-            call_key = _tool_call_key(tool_name, args)
-            if (
-                tool_name not in _SQL_TOOLS
-                and any(_tool_call_key(call.tool, call.args) == call_key for call in state.calls)
-            ):
-                count = state.repeated_blocks.get(call_key, 0) + 1
-                state.repeated_blocks[call_key] = count
-                previous = next(
-                    (call.summary for call in reversed(state.calls)
-                     if _tool_call_key(call.tool, call.args) == call_key),
-                    "",
-                )
-                reason = (
-                    f"repeated {count} time(s); previous result: {_shorten(previous, 420)}. "
-                    "Use the completed result from memory, change arguments/tool, ask_user, execute SQL, or finish."
-                )
-                orch.run_state.memory.add_do_not_repeat(call_key, reason)
-                orch.run_state.memory.next_action_hint = (
-                    "The last requested tool call was an exact repeat and is blocked. "
-                    "Use the prior evidence in memory; choose a different action, ask_user, run SQL, or finish."
-                )
-                transcript.append(f"Repeated tool call blocked: {call_key}. {reason}")
-                runtime.consume_step()
-                if count >= MAX_REPEATED_CALL_BLOCKS:
-                    return self._build_failed_response(
-                        orch,
-                        f"repeated_tool_call_blocked: {call_key}",
-                        disclosures_before or [],
-                    )
-                continue
             step_no += 1
             self.progress(
                 self._ns_step(progress_event(
@@ -607,7 +592,9 @@ class AskAgentLoop:
                 mem.add_finding(str(item), source="model_note", confidence="model_note")
         for item in _list_update_items(updates.get("open_questions")):
             mem.add_open_question(str(item.get("text") if isinstance(item, dict) else item))
-        for item in _list_update_items(updates.get("excluded_paths")):
+        for item in _list_update_items(updates.get("hypotheses")):
+            mem.add_hypothesis(str(item.get("text") if isinstance(item, dict) else item))
+        for item in _list_update_items(updates.get("excluded_paths")) + _list_update_items(updates.get("exclusions")):
             if isinstance(item, dict):
                 mem.add_exclusion(
                     str(item.get("target") or ""),

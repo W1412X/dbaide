@@ -8,7 +8,7 @@ from typing import Any
 from dbaide.agent.memory import AgentMemory
 from dbaide.agent.progressive_schema import DiscoveryResult, SchemaHit
 from dbaide.i18n import normalize
-from dbaide.models import ColumnInfo
+from dbaide.models import ColumnInfo, QueryResult
 
 LOOP_STATE_VERSION = 2
 
@@ -114,8 +114,35 @@ def dump_loop_state(
             "clarify_questions": orchestrator.run_state.clarify_questions,
             "memory": orchestrator.run_state.memory.to_dict(),
             "scope_used": bool(orchestrator.run_state.scope_used),
+            "query_result": query_result_to_dict(orchestrator.run_state.query_result),
         },
     }
+
+
+def query_result_to_dict(result: QueryResult | None) -> dict[str, Any] | None:
+    if result is None:
+        return None
+    return {
+        "columns": list(result.columns),
+        "rows": list(result.rows),
+        "row_count": int(result.row_count),
+        "truncated": bool(result.truncated),
+        "sql": str(result.sql or ""),
+        "elapsed_ms": float(result.elapsed_ms or 0.0),
+    }
+
+
+def query_result_from_dict(data: dict[str, Any] | None) -> QueryResult | None:
+    if not isinstance(data, dict):
+        return None
+    return QueryResult(
+        columns=[str(x) for x in _list_or_empty(data.get("columns"))],
+        rows=[row for row in _list_or_empty(data.get("rows")) if isinstance(row, dict)],
+        row_count=int(data.get("row_count") or 0),
+        truncated=bool(data.get("truncated")),
+        sql=str(data.get("sql") or ""),
+        elapsed_ms=float(data.get("elapsed_ms") or 0.0),
+    )
 
 
 def restore_loop_state(orchestrator: Any, snapshot: dict[str, Any]) -> tuple[list[str], bool]:
@@ -157,6 +184,7 @@ def restore_loop_state(orchestrator: Any, snapshot: dict[str, Any]) -> tuple[lis
     orchestrator.run_state.clarify_questions = str(payload.get("clarify_questions") or "")
     orchestrator.run_state.memory = AgentMemory.from_dict(payload.get("memory"))
     orchestrator.run_state.scope_used = bool(payload.get("scope_used", False))
+    orchestrator.run_state.query_result = query_result_from_dict(payload.get("query_result"))
     orchestrator.run_state.execute_allowed = execute_allowed
     if not orchestrator.run_state.memory.goal and orchestrator.run_state.question:
         orchestrator.run_state.memory.reset_goal(
@@ -164,7 +192,6 @@ def restore_loop_state(orchestrator: Any, snapshot: dict[str, Any]) -> tuple[lis
             database=orchestrator.run_state.database,
             execute_allowed=execute_allowed,
         )
-    orchestrator.run_state.query_result = None
     return transcript, execute_allowed
 
 

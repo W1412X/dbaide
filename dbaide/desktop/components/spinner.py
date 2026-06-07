@@ -18,12 +18,16 @@ from dbaide.desktop.theme import Theme
 
 # Degrees advanced per tick — 30° × ~70ms ≈ a smooth ~0.8s revolution.
 _ANGLE_STEP = 30
-def spinner_pixmap(angle: float, *, size: int = 14, color: str = Theme.BLUE, width: float = 2.0) -> QPixmap:
+# Logical px — always pair with ``widget.setIconSize(QSize(SPINNER_SIZE, SPINNER_SIZE))``.
+SPINNER_SIZE = 15
+
+
+def spinner_pixmap(angle: float, *, size: int = SPINNER_SIZE, color: str = Theme.BLUE, width: float = 2.0) -> QPixmap:
     """The loader arc rotated to ``angle`` — crisp vector, HiDPI-aware."""
     return svg_pixmap("loader", color=color, size=size, width=width, angle=angle)
 
 
-def spinner_icon(angle: float, *, size: int = 14, color: str = Theme.BLUE, width: float = 2.0) -> QIcon:
+def spinner_icon(angle: float, *, size: int = SPINNER_SIZE, color: str = Theme.BLUE, width: float = 2.0) -> QIcon:
     return QIcon(spinner_pixmap(angle, size=size, color=color, width=width))
 
 

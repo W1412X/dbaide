@@ -14,10 +14,11 @@ from PyQt6.QtWidgets import (
     QLineEdit,
     QListWidget,
     QListWidgetItem,
-    QMessageBox,
     QVBoxLayout,
     QWidget,
 )
+
+from dbaide.desktop.dialogs.message_dialog import alert as dialog_alert, confirm as dialog_confirm, warn as dialog_warn
 
 from dbaide.desktop.components.base import compact_button
 from dbaide.desktop.components.icons import svg_icon
@@ -145,7 +146,7 @@ class JoinsTab(QWidget):
             return
         payload = dialog.payload()
         if not all(payload.get(k) for k in ("table", "column", "ref_table", "ref_column")):
-            QMessageBox.warning(self, "Join", "All four endpoint fields are required.")
+            dialog_warn(self, "Join", "All four endpoint fields are required.")
             return
         payload["source"] = "user"
         self.add_requested.emit(payload)
@@ -153,7 +154,7 @@ class JoinsTab(QWidget):
     def _edit(self) -> None:
         rec = self._selected_record()
         if not rec:
-            QMessageBox.information(self, "Join", "Select a join to edit.")
+            dialog_alert(self, "Join", "Select a join to edit.")
             return
         dialog = JoinEditorDialog(self, initial=rec)
         if dialog.exec() != QDialog.DialogCode.Accepted:
@@ -165,8 +166,8 @@ class JoinsTab(QWidget):
     def _delete(self) -> None:
         join_id = self._selected_id()
         if not join_id:
-            QMessageBox.information(self, "Join", "Select a join to delete.")
+            dialog_alert(self, "Join", "Select a join to delete.")
             return
-        if QMessageBox.question(self, "Delete join", "Remove this saved join?") != QMessageBox.StandardButton.Yes:
+        if not dialog_confirm(self, "Delete join", "Remove this saved join?"):
             return
         self.delete_requested.emit(join_id)

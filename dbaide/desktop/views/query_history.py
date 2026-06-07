@@ -22,6 +22,7 @@ from PyQt6.QtWidgets import (
 )
 
 from dbaide.desktop.components.base import compact_button
+from dbaide.desktop.components.empty_state import EmptyState
 from dbaide.desktop.components.session_list import _relative_time
 from dbaide.desktop.theme import Theme
 
@@ -82,6 +83,7 @@ class QueryHistoryPanel(QWidget):
     sql_selected = pyqtSignal(str)  # load into editor (single click)
     sql_run = pyqtSignal(str)       # load + run (double click)
     clear_requested = pyqtSignal()
+    open_editor_requested = pyqtSignal()
 
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
@@ -103,16 +105,20 @@ class QueryHistoryPanel(QWidget):
         outer.addLayout(bar)
 
         self.stack = QStackedWidget()
-        empty = QWidget()
-        el = QVBoxLayout(empty)
+        empty_page = QWidget()
+        el = QVBoxLayout(empty_page)
+        el.setContentsMargins(0, 0, 0, 0)
         el.addStretch(1)
-        hint = QLabel(t("history.empty_hint"))
-        hint.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        hint.setWordWrap(True)
-        hint.setStyleSheet(f"color: {Theme.MUTED}; font-size: 13px;")
-        el.addWidget(hint)
+        self._empty = EmptyState(
+            t("history.empty_title"),
+            t("history.empty_hint"),
+            [(t("history.open_editor"), "open_editor")],
+            icon="clock",
+        )
+        self._empty.action_clicked.connect(self._on_empty_action)
+        el.addWidget(self._empty)
         el.addStretch(1)
-        self.stack.addWidget(empty)
+        self.stack.addWidget(empty_page)
 
         self.list = QListWidget()
         self.list.setStyleSheet("QListWidget { border: none; background: transparent; }")
@@ -121,6 +127,10 @@ class QueryHistoryPanel(QWidget):
         self.list.itemDoubleClicked.connect(self._on_activated)
         self.stack.addWidget(self.list)
         outer.addWidget(self.stack, 1)
+
+    def _on_empty_action(self, action_id: str) -> None:
+        if action_id == "open_editor":
+            self.open_editor_requested.emit()
 
     def load(self, entries: list[dict[str, Any]]) -> None:
         self.list.clear()

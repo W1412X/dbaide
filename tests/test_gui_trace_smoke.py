@@ -51,8 +51,11 @@ def test_trace_panel_live_then_finalize(qapp):
 
 def test_trace_detail_dialog_shows_step(qapp):
     from PyQt6.QtCore import Qt
-    from dbaide.desktop.components.trace import InlineTrace, TraceDetailDialog
+    from PyQt6.QtWidgets import QWidget
+    from dbaide.desktop.components.trace import InlineTrace, TraceDetailPanel
 
+    host = QWidget()
+    host.resize(900, 640)
     panel = InlineTrace()
     panel.begin_live()
     panel.append_live_event(progress_event(stage="execute_sql", title="ran query", detail="SELECT 1",
@@ -60,7 +63,8 @@ def test_trace_detail_dialog_shows_step(qapp):
     panel.end_live()  # flush the coalesced render
     step = panel._tree.topLevelItem(1)
     data = step.data(0, Qt.ItemDataRole.UserRole)
-    dlg = TraceDetailDialog(data)
+    dlg = TraceDetailPanel(host)
+    dlg.show_detail(data)
     text = dlg._body.toPlainText()
     assert "execute_sql" in text
     assert "SELECT 1" in text
@@ -141,7 +145,7 @@ def test_settings_new_connection_and_model_are_explicit_drafts(qapp):
 
 
 def test_settings_delete_and_default_wait_for_controller_success(qapp, monkeypatch):
-    from PyQt6.QtWidgets import QMessageBox
+    from dbaide.desktop.dialogs import message_dialog
 
     from dbaide.i18n import set_language
     from dbaide.desktop.dialogs.settings import SettingsDialog
@@ -159,7 +163,7 @@ def test_settings_delete_and_default_wait_for_controller_success(qapp, monkeypat
         default_connection="local",
         default_model="default",
     )
-    monkeypatch.setattr(QMessageBox, "question", lambda *a, **k: QMessageBox.StandardButton.Yes)
+    monkeypatch.setattr(message_dialog, "confirm", lambda *a, **k: True)
     deleted_connections: list[str] = []
     deleted_models: list[str] = []
     saved_connections: list[dict] = []

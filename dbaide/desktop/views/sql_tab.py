@@ -4,6 +4,7 @@ from PyQt6.QtCore import QEvent, QSize, Qt, pyqtSignal
 from PyQt6.QtGui import QFont
 from PyQt6.QtWidgets import (
     QHBoxLayout,
+    QSplitter,
     QTabWidget,
     QTextBrowser,
     QToolButton,
@@ -13,10 +14,10 @@ from PyQt6.QtWidgets import (
 
 from dbaide.desktop.components.icons import svg_icon
 from dbaide.desktop.components.sql_editor import SqlEditor
-from dbaide.desktop.components.inputs import configure_multiline_text_edit, configure_readonly_text_view
+from dbaide.desktop.components.inputs import configure_readonly_text_view, configure_sql_editor_pane
 from dbaide.desktop.components.spinner import BusyAnimator, spinner_icon
 from dbaide.desktop.components.table import ResultTableWidget
-from dbaide.desktop.theme import Theme
+from dbaide.desktop.theme import Theme, workbench_tab_stylesheet
 
 
 class SqlTab(QWidget):
@@ -26,24 +27,34 @@ class SqlTab(QWidget):
         super().__init__(parent)
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(12)
+        layout.setSpacing(0)
         from dbaide.i18n import t
         self._t = t
 
-        # ── Editor + a vertical strip of small action icons on its right edge ───
-        editor_row = QHBoxLayout()
-        editor_row.setContentsMargins(0, 0, 0, 0)
+        self._splitter = QSplitter(Qt.Orientation.Vertical)
+        self._splitter.setChildrenCollapsible(False)
+        self._splitter.setHandleWidth(1)
+
+        editor_wrap = QWidget()
+        editor_wrap.setObjectName("sqlEditorPane")
+        editor_wrap.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
+        editor_wrap.setStyleSheet(
+            f"QWidget#sqlEditorPane {{ background: {Theme.SURFACE};"
+            f" border: 1px solid {Theme.BORDER_SOFT}; border-radius: {Theme.RADIUS_LG}px; }}"
+        )
+        editor_row = QHBoxLayout(editor_wrap)
+        editor_row.setContentsMargins(8, 8, 8, 8)
         editor_row.setSpacing(6)
+
         self.editor = SqlEditor()
         self.editor.setPlaceholderText(t("sql.placeholder"))
         self.editor.setFont(QFont("Menlo", 11))
-        configure_multiline_text_edit(self.editor, min_height=120, max_height=480, padding=16)
+        configure_sql_editor_pane(self.editor, min_height=100)
         self.editor.setStyleSheet(
-            f"QPlainTextEdit {{ background: {Theme.PANEL}; border: 1px solid {Theme.BORDER};"
-            f" border-radius: 10px; }}"
-            f"QPlainTextEdit:focus {{ border: 1px solid {Theme.FOCUS}; }}"
+            f"QPlainTextEdit {{ background: transparent; border: none; }}"
+            f"QPlainTextEdit:focus {{ border: none; }}"
         )
-        self.editor.installEventFilter(self)  # ⌘↵ to run
+        self.editor.installEventFilter(self)
         from dbaide.desktop.components.sql_highlighter import SqlHighlighter
         self._highlighter = SqlHighlighter(self.editor.document())
         editor_row.addWidget(self.editor, 1)
@@ -51,9 +62,6 @@ class SqlTab(QWidget):
         actions = QVBoxLayout()
         actions.setContentsMargins(0, 0, 0, 0)
         actions.setSpacing(6)
-        # Run is the accented primary action; Explain (execution plan) and Format are
-        # quiet secondary icons. The group is bottom-aligned so it does not crowd the
-        # workbench corner controls above the editor.
         self.run_btn = self._icon_button("play", f"{t('sql.run')} · ⌘↵", primary=True)
         self.run_btn.clicked.connect(self._run)
         self.explain_btn = self._icon_button("list-tree", t("sql.explain_tooltip"))
@@ -65,41 +73,31 @@ class SqlTab(QWidget):
         actions.addWidget(self.explain_btn)
         actions.addWidget(self.run_btn)
         editor_row.addLayout(actions)
-        # The editor auto-grows with its content (composer-style); give the row its
-        # natural height and let the results grid below take the remaining space, so
-        # there's no dead gap around a short query.
-        layout.addLayout(editor_row)
+        self._splitter.addWidget(editor_wrap)
+
         self._busy = BusyAnimator(
             lambda: self.run_btn.setIcon(spinner_icon(self._busy.angle, color=Theme.ACCENT_TEXT, size=15))
         )
 
-        # ── Results ───────────────────────────────────────────────────────────
         self.tabs = QTabWidget()
-        self.tabs.tabBar().setProperty("panelTabs", True)  # quiet, rounded tabs
+        self.tabs.tabBar().setProperty("panelTabs", True)
         self.tabs.tabBar().setDrawBase(False)
         self.tabs.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
-        self.tabs.setStyleSheet(
-            f"QTabWidget {{ background: {Theme.SURFACE}; }}"
-            f"QTabWidget::tab-bar {{ background: {Theme.SURFACE}; }}"
-            f"QTabWidget::pane {{ border: 1px solid {Theme.BORDER_SOFT}; border-radius: 10px;"
-            f" top: -1px; background: {Theme.SURFACE}; }}"
-        )
+        self.tabs.setStyleSheet(workbench_tab_stylesheet(bordered_pane=True))
         self.result_table = ResultTableWidget()
         self.messages = QTextBrowser()
         self.messages.setFont(QFont("Menlo", 10))
         configure_readonly_text_view(self.messages)
-        # Borderless — it's a tab page inside the bordered pane (no frame-in-a-frame).
         self.messages.setStyleSheet("QTextBrowser { background: transparent; border: none; }")
         self.tabs.addTab(self.result_table, t("sql.result"))
         self.tabs.addTab(self.messages, t("sql.messages"))
-        layout.addWidget(self.tabs, 1)
+        self._splitter.addWidget(self.tabs)
+        self._splitter.setStretchFactor(0, 1)
+        self._splitter.setStretchFactor(1, 2)
+        self._splitter.setSizes([240, 420])
+        layout.addWidget(self._splitter, 1)
 
     def _icon_button(self, icon_name: str, tooltip: str, *, primary: bool = False) -> QToolButton:
-        """A small square icon button for the editor's right-edge action strip.
-
-        The global QToolButton rule (padding:0 10px; min/max-height:26px; border)
-        otherwise distorts these into 30×26 rects and squeezes the icon, so the box
-        size is pinned explicitly here."""
         btn = QToolButton()
         color = Theme.ACCENT_TEXT if primary else Theme.TEXT_2
         btn.setIcon(svg_icon(icon_name, color=color, size=14))
@@ -131,7 +129,6 @@ class SqlTab(QWidget):
             if event.key() in (Qt.Key.Key_Return, Qt.Key.Key_Enter) and mod:
                 self._run()
                 return True
-            # ⌘⇧F / Ctrl+Shift+F — format the editor contents.
             if event.key() == Qt.Key.Key_F and mod and (
                 event.modifiers() & Qt.KeyboardModifier.ShiftModifier
             ):
@@ -140,8 +137,6 @@ class SqlTab(QWidget):
         return super().eventFilter(obj, event)
 
     def _current_sql(self) -> str:
-        """What Run executes: the highlighted selection if any, else the statement
-        under the cursor (so multi-statement editors 'just run' the right one)."""
         cursor = self.editor.textCursor()
         if cursor.hasSelection():
             selected = cursor.selectedText().replace(" ", "\n").strip()
@@ -184,6 +179,13 @@ class SqlTab(QWidget):
 
     def set_schema(self, schema: dict) -> None:
         self.editor.set_schema(schema)
+        dialect = str((schema or {}).get("dialect") or "")
+        if dialect:
+            self.set_dialect(dialect)
+
+    def set_dialect(self, dialect: str) -> None:
+        self.editor.set_dialect(dialect)
+        self._highlighter.set_dialect(dialect)
 
     def show_result(self, payload: dict) -> None:
         self.result_table.load(

@@ -13,8 +13,8 @@ from dbaide.agent.schema_context import decision_notes_block
 from dbaide.i18n import answer_language_directive
 
 
-RAW_HISTORY_ITEMS = 5
-RAW_HISTORY_ITEM_LIMIT = 900
+RAW_HISTORY_ITEMS = 32
+RAW_HISTORY_ITEM_LIMIT = 2400
 
 
 class DecisionPromptBuilder:
@@ -28,15 +28,16 @@ class DecisionPromptBuilder:
             "which schema, metric, filter, or final answer is correct. Think, act, incorporate the "
             "result into memory, then choose the next step until the user's single intent is solved.\n\n"
             "How to work:\n"
-            "• Keep global sight of the original goal and the compressed memory. Avoid repeating "
-            "actions already listed in the action ledger unless new evidence changes the situation.\n"
+            "• Keep global sight of the original goal and the compressed memory. Prefer "
+            "retrieve_memory_item when you need details from an earlier step instead of "
+            "re-running the same tool blindly.\n"
             "• Working memory is compressed like human notes. Summaries preserve key facts and raw "
             "evidence refs (mem:n, work step ids, report ids, SQL artifact ids). If you need omitted "
             "details from something already observed, call retrieve_memory_item(ref=...) instead of "
             "repeating the original database/tool action.\n"
             "• Treat failed tool calls as observations, not as the end of the task. Read the error, "
-            "avoid repeating the same failed action, then decide whether to use another tool, answer "
-            "from existing evidence, or ask only for irreducible business intent.\n"
+            "then decide whether to use another tool, answer from existing evidence, or ask only "
+            "for irreducible business intent.\n"
             "• Use retrieve_schema_context first for data questions. It returns only schema evidence: "
             "candidate tables, user notes, inactive/missing paths, and columns. If it shows "
             "several plausible active tables/columns/grains whose choice changes the answer, ask_user "
@@ -71,7 +72,7 @@ class DecisionPromptBuilder:
             f"{tool_lines}\n\n"
             "Return JSON only. You may include memory_updates so the next round has compressed context:\n"
             '  {"action":"call_tool","tool":"retrieve_schema_context","args":{"request":"..."},"thought":"...",'
-            '"memory_updates":{"findings":[],"excluded_paths":[],"open_questions":[]},"next_action_hint":"..."}\n'
+            '"memory_updates":{"findings":[],"hypotheses":[],"excluded_paths":[],"open_questions":[]},"next_action_hint":"..."}\n'
             '  {"action":"finish","answer":"markdown answer for the user","memory_updates":{"findings":[]}}\n\n'
             "Tool guidance:\n"
             "- Schema / where-is questions: discover_schema or retrieve_schema_context → finish\n"
@@ -89,7 +90,7 @@ class DecisionPromptBuilder:
             "- If SQL fails because it tried to inspect system metadata, switch to inspect_metadata or describe_table.\n"
             "- describe_table returns the table's full structure (columns, types, indexes, FKs) plus a small sample — the table is the lowest pre-built level; there are no per-column docs.\n"
             "- For a column's value ranges / null rate / distinct / length, call column_stats (pick only the metrics you need); for a whole-table overview omit columns. To learn a column's actual values (e.g. which status/flag value means what), use column_stats with metrics=[\"top_values\"].\n"
-            "- Do NOT repeat the same tool call with the same args. If a tool didn't give you what you need, change approach or ask_user.\n"
+            "- You may repeat a tool call when recovery, verification, or a fresh context requires it; prefer retrieve_memory_item when prior evidence is enough.\n"
             "- Profile questions: discover_schema → describe_table → column_stats → finish\n"
             "- SQL explain: validate_sql or explain_sql as needed → finish\n"
             "- Do not invent tables or columns. Prefer precision over listing everything.\n"

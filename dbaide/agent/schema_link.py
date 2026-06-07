@@ -68,7 +68,7 @@ class SchemaEvidenceRetriever:
         focus_terms: list[str] | None = None,
         scope: dict[str, Any] | None = None,
         need: str = "",
-        limit: int = 8,
+        limit: int = 32,
     ) -> SchemaContextReport:
         base = self.orch.run_state.trace_node or self.PARENT
         report_id = next_prefixed_id(

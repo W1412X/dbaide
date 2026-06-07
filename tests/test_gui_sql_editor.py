@@ -127,10 +127,41 @@ def test_dot_context_matches_table(qapp):
 
 
 def test_dot_prefix_regex(qapp):
-    from dbaide.desktop.components.sql_editor import _DOT_PREFIX
-    assert _DOT_PREFIX.search("SELECT * FROM orders WHERE orders.cit").group(1) == "orders"
-    assert _DOT_PREFIX.search("o.").group(1) == "o"
-    assert _DOT_PREFIX.search("plain") is None
+    from dbaide.desktop.components.sql_editor import _QUALIFIED_DOT
+    assert _QUALIFIED_DOT.search("SELECT * FROM orders WHERE orders.cit").group(1) == "orders"
+    assert _QUALIFIED_DOT.search("FROM analysis.orders.").group(1) == "analysis.orders"
+    assert _QUALIFIED_DOT.search("o.").group(1) == "o"
+    assert _QUALIFIED_DOT.search("plain") is None
+
+
+def test_insert_completion_strips_column_type(qapp):
+    from dbaide.desktop.components.sql_editor import SqlEditor
+    e = SqlEditor()
+    e.setPlainText("SELECT orders.")
+    tc = e.textCursor()
+    tc.movePosition(QTextCursor.MoveOperation.End)
+    e.setTextCursor(tc)
+    e._insert_completion("id · INTEGER")
+    assert e.toPlainText() == "SELECT orders.id"
+
+
+def test_column_labels_include_types(qapp):
+    from dbaide.desktop.components.sql_editor import SqlEditor
+    e = SqlEditor()
+    e.set_schema({
+        "columns_by_qualified": {"main.orders": ["id", "amount"]},
+        "column_types": {"main.orders.id": "INTEGER", "main.orders.amount": "DECIMAL"},
+    })
+    assert e._column_labels("main.orders") == ["id · INTEGER", "amount · DECIMAL"]
+
+
+def test_dialect_keywords_merge(qapp):
+    from dbaide.desktop.components.sql_editor import SqlEditor
+    e = SqlEditor()
+    e.set_dialect("postgres")
+    words = set(e.completion_names())
+    assert "RETURNING" in words
+    assert "SELECT" in words
 
 
 def test_cascading_completion_db_table_column(qapp):
@@ -141,10 +172,22 @@ def test_cascading_completion_db_table_column(qapp):
         "databases": ["analysis", "platform"],
         "tables": ["orders", "sys_user"],
         "columns_by_table": {"orders": ["id", "amount"], "sys_user": ["user_id", "del_flag"]},
+        "columns_by_qualified": {
+            "analysis.orders": ["id", "amount"],
+            "platform.sys_user": ["user_id", "del_flag"],
+        },
         "tables_by_database": {"analysis": ["orders"], "platform": ["sys_user"]},
+        "column_types": {
+            "orders.id": "INTEGER",
+            "orders.amount": "INTEGER",
+            "analysis.orders.id": "INTEGER",
+            "analysis.orders.amount": "INTEGER",
+            "sys_user.user_id": "BIGINT",
+            "sys_user.del_flag": "CHAR",
+        },
     })
     assert e._scoped_words("SELECT * FROM analysis.") == (["orders"], "db:analysis")
-    assert e._scoped_words("SELECT orders.")[0] == ["id", "amount"]
-    assert e._scoped_words("FROM analysis.orders.")[0] == ["id", "amount"]   # db.table. → cols
-    assert e._scoped_words("WHERE sys_user.del")[0] == ["user_id", "del_flag"]
+    assert e._scoped_words("SELECT orders.")[0] == ["id · INTEGER", "amount · INTEGER"]
+    assert e._scoped_words("FROM analysis.orders.")[0] == ["id · INTEGER", "amount · INTEGER"]
+    assert e._scoped_words("WHERE sys_user.del")[0] == ["user_id · BIGINT", "del_flag · CHAR"]
     assert e._scoped_words("SELECT id") == (None, "")                        # no dotted scope

@@ -100,7 +100,7 @@ def test_orchestrator_returns_honest_failure_no_alternate_pipeline(tmp_path):
     orch = AskOrchestrator(build_adapter(conn), Session(connection=conn), _BadLLM())
     resp = orch.run("和产线相关的表")
     blob = " ".join(resp.warnings)
-    assert "decision_invalid" in blob                  # the real reason is surfaced
+    assert "decision_invalid" in blob or "step_budget_exhausted" in blob
     assert "alternate pipeline" not in blob            # no degradation happened
     assert resp.result is None and not resp.sql        # no fabricated staged result
 

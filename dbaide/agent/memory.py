@@ -14,16 +14,24 @@ from dataclasses import asdict, dataclass, field
 from typing import Any
 
 
-MAX_WORK_STEPS = 18
-MAX_FINDINGS = 18
-MAX_OPEN_QUESTIONS = 8
-MAX_EXCLUDED = 12
-MAX_SCHEMA_REPORTS = 5
-MAX_JOIN_REPORTS = 5
-MAX_SQL_ARTIFACTS = 8
-MAX_RESOLVED_QUESTIONS = 12
-MAX_DO_NOT_REPEAT = 18
-MAX_ARCHIVE_INDEX = 12
+MAX_WORK_STEPS = 512
+MAX_FINDINGS = 512
+MAX_OPEN_QUESTIONS = 128
+MAX_EXCLUDED = 256
+MAX_SCHEMA_REPORTS = 64
+MAX_JOIN_REPORTS = 64
+MAX_SQL_ARTIFACTS = 128
+MAX_RESOLVED_QUESTIONS = 128
+MAX_DO_NOT_REPEAT = 0  # unused — repetition is governed by the outer step budget only
+MAX_ARCHIVE_INDEX = 128
+PROMPT_SLICE_WORK = 48
+PROMPT_SLICE_FINDINGS = 48
+PROMPT_SLICE_SCHEMA = 12
+PROMPT_SLICE_JOIN = 12
+PROMPT_SLICE_SQL = 24
+PROMPT_SLICE_ARCHIVE = 48
+PROMPT_SLICE_FACTS = 48
+PROMPT_SLICE_LEDGER = 48
 
 
 @dataclass(slots=True)
@@ -185,7 +193,6 @@ class AgentMemory:
         if ledger_key not in self.action_ledger:
             self.action_ledger.append(ledger_key)
             self.action_ledger = self.action_ledger[-MAX_WORK_STEPS:]
-        self.add_do_not_repeat(ledger_key, f"{'completed' if ok else 'failed'}: {result_summary}")
         if ok and isinstance(data, dict):
             self.learn_tool_result(action=action, args=args or {}, data=data, summary=result_summary)
 
@@ -226,6 +233,8 @@ class AgentMemory:
         return None
 
     def add_do_not_repeat(self, key: str, reason: str = "") -> None:
+        if MAX_DO_NOT_REPEAT <= 0:
+            return
         key = _trim(key, 420)
         reason = _trim(reason, 260)
         if not key:
@@ -238,6 +247,12 @@ class AgentMemory:
         ]
         self.do_not_repeat.append(entry)
         self.do_not_repeat = self.do_not_repeat[-MAX_DO_NOT_REPEAT:]
+
+    def add_hypothesis(self, text: str) -> None:
+        text = _trim(text, 500)
+        if text and text not in self.hypotheses:
+            self.hypotheses.append(text)
+            self.hypotheses = self.hypotheses[-MAX_FINDINGS:]
 
     def add_finding(self, text: str, *, source: str = "", confidence: str = "observed") -> None:
         text = _trim(text, 500)
@@ -518,10 +533,12 @@ class AgentMemory:
         if self.constraints:
             lines += ["[Constraints]", *[f"- {c}" for c in self.constraints], ""]
         if self.confirmed_facts:
-            lines += ["[Authoritative Facts]", *[f"- {x}" for x in self.confirmed_facts[-12:]], ""]
+            lines += ["[Authoritative Facts]", *[f"- {x}" for x in self.confirmed_facts[-PROMPT_SLICE_FACTS:]], ""]
+        if self.hypotheses:
+            lines += ["[Candidate Hypotheses]", *[f"- {x}" for x in self.hypotheses[-PROMPT_SLICE_FINDINGS:]], ""]
         if self.work_log:
             lines += ["[Work Done]"]
-            for step in self.work_log[-12:]:
+            for step in self.work_log[-PROMPT_SLICE_WORK:]:
                 refs_list = [*step.artifact_refs]
                 if step.raw_ref:
                     refs_list.append(f"raw={step.raw_ref}")
@@ -530,7 +547,7 @@ class AgentMemory:
             lines.append("")
         if self.findings:
             lines.append("[Observed Evidence / Model Working Notes]")
-            for f in self.findings[-12:]:
+            for f in self.findings[-PROMPT_SLICE_FINDINGS:]:
                 qualifier = f.confidence if f.confidence != "observed" else "observed"
                 suffix_parts = [part for part in (f.source, qualifier) if part]
                 suffix = f" ({'; '.join(suffix_parts)})" if suffix_parts else ""
@@ -540,7 +557,7 @@ class AgentMemory:
             lines += ["[Resolved Questions]", *[f"- {q}" for q in self.resolved_questions[-MAX_RESOLVED_QUESTIONS:]], ""]
         if self.schema_reports:
             lines += ["[Schema Evidence]"]
-            for report in self.schema_reports[-3:]:
+            for report in self.schema_reports[-PROMPT_SLICE_SCHEMA:]:
                 cand = []
                 for c in report.candidates[:8]:
                     label = f"{c.database}.{c.table}" if c.database else c.table
@@ -563,7 +580,7 @@ class AgentMemory:
             lines.append("")
         if self.join_reports:
             lines += ["[Join Evidence]"]
-            for report in self.join_reports[-3:]:
+            for report in self.join_reports[-PROMPT_SLICE_JOIN:]:
                 lines.append(
                     f"- {report.id}: tables={', '.join(report.tables)}; "
                     f"{len(report.relations)} candidate relation(s); {report.source_summary}"
@@ -578,7 +595,7 @@ class AgentMemory:
             lines.append("")
         if self.sql_artifacts:
             lines += ["[SQL Artifacts]"]
-            for art in self.sql_artifacts[-5:]:
+            for art in self.sql_artifacts[-PROMPT_SLICE_SQL:]:
                 lines.append(
                     f"- {art.id}: purpose={art.purpose or '(not stated)'} rows={art.row_count} "
                     f"columns={', '.join(art.columns[:8])} sql={_trim(art.sql, 220)}"
@@ -587,19 +604,15 @@ class AgentMemory:
         if self.open_questions:
             lines += ["[Open Issues]", *[f"- {q}" for q in self.open_questions[-MAX_OPEN_QUESTIONS:]], ""]
         if self.excluded_paths:
-            lines += ["[Do Not Repeat Unless New Evidence Changes It]"]
+            lines += ["[Excluded Paths]"]
             for item in self.excluded_paths[-MAX_EXCLUDED:]:
                 lines.append(f"- {item.target}: {item.reason} ({item.source_priority}; {item.evidence_ref})")
             lines.append("")
-        if self.do_not_repeat:
-            lines += ["[Completed / Blocked Tool Calls — Do Not Repeat Exactly]"]
-            lines.extend(f"- {x}" for x in self.do_not_repeat[-MAX_DO_NOT_REPEAT:])
-            lines.append("")
         if self.action_ledger:
-            lines += ["[Recent Action Ledger]", *[f"- {x}" for x in self.action_ledger[-10:]], ""]
+            lines += ["[Recent Action Ledger]", *[f"- {x}" for x in self.action_ledger[-PROMPT_SLICE_LEDGER:]], ""]
         if self.archive:
             lines += ["[Raw Evidence Archive]"]
-            for item in self.archive[-MAX_ARCHIVE_INDEX:]:
+            for item in self.archive[-PROMPT_SLICE_ARCHIVE:]:
                 refs = f" refs={', '.join(item.source_refs[:6])}" if item.source_refs else ""
                 lines.append(f"- {item.id} {item.action}{refs}: {item.summary}")
             lines.append("Use retrieve_memory_item(ref=...) when a compressed summary is insufficient.")
@@ -639,7 +652,11 @@ class AgentMemory:
         mem.pending_confirmations = [str(x) for x in _list_or_empty(data.get("pending_confirmations"))]
         mem.action_ledger = [str(x) for x in _list_or_empty(data.get("action_ledger"))][-MAX_WORK_STEPS:]
         mem.resolved_questions = [str(x) for x in _list_or_empty(data.get("resolved_questions"))][-MAX_RESOLVED_QUESTIONS:]
-        mem.do_not_repeat = [str(x) for x in _list_or_empty(data.get("do_not_repeat"))][-MAX_DO_NOT_REPEAT:]
+        mem.do_not_repeat = (
+            [str(x) for x in _list_or_empty(data.get("do_not_repeat"))][-MAX_DO_NOT_REPEAT:]
+            if MAX_DO_NOT_REPEAT > 0
+            else []
+        )
         mem.next_action_hint = str(data.get("next_action_hint") or "")
         mem.archive = [_archive_item_from_dict(x) for x in _list_or_empty(data.get("archive")) if isinstance(x, dict)]
         archive_work_refs = [

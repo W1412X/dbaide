@@ -13,8 +13,7 @@ from PyQt6.QtWidgets import (
 
 from dbaide.desktop.components.base import StatusBadge
 from dbaide.desktop.components.icons import more_icon
-from dbaide.desktop.components.inputs import DropdownCombo
-from dbaide.desktop.components.menu import MenuButton
+from dbaide.desktop.components.menu import MenuButton, PillSelect
 from dbaide.desktop.theme import Theme
 
 
@@ -25,12 +24,12 @@ class ModeSwitch(QWidget):
         super().__init__(parent)
         self.setObjectName("modeSwitch")
         self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
-        self.setFixedSize(78, 30)
+        self.setFixedHeight(30)
         self._buttons: list[QToolButton] = []
         self._current = -1
         row = QHBoxLayout(self)
         row.setContentsMargins(2, 2, 2, 2)
-        row.setSpacing(0)
+        row.setSpacing(2)
         self._row = row
         self._apply_style()
 
@@ -41,18 +40,24 @@ class ModeSwitch(QWidget):
         btn.setCheckable(True)
         btn.setAutoRaise(True)
         btn.setIcon(icon)
-        btn.setIconSize(QSize(16, 16))
-        btn.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonIconOnly)
+        btn.setIconSize(QSize(14, 14))
+        btn.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextBesideIcon)
         btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        btn.setFixedSize(36, 26)
+        btn.setFixedHeight(26)
         if text:
+            btn.setText(text)
             btn.setToolTip(text)
         btn.clicked.connect(lambda _checked=False, i=index: self.setCurrentIndex(i))
         self._buttons.append(btn)
         self._row.addWidget(btn)
         if self._current < 0:
             self.setCurrentIndex(0, emit=False)
+        self._resize()
         return index
+
+    def _resize(self) -> None:
+        total = max(148, sum(max(72, btn.sizeHint().width() + 8) for btn in self._buttons))
+        self.setFixedWidth(total)
 
     def setTabToolTip(self, index: int, text: str) -> None:  # noqa: N802
         if 0 <= index < len(self._buttons):
@@ -81,14 +86,17 @@ class ModeSwitch(QWidget):
             QWidget#modeSwitch {{
                 background: transparent;
                 border: none;
-                border-radius: 9px;
+                border-radius: {Theme.RADIUS_LG}px;
             }}
             QToolButton#modeSwitchButton {{
                 background: transparent;
                 border: 1px solid transparent;
-                border-radius: 7px;
-                padding: 0;
+                border-radius: {Theme.RADIUS_MD}px;
+                padding: 0 8px;
                 margin: 0;
+                color: {Theme.TEXT_2};
+                font-size: 11px;
+                font-weight: 600;
             }}
             QToolButton#modeSwitchButton:hover {{
                 background: {Theme.PANEL_2};
@@ -96,6 +104,7 @@ class ModeSwitch(QWidget):
             QToolButton#modeSwitchButton:checked {{
                 background: {Theme.PANEL_2};
                 border: 1px solid {Theme.BORDER};
+                color: {Theme.TEXT};
             }}
             """
         )
@@ -103,7 +112,6 @@ class ModeSwitch(QWidget):
 
 class TopBar(QWidget):
     connection_changed = pyqtSignal(str)
-    database_changed = pyqtSignal(str)
     refresh = pyqtSignal()
     build_assets = pyqtSignal()
     settings = pyqtSignal()
@@ -119,9 +127,8 @@ class TopBar(QWidget):
         self.setStyleSheet(f"background:{Theme.BG}; border:none;")
         row = QHBoxLayout(self)
         row.setContentsMargins(12, 0, 12, 0)
-        row.setSpacing(4)
+        row.setSpacing(6)
 
-        # Brand
         brand = QLabel("DBAide")
         brand.setStyleSheet(
             "font-size:15px;font-weight:700;letter-spacing:0.3px;"
@@ -133,26 +140,17 @@ class TopBar(QWidget):
 
         from dbaide.i18n import t
 
-        # New query / build assets / new connection are reachable via ⌘T + the
-        # Workbench "+ New SQL" button, and Build / Settings in the overflow menu —
-        # so the topbar stays clean: brand · connection · database … mode · status · ⋯.
-
-        # Connection + database selectors
-        self.connection = DropdownCombo(max_visible=8)
-        self.connection.setProperty("soft", True)
-        self.connection.currentIndexChanged.connect(self._emit_connection)
-        self.database = DropdownCombo(max_visible=10)
-        self.database.setProperty("soft", True)
-        self.database.currentIndexChanged.connect(self._emit_database)
+        # Pill selectors — one unified control (label + chevron), no legacy QComboBox
+        # drop-down subcontrol box that showed black corners on macOS.
+        self.connection = PillSelect(t("topbar.connection"), max_width=240, soft=True)
+        self.connection.value_changed.connect(self._emit_connection)
         row.addWidget(self.connection)
-        row.addWidget(self.database)
 
         row.addStretch(1)
 
         self.mode_tabs = ModeSwitch()
         row.addWidget(self.mode_tabs)
 
-        # Status + overflow menu
         self.status = StatusBadge("Idle", "idle")
         row.addWidget(self.status)
 
@@ -169,35 +167,18 @@ class TopBar(QWidget):
         self.menu.add_action(t("topbar.settings") + "…", self.settings.emit)
         row.addWidget(self.menu)
 
-    # ── signal helpers ────────────────────────────────────────────────────────
-
-    def _emit_connection(self, _index: int) -> None:
-        self.connection_changed.emit(self.connection.currentText())
-
-    def _emit_database(self, _index: int) -> None:
-        self.database_changed.emit(self.database.currentText())
-
-    # ── setters ───────────────────────────────────────────────────────────────
+    def _emit_connection(self, value: str) -> None:
+        self.connection_changed.emit(str(value or ""))
 
     def set_connections(self, items: list[dict[str, Any]], default: str = "") -> None:
+        options = [(f"{item['name']} · {item['type']}", str(item["name"])) for item in items]
         self.connection.blockSignals(True)
-        self.connection.clear()
-        for item in items:
-            label = f"{item['name']} · {item['type']}"
-            self.connection.addItem(label, item["name"])
+        self.connection.set_options(options)
         if default:
-            idx = self.connection.findData(default)
-            if idx >= 0:
-                self.connection.setCurrentIndex(idx)
+            self.connection.set_value(default)
+        elif options:
+            self.connection.set_value(options[0][1])
         self.connection.blockSignals(False)
-
-    def set_databases(self, names: list[str]) -> None:
-        self.database.blockSignals(True)
-        self.database.clear()
-        self.database.addItem("Auto", "")
-        for name in names:
-            self.database.addItem(name, name)
-        self.database.blockSignals(False)
 
     def set_asset_status(self, status: str) -> None:
         mapping = {

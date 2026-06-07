@@ -62,6 +62,30 @@ def test_loop_state_preserves_disclosed_schema_notes_scope_and_zero_confidence(t
     assert fresh.run_state.sql_confidence == 0.0
 
 
+def test_loop_state_preserves_query_result_on_resume(tmp_path):
+    from dbaide.models import QueryResult
+
+    orch = _orch(tmp_path)
+    orch._reset_loop_state("q", "main", True)
+    orch.run_state.query_result = QueryResult(
+        columns=["id", "name"],
+        rows=[{"id": 1, "name": "alice"}],
+        row_count=1,
+        truncated=False,
+        sql="SELECT id, name FROM users",
+        elapsed_ms=12.5,
+    )
+    snap = dump_loop_state(orch, transcript=["step 1"], execute_allowed=True)
+
+    fresh = _orch(tmp_path)
+    restore_loop_state(fresh, snap)
+
+    assert fresh.run_state.query_result is not None
+    assert fresh.run_state.query_result.columns == ["id", "name"]
+    assert fresh.run_state.query_result.rows == [{"id": 1, "name": "alice"}]
+    assert fresh.run_state.query_result.sql == "SELECT id, name FROM users"
+
+
 def test_loop_state_restore_tolerates_future_discovery_hit_shape(tmp_path):
     snapshot = {
         "question": "q",
@@ -697,8 +721,8 @@ def test_tool_specs_distinguish_exploratory_and_final_sql():
     assert "answer" not in ASK_USER.output_schema
 
 
-def test_decision_retries_transient_llm_call_failure(tmp_path):
-    from dbaide.agent.loop import AskAgentLoop, LoopState
+def test_decision_raises_on_transient_llm_call_failure(tmp_path):
+    from dbaide.agent.loop import AskAgentLoop, LoopDecisionError, LoopState
 
     class FlakyLLM(LLMClient):
         def __init__(self):
@@ -706,9 +730,7 @@ def test_decision_retries_transient_llm_call_failure(tmp_path):
 
         def complete_json(self, messages, *, schema_hint=""):
             self.calls += 1
-            if self.calls == 1:
-                raise RuntimeError("temporary outage")
-            return {"action": "finish", "answer": "done"}
+            raise RuntimeError("temporary outage")
 
         def complete_text(self, messages):
             return "done"
@@ -717,10 +739,10 @@ def test_decision_retries_transient_llm_call_failure(tmp_path):
     orch.llm = FlakyLLM()
     loop = AskAgentLoop(orch)
 
-    decision = loop._decide(LoopState(question="q", database="", execute_allowed=True), [])
+    with pytest.raises(LoopDecisionError, match="temporary outage"):
+        loop._decide(LoopState(question="q", database="", execute_allowed=True), [])
 
-    assert decision == {"action": "finish", "answer": "done"}
-    assert orch.llm.calls == 2
+    assert orch.llm.calls == 1
 
 
 def test_decision_does_not_retry_cancelled_llm_call(tmp_path):
@@ -772,7 +794,8 @@ def test_memory_compresses_tool_result_without_keyword_resolving_open_question()
     assert mem.resolved_questions == []
     assert "Described order_data.fulfillment" in prompt
     assert "Open Issues" in prompt
-    assert "describe_table" in prompt and "Do Not Repeat Exactly" in prompt
+    assert "describe_table" in prompt
+    assert "Do Not Repeat Exactly" not in prompt
 
 
 def test_memory_from_dict_restores_current_shapes_and_trims_unknown_fields():
@@ -843,7 +866,6 @@ def test_memory_from_dict_restores_current_shapes_and_trims_unknown_fields():
 def test_memory_from_dict_trims_prompt_lists_and_keeps_unique_next_ids():
     from dbaide.agent.memory import (
         AgentMemory,
-        MAX_DO_NOT_REPEAT,
         MAX_FINDINGS,
         MAX_OPEN_QUESTIONS,
         MAX_SCHEMA_REPORTS,
@@ -856,7 +878,6 @@ def test_memory_from_dict_trims_prompt_lists_and_keeps_unique_next_ids():
         "open_questions": [f"q{i}" for i in range(MAX_OPEN_QUESTIONS + 8)],
         "schema_reports": [{"id": f"schema:{i}", "request": "r"} for i in range(MAX_SCHEMA_REPORTS + 8)],
         "action_ledger": [f"a{i}" for i in range(MAX_WORK_STEPS + 8)],
-        "do_not_repeat": [f"d{i}" for i in range(MAX_DO_NOT_REPEAT + 8)],
         "archive": [{"id": "mem:10", "action": "x"}],
         "next_work_index": 1,
         "next_archive_index": 1,
@@ -868,7 +889,7 @@ def test_memory_from_dict_trims_prompt_lists_and_keeps_unique_next_ids():
     assert len(mem.open_questions) == MAX_OPEN_QUESTIONS
     assert len(mem.schema_reports) == MAX_SCHEMA_REPORTS
     assert len(mem.action_ledger) == MAX_WORK_STEPS
-    assert len(mem.do_not_repeat) == MAX_DO_NOT_REPEAT
+    assert mem.do_not_repeat == []
     assert mem.next_work_index == MAX_WORK_STEPS + 8
     assert mem.next_archive_index == 11
 
@@ -1095,7 +1116,7 @@ def test_memory_compresses_validated_join_evidence():
     assert "match_rate=0.98" in prompt
 
 
-def test_loop_blocks_repeated_tool_call_as_memory_not_raw_spam(tmp_path):
+def test_loop_allows_repeated_tool_call(tmp_path):
     from dbaide.agent.loop import AskAgentLoop
 
     class RepeatLLM(LLMClient):
@@ -1122,11 +1143,8 @@ def test_loop_blocks_repeated_tool_call_as_memory_not_raw_spam(tmp_path):
 
     resp = AskAgentLoop(orch).run("describe orders", database="main", execute=True)
 
-    assert resp.warnings
-    assert "repeated_tool_call_blocked" in resp.warnings[0]
-    assert any("describe_table" in item for item in orch.run_state.memory.do_not_repeat)
-    # One real describe_table call plus blocked repeats; it must not burn the whole budget.
-    assert len(orch.run_state.memory.work_log) == 1
+    assert len(orch.run_state.memory.work_log) > 1
+    assert not any("repeated_tool_call_blocked" in str(w) for w in (resp.warnings or []))
 
 
 def test_total_step_budget_stops_repeated_bad_sql_loop(tmp_path):
@@ -1216,7 +1234,7 @@ def test_exploratory_sql_failure_enters_memory_and_loop_can_finish(tmp_path):
         step.action == "execute_readonly_sql" and step.status == "failed"
         for step in orch.run_state.memory.work_log
     )
-    assert any("missing_table" in item for item in orch.run_state.memory.do_not_repeat)
+    assert any("missing_table" in step.result_summary for step in orch.run_state.memory.work_log)
 
 
 def test_default_agent_tool_surface_contains_sql_and_metadata_tools(tmp_path):
@@ -1470,7 +1488,7 @@ def test_memory_prefixed_ids_scan_archive_after_prompt_trim():
         )
 
     assert [report.id for report in mem.schema_reports][0] == "schema:4"
-    assert next_prefixed_id(mem, "schema:", collections=("schema_reports",)) == "schema:9"
+    assert next_prefixed_id(mem, "schema:", collections=("schema_reports",)) == f"schema:{MAX_SCHEMA_REPORTS + 4}"
 
 
 def test_exploratory_sql_does_not_create_stale_final_result(tmp_path):

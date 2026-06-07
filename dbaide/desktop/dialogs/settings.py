@@ -10,7 +10,6 @@ from PyQt6.QtWidgets import (
     QLineEdit,
     QListWidget,
     QListWidgetItem,
-    QMessageBox,
     QScrollArea,
     QSpinBox,
     QStackedWidget,
@@ -18,6 +17,7 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 
+from dbaide.desktop.dialogs.message_dialog import confirm as dialog_confirm, warn as dialog_warn
 from dbaide.desktop.components.base import compact_button
 from dbaide.desktop.components.inputs import Combo, FORM_INNER_LABEL_RULES, configure_form, form_label
 from dbaide.desktop.components.menu import MenuButton
@@ -465,6 +465,7 @@ class SettingsDialog(QDialog):
                 border-radius: 10px;
             }}
             QListWidget::item {{ padding: 10px 12px; }}
+            QListWidget::item:hover {{ background: {Theme.PANEL_2}; }}
             QListWidget::item:selected {{ background: {Theme.PANEL_3}; }}
             """
         )
@@ -623,7 +624,7 @@ class SettingsDialog(QDialog):
     def _save_connection(self) -> None:
         payload = self.conn_form.payload(make_default=not self._connections)
         if not payload["name"]:
-            QMessageBox.warning(self, "Settings", "Connection name is required.")
+            dialog_warn(self, _pt("settings.title"), _pt("settings.err.conn_name"))
             return
         # Remember which row to select; the controller updates the list only after
         # the save actually succeeds (no optimistic write that lies on failure).
@@ -633,14 +634,14 @@ class SettingsDialog(QDialog):
     def _test_connection(self) -> None:
         payload = self.conn_form.payload()
         if not payload["name"]:
-            QMessageBox.warning(self, "Settings", "Select or enter a connection to test.")
+            dialog_warn(self, _pt("settings.title"), _pt("settings.err.select_conn_test"))
             return
         self.connection_test.emit(payload)
 
     def _set_default_connection(self) -> None:
         name = self.conn_form.payload()["name"]
         if not name or name not in self._connections:
-            QMessageBox.warning(self, "Settings", "Save the connection first.")
+            dialog_warn(self, _pt("settings.title"), _pt("settings.err.save_conn_first"))
             return
         payload = dict(self._connections[name])
         payload["make_default"] = True
@@ -650,7 +651,7 @@ class SettingsDialog(QDialog):
         name = self.conn_form.payload()["name"]
         if not name or name not in self._connections:
             return
-        if QMessageBox.question(self, "Settings", f"Remove connection '{name}'?") != QMessageBox.StandardButton.Yes:
+        if not dialog_confirm(self, _pt("settings.title"), _pt("settings.confirm.remove_conn", name=name)):
             return
         self.connection_deleted.emit(name)
 
@@ -668,7 +669,7 @@ class SettingsDialog(QDialog):
     def _save_model(self) -> None:
         payload = self.model_form.payload(make_default=not self._models)
         if not payload["name"]:
-            QMessageBox.warning(self, "Settings", "Profile name is required.")
+            dialog_warn(self, _pt("settings.title"), _pt("settings.err.model_name"))
             return
         # The controller updates the list on save success; don't write optimistically.
         self._selected_model = payload["name"]
@@ -677,14 +678,14 @@ class SettingsDialog(QDialog):
     def _test_model(self) -> None:
         payload = self.model_form.payload()
         if not payload.get("name"):
-            QMessageBox.warning(self, "Settings", "Select or enter a model profile to test.")
+            dialog_warn(self, _pt("settings.title"), _pt("settings.err.select_model_test"))
             return
         self.model_test.emit(payload)
 
     def _set_default_model(self) -> None:
         name = self.model_form.payload()["name"]
         if not name or name not in self._models:
-            QMessageBox.warning(self, "Settings", "Save the model profile first.")
+            dialog_warn(self, _pt("settings.title"), _pt("settings.err.save_model_first"))
             return
         payload = dict(self._models[name])
         payload["make_default"] = True
@@ -694,7 +695,7 @@ class SettingsDialog(QDialog):
         name = self.model_form.payload()["name"]
         if not name or name not in self._models:
             return
-        if QMessageBox.question(self, "Settings", f"Remove model profile '{name}'?") != QMessageBox.StandardButton.Yes:
+        if not dialog_confirm(self, _pt("settings.title"), _pt("settings.confirm.remove_model", name=name)):
             return
         self.model_deleted.emit(name)
 
@@ -746,4 +747,4 @@ class SettingsDialog(QDialog):
         label.setStyleSheet(f"color:{color}; font-size:12px;")
         label.setText(f"{prefix}: {message}")
         if not ok:
-            QMessageBox.warning(self, "Settings", message)
+            dialog_warn(self, _pt("settings.title"), message)

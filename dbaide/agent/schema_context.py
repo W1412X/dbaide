@@ -19,7 +19,7 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger("dbaide.schema_context")
 
-MAX_DISCLOSED_TABLES = 4
+MAX_DISCLOSED_TABLES = 32
 
 
 def normalize_db_table(table: str, database: str = "") -> tuple[str, str]:

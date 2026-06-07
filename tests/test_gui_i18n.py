@@ -35,7 +35,7 @@ def test_language_change_persists_and_prompts_restart(qapp, tmp_path, monkeypatc
     cfg.upsert_connection(ConnectionConfig(name="demo", type="sqlite", path=str(db)), make_default=True)
 
     prompts: list[str] = []
-    monkeypatch.setattr(mw.QMessageBox, "information", lambda *a, **k: prompts.append(a[-1]))
+    monkeypatch.setattr(mw, "dialog_alert", lambda *a, **k: prompts.append(a[-1]))
     i18n.set_language("en")
     win = mw.MainWindow(DesktopService(cfg, AssetStore(tmp_path / "assets")))
     win2 = None

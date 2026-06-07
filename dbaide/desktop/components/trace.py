@@ -3,11 +3,10 @@ from __future__ import annotations
 import json
 from typing import Any
 
-from PyQt6.QtCore import Qt, QSize, QTimer
+from PyQt6.QtCore import Qt, QSize, QTimer, QPropertyAnimation, QEasingCurve, QRect, QEvent
 from PyQt6.QtGui import QColor, QFont
 from PyQt6.QtWidgets import (
     QApplication,
-    QDialog,
     QFrame,
     QHBoxLayout,
     QHeaderView,
@@ -17,6 +16,7 @@ from PyQt6.QtWidgets import (
     QTreeWidget,
     QTreeWidgetItem,
     QVBoxLayout,
+    QWidget,
 )
 
 from dbaide.agent.trace_model import (
@@ -30,7 +30,7 @@ from dbaide.agent.trace_model import (
 from dbaide.desktop.components.base import compact_button
 from dbaide.desktop.components.icons import svg_icon
 from dbaide.desktop.components.inputs import configure_readonly_text_view
-from dbaide.desktop.components.spinner import BusyAnimator, spinner_icon
+from dbaide.desktop.components.spinner import BusyAnimator, SPINNER_SIZE, spinner_icon
 from dbaide.desktop.trace_state import InlineTraceState
 from dbaide.desktop.theme import Theme
 
@@ -45,6 +45,9 @@ _GLYPH = {
     "done": "✓",
 }
 _NODE_ROLE = Qt.ItemDataRole.UserRole
+# Header action icons — match rendered svg size to setIconSize to stay crisp.
+_TRACE_ACTION_ICON_SIZE = 18
+_TRACE_ACTION_BTN_SIZE = 30
 
 
 class InlineTrace(QFrame):
@@ -58,7 +61,7 @@ class InlineTrace(QFrame):
         self.setObjectName("inlineTrace")
         self.setStyleSheet(
             f"QFrame#inlineTrace {{ background: {Theme.PANEL}; border: 1px solid {Theme.BORDER_SOFT};"
-            f" border-radius: 10px; }}"
+            f" border-radius: {Theme.RADIUS_LG}px; }}"
         )
         self.setMaximumHeight(340)
         from dbaide.i18n import t
@@ -74,11 +77,11 @@ class InlineTrace(QFrame):
         header.addWidget(title)
         header.addStretch(1)
         self._copy_btn = QToolButton()
-        self._copy_btn.setIcon(svg_icon("copy", color=Theme.TEXT_2, size=15))
-        self._copy_btn.setIconSize(QSize(15, 15))
+        self._copy_btn.setIcon(svg_icon("copy", color=Theme.TEXT_2, size=_TRACE_ACTION_ICON_SIZE))
+        self._copy_btn.setIconSize(QSize(_TRACE_ACTION_ICON_SIZE, _TRACE_ACTION_ICON_SIZE))
         self._copy_btn.setToolTip(t("trace.copy"))
         self._copy_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        self._copy_btn.setFixedSize(26, 26)
+        self._copy_btn.setFixedSize(_TRACE_ACTION_BTN_SIZE, _TRACE_ACTION_BTN_SIZE)
         self._copy_btn.setStyleSheet(
             f"QToolButton {{ background: transparent; border: none; border-radius: 7px; }}"
             f"QToolButton:hover {{ background: {Theme.PANEL_2}; }}"
@@ -102,9 +105,13 @@ class InlineTrace(QFrame):
         self._tree.setIndentation(14)
         self._tree.setTextElideMode(Qt.TextElideMode.ElideRight)
         self._tree.setFont(QFont("Inter", 11))
+        self._tree.setIconSize(QSize(SPINNER_SIZE, SPINNER_SIZE))
         self._tree.setExpandsOnDoubleClick(False)
         self._tree.setStyleSheet("QTreeWidget { background: transparent; border: none; }")
         self._tree.itemClicked.connect(self._on_click)
+        self._tree.itemExpanded.connect(self._on_item_expanded)
+        self._tree.itemCollapsed.connect(self._on_item_collapsed)
+        self._tree.verticalScrollBar().valueChanged.connect(self._on_user_scroll)
         layout.addWidget(self._tree, 1)
 
         self._state = InlineTraceState()
@@ -162,8 +169,13 @@ class InlineTrace(QFrame):
         if not text:
             return
         QApplication.clipboard().setText(text)
-        self._copy_btn.setIcon(svg_icon("check", color=Theme.GREEN, size=15))
-        QTimer.singleShot(1200, lambda: self._copy_btn.setIcon(svg_icon("copy", color=Theme.TEXT_2, size=15)))
+        self._copy_btn.setIcon(svg_icon("check", color=Theme.GREEN, size=_TRACE_ACTION_ICON_SIZE))
+        QTimer.singleShot(
+            1200,
+            lambda: self._copy_btn.setIcon(
+                svg_icon("copy", color=Theme.TEXT_2, size=_TRACE_ACTION_ICON_SIZE)
+            ),
+        )
 
     def _render(self) -> None:
         self._tree.clear()
@@ -184,7 +196,9 @@ class InlineTrace(QFrame):
         for node in model.steps:
             last = self._add_node(self._tree, node, depth=0)
 
-        self._tree.scrollToItem(last)
+        self._restore_user_expansion()
+        if self._state.follow_live:
+            self._tree.scrollToItem(last)
         # Spin while anything is still running; stop once everything has resolved.
         if self._running_items:
             self._busy.start()
@@ -192,7 +206,7 @@ class InlineTrace(QFrame):
             self._busy.stop()
 
     def _on_spin(self) -> None:
-        icon = spinner_icon(self._busy.angle, color=Theme.BLUE)
+        icon = spinner_icon(self._busy.angle, color=Theme.BLUE, size=SPINNER_SIZE)
         for item in self._running_items:
             try:
                 item.setIcon(0, icon)
@@ -227,7 +241,7 @@ class InlineTrace(QFrame):
             "thought": node.thought, "node_type": node.node_type, "raw": node.raw,
         })
         if running:
-            item.setIcon(0, spinner_icon(self._busy.angle, color=Theme.BLUE))
+            item.setIcon(0, spinner_icon(self._busy.angle, color=Theme.BLUE, size=SPINNER_SIZE))
             self._running_items.append(item)
 
         if isinstance(parent, QTreeWidget):
@@ -260,10 +274,56 @@ class InlineTrace(QFrame):
         if not isinstance(data, dict) or data.get("__summary__"):
             return
         self._state.selected_id = str(data.get("node_id") or "")
-        dialog = TraceDetailDialog(data, parent=self.window())
-        dialog.show()
-        dialog.raise_()
-        dialog.activateWindow()
+        show_trace_detail(self.window(), data)
+
+    def _on_item_expanded(self, item: QTreeWidgetItem) -> None:
+        node_id = self._item_node_id(item)
+        if not node_id:
+            return
+        self._state.expanded_node_ids.add(node_id)
+        self._state.follow_live = False
+
+    def _on_item_collapsed(self, item: QTreeWidgetItem) -> None:
+        node_id = self._item_node_id(item)
+        if node_id:
+            self._state.expanded_node_ids.discard(node_id)
+
+    def _on_user_scroll(self, value: int) -> None:
+        bar = self._tree.verticalScrollBar()
+        if value < bar.maximum() - 8:
+            self._state.follow_live = False
+
+    def _item_node_id(self, item: QTreeWidgetItem) -> str:
+        data = item.data(0, _NODE_ROLE)
+        if not isinstance(data, dict):
+            return ""
+        return str(data.get("node_id") or "").strip()
+
+    def _restore_user_expansion(self) -> None:
+        if not self._state.expanded_node_ids:
+            return
+        self._tree.blockSignals(True)
+        try:
+            for item in self._iter_items():
+                node_id = self._item_node_id(item)
+                if node_id and node_id in self._state.expanded_node_ids:
+                    item.setExpanded(True)
+        finally:
+            self._tree.blockSignals(False)
+
+    def _iter_items(self):
+        for index in range(self._tree.topLevelItemCount()):
+            item = self._tree.topLevelItem(index)
+            if item is None:
+                continue
+            stack = [item]
+            while stack:
+                current = stack.pop()
+                yield current
+                for child_index in range(current.childCount()):
+                    child = current.child(child_index)
+                    if child is not None:
+                        stack.append(child)
 
     @property
     def _model(self) -> TraceModel | None:
@@ -282,56 +342,124 @@ class InlineTrace(QFrame):
         self._state.selected_id = str(value or "")
 
 
-class TraceDetailDialog(QDialog):
-    """Popup showing the full detail of a single trace step, with a copy-raw action.
-    Replaces the old always-on detail pane — detail is now one click away, on demand."""
+class TraceDetailPanel(QFrame):
+    """Right-side slide-over panel for a single trace step (one at a time per window)."""
 
-    def __init__(self, data: dict, *, parent=None) -> None:
-        super().__init__(parent)
+    def __init__(self, host: QWidget) -> None:
+        super().__init__(host)
+        self._host = host
+        self.setObjectName("traceDetailPanel")
+        self.setStyleSheet(
+            f"QFrame#traceDetailPanel {{ background: {Theme.BG};"
+            f" border-left: 1px solid {Theme.BORDER_SOFT}; }}"
+        )
+        self._raw_text = ""
+        self._anim: QPropertyAnimation | None = None
+        self._build_ui()
+        self.hide()
+        host.installEventFilter(self)
+
+    def eventFilter(self, obj, event) -> bool:  # noqa: N802
+        if obj is self._host and self.isVisible() and event.type() == event.Type.Resize:
+            self._relayout(animate=False)
+        return super().eventFilter(obj, event)
+
+    def _build_ui(self) -> None:
         from dbaide.i18n import t
-        title = str(data.get("title") or data.get("phase") or data.get("stage") or "step")
-        self.setWindowTitle(title)
-        self.setModal(False)
-        self.resize(560, 420)
-        self.setMinimumSize(360, 240)
-        self.setStyleSheet(f"QDialog {{ background: {Theme.BG}; }}")
-
-        raw = data.get("raw") if isinstance(data.get("raw"), dict) else {}
-        try:
-            self._raw_text = json.dumps(raw, ensure_ascii=False, indent=2, default=str) if raw else ""
-        except (TypeError, ValueError):
-            self._raw_text = str(raw)
-
         layout = QVBoxLayout(self)
         layout.setContentsMargins(16, 16, 16, 12)
         layout.setSpacing(10)
+
+        header = QHBoxLayout()
+        header.setContentsMargins(0, 0, 0, 0)
+        self._title = QLabel("")
+        self._title.setStyleSheet(
+            f"color: {Theme.TEXT}; font-size: 14px; font-weight: 700; background: transparent;"
+        )
+        self._title.setWordWrap(True)
+        header.addWidget(self._title, 1)
+        close = QToolButton()
+        close.setIcon(svg_icon("x", color=Theme.TEXT_2, size=16))
+        close.setIconSize(QSize(16, 16))
+        close.setToolTip(t("dialog.close"))
+        close.setCursor(Qt.CursorShape.PointingHandCursor)
+        close.setFixedSize(30, 30)
+        close.setStyleSheet(
+            f"QToolButton {{ background: transparent; border: none; border-radius: {Theme.RADIUS_MD}px; }}"
+            f"QToolButton:hover {{ background: {Theme.PANEL_2}; }}"
+        )
+        close.clicked.connect(self.close_panel)
+        header.addWidget(close)
+        layout.addLayout(header)
 
         self._body = QTextBrowser()
         self._body.setFont(QFont("Inter", 11))
         configure_readonly_text_view(self._body)
         self._body.setStyleSheet("QTextBrowser { background: transparent; border: none; }")
-        self._body.setHtml(_detail_html(data))
         layout.addWidget(self._body, 1)
 
         row = QHBoxLayout()
         row.setContentsMargins(0, 0, 0, 0)
         row.addStretch(1)
-        if self._raw_text:
-            self._copy_raw = compact_button(
-                t("trace.copy_raw"),
-                icon=svg_icon("copy", color=Theme.TEXT_2, size=14),
-                width=112,
-            )
-            self._copy_raw.clicked.connect(self._do_copy_raw)
-            row.addWidget(self._copy_raw)
-        close = compact_button(
-            t("dialog.close"),
-            icon=svg_icon("x", color=Theme.TEXT_2, size=14),
-            width=84,
+        self._copy_raw = compact_button(
+            t("trace.copy_raw"),
+            icon=svg_icon("copy", color=Theme.TEXT_2, size=14),
         )
-        close.clicked.connect(self.close)
-        row.addWidget(close)
+        self._copy_raw.clicked.connect(self._do_copy_raw)
+        self._copy_raw.hide()
+        row.addWidget(self._copy_raw)
         layout.addLayout(row)
+
+    def show_detail(self, data: dict) -> None:
+        title = str(data.get("title") or data.get("phase") or data.get("stage") or "step")
+        self._title.setText(title)
+        raw = data.get("raw") if isinstance(data.get("raw"), dict) else {}
+        try:
+            self._raw_text = json.dumps(raw, ensure_ascii=False, indent=2, default=str) if raw else ""
+        except (TypeError, ValueError):
+            self._raw_text = str(raw)
+        self._body.setHtml(_detail_html(data))
+        self._copy_raw.setVisible(bool(self._raw_text))
+        self._relayout(animate=True)
+
+    def close_panel(self) -> None:
+        if not self.isVisible():
+            return
+        w = self.width()
+        h = self.height()
+        x = self.x()
+        anim = QPropertyAnimation(self, b"geometry", self)
+        anim.setDuration(180)
+        anim.setStartValue(QRect(x, 0, w, h))
+        anim.setEndValue(QRect(self._host.width(), 0, w, h))
+        anim.setEasingCurve(QEasingCurve.Type.InCubic)
+        anim.finished.connect(self.hide)
+        anim.start()
+        self._anim = anim
+
+    def _panel_width(self) -> int:
+        return min(440, max(320, int(self._host.width() * 0.36)))
+
+    def _relayout(self, *, animate: bool) -> None:
+        w = self._panel_width()
+        h = self._host.height()
+        target = QRect(self._host.width() - w, 0, w, h)
+        if animate and not self.isVisible():
+            start = QRect(self._host.width(), 0, w, h)
+            self.setGeometry(start)
+            self.show()
+            self.raise_()
+            anim = QPropertyAnimation(self, b"geometry", self)
+            anim.setDuration(200)
+            anim.setStartValue(start)
+            anim.setEndValue(target)
+            anim.setEasingCurve(QEasingCurve.Type.OutCubic)
+            anim.start()
+            self._anim = anim
+        else:
+            self.setGeometry(target)
+            self.show()
+            self.raise_()
 
     def _do_copy_raw(self) -> None:
         if self._raw_text:
@@ -343,6 +471,20 @@ class TraceDetailDialog(QDialog):
     def _restore_copy_raw_button(self) -> None:
         self._copy_raw.setText(_copy_raw_label())
         self._copy_raw.setIcon(svg_icon("copy", color=Theme.TEXT_2, size=14))
+
+
+def show_trace_detail(host: QWidget, data: dict) -> None:
+    """Show (or update) the single slide-over trace detail panel for this window."""
+    window = host.window()
+    panel = getattr(window, "_trace_detail_panel", None)
+    if panel is None:
+        panel = TraceDetailPanel(window)
+        window._trace_detail_panel = panel
+    panel.show_detail(data)
+
+
+# Backwards-compatible alias for tests / imports.
+TraceDetailDialog = TraceDetailPanel
 
 
 def _copy_raw_label() -> str:

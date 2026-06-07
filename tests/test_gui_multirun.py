@@ -299,8 +299,10 @@ def test_status_badge_restore_respects_owner_token():
     win = mw.MainWindow.__new__(mw.MainWindow)
     calls: list[tuple[str, list]] = []
     win._status_owner = "sync:old"
+    win._asset_work_stack = []
     win.bootstrap = {"connections": [{"name": "current", "asset_status": "ready"}]}
     win.current_connection = lambda: "current"  # type: ignore[method-assign]
+    win._assets_busy = lambda conn=None: False  # type: ignore[method-assign]
     win._ensure_ui_state = lambda: type("Ui", (), {  # type: ignore[method-assign]
         "restore_connection_status": lambda _self, conn, conns: calls.append((conn, conns)),
     })()
@@ -312,6 +314,27 @@ def test_status_badge_restore_respects_owner_token():
     win._restore_status_badge(owner="sync:old")
     assert calls == [("current", [{"name": "current", "asset_status": "ready"}])]
     assert win._status_owner == ""
+
+
+def test_status_badge_restore_skips_while_assets_busy():
+    import dbaide.desktop.views.main_window as mw
+
+    win = mw.MainWindow.__new__(mw.MainWindow)
+    calls: list[tuple[str, list]] = []
+    win._status_owner = ""
+    win._asset_work_stack = [("refresh_instance", "current", "Syncing")]
+    win.bootstrap = {"connections": [{"name": "current", "asset_status": "ready"}]}
+    win.current_connection = lambda: "current"  # type: ignore[method-assign]
+    win._assets_busy = lambda conn=None: True  # type: ignore[method-assign]
+    win._ensure_ui_state = lambda: type("Ui", (), {  # type: ignore[method-assign]
+        "restore_connection_status": lambda _self, conn, conns: calls.append((conn, conns)),
+    })()
+
+    win._restore_status_badge()
+    assert calls == []
+
+    win._restore_status_badge(force=True)
+    assert calls == [("current", [{"name": "current", "asset_status": "ready"}])]
 
 
 def test_stale_ask_completion_is_ignored():

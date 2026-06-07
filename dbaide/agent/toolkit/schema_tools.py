@@ -64,7 +64,7 @@ def register(registry: ToolRegistry, orchestrator) -> None:
                 focus_terms=_string_list(args.get("focus_terms")),
                 scope=args.get("scope") if isinstance(args.get("scope"), dict) else None,
                 need=str(args.get("need") or ""),
-                limit=int(args.get("limit") or 8),
+                limit=int(args.get("limit") or 64),
             )
         except Exception as exc:
             logger.warning("retrieve_schema_context_failed: %s", exc)
@@ -80,7 +80,7 @@ def register(registry: ToolRegistry, orchestrator) -> None:
         # Listing a specific database narrows the agent's working scope to it.
         _note_working_db(orchestrator, database)
         tables = orchestrator.schema.list_tables(database=database)
-        payload = [{"name": t.name, "comment": (t.comment or "")[:120]} for t in tables[:50]]
+        payload = [{"name": t.name, "comment": (t.comment or "")[:120]} for t in tables]
         return ToolResult(ok=True, data={"database": database, "tables": payload})
 
     def _describe_table(args: dict[str, Any], _ctx: ToolContext) -> ToolResult:
@@ -192,7 +192,7 @@ def register(registry: ToolRegistry, orchestrator) -> None:
         include_columns = bool(args.get("include_columns", True))
         include_indexes = bool(args.get("include_indexes", False))
         include_foreign_keys = bool(args.get("include_foreign_keys", False))
-        limit = _positive_int(args.get("limit"), 50)
+        limit = _positive_int(args.get("limit"), 256)
         explicit_tables = _string_list(args.get("tables"))
 
         if explicit_tables:

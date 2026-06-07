@@ -24,6 +24,7 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 
+from dbaide.desktop.components.empty_state import EmptyState
 from dbaide.desktop.components.icon_button import IconToolButton
 from dbaide.desktop.components.icons import svg_icon
 from dbaide.desktop.components.menu import PillSelect
@@ -64,16 +65,18 @@ class DataBrowser(QWidget):
         self.stack = QStackedWidget()
 
         # Empty state — shown until a table is opened.
-        empty = QWidget()
-        el = QVBoxLayout(empty)
+        empty_page = QWidget()
+        el = QVBoxLayout(empty_page)
+        el.setContentsMargins(0, 0, 0, 0)
         el.addStretch(1)
-        hint = QLabel(t("data.empty_hint"))
-        hint.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        hint.setWordWrap(True)
-        hint.setStyleSheet(f"color: {Theme.MUTED}; font-size: 13px;")
-        el.addWidget(hint)
+        self._empty = EmptyState(
+            t("data.empty_title"),
+            t("data.empty_hint"),
+            icon="table",
+        )
+        el.addWidget(self._empty)
         el.addStretch(1)
-        self.stack.addWidget(empty)
+        self.stack.addWidget(empty_page)
 
         # Data view.
         page = QWidget()

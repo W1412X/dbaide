@@ -11,7 +11,7 @@ from __future__ import annotations
 import json
 from typing import Any
 
-from PyQt6.QtWidgets import QMessageBox
+from dbaide.desktop.dialogs.message_dialog import confirm as dialog_confirm
 
 from dbaide.agent.progress_events import progress_label
 from dbaide.desktop.event_bus import ASSETS_CHANGED, QUERY_COMPLETED
@@ -116,11 +116,17 @@ class OneOffActionController:
                 warnings = "\n".join(str(w) for w in (result.get("warnings") or []))
                 confirmed_sql = str(result.get("normalized_sql") or sql_text)
                 sql_preview = confirmed_sql if len(confirmed_sql) <= 2000 else confirmed_sql[:2000] + "\n..."
-                message = "This SQL may be expensive or risky. Execute anyway?"
+                message = _i18n_t("risk.confirm_title")
                 if warnings:
-                    message += f"\n\n{warnings}"
-                message += f"\n\nSQL:\n{sql_preview}"
-                if QMessageBox.question(win, "Confirm SQL execution", message) == QMessageBox.StandardButton.Yes:
+                    message += f"\n\n{_i18n_t('risk.warnings')}\n{warnings}"
+                message += f"\n\n{_i18n_t('risk.sql')}\n{sql_preview}"
+                if dialog_confirm(
+                    win,
+                    _i18n_t("risk.confirm_title"),
+                    message,
+                    ok_label=_i18n_t("risk.execute_anyway"),
+                    cancel_label=_i18n_t("risk.cancel"),
+                ):
                     self.run_action("execute_sql", {
                         "connection_name": run_connection,
                         "database": run_database,
@@ -350,11 +356,14 @@ class ConversationRunController:
         win = self.win
         has_connection = bool(win.current_connection())
         waiting = win.run_state.is_active_waiting()
-        busy = win.run_state.is_active_running() or win.run_state.is_active_queued() or win._building
+        assets_busy = win._assets_busy()
+        busy = win.run_state.is_active_running() or win.run_state.is_active_queued() or assets_busy or win._building
         if not has_connection:
             placeholder = _i18n_t("composer.placeholder.no_conn")
         elif waiting and not busy:
             placeholder = _i18n_t("composer.placeholder.reply")
+        elif assets_busy or win._building:
+            placeholder = _i18n_t("composer.placeholder.building")
         else:
             placeholder = self.composer_ready_placeholder()
         win._ensure_ui_state().apply_composer(ComposerUiState(
@@ -366,26 +375,25 @@ class ConversationRunController:
 
     def refresh_run_status(self) -> None:
         win = self.win
-        active = win.run_state.active_count()
-        if win._building:
-            text, state = "Building assets", "building"
-        elif active > 0:
-            text, state = _i18n_t("status.runs_active", n=active), "running"
-        else:
-            win._restore_status_badge()
-            text, state = "", ""
         selected = self.chat_selection_id()
         pending = self.pending_chat_rows()
-        if text:
-            win._ensure_ui_state().apply_run_status(RunStatusUiState(
-                topbar_text=text,
-                topbar_state=state,
-                running_ids=win.run_state.running_ids(),
-                pending_rows=pending,
-                selected_chat=selected,
-            ))
+        if win._assets_busy():
+            text, state = win._current_asset_label() or _i18n_t("status.building"), "building"
+        elif win._building:
+            text, state = _i18n_t("status.building"), "building"
+        elif win.run_state.active_count() > 0:
+            text, state = _i18n_t("status.runs_active", n=win.run_state.active_count()), "running"
         else:
+            win._restore_status_badge(force=True)
             win._ensure_ui_state().apply_chat_activity(win.run_state.running_ids(), pending, selected)
+            return
+        win._ensure_ui_state().apply_run_status(RunStatusUiState(
+            topbar_text=text,
+            topbar_state=state,
+            running_ids=win.run_state.running_ids(),
+            pending_rows=pending,
+            selected_chat=selected,
+        ))
 
     def sync_chat_selection(self) -> None:
         win = self.win
