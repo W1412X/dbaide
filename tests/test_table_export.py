@@ -16,7 +16,7 @@ def test_export_json_empty():
 def test_export_insert_escapes_and_types():
     rows = [{"id": 1, "name": "O'Brien", "amt": 3.5, "flag": None}]
     sql = export_insert(rows, ["id", "name", "amt", "flag"], table="users")
-    assert sql == "INSERT INTO users (id, name, amt, flag) VALUES (1, 'O''Brien', 3.5, NULL);"
+    assert sql == 'INSERT INTO "users" ("id", "name", "amt", "flag") VALUES (1, \'O\'\'Brien\', 3.5, NULL);'
 
 
 def test_export_insert_empty():

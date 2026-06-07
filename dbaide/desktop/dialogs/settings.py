@@ -143,7 +143,6 @@ class SettingsDialog(QDialog):
         ("default_row_limit", 1, 100000),
         ("max_row_limit", 1, 1000000),
         ("agent_max_steps", 1, 100),
-        ("agent_sql_retries", 0, 10),
         ("big_table_rows", 1000, 1000000000),
         ("explain_max_rows", 1000, 1000000000),
         ("join_sample_size", 10, 1000),

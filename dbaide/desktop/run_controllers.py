@@ -93,7 +93,7 @@ class OneOffActionController:
             )
             if not stats.get("estimated_queries"):
                 win.bus.emit(ASSETS_CHANGED, {"instance": win.current_connection()})
-            win.switch_tab("Ask")
+            win.switch_tab("Chat")
             if stats.get("estimated_queries"):
                 win.toast(f"≈{stats.get('estimated_queries')} queries (dry-run)")
             else:
@@ -109,7 +109,7 @@ class OneOffActionController:
             win.ask_tab.set_active(key)
             win._active_key = key
             win.ask_tab.append_search_hits(key, win._last_question, result or [])
-            win.switch_tab("Ask")
+            win.switch_tab("Chat")
             return
         if action == "execute_sql":
             if isinstance(result, dict) and result.get("pending_confirmation"):
@@ -193,7 +193,7 @@ class OneOffActionController:
         if action in ("browse_table", "count_table"):
             win.toast(str(exc))
             return
-        win.fail(exc, modal=action not in ("preview_asset", "search_assets"))
+        win.fail(exc, modal=action not in ("asset_markdown", "search_assets"))
 
 
 class ConversationRunController:
@@ -265,7 +265,7 @@ class ConversationRunController:
         win._runs.pop(key, None)
         server_id = str(result.get("session_id") or win._slot_session.get(key) or "")
         if server_id and server_id != key and not win.ask_tab.has_slot(server_id):
-            self.migrate_slot(key, server_id)
+            self.bind_slot_to_session(key, server_id)
             key = server_id
         win._slot_session[key] = server_id
         if result.get("trace"):
@@ -312,9 +312,9 @@ class ConversationRunController:
         self.sync_active_ui()
         self.refresh_run_status()
 
-    def migrate_slot(self, old: str, new: str) -> None:
-        self.win.ask_tab.remap(old, new)
-        self.win.run_state.remap(old, new)
+    def bind_slot_to_session(self, temporary_key: str, session_id: str) -> None:
+        self.win.ask_tab.remap(temporary_key, session_id)
+        self.win.run_state.remap(temporary_key, session_id)
 
     def drain_queue(self) -> None:
         win = self.win

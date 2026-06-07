@@ -17,7 +17,6 @@ from dbaide.joins import JoinCatalogStore
 from dbaide.annotations import AnnotationStore
 from dbaide.assets import AssetStore
 from dbaide.connection_identity import connection_fingerprint
-from dbaide.core.result import ExecutionPolicy
 from dbaide.i18n import detect_user_language, normalize, t as _i18n_t
 from dbaide.llm import LLMClient, NullLLMClient
 from dbaide.models import AssistantResponse, TaskType
@@ -60,7 +59,6 @@ class AskOrchestrator:
         asset_store: AssetStore | None = None,
         join_catalog: JoinCatalogStore | None = None,
         annotations: AnnotationStore | None = None,
-        execution_policy: ExecutionPolicy = ExecutionPolicy.SAFE_AUTO,
         progress: Callable[[Any], None] | None = None,
     ) -> None:
         self.adapter = adapter
@@ -80,7 +78,6 @@ class AskOrchestrator:
         self.asset_store = asset_store or AssetStore()
         self.join_catalog = join_catalog or JoinCatalogStore()
         self.annotations = annotations or AnnotationStore()
-        self.execution_policy = execution_policy
         self.progress = progress or (lambda _msg: None)
         # User-pinned schema scope (set by the workflow from composer attachments).
         self.schema_scope: dict[str, Any] = {}

@@ -5,9 +5,9 @@ import logging
 import time
 from typing import Any, Callable
 
+from dbaide.core.cancellation import CancelledError
 from dbaide.core.errors import DBAideError, ErrorCode, RepairAction
 from dbaide.core.events import TraceEvent, TraceKind, TraceLevel
-from dbaide.core.result import ExecutionPolicy
 from dbaide.llm import LLMClient, NullLLMClient
 from dbaide.tools.registry import ToolContext, ToolRegistry, ToolResult
 
@@ -31,14 +31,12 @@ class AgentRuntime:
         *,
         llm: LLMClient | None = None,
         tool_registry: ToolRegistry | None = None,
-        execution_policy: ExecutionPolicy = ExecutionPolicy.SAFE_AUTO,
         trace_sink: Callable[[TraceEvent], None] | None = None,
         max_steps: int | None = None,
         cancel_check: Callable[[], None] | None = None,
     ) -> None:
         self.llm = llm or NullLLMClient()
         self.tool_registry = tool_registry or ToolRegistry()
-        self.execution_policy = execution_policy
         self.trace_sink = trace_sink or (lambda _: None)
         self.max_steps = max(1, int(max_steps)) if max_steps else self.MAX_STEPS
         self.cancel_check = cancel_check
@@ -62,7 +60,7 @@ class AgentRuntime:
         """Check if execution budget is exhausted."""
         self.check_cancelled()
         if self._cancelled:
-            raise RuntimeError("Execution cancelled by user")
+            raise CancelledError("Execution cancelled by user")
         if self._step_count >= self.max_steps:
             raise RuntimeError(f"Execution budget exhausted ({self.max_steps} steps)")
 
@@ -70,7 +68,7 @@ class AgentRuntime:
         if self.cancel_check:
             self.cancel_check()
         if self._cancelled:
-            raise RuntimeError("Execution cancelled by user")
+            raise CancelledError("Execution cancelled by user")
 
     def emit_trace(self, event: TraceEvent) -> None:
         """Emit a trace event."""
@@ -94,7 +92,6 @@ class AgentRuntime:
         self._step_count += 1
         return ToolContext(
             trace_sink=self.trace_sink,
-            execution_policy=self.execution_policy.value,
             cancel_check=self.cancel_check,
         )
 

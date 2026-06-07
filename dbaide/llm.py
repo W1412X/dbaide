@@ -5,6 +5,7 @@ import logging
 import os
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
 from dataclasses import dataclass
 from typing import Any, Callable
@@ -49,10 +50,10 @@ class LLMClient:
 
 class NullLLMClient(LLMClient):
     def complete_json(self, messages: list[LLMMessage], *, schema_hint: str = "") -> dict[str, Any]:
-        raise RuntimeError("No LLM model configured. Use heuristic fallback or configure a model.")
+        raise RuntimeError("No LLM model configured. Configure a model before running agent reasoning.")
 
     def complete_text(self, messages: list[LLMMessage]) -> str:
-        raise RuntimeError("No LLM model configured. Use heuristic fallback or configure a model.")
+        raise RuntimeError("No LLM model configured. Configure a model before running agent reasoning.")
 
 
 class OpenAICompatibleClient(LLMClient):
@@ -61,7 +62,7 @@ class OpenAICompatibleClient(LLMClient):
 
     def __init__(self, cfg: ModelConfig) -> None:
         self.cfg = cfg
-        self.base_url = cfg.base_url.rstrip("/")
+        self.base_url = _validated_http_base_url(cfg.base_url)
         self.api_key = cfg.api_key or (os.environ.get(cfg.api_key_env) if cfg.api_key_env else "")
         if not self.base_url or not self.api_key or not cfg.model:
             missing = []
@@ -102,7 +103,8 @@ class OpenAICompatibleClient(LLMClient):
         for attempt in range(self.MAX_RETRIES):
             try:
                 start = time.perf_counter()
-                with urllib.request.urlopen(req, timeout=timeout) as resp:
+                # base_url is validated as an absolute http(s) URL in __init__.
+                with urllib.request.urlopen(req, timeout=timeout) as resp:  # nosec B310
                     data = json.loads(resp.read().decode("utf-8"))
                 elapsed = (time.perf_counter() - start) * 1000
                 logger.debug("llm_response model=%s elapsed_ms=%.0f attempt=%d", self.cfg.model, elapsed, attempt + 1)
@@ -167,7 +169,8 @@ class OpenAICompatibleClient(LLMClient):
         timeout = max(1, int(self.cfg.timeout_seconds))
         parts: list[str] = []
         try:
-            with urllib.request.urlopen(req, timeout=timeout) as resp:
+            # base_url is validated as an absolute http(s) URL in __init__.
+            with urllib.request.urlopen(req, timeout=timeout) as resp:  # nosec B310
                 for raw in resp:                         # SSE: one "data: {...}" per line
                     line = raw.decode("utf-8", errors="replace").strip()
                     if not line or not line.startswith("data:"):
@@ -221,6 +224,16 @@ class OpenAICompatibleClient(LLMClient):
 def build_llm_client(cfg: ModelConfig) -> LLMClient:
     if cfg.provider in {"none", ""}:
         return NullLLMClient()
-    if cfg.provider in {"openai_compatible", "openai-compatible", "openai"}:
+    if cfg.provider == "openai_compatible":
         return OpenAICompatibleClient(cfg)
-    raise ValueError(f"Unknown LLM provider: {cfg.provider!r}. Supported: openai_compatible, openai-compatible, openai, none")
+    raise ValueError(f"Unknown LLM provider: {cfg.provider!r}. Supported: openai_compatible, none")
+
+
+def _validated_http_base_url(base_url: str) -> str:
+    url = str(base_url or "").strip().rstrip("/")
+    if not url:
+        return ""
+    parsed = urllib.parse.urlparse(url)
+    if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+        raise ValueError("Model Base URL must be an absolute http(s) URL.")
+    return url

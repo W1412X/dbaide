@@ -3,7 +3,7 @@ import sqlite3
 from dbaide.adapters import build_adapter
 from dbaide.agent.controllers import RiskController
 from dbaide.agent.orchestrator import AskOrchestrator
-from dbaide.core.result import ExecutionPolicy, ValidationReport
+from dbaide.core.result import ValidationReport
 from dbaide.models import ConnectionConfig
 from dbaide.session import Session
 from tests.llm_mock import AgentMockLLM
@@ -46,14 +46,13 @@ def test_orchestrator_live_schema_query_without_assets(tmp_path):
     assert response.result.row_count >= 1
 
 
-def test_risk_controller_blocks_sql_only_policy():
+def test_risk_controller_confirms_low_confidence_safe_query():
     risk = RiskController()
     decision = risk.decide(
-        policy=ExecutionPolicy.SQL_ONLY,
         validation=ValidationReport(ok=True, normalized_sql="SELECT 1", issues=[]),
-        plan_confidence=0.9,
+        plan_confidence=0.3,
     )
-    assert decision.action == "generate_only"
+    assert decision.action == "confirm"
 
 
 def test_orchestrator_schema_explore_without_assets(tmp_path):

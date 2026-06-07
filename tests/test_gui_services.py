@@ -80,7 +80,7 @@ def test_gui_ask_uses_the_same_asset_store_for_lookup_questions(tmp_path):
     cfg.upsert_connection(conn, make_default=True)
     service.build_assets({"name": "local", "profile_mode": "auto", "top_k": 10, "sample_limit": 20})
     service._safe_llm = lambda: AgentMockLLM()  # noqa: SLF001
-    answer = service.ask({"connection_name": "local", "question": "email 在哪里", "execution_policy": "sql_only"})
+    answer = service.ask({"connection_name": "local", "question": "email 在哪里"})
 
     assert "local.main.users.email" in json.dumps(answer, ensure_ascii=False)
 

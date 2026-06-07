@@ -27,14 +27,7 @@ class ErrorCode(str, Enum):
 
 class RepairAction(str, Enum):
     """Suggested repair actions."""
-    ASK_USER = "ask_user"
-    CONFIRM = "confirm"
-    REBUILD_ASSET = "rebuild_asset"
     REFRESH_SCHEMA = "refresh_schema"
-    REPLAN = "replan"
-    RERENDER_SQL = "rerender_sql"
-    REVALIDATE = "revalidate"
-    REEXECUTE = "reexecute"
     STOP = "stop"
 
 

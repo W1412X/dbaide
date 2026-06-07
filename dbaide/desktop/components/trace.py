@@ -127,10 +127,6 @@ class InlineTrace(QFrame):
         self._state.set_events(events, live=live)
         self._render()
 
-    # Back-compat alias used by some callers/tests.
-    def load_events(self, events: list[dict[str, Any]]) -> None:
-        self.set_events(events, live=False)
-
     def begin_live(self) -> None:
         self._state.begin_live()
         self._render()
@@ -251,7 +247,6 @@ class InlineTrace(QFrame):
         for child in node.children:
             self._add_node(item, child, depth=depth + 1)
 
-        item.setExpanded(True)
         return item
 
     def _add_leaf(self, parent: QTreeWidgetItem, text: str, *, muted: bool = True) -> None:

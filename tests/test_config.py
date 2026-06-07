@@ -1,5 +1,4 @@
 import pytest
-from pathlib import Path
 
 from dbaide.config import ConfigManager, _toml_quote
 from dbaide.models import ConnectionConfig, ModelConfig
@@ -60,10 +59,10 @@ class TestConfigManager:
 
     def test_model_save_and_load(self, tmp_path):
         cfg = ConfigManager(path=tmp_path / "config.toml")
-        model = ModelConfig(name="default", provider="openai", base_url="http://test", model="gpt-4")
+        model = ModelConfig(name="default", provider="openai_compatible", base_url="http://test", model="gpt-4")
         cfg.upsert_model(model)
         loaded = cfg.model()
-        assert loaded.provider == "openai"
+        assert loaded.provider == "openai_compatible"
         assert loaded.model == "gpt-4"
 
     def test_model_default(self, tmp_path):

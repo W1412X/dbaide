@@ -52,8 +52,10 @@ class Sidebar(QWidget):
         self.context_tabs.setDrawBase(False)
         self.context_tabs.setUsesScrollButtons(False)
         self.context_tabs.setExpanding(True)
-        self.context_tabs.addTab(t("sidebar.chats"))
-        self.context_tabs.addTab(t("sidebar.schema"))
+        self.context_tabs.setIconSize(QSize(14, 14))
+        self.context_tabs.setFixedHeight(34)
+        self.context_tabs.addTab(svg_icon("message-circle", color=Theme.TEXT_2, size=14), t("sidebar.chats"))
+        self.context_tabs.addTab(svg_icon("database", color=Theme.TEXT_2, size=14), t("sidebar.schema"))
         self.context_tabs.currentChanged.connect(self._on_context_tab_changed)
         layout.addWidget(self.context_tabs)
 
@@ -286,7 +288,6 @@ class Sidebar(QWidget):
                     col_item.setData(0, Qt.ItemDataRole.UserRole, col)
                     table_item.addChild(col_item)
             self.tree.addTopLevelItem(db_item)
-            db_item.setExpanded(True)
         # Add per-row action icons. Databases/tables get a direct "view doc" icon plus
         # a compact overflow menu; columns only get the overflow menu because their
         # note is shown inside the parent table document.

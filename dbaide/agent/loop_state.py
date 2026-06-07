@@ -10,7 +10,7 @@ from dbaide.agent.progressive_schema import DiscoveryResult, SchemaHit
 from dbaide.i18n import normalize
 from dbaide.models import ColumnInfo
 
-LOOP_STATE_VERSION = 1
+LOOP_STATE_VERSION = 2
 
 
 def column_to_dict(col: ColumnInfo) -> dict[str, Any]:
@@ -92,28 +92,28 @@ def dump_loop_state(
         "execute_allowed": execute_allowed,
         "answer_language": orchestrator.run_state.answer_language,
         "transcript": list(transcript),
-        "orchestrator": {
-            "_loop_discovery": discovery_to_dict(orchestrator.run_state.discovery),
-            "_loop_table": orchestrator.run_state.table,
-            "_loop_table_database": orchestrator.run_state.table_database,
-            "_loop_columns": columns,
-            "_loop_schemas": schemas,
-            "_loop_schema_db": dict(orchestrator.run_state.schema_db),
-            "_loop_relations": list(orchestrator.run_state.relations),
-            "_loop_sql": orchestrator.run_state.sql,
-            "_loop_sql_rationale": orchestrator.run_state.sql_rationale,
-            "_loop_sql_confidence": orchestrator.run_state.sql_confidence,
-            "_loop_sql_feedback": orchestrator.run_state.sql_feedback,
-            "_loop_answer": orchestrator.run_state.answer,
-            "_loop_pending_question": orchestrator.run_state.pending_question,
-            "_loop_pending_options": list(orchestrator.run_state.pending_options),
-            "_loop_pending_questions": list(orchestrator.run_state.pending_questions),
-            "_loop_risk_confirmation": dict(orchestrator.run_state.risk_confirmation),
-            "_loop_confirmed_risk_sqls": list(orchestrator.run_state.confirmed_risk_sqls),
-            "_loop_clarifications": list(orchestrator.run_state.clarifications),
-            "_loop_clarify_questions": orchestrator.run_state.clarify_questions,
-            "_loop_memory": orchestrator.run_state.memory.to_dict(),
-            "_loop_scope_used": bool(orchestrator.run_state.scope_used),
+        "run_state": {
+            "discovery": discovery_to_dict(orchestrator.run_state.discovery),
+            "table": orchestrator.run_state.table,
+            "table_database": orchestrator.run_state.table_database,
+            "columns": columns,
+            "schemas": schemas,
+            "schema_db": dict(orchestrator.run_state.schema_db),
+            "relations": list(orchestrator.run_state.relations),
+            "sql": orchestrator.run_state.sql,
+            "sql_rationale": orchestrator.run_state.sql_rationale,
+            "sql_confidence": orchestrator.run_state.sql_confidence,
+            "sql_feedback": orchestrator.run_state.sql_feedback,
+            "answer": orchestrator.run_state.answer,
+            "pending_question": orchestrator.run_state.pending_question,
+            "pending_options": list(orchestrator.run_state.pending_options),
+            "pending_questions": list(orchestrator.run_state.pending_questions),
+            "risk_confirmation": dict(orchestrator.run_state.risk_confirmation),
+            "confirmed_risk_sqls": list(orchestrator.run_state.confirmed_risk_sqls),
+            "clarifications": list(orchestrator.run_state.clarifications),
+            "clarify_questions": orchestrator.run_state.clarify_questions,
+            "memory": orchestrator.run_state.memory.to_dict(),
+            "scope_used": bool(orchestrator.run_state.scope_used),
         },
     }
 
@@ -126,37 +126,37 @@ def restore_loop_state(orchestrator: Any, snapshot: dict[str, Any]) -> tuple[lis
     orchestrator.run_state.answer_language = normalize(snapshot.get("answer_language") or "en")
     execute_allowed = bool(snapshot.get("execute_allowed", True))
     transcript = [str(x) for x in _list_or_empty(snapshot.get("transcript"))]
-    payload = snapshot.get("orchestrator") if isinstance(snapshot.get("orchestrator"), dict) else {}
+    payload = snapshot.get("run_state") if isinstance(snapshot.get("run_state"), dict) else {}
 
-    orchestrator.run_state.discovery = discovery_from_dict(payload.get("_loop_discovery"))
-    orchestrator.run_state.table = str(payload.get("_loop_table") or "")
-    orchestrator.run_state.table_database = str(payload.get("_loop_table_database") or "")
+    orchestrator.run_state.discovery = discovery_from_dict(payload.get("discovery"))
+    orchestrator.run_state.table = str(payload.get("table") or "")
+    orchestrator.run_state.table_database = str(payload.get("table_database") or "")
     orchestrator.run_state.columns = [
-        column_from_dict(item) for item in _list_or_empty(payload.get("_loop_columns")) if isinstance(item, dict)
+        column_from_dict(item) for item in _list_or_empty(payload.get("columns")) if isinstance(item, dict)
     ]
-    schemas_payload = payload.get("_loop_schemas") if isinstance(payload.get("_loop_schemas"), dict) else {}
+    schemas_payload = payload.get("schemas") if isinstance(payload.get("schemas"), dict) else {}
     orchestrator.run_state.schemas = {
         str(key): [column_from_dict(item) for item in cols if isinstance(item, dict)]
         for key, cols in schemas_payload.items()
         if isinstance(cols, list)
     }
-    orchestrator.run_state.schema_db = _dict_or_empty(payload.get("_loop_schema_db"))
-    orchestrator.run_state.relations = _list_or_empty(payload.get("_loop_relations"))
-    orchestrator.run_state.sql = str(payload.get("_loop_sql") or "")
-    orchestrator.run_state.sql_rationale = str(payload.get("_loop_sql_rationale") or "")
-    _conf = payload.get("_loop_sql_confidence")
+    orchestrator.run_state.schema_db = _dict_or_empty(payload.get("schema_db"))
+    orchestrator.run_state.relations = _list_or_empty(payload.get("relations"))
+    orchestrator.run_state.sql = str(payload.get("sql") or "")
+    orchestrator.run_state.sql_rationale = str(payload.get("sql_rationale") or "")
+    _conf = payload.get("sql_confidence")
     orchestrator.run_state.sql_confidence = _float_or_none(_conf)
-    orchestrator.run_state.sql_feedback = str(payload.get("_loop_sql_feedback") or "")
-    orchestrator.run_state.answer = str(payload.get("_loop_answer") or "")
-    orchestrator.run_state.pending_question = str(payload.get("_loop_pending_question") or "")
-    orchestrator.run_state.pending_options = _list_or_empty(payload.get("_loop_pending_options"))
-    orchestrator.run_state.pending_questions = _list_or_empty(payload.get("_loop_pending_questions"))
-    orchestrator.run_state.risk_confirmation = _dict_or_empty(payload.get("_loop_risk_confirmation"))
-    orchestrator.run_state.confirmed_risk_sqls = [str(x) for x in _list_or_empty(payload.get("_loop_confirmed_risk_sqls"))]
-    orchestrator.run_state.clarifications = [str(x) for x in _list_or_empty(payload.get("_loop_clarifications"))]
-    orchestrator.run_state.clarify_questions = str(payload.get("_loop_clarify_questions") or "")
-    orchestrator.run_state.memory = AgentMemory.from_dict(payload.get("_loop_memory"))
-    orchestrator.run_state.scope_used = bool(payload.get("_loop_scope_used", False))
+    orchestrator.run_state.sql_feedback = str(payload.get("sql_feedback") or "")
+    orchestrator.run_state.answer = str(payload.get("answer") or "")
+    orchestrator.run_state.pending_question = str(payload.get("pending_question") or "")
+    orchestrator.run_state.pending_options = _list_or_empty(payload.get("pending_options"))
+    orchestrator.run_state.pending_questions = _list_or_empty(payload.get("pending_questions"))
+    orchestrator.run_state.risk_confirmation = _dict_or_empty(payload.get("risk_confirmation"))
+    orchestrator.run_state.confirmed_risk_sqls = [str(x) for x in _list_or_empty(payload.get("confirmed_risk_sqls"))]
+    orchestrator.run_state.clarifications = [str(x) for x in _list_or_empty(payload.get("clarifications"))]
+    orchestrator.run_state.clarify_questions = str(payload.get("clarify_questions") or "")
+    orchestrator.run_state.memory = AgentMemory.from_dict(payload.get("memory"))
+    orchestrator.run_state.scope_used = bool(payload.get("scope_used", False))
     orchestrator.run_state.execute_allowed = execute_allowed
     if not orchestrator.run_state.memory.goal and orchestrator.run_state.question:
         orchestrator.run_state.memory.reset_goal(

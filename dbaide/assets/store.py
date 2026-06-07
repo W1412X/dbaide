@@ -219,5 +219,5 @@ def object_component(value: str) -> str:
     safe = safe_name(raw)
     if raw == safe:
         return safe
-    digest = hashlib.sha1(raw.encode("utf-8")).hexdigest()[:10]
+    digest = hashlib.sha256(raw.encode("utf-8")).hexdigest()[:10]
     return f"{safe}__{digest}"

@@ -4,8 +4,6 @@ returned that instance's trace/JSON, inconsistent with the merged answer."""
 
 import argparse
 
-import pytest
-
 from dbaide import cli
 from dbaide.agent.multi import InstanceTarget
 from dbaide.core.result import WorkflowStatus
@@ -36,8 +34,7 @@ def test_multi_instance_cli_does_not_double_execute(monkeypatch):
     monkeypatch.setattr(cli, "WorkflowEngine", _boom)
 
     args = argparse.Namespace(
-        question="q", conn="a,b", database="", no_execute=False,
-        policy="safe-auto", limit=100, timeout=10,
+        question="q", conn="a,b", database="", limit=100, timeout=10,
     )
     result = cli.run_workflow_cli(cli.ConfigManager.__new__(cli.ConfigManager), args)
 

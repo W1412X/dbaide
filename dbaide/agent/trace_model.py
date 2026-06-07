@@ -51,11 +51,6 @@ class TraceNode:
     def agent_name(self) -> str:
         return localized_agent_label(self.agent) if self.agent else ""
 
-    # Backwards-compatible alias: a tool node's children are its sub-agent steps.
-    @property
-    def substeps(self) -> list["TraceNode"]:
-        return self.children
-
     @property
     def agents(self) -> list[str]:
         seen: list[str] = []
@@ -364,7 +359,7 @@ def localized_phase(stage: str, phase: str = "") -> str:
     stage = str(stage or "").strip()
     phase = str(phase or "").strip()
     for key in (f"trace.phase.{stage}", f"trace.phase.{phase}"):
-        if key.endswith("."):
+        if key == "trace.phase.":
             continue
         value = _t(key)
         if value != key:
@@ -387,10 +382,12 @@ def localized_node_head(node: "TraceNode") -> str:
     if node.agent:
         agent = localized_agent_label(node.agent)
         return _t("trace.subagent", agent=agent, title=title or localized_phase(stage, node.phase))
-    if title.startswith("Calling "):
-        return _t("trace.call_tool", tool=stage or title.removeprefix("Calling ").strip())
-    if title.endswith(" done"):
-        tool = stage or title.removesuffix(" done").strip()
+    called_tool = title.removeprefix("Calling ").strip()
+    if called_tool != title:
+        return _t("trace.call_tool", tool=stage or called_tool)
+    done_tool = title.removesuffix(" done").strip()
+    if done_tool != title:
+        tool = stage or done_tool
         return _t("trace.tool_done", tool=tool)
     chip = localized_type(node.node_type)
     base = localized_phase(stage, node.phase) or title

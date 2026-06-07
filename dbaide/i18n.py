@@ -113,6 +113,8 @@ _STRINGS: dict[str, dict[str, str]] = {
     "trace.view_failed": {"en": "View agent trace · failed", "zh": "查看执行轨迹 · 失败"},
     "trace.copy": {"en": "Copy trace", "zh": "复制轨迹"},
     "trace.copy_raw": {"en": "Copy raw JSON", "zh": "复制原始数据"},
+    "message.copy_selection": {"en": "Copy selection", "zh": "复制选中内容"},
+    "message.copy_message": {"en": "Copy message", "zh": "复制整条消息"},
     "trace.workflow": {"en": "Workflow", "zh": "执行流程"},
     "trace.idle": {"en": "Idle", "zh": "空闲"},
     "trace.done": {"en": "Done", "zh": "完成"},
@@ -242,7 +244,6 @@ _STRINGS: dict[str, dict[str, str]] = {
     "res.default_row_limit": {"en": "Default row limit", "zh": "默认行数上限"},
     "res.max_row_limit": {"en": "Large LIMIT confirmation threshold", "zh": "大 LIMIT 确认阈值"},
     "res.agent_max_steps": {"en": "Agent step budget", "zh": "Agent 步数预算"},
-    "res.agent_sql_retries": {"en": "SQL retry budget", "zh": "SQL 重试预算"},
     "res.big_table_rows": {"en": "Big-table threshold (rows)", "zh": "大表阈值（行）"},
     "res.explain_max_rows": {"en": "EXPLAIN cost gate (rows)", "zh": "EXPLAIN 成本闸（行）"},
     "res.join_sample_size": {"en": "Join sample size (rows)", "zh": "关联采样行数"},
@@ -559,8 +560,8 @@ def answer_language_directive(lang: str | None = None) -> str:
     """Instruction appended to prompts for the target answer language.
 
     Callers should pass the language detected from the user's current question.
-    Falling back to the UI language is only for legacy call sites and UI-owned prose.
-    SQL, identifiers and code are kept verbatim.
+    When no language is supplied, UI-owned prose uses the current interface
+    language. SQL, identifiers and code are kept verbatim.
     """
     code = normalize(lang if lang is not None else _current)
     target = "Simplified Chinese (简体中文)" if code == "zh" else "English"

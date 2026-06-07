@@ -20,7 +20,7 @@ def qapp():
 def test_completion_vocab_merges_keywords_and_schema(qapp):
     from dbaide.desktop.components.sql_editor import SqlEditor
     e = SqlEditor()
-    e.set_completions(["users", "orders", "user_id"])
+    e.set_schema({"tables": ["users", "orders"], "columns_by_table": {"orders": ["user_id"]}})
     words = set(e.completion_names())
     assert "SELECT" in words and "JOIN" in words  # keywords
     assert {"users", "orders", "user_id"} <= words  # schema identifiers
@@ -29,7 +29,7 @@ def test_completion_vocab_merges_keywords_and_schema(qapp):
 def test_insert_completion_replaces_current_word(qapp):
     from dbaide.desktop.components.sql_editor import SqlEditor
     e = SqlEditor()
-    e.set_completions(["users"])
+    e.set_schema({"tables": ["users"], "columns_by_table": {}})
     e.setPlainText("SELECT * FROM use")
     tc = e.textCursor(); tc.movePosition(QTextCursor.MoveOperation.End); e.setTextCursor(tc)
     assert e._current_prefix() == "use"

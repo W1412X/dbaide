@@ -1,8 +1,8 @@
 """Breadth stress-test of the Ask agent loop.
 
 Drives the REAL orchestrator/loop/toolkit/schema-link/validator/executor over a
-matrix of schemas x questions x execution policies (50+ full flows) plus the
-clarify→pause→resume path, asserting cross-cutting invariants. The point is to
+matrix of schemas x questions plus the clarify→pause→resume path, asserting
+cross-cutting invariants. The point is to
 exercise the agent's core control flow broadly and catch regressions that a
 single happy-path test would miss — not to test the LLM (a deterministic,
 state-driven mock stands in for it).
@@ -20,7 +20,6 @@ from dbaide.adapters import build_adapter
 from dbaide.agent.loop import AskAgentLoop
 from dbaide.agent.orchestrator import AskOrchestrator
 from dbaide.assets import AssetBuilder, AssetStore
-from dbaide.core.result import ExecutionPolicy
 from dbaide.llm import LLMClient, LLMMessage
 from dbaide.models import ConnectionConfig
 from dbaide.session import Session
@@ -151,8 +150,6 @@ _QUESTIONS = [
     ("data", "查询最近的数据"),
     ("data", "统计每个用户的订单数"),   # join intent → multi-table generate + join inference
 ]
-_POLICIES = [ExecutionPolicy.SAFE_AUTO, ExecutionPolicy.SQL_ONLY]
-_NO_EXEC = {ExecutionPolicy.SQL_ONLY, ExecutionPolicy.INSPECT_ONLY}
 
 
 @pytest.fixture(scope="module")
@@ -175,15 +172,13 @@ def _connections(tmp_path_factory):
 
 @pytest.mark.parametrize("sname", list(_SCHEMAS))
 @pytest.mark.parametrize("qkind,question", _QUESTIONS)
-@pytest.mark.parametrize("policy", _POLICIES)
-def test_agent_flow_matrix(_connections, sname, qkind, question, policy):
-    """50 full agent flows (5 schemas x 5 questions x 2 policies); each must obey the
+def test_agent_flow_matrix(_connections, sname, qkind, question):
+    """Full agent flows across schemas and questions; each must obey the
     cross-cutting invariants below."""
     cfg = _connections[sname]
     ref: dict = {}
     mock = _StressMock(ref)
-    orch = AskOrchestrator(build_adapter(cfg), Session(connection=cfg), mock,
-                           execution_policy=policy)
+    orch = AskOrchestrator(build_adapter(cfg), Session(connection=cfg), mock)
     ref["orch"] = orch
     resp = AskAgentLoop(orch).run(question, execute=True)
 
@@ -191,9 +186,6 @@ def test_agent_flow_matrix(_connections, sname, qkind, question, policy):
     waiting = getattr(resp, "status", "") == "wait_user"
     if not waiting:
         assert (resp.answer or "").strip(), "completed run has empty answer"
-    # Non-executing policy must never run the query.
-    if policy in _NO_EXEC:
-        assert resp.result is None, "non-exec policy produced an execution result"
     # Schema questions never fabricate an execution result.
     if qkind == "schema":
         assert resp.result is None
@@ -201,7 +193,7 @@ def test_agent_flow_matrix(_connections, sname, qkind, question, policy):
     if resp.result is not None:
         assert "partial" not in " ".join(resp.warnings or []).lower()
     # Executing data queries should actually return rows.
-    if qkind == "data" and policy not in _NO_EXEC and not waiting:
+    if qkind == "data" and not waiting:
         assert resp.result is not None, "executing data query produced no result"
 
 
@@ -211,8 +203,7 @@ def test_join_question_exercises_multi_table_path(_connections):
     cfg = _connections["shop"]
     ref: dict = {}
     mock = _StressMock(ref)
-    orch = AskOrchestrator(build_adapter(cfg), Session(connection=cfg), mock,
-                           execution_policy=ExecutionPolicy.SAFE_AUTO)
+    orch = AskOrchestrator(build_adapter(cfg), Session(connection=cfg), mock)
     ref["orch"] = orch
     resp = AskAgentLoop(orch).run("统计每个用户的订单数", execute=True)
     active = [c for c in orch.run_state.memory.schema_reports[-1].candidates if c.status == "active"]
@@ -236,8 +227,7 @@ def test_user_notes_reach_the_sql_writer(_connections, tmp_path):
 
     ref: dict = {}
     mock = _StressMock(ref)
-    orch = AskOrchestrator(build_adapter(cfg), Session(connection=cfg), mock,
-                           execution_policy=ExecutionPolicy.SAFE_AUTO, annotations=ann)
+    orch = AskOrchestrator(build_adapter(cfg), Session(connection=cfg), mock, annotations=ann)
     ref["orch"] = orch
 
     sql_prompts: list[str] = []
@@ -263,8 +253,7 @@ def test_user_notes_reach_the_sql_writer(_connections, tmp_path):
     sql_prompts.clear()
     ref2: dict = {}
     mock2 = _StressMock(ref2)
-    orch2 = AskOrchestrator(build_adapter(cfg), Session(connection=cfg), mock2,
-                            execution_policy=ExecutionPolicy.SAFE_AUTO, annotations=ann)
+    orch2 = AskOrchestrator(build_adapter(cfg), Session(connection=cfg), mock2, annotations=ann)
     ref2["orch"] = orch2
     inner2 = mock2.complete_json
 
@@ -298,8 +287,7 @@ def test_agent_annotate_object_persists(_connections, tmp_path):
     ann = AnnotationStore(base_dir=tmp_path / "ann")
     ref: dict = {}
     mock = _AnnotateMock(ref)
-    orch = AskOrchestrator(build_adapter(cfg), Session(connection=cfg), mock,
-                           execution_policy=ExecutionPolicy.SAFE_AUTO, annotations=ann)
+    orch = AskOrchestrator(build_adapter(cfg), Session(connection=cfg), mock, annotations=ann)
     ref["orch"] = orch
     resp = AskAgentLoop(orch).run("记住 orders 表已停用", execute=True)
     assert resp.status != "wait_user"
@@ -325,8 +313,7 @@ def test_profile_question_runs_column_stats(_connections):
     cfg = _connections["shop"]
     ref: dict = {}
     mock = _ProfileMock(ref)
-    orch = AskOrchestrator(build_adapter(cfg), Session(connection=cfg), mock,
-                           execution_policy=ExecutionPolicy.SAFE_AUTO)
+    orch = AskOrchestrator(build_adapter(cfg), Session(connection=cfg), mock)
     ref["orch"] = orch
 
     ran: dict[str, bool] = {}
@@ -363,8 +350,7 @@ def test_explain_diagnose_path(_connections):
     cfg = _connections["shop"]
     ref: dict = {}
     mock = _DiagnoseMock(ref)
-    orch = AskOrchestrator(build_adapter(cfg), Session(connection=cfg), mock,
-                           execution_policy=ExecutionPolicy.SAFE_AUTO)
+    orch = AskOrchestrator(build_adapter(cfg), Session(connection=cfg), mock)
     ref["orch"] = orch
     resp = AskAgentLoop(orch).run("解释这个查询为什么慢", execute=True)
     assert resp.status != "wait_user"
@@ -392,8 +378,7 @@ def test_multi_intent_runs_each_and_aggregates(_connections):
     cfg = _connections["shop"]
     ref: dict = {}
     mock = _MultiIntentMock(ref)
-    orch = AskOrchestrator(build_adapter(cfg), Session(connection=cfg), mock,
-                           execution_policy=ExecutionPolicy.SAFE_AUTO)
+    orch = AskOrchestrator(build_adapter(cfg), Session(connection=cfg), mock)
     ref["orch"] = orch
     resp = orch.run("有哪些表，以及统计订单数量", execute=True)  # NOTE: full entry (decomposes)
     assert getattr(resp, "status", "completed") != "wait_user"
@@ -423,8 +408,7 @@ def test_multi_intent_pause_in_first_resumes_whole_plan(_connections):
     cfg = _connections["shop"]
     ref: dict = {}
     mock = _MultiIntentPauseMock(ref, ambiguous=True)  # ambiguity pauses the data intent
-    orch = AskOrchestrator(build_adapter(cfg), Session(connection=cfg), mock,
-                           execution_policy=ExecutionPolicy.SAFE_AUTO)
+    orch = AskOrchestrator(build_adapter(cfg), Session(connection=cfg), mock)
     ref["orch"] = orch
 
     paused = orch.run("统计订单数量，以及有哪些表", execute=True)
@@ -444,8 +428,7 @@ def test_clarify_pause_then_resume_completes(_connections):
     cfg = _connections["shop"]
     ref: dict = {}
     mock = _StressMock(ref, ambiguous=True)
-    orch = AskOrchestrator(build_adapter(cfg), Session(connection=cfg), mock,
-                           execution_policy=ExecutionPolicy.SAFE_AUTO)
+    orch = AskOrchestrator(build_adapter(cfg), Session(connection=cfg), mock)
     ref["orch"] = orch
     first = AskAgentLoop(orch).run("统计订单数量", execute=True)
     assert first.status == "wait_user" and first.pending_question

@@ -2,12 +2,11 @@ from __future__ import annotations
 
 from typing import Any
 
-from PyQt6.QtCore import pyqtSignal
+from PyQt6.QtCore import QSize, Qt, pyqtSignal
 from PyQt6.QtWidgets import (
-    QFrame,
     QHBoxLayout,
     QLabel,
-    QTabBar,
+    QToolButton,
     QSizePolicy,
     QWidget,
 )
@@ -19,14 +18,87 @@ from dbaide.desktop.components.menu import MenuButton
 from dbaide.desktop.theme import Theme
 
 
-def _sep() -> QFrame:
-    """Vertical separator for the topbar."""
-    f = QFrame()
-    f.setFrameShape(QFrame.Shape.VLine)
-    f.setFixedWidth(1)
-    f.setFixedHeight(20)
-    f.setStyleSheet(f"background: {Theme.BORDER_SOFT}; border: none;")
-    return f
+class ModeSwitch(QWidget):
+    currentChanged = pyqtSignal(int)
+
+    def __init__(self, parent=None) -> None:
+        super().__init__(parent)
+        self.setObjectName("modeSwitch")
+        self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
+        self.setFixedSize(78, 30)
+        self._buttons: list[QToolButton] = []
+        self._current = -1
+        row = QHBoxLayout(self)
+        row.setContentsMargins(2, 2, 2, 2)
+        row.setSpacing(0)
+        self._row = row
+        self._apply_style()
+
+    def addTab(self, icon, text: str = "") -> int:  # noqa: N802 - QTabBar-compatible API
+        index = len(self._buttons)
+        btn = QToolButton(self)
+        btn.setObjectName("modeSwitchButton")
+        btn.setCheckable(True)
+        btn.setAutoRaise(True)
+        btn.setIcon(icon)
+        btn.setIconSize(QSize(16, 16))
+        btn.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonIconOnly)
+        btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        btn.setFixedSize(36, 26)
+        if text:
+            btn.setToolTip(text)
+        btn.clicked.connect(lambda _checked=False, i=index: self.setCurrentIndex(i))
+        self._buttons.append(btn)
+        self._row.addWidget(btn)
+        if self._current < 0:
+            self.setCurrentIndex(0, emit=False)
+        return index
+
+    def setTabToolTip(self, index: int, text: str) -> None:  # noqa: N802
+        if 0 <= index < len(self._buttons):
+            self._buttons[index].setToolTip(text)
+
+    def tabToolTip(self, index: int) -> str:  # noqa: N802
+        if 0 <= index < len(self._buttons):
+            return self._buttons[index].toolTip()
+        return ""
+
+    def currentIndex(self) -> int:  # noqa: N802
+        return self._current
+
+    def setCurrentIndex(self, index: int, *, emit: bool = True) -> None:  # noqa: N802
+        if not (0 <= index < len(self._buttons)) or index == self._current:
+            return
+        self._current = index
+        for i, btn in enumerate(self._buttons):
+            btn.setChecked(i == index)
+        if emit:
+            self.currentChanged.emit(index)
+
+    def _apply_style(self) -> None:
+        self.setStyleSheet(
+            f"""
+            QWidget#modeSwitch {{
+                background: transparent;
+                border: none;
+                border-radius: 9px;
+            }}
+            QToolButton#modeSwitchButton {{
+                background: transparent;
+                border: 1px solid transparent;
+                border-radius: 7px;
+                padding: 0;
+                margin: 0;
+            }}
+            QToolButton#modeSwitchButton:hover {{
+                background: {Theme.PANEL_2};
+            }}
+            QToolButton#modeSwitchButton:checked {{
+                background: {Theme.PANEL_2};
+                border: 1px solid {Theme.BORDER};
+            }}
+            """
+        )
 
 
 class TopBar(QWidget):
@@ -44,9 +116,7 @@ class TopBar(QWidget):
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
         self.setFixedHeight(42)
-        self.setStyleSheet(
-            f"background:{Theme.BG}; border-bottom:1px solid {Theme.BORDER_SOFT};"
-        )
+        self.setStyleSheet(f"background:{Theme.BG}; border:none;")
         row = QHBoxLayout(self)
         row.setContentsMargins(12, 0, 12, 0)
         row.setSpacing(4)
@@ -59,7 +129,7 @@ class TopBar(QWidget):
         )
         brand.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
         row.addWidget(brand)
-        row.addWidget(_sep())
+        row.addSpacing(8)
 
         from dbaide.i18n import t
 
@@ -79,13 +149,7 @@ class TopBar(QWidget):
 
         row.addStretch(1)
 
-        self.mode_tabs = QTabBar()
-        self.mode_tabs.setObjectName("modeTabs")
-        self.mode_tabs.setProperty("topMode", True)
-        self.mode_tabs.setDrawBase(False)
-        self.mode_tabs.setUsesScrollButtons(True)
-        self.mode_tabs.setExpanding(False)
-        self.mode_tabs.setMinimumWidth(190)
+        self.mode_tabs = ModeSwitch()
         row.addWidget(self.mode_tabs)
 
         # Status + overflow menu

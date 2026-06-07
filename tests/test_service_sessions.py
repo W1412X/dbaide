@@ -55,7 +55,7 @@ def _fake_result(*, status="completed", pending="", question="q", answer="a", sq
 
 
 def _req(question="q"):
-    return SimpleNamespace(question=question, execution_policy=SimpleNamespace(value="safe_auto"))
+    return SimpleNamespace(question=question)
 
 
 def test_completed_turn_is_recorded(service):

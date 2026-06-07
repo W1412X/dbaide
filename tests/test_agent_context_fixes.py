@@ -69,8 +69,8 @@ def test_loop_state_restore_tolerates_future_discovery_hit_shape(tmp_path):
         "execute_allowed": True,
         "answer_language": "zh-CN",
         "transcript": [],
-        "orchestrator": {
-            "_loop_discovery": {
+        "run_state": {
+            "discovery": {
                 "question": "q",
                 "hits": [{
                     "kind": "table",
@@ -98,17 +98,17 @@ def test_loop_state_restore_tolerates_corrupt_snapshot_shapes(tmp_path):
         "question": "q",
         "transcript": "not-a-list",
         "execute_allowed": True,
-        "orchestrator": {
-            "_loop_sql_confidence": "not-a-float",
-            "_loop_columns": "not-a-list",
-            "_loop_schemas": {"orders": ["bad", {"name": "id", "data_type": "int"}]},
-            "_loop_schema_db": "not-a-dict",
-            "_loop_relations": "not-a-list",
-            "_loop_pending_options": "not-a-list",
-            "_loop_pending_questions": "not-a-list",
-            "_loop_risk_confirmation": "not-a-dict",
-            "_loop_confirmed_risk_sqls": "not-a-list",
-            "_loop_clarifications": "not-a-list",
+        "run_state": {
+            "sql_confidence": "not-a-float",
+            "columns": "not-a-list",
+            "schemas": {"orders": ["bad", {"name": "id", "data_type": "int"}]},
+            "schema_db": "not-a-dict",
+            "relations": "not-a-list",
+            "pending_options": "not-a-list",
+            "pending_questions": "not-a-list",
+            "risk_confirmation": "not-a-dict",
+            "confirmed_risk_sqls": "not-a-list",
+            "clarifications": "not-a-list",
         },
     })
 
@@ -125,7 +125,7 @@ def test_loop_state_restore_tolerates_corrupt_snapshot_shapes(tmp_path):
 
     transcript, execute = restore_loop_state(orch, {
         "question": "q",
-        "orchestrator": ["not", "a", "dict"],
+        "run_state": ["not", "a", "dict"],
     })
 
     assert transcript == []
@@ -139,7 +139,7 @@ def test_loop_state_restore_initializes_missing_memory_goal(tmp_path):
         "question": "统计订单数量",
         "database": "main",
         "execute_allowed": False,
-        "orchestrator": {},
+        "run_state": {},
     })
 
     assert orch.run_state.memory.goal == "统计订单数量"
@@ -154,8 +154,6 @@ def test_confidence_none_when_no_sql_generated(tmp_path):
 
 
 def test_continue_multi_runs_all_remaining_intents(tmp_path):
-    from dbaide.agent.intent import SubIntent
-
     orch = _orch(tmp_path)
     # Simulate: intent i2 was paused and just resumed (its answer ready); i3 still to run.
     calls: list[str] = []
@@ -198,7 +196,7 @@ def test_multi_resume_uses_snapshot_database_for_remaining_intents(tmp_path):
         "question": "B",
         "database": "main",
         "execute_allowed": True,
-        "orchestrator": {},
+        "run_state": {},
         "multi": {
             "question": "A B C",
             "done": [],
@@ -264,7 +262,6 @@ def test_decision_prompt_requires_tool_evidence_before_clarification(tmp_path):
     prompt = loop.prompts.system_prompt(
         LoopState(question="q", database="", execute_allowed=True, answer_language="zh"),
         "ask_user: spec",
-        "safe_auto",
         "allowed",
     )
 
@@ -618,7 +615,13 @@ def test_confirmed_risk_execution_records_work_memory(tmp_path):
     orch.run_state.pending_question = "Execute risky SQL?"
     snapshot = dump_loop_state(orch, transcript=[], execute_allowed=True)
 
-    resp = AskAgentLoop(orch).run("yes", database="main", execute=True, resume_state=snapshot, user_reply="yes")
+    resp = AskAgentLoop(orch).run(
+        "execute anyway",
+        database="main",
+        execute=True,
+        resume_state=snapshot,
+        user_reply="execute anyway",
+    )
 
     assert resp.result is not None
     assert any(step.action == "execute_sql" for step in orch.run_state.memory.work_log)
@@ -722,9 +725,7 @@ def test_decision_retries_transient_llm_call_failure(tmp_path):
 
 def test_decision_does_not_retry_cancelled_llm_call(tmp_path):
     from dbaide.agent.loop import AskAgentLoop, LoopState
-
-    class CancelledError(Exception):
-        pass
+    from dbaide.core.cancellation import CancelledError
 
     class CancelLLM(LLMClient):
         def complete_json(self, messages, *, schema_hint=""):
@@ -741,7 +742,7 @@ def test_decision_does_not_retry_cancelled_llm_call(tmp_path):
         loop._decide(LoopState(question="q", database="", execute_allowed=True), [])
 
 
-def test_memory_compresses_tool_result_and_resolves_open_question():
+def test_memory_compresses_tool_result_without_keyword_resolving_open_question():
     from dbaide.agent.memory import AgentMemory
 
     mem = AgentMemory()
@@ -767,14 +768,14 @@ def test_memory_compresses_tool_result_and_resolves_open_question():
     )
 
     prompt = mem.prompt_block()
-    assert "order_data.fulfillment 表是否包含妥投时间字段" not in "\n".join(mem.open_questions)
-    assert any("delivered_at" in item for item in mem.resolved_questions)
+    assert "order_data.fulfillment 表是否包含妥投时间字段" in "\n".join(mem.open_questions)
+    assert mem.resolved_questions == []
     assert "Described order_data.fulfillment" in prompt
-    assert "Resolved Questions" in prompt
+    assert "Open Issues" in prompt
     assert "describe_table" in prompt and "Do Not Repeat Exactly" in prompt
 
 
-def test_memory_from_dict_tolerates_old_and_future_shapes():
+def test_memory_from_dict_restores_current_shapes_and_trims_unknown_fields():
     from dbaide.agent.memory import AgentMemory
 
     mem = AgentMemory.from_dict({
@@ -839,7 +840,7 @@ def test_memory_from_dict_tolerates_old_and_future_shapes():
     assert mem.next_archive_index == 5
 
 
-def test_memory_from_dict_trims_old_prompt_lists_and_keeps_unique_next_ids():
+def test_memory_from_dict_trims_prompt_lists_and_keeps_unique_next_ids():
     from dbaide.agent.memory import (
         AgentMemory,
         MAX_DO_NOT_REPEAT,
@@ -872,7 +873,7 @@ def test_memory_from_dict_trims_old_prompt_lists_and_keeps_unique_next_ids():
     assert mem.next_archive_index == 11
 
 
-def test_memory_from_dict_infers_work_index_from_archive_aliases():
+def test_memory_from_dict_infers_work_index_from_archive_source_refs():
     from dbaide.agent.memory import AgentMemory
 
     mem = AgentMemory.from_dict({
@@ -898,8 +899,6 @@ def test_memory_from_dict_does_not_split_string_list_fields():
             "id": "schema:1",
             "candidates": "abc",
             "actions_taken": "abc",
-            "joins": "abc",
-            "conflicts": "abc",
             "missing": "abc",
         }],
         "join_reports": [{
@@ -928,7 +927,6 @@ def test_memory_from_dict_does_not_split_string_list_fields():
     assert mem.excluded_paths == []
     assert mem.schema_reports[0].candidates == []
     assert mem.schema_reports[0].actions_taken == []
-    assert mem.schema_reports[0].joins == []
     assert mem.join_reports[0].tables == []
     assert mem.sql_artifacts[0].columns == []
     assert mem.archive[0].source_refs == []
@@ -1131,7 +1129,7 @@ def test_loop_blocks_repeated_tool_call_as_memory_not_raw_spam(tmp_path):
     assert len(orch.run_state.memory.work_log) == 1
 
 
-def test_sql_retry_budget_stops_bad_sql_loop(tmp_path):
+def test_total_step_budget_stops_repeated_bad_sql_loop(tmp_path):
     from dbaide.agent.loop import AskAgentLoop
 
     class BadSqlLLM(LLMClient):
@@ -1157,14 +1155,93 @@ def test_sql_retry_budget_stops_bad_sql_loop(tmp_path):
     conn.commit()
     conn.close()
     cfg = ConnectionConfig(name="local", type="sqlite", path=str(db))
-    session = Session(connection=cfg, agent_sql_retries=1, agent_max_steps=8)
+    session = Session(connection=cfg, agent_max_steps=3)
     orch = AskOrchestrator(build_adapter(cfg), session, BadSqlLLM())
 
     response = AskAgentLoop(orch).run("update t", disclosures_before=[])
 
-    assert orch.run_state.fail_reason.startswith("sql_repair_budget_exhausted")
-    assert any("sql_repair_budget_exhausted" in warning for warning in response.warnings)
-    assert orch.llm.decisions == 2
+    assert orch.run_state.fail_reason == "step_budget_exhausted"
+    assert any("step_budget_exhausted" in warning for warning in response.warnings)
+    assert orch.llm.decisions == 3
+
+
+def test_exploratory_sql_failure_enters_memory_and_loop_can_finish(tmp_path):
+    from dbaide.agent.loop import AskAgentLoop
+
+    class BadProbeThenFinishLLM(LLMClient):
+        def __init__(self):
+            self.loop_calls = 0
+
+        def complete_json(self, messages, *, schema_hint=""):
+            system = messages[0].content if messages else ""
+            if "operating in a tool loop" not in system:
+                return {}
+            self.loop_calls += 1
+            if self.loop_calls == 1:
+                return {
+                    "action": "call_tool",
+                    "tool": "execute_readonly_sql",
+                    "args": {
+                        "sql": "SELECT * FROM missing_table",
+                        "database": "main",
+                        "purpose": "probe a possible table",
+                    },
+                    "thought": "Try a quick exploratory probe.",
+                }
+            assert any("Tool `execute_readonly_sql` → ERROR" in msg.content for msg in messages)
+            return {
+                "action": "finish",
+                "answer": "探索 SQL 失败已记录；我会基于已有证据继续回答。",
+            }
+
+        def complete_text(self, messages):
+            return "ok"
+
+    db = tmp_path / "bad_probe.db"
+    conn = sqlite3.connect(db)
+    conn.executescript("CREATE TABLE t(id INTEGER PRIMARY KEY);")
+    conn.commit()
+    conn.close()
+    cfg = ConnectionConfig(name="local", type="sqlite", path=str(db))
+    session = Session(connection=cfg, agent_max_steps=6)
+    llm = BadProbeThenFinishLLM()
+    orch = AskOrchestrator(build_adapter(cfg), session, llm)
+
+    response = AskAgentLoop(orch).run("where is product attribute", database="main", disclosures_before=[])
+
+    assert "探索 SQL 失败已记录" in response.answer
+    assert orch.run_state.fail_reason == ""
+    assert llm.loop_calls == 2
+    assert any(
+        step.action == "execute_readonly_sql" and step.status == "failed"
+        for step in orch.run_state.memory.work_log
+    )
+    assert any("missing_table" in item for item in orch.run_state.memory.do_not_repeat)
+
+
+def test_default_agent_tool_surface_contains_sql_and_metadata_tools(tmp_path):
+    from dbaide.agent.loop import AskAgentLoop
+
+    db = tmp_path / "policy_tools.db"
+    conn = sqlite3.connect(db)
+    conn.execute("CREATE TABLE t(id INTEGER PRIMARY KEY)")
+    conn.commit()
+    conn.close()
+    cfg = ConnectionConfig(name="local", type="sqlite", path=str(db))
+
+    orch = AskOrchestrator(
+        build_adapter(cfg),
+        Session(connection=cfg),
+        _MockLLM(),
+    )
+    tools = AskAgentLoop(orch).allowed_tool_names
+    assert "inspect_metadata" in tools
+    assert "profile_table" in tools
+    assert "generate_sql" in tools
+    assert "validate_sql" in tools
+    assert "execute_sql" in tools
+    assert "execute_readonly_sql" in tools
+    assert "explain_sql" in tools
 
 
 def test_execute_sql_tool_returns_actual_database(tmp_path):
@@ -1186,7 +1263,7 @@ def test_execute_sql_tool_returns_actual_database(tmp_path):
     result = registry.invoke(
         "execute_sql",
         {"sql": "SELECT id FROM t", "limit": 10},
-        ToolContext(execution_policy="safe_auto"),
+        ToolContext(),
     )
 
     assert result.ok
@@ -1209,7 +1286,7 @@ def test_execute_sql_invalid_sql_sets_repair_feedback(tmp_path):
     result = build_tool_registry(orch).invoke(
         "execute_sql",
         {"sql": "UPDATE t SET id = 2", "database": "main"},
-        ToolContext(execution_policy="safe_auto"),
+        ToolContext(),
     )
 
     assert not result.ok
@@ -1327,7 +1404,13 @@ def test_confirmed_exploratory_sql_does_not_become_final_result(tmp_path):
     orch.run_state.pending_question = "Execute risky exploratory SQL?"
     snapshot = dump_loop_state(orch, transcript=[], execute_allowed=True)
 
-    resp = AskAgentLoop(orch).run("yes", database="main", execute=True, resume_state=snapshot, user_reply="yes")
+    resp = AskAgentLoop(orch).run(
+        "execute anyway",
+        database="main",
+        execute=True,
+        resume_state=snapshot,
+        user_reply="execute anyway",
+    )
 
     assert resp.answer == "Exploration approved and recorded."
     assert resp.result is None
@@ -1357,7 +1440,7 @@ def test_default_sql_artifact_ids_remain_unique_after_trim(tmp_path):
         result = registry.invoke(
             "execute_readonly_sql",
             {"sql": "SELECT id FROM t", "database": "main"},
-            ToolContext(execution_policy="safe_auto"),
+            ToolContext(),
         )
         assert result.ok
         ids.append(result.data["artifact_id"])
@@ -1412,7 +1495,7 @@ def test_exploratory_sql_does_not_create_stale_final_result(tmp_path):
     orch = AskOrchestrator(build_adapter(cfg), Session(connection=cfg), SqlWriterLLM())
     orch._reset_loop_state("q", "main", True)
     registry = build_tool_registry(orch)
-    ctx = ToolContext(execution_policy="safe_auto")
+    ctx = ToolContext()
 
     executed = registry.invoke(
         "execute_readonly_sql",
@@ -1459,6 +1542,7 @@ def test_resume_clarification_deduplicates_confirmed_criteria(tmp_path):
 
 
 def test_tool_registry_checks_cancel_before_handler():
+    from dbaide.core.cancellation import CancelledError
     from dbaide.tools.registry import ToolContext, ToolRegistry
     from dbaide.tools.specs import ToolSpec
 
@@ -1472,30 +1556,29 @@ def test_tool_registry_checks_cancel_before_handler():
 
     registry.register(ToolSpec(name="x", description="test"), handler)
 
-    with pytest.raises(RuntimeError, match="cancelled"):
-        registry.invoke("x", {}, ToolContext(cancel_check=lambda: (_ for _ in ()).throw(RuntimeError("cancelled"))))
+    with pytest.raises(CancelledError):
+        registry.invoke("x", {}, ToolContext(cancel_check=lambda: (_ for _ in ()).throw(CancelledError())))
 
     assert called is False
 
 
 def test_tool_registry_propagates_cancel_from_handler():
+    from dbaide.core.cancellation import CancelledError
     from dbaide.tools.registry import ToolContext, ToolRegistry
     from dbaide.tools.specs import ToolSpec
 
     registry = ToolRegistry()
 
     def handler(_args, _ctx):
-        raise RuntimeError("Task cancelled by user")
+        raise CancelledError()
 
     registry.register(ToolSpec(name="x", description="test"), handler)
 
-    with pytest.raises(RuntimeError, match="cancelled"):
+    with pytest.raises(CancelledError):
         registry.invoke("x", {}, ToolContext())
 
 
 def test_continue_multi_repause_keeps_plan(tmp_path):
-    from dbaide.agent.intent import SubIntent
-
     orch = _orch(tmp_path)
 
     def fake_run_single(text, **kw):

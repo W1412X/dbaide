@@ -1,8 +1,7 @@
-import pytest
 from dbaide.validation.sql_guard import SQLGuard, _strip_strings_and_comments
 from dbaide.validation.schema_guard import SchemaGuard
 from dbaide.context.disclosure import DisclosureContext
-from dbaide.models import ColumnInfo, TableInfo
+from dbaide.models import TableInfo
 
 
 class TestSQLGuardEdgeCases:
@@ -148,3 +147,14 @@ class TestSchemaGuardEdgeCases:
         ctx.record_tables([TableInfo(name="users")], instance="local", database="main")
         result = SchemaGuard().validate('SELECT * FROM "main"."users"', ctx)
         assert result.ok
+
+    def test_duplicate_bare_table_requires_qualification(self):
+        ctx = DisclosureContext()
+        ctx.record_tables([TableInfo(name="orders")], instance="local", database="sales")
+        ctx.record_tables([TableInfo(name="orders")], instance="local", database="archive")
+
+        bare = SchemaGuard().validate("SELECT * FROM orders", ctx)
+        qualified = SchemaGuard().validate("SELECT * FROM sales.orders", ctx)
+
+        assert not bare.ok
+        assert qualified.ok

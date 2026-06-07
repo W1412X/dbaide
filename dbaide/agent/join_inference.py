@@ -241,7 +241,7 @@ def _system_prompt() -> str:
         "Use column semantics, comments, table summaries, types, and the user question.\n"
         "You are the primary judge — propose joins the business needs even when types differ "
         "(explain casts or conversions in reason).\n"
-        "Do NOT use column-name pattern rules (e.g. never assume *_id implies a table).\n"
+        "Do NOT infer relationships from names alone; use supplied schema, notes, declared FKs, and evidence.\n"
         "Return JSON only:\n"
         '{"joins":[{"left_table":"...","left_column":"...","right_table":"...","right_column":"...",'
         '"confidence":0.0,"reason":"..."}]}\n'

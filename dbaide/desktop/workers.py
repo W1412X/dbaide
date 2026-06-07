@@ -5,11 +5,8 @@ from typing import Any
 from PyQt6 import sip
 from PyQt6.QtCore import QObject, QRunnable, pyqtSignal
 
+from dbaide.core.cancellation import CancelledError
 from dbaide.desktop.service import DesktopService
-
-
-class CancelledError(Exception):
-    """Raised when the user cancels an in-flight desktop worker task."""
 
 
 class WorkerSignals(QObject):

@@ -15,6 +15,7 @@ class TaskType(str, Enum):
 
 _VALID_TYPES = {"sqlite", "mysql", "mariadb", "postgres", "postgresql"}
 _VALID_LOAD_PROFILES = {"production", "staging", "dev"}
+_VALID_MODEL_PROVIDERS = {"none", "openai_compatible"}
 
 
 class ConnectionConfig:
@@ -73,6 +74,10 @@ class ModelConfig:
     ) -> None:
         self.name = name
         self.provider = str(provider or "none").strip().lower()
+        if self.provider not in _VALID_MODEL_PROVIDERS:
+            raise ValueError(
+                f"Invalid model provider: {self.provider!r}. Supported: {', '.join(sorted(_VALID_MODEL_PROVIDERS))}"
+            )
         self.base_url = str(base_url or "")
         self.api_key_env = str(api_key_env or "")
         self.api_key = str(api_key or "")

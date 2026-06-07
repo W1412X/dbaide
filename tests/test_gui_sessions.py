@@ -24,7 +24,7 @@ def _turns():
          "selected_sql": "SELECT COUNT(*) FROM orders WHERE status='paid'", "status": "completed",
          "trace": [{"stage": "execute_sql", "title": "execute_sql done", "status": "completed",
                     "kind": "tool", "step": 1, "row_count": 3, "duration_ms": 5}],
-         "meta": {"database": "", "policy": "safe_auto"}},
+         "meta": {"database": ""}},
         {"question": "and refunded?", "answer_markdown": "Just 1.", "selected_sql": "",
          "status": "completed", "trace": [], "meta": {}},
     ]

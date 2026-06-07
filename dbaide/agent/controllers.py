@@ -4,7 +4,7 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from dbaide.core.result import ExecutionPolicy, ValidationReport
+from dbaide.core.result import ValidationReport
 
 logger = logging.getLogger("dbaide.agent.controllers")
 
@@ -43,7 +43,6 @@ class RiskController:
     def decide(
         self,
         *,
-        policy: ExecutionPolicy,
         validation: ValidationReport,
         plan_confidence: float = 0.0,
         table_count: int = 1,
@@ -54,19 +53,9 @@ class RiskController:
     ) -> RiskDecision:
         """Decide whether to execute, confirm, or reject."""
 
-        # Policy: inspect only - never execute
-        if policy == ExecutionPolicy.INSPECT_ONLY:
-            return RiskDecision("reject", "Inspect-only policy", "low")
-
-        # Policy: SQL only - generate but don't execute
-        if policy == ExecutionPolicy.SQL_ONLY:
-            return RiskDecision("generate_only", "SQL-only policy", "low")
-
         # Validation failed - reject
         if not validation.ok:
             return RiskDecision("reject", "SQL validation failed", "rejected")
-
-        # ── Hard gates below apply to ALL policies, including EXPERT ──────────
 
         # EXPLAIN cost gate: estimated scan far too large.
         if explain_max_rows > 0 and estimated_rows is not None and estimated_rows > explain_max_rows:
@@ -85,10 +74,6 @@ class RiskController:
                 "high",
                 requires_confirmation=True,
             )
-
-        # ── Policy: expert - allow more (but only after the hard gates above) ─
-        if policy == ExecutionPolicy.EXPERT:
-            return RiskDecision("auto_execute", "Expert policy, low risk", "low")
 
         # Low confidence plan
         if plan_confidence < 0.65:
@@ -147,16 +132,7 @@ class ResultInterpreter:
         parts = []
 
         if row_count == 0:
-            if zh:
-                parts.append("查询未返回任何行，可能原因：")
-                parts.append("- 筛选条件过严或字段值不匹配")
-                parts.append("- 目标表当前没有符合条件的数据")
-                parts.append("- 关联的表或时间范围不正确")
-            else:
-                parts.append("The query returned no rows. This could mean:")
-                parts.append("- The filter conditions are too restrictive")
-                parts.append("- The data doesn't match the expected criteria")
-                parts.append("- The table is empty")
+            parts.append("查询未返回任何行。" if zh else "The query returned no rows.")
         elif row_count == 1:
             parts.append("查询返回 1 条记录。" if zh else "The query returned 1 row.")
         else:
@@ -175,9 +151,9 @@ class ResultInterpreter:
 
         if elapsed_ms > 5000:
             parts.append(
-                f"查询耗时 {elapsed_ms / 1000:.1f}s，可考虑加索引或缩小范围。"
+                f"查询耗时 {elapsed_ms / 1000:.1f}s。"
                 if zh
-                else f"Query took {elapsed_ms/1000:.1f}s - consider adding indexes or reducing scope."
+                else f"Query took {elapsed_ms/1000:.1f}s."
             )
 
         if warnings:
@@ -186,25 +162,10 @@ class ResultInterpreter:
             for w in warnings:
                 parts.append(f"  - {w}")
 
-        assumptions = []
-        if "date" in sql.lower() or "time" in sql.lower():
-            assumptions.append("查询包含时间筛选" if zh else "Query involves date/time filtering")
-        if "join" in sql.lower():
-            assumptions.append("查询涉及多表关联" if zh else "Query joins multiple tables")
-
-        next_actions = []
-        if row_count == 0:
-            next_actions.append("放宽 WHERE 条件或检查样例数据" if zh else "Try relaxing filter conditions")
-            next_actions.append("确认表名、字段名和时间范围" if zh else "Check if the table has data")
-        elif truncated:
-            next_actions.append("增加更具体的筛选以减少结果集" if zh else "Add more specific filters to reduce result set")
-        if elapsed_ms > 10000:
-            next_actions.append("运行 EXPLAIN 查看执行计划" if zh else "Consider running EXPLAIN to check query plan")
-
         return {
             "summary": "\n".join(parts),
-            "assumptions": assumptions,
-            "next_actions": next_actions,
+            "assumptions": [],
+            "next_actions": [],
             "row_count": row_count,
             "elapsed_ms": elapsed_ms,
         }

@@ -8,7 +8,7 @@ Core philosophy (Codex-style):
 
 - **LLM decides** what to do next and how to write SQL.
 - **Tools provide evidence** (schema, joins, validation, samples)—not hard business rules disguised as heuristics.
-- **Code enforces safety** (validation, execution policy, risk gate, budgets).
+- **Code enforces safety** (validation, read-only execution, risk gate, budgets).
 - **Progressive disclosure**—never dump the whole database into the prompt at once.
 
 Offline assets accelerate discovery; live adapters remain the fallback when assets are missing or stale.
@@ -33,8 +33,7 @@ flowchart TB
     subgraph Online["Online Ask path"]
         DA["DataAssistant.ask()"]
         ORCH["AskOrchestrator.run()"]
-        LOOP["AskAgentLoop<br/>primary · 12-step budget"]
-        STAGED["Staged pipeline<br/>fallback"]
+        LOOP["AskAgentLoop<br/>single tool loop"]
     end
 
     subgraph Output["Output"]
@@ -47,9 +46,7 @@ flowchart TB
     WF --> DA
     DA --> ORCH
     ORCH --> LOOP
-    LOOP -->|fail / budget exhausted| STAGED
     LOOP --> AR
-    STAGED --> AR
     AR --> WR
 
     BA --> AS
@@ -156,7 +153,6 @@ flowchart LR
 |-------|---------|
 | `question` | Natural language question |
 | `database_scope` | Optional database filter |
-| `execution_policy` | `safe_auto` / `sql_only` / `inspect_only` / `expert` |
 | `resume_state` + `user_reply` | Resume after `ask_user` clarification |
 
 **Output (`WorkflowResult` / `AssistantResponse`):**
@@ -166,7 +162,7 @@ flowchart LR
 | `answer` | Markdown answer |
 | `sql` | Generated SQL (if any) |
 | `result` | Query rows (if executed) |
-| `warnings` | Policy blocks, fallback notices, risk confirms |
+| `warnings` | Loop failure notices, risk confirmations, execution warnings |
 | `status` | `completed` / `wait_user` / `failed` / `cancelled` |
 | `resume_state` | Serialized loop state when waiting for user |
 
@@ -176,7 +172,6 @@ flowchart LR
 flowchart TB
     subgraph Req["Input"]
         Q["question"]
-        POL["execution_policy"]
         RS["resume_state (optional)"]
     end
 
@@ -206,11 +201,10 @@ flowchart TB
     ENV -->|OK| DA --> Loop
 
     DEC --> T1 --> T2 --> T2A --> T3 --> T4 --> T5
-    T5 -->|sql_only / no execute| FIN
     T5 --> T6
     T6 --> RC
     RC -->|auto_execute| EXEC["QueryTools.execute_sql<br/>read-only + LIMIT"]
-    RC -->|confirm / blocked| BLOCK["Return SQL + reason<br/>no execution"]
+    RC -->|confirm| PAUSE2["status=wait_user<br/>risk confirmation"]
     EXEC --> FIN
     T7 --> PAUSE["status=wait_user"]
     DEC --> FIN
@@ -221,7 +215,7 @@ flowchart TB
 | Tool | Input | Output |
 |------|-------|--------|
 | `discover_schema` | `question` | `hits[]`, `trace` |
-| `describe_table` | `table`, `database?` | `columns[]` → `_loop_schemas` |
+| `describe_table` | `table`, `database?` | `columns[]` → `run_state.schemas` |
 | `get_relations` | disclosed tables | `relations[]` + confidence; may persist agent candidates |
 | `generate_sql` | question + schemas + relations | `sql`, `rationale`, `confidence` |
 | `validate_sql` | `sql` | `ok`, `normalized_sql`, `issues`, `risk_level` |
@@ -246,31 +240,30 @@ flowchart LR
 
 ---
 
-## Phase 3: Staged Fallback
+## Phase 3: Loop Failure Handling
 
-When the tool loop returns `None` (invalid decision, step budget exhausted, exception), the orchestrator runs a staged pipeline that **reuses warm loop state** when available.
+There is one Ask execution path: the LLM tool loop. Tool failures are recorded
+into working memory as observations, and the next LLM decision chooses whether to
+retry with different evidence, inspect another path, ask the user, or finish from
+the available evidence. Invalid LLM decisions are retried in-place with a repair
+message; after repeated invalid decisions or a total step-budget exhaustion, the
+workflow returns an honest failed or partial response instead of degrading into a
+second pipeline.
 
 ```mermaid
 flowchart TB
-    LOOP_FAIL["Loop returns None"]
-    LOOP_FAIL --> REUSE["Reuse _loop_discovery<br/>_loop_schemas<br/>_loop_relations"]
-    REUSE --> ROUTE["TaskRouter.route(question)"]
-    ROUTE --> P1["schema_explore"]
-    ROUTE --> P2["data_profile"]
-    ROUTE --> P3["sql_diagnose / rewrite"]
-    ROUTE --> P4["data_query (default)"]
-
-    P4 --> DISC["discover / pick_table"]
-    DISC --> DESC["describe_table(s)"]
-    DESC --> REL["collect_relations"]
-    REL --> GEN["SQLWriter.write()"]
-    GEN --> VAL["validate_sql · up to 2 retries"]
-    VAL --> RISK["RiskController"]
-    RISK --> EXEC2["execute_sql or SQL-only response"]
-    EXEC2 --> RESP["AssistantResponse + warning:<br/>Tool loop unavailable"]
+    TOOL["Tool call"]
+    TOOL -->|ok| MEM1["Record result in working memory"]
+    TOOL -->|failed| MEM2["Record error + args in working memory"]
+    MEM1 --> DEC["Next LLM decision"]
+    MEM2 --> DEC
+    DEC -->|retry with changed args/tool| TOOL
+    DEC -->|needs business intent| ASK["ask_user → WAIT_USER"]
+    DEC -->|enough evidence| FIN["finish"]
+    DEC -->|invalid JSON/action| REPAIR["decision retry with error feedback"]
+    REPAIR --> DEC
+    DEC -->|budget exhausted| FAIL["failed/partial response + warning"]
 ```
-
-Both paths share: `collect_relations`, `SQLWriter`, `validate_sql`, `RiskController`, `ResultInterpreter`.
 
 ---
 
@@ -319,33 +312,25 @@ User catalog joins (0.99) and strong FK edges typically pass; low-confidence sem
 flowchart TB
     subgraph Layers["Layered handling"]
         L1["Tool layer · ToolResult<br/>ok=false + DBAideError<br/>retryable flag"]
-        L2["Loop layer<br/>unknown tool → transcript retry<br/>bad decision → 3 retries → fallback<br/>12 steps exhausted → fallback"]
+        L2["Loop layer<br/>unknown tool → transcript retry<br/>bad decision → 3 retries<br/>step budget exhausted → failed/partial"]
         L3["Workflow layer<br/>connection fail → FAILED<br/>user cancel → CANCELLED<br/>ask_user → WAIT_USER"]
-        L4["Staged layer · ErrorRouter<br/>SQL exec fail → rerender_sql (budget)<br/>budget exhausted → error + SQL"]
-        L5["Risk layer · RiskController<br/>reject / confirm / auto_execute"]
+        L4["Risk layer · RiskController<br/>reject / confirm / auto_execute"]
     end
 
     L1 --> L2 --> L3
-    L2 -->|fallback| L4
-    L4 --> L5
+    L2 --> L4
 ```
 
 | Scenario | Strategy | User-visible |
 |----------|----------|--------------|
 | No LLM configured | Loop skipped; prompt to configure Models | Settings guidance |
 | No offline assets | `discover_schema` uses live catalog | Trace suggests build assets |
-| `validate_sql` unknown table/column | Feedback → `describe_table` → retry `generate_sql` | Self-heal in loop transcript |
-| Execute blocked by policy | `blocked: true` + SQL | SQL shown + reason |
+| `validate_sql` invalid schema references | Feedback → inspect relevant objects → retry corrected SQL | Self-heal in loop transcript |
+| Risky read-only SQL | Risk confirmation pause with exact SQL + reason | User approves or cancels |
 | Low join confidence | `confirm`, no auto execute | SQL shown; manual confirm |
-| Loop failure overall | Staged pipeline + warning | Answer/SQL still possible |
+| Loop failure overall | Honest failed/partial response + warning | No silent alternate pipeline |
 | Partial asset build | Errors in `BuildStats.errors` | Partial ready state |
-| SQL execution error | `ErrorRouter` → one self-correction attempt | Error + optional corrected SQL |
-
-### ErrorRouter repair budget
-
-- Max **2 repairs per stage**, **5 total** per workflow.
-- Maps error codes to actions: `REFRESH_SCHEMA`, `RERENDER_SQL`, `REPLAN`, `ASK_USER`, `STOP`, etc.
-- Used primarily in staged execution path after SQL failures.
+| SQL execution error | Error recorded in memory; LLM decides next action | Retry with changed SQL/tool or explain failure |
 
 ---
 
@@ -359,11 +344,11 @@ flowchart LR
         HI[("Workflow history")]
     end
 
-    subgraph Runtime["_loop_* session state"]
-        LD["_loop_discovery"]
-        LS["_loop_schemas"]
-        LR["_loop_relations"]
-        LQ["_loop_sql / _loop_query_result"]
+    subgraph Runtime["run_state session state"]
+        LD["discovery"]
+        LS["schemas"]
+        LR["relations"]
+        LQ["sql / query_result"]
     end
 
     AS -->|discover / FK| LD
@@ -385,7 +370,7 @@ WorkflowEngine
   connection check, trace, WorkflowResult assembly
 
 DataAssistant / AskOrchestrator
-  routes to loop or staged pipeline
+  routes to the single Ask tool loop
 
 AskAgentLoop
   LLM tool-calling loop, auto get_relations, ask_user pause/resume
@@ -397,7 +382,7 @@ Agent helpers
   ProgressiveSchemaAgent, SemanticJoinInferencer, SQLWriter, JoinSampleValidator
 
 Controllers
-  RiskController (execute gate), ResultInterpreter, ErrorRouter
+  RiskController (execute gate), ResultInterpreter
 
 Assets
   AssetBuilder, AssetStore, AssetSummarizer, ColumnProfiler
@@ -427,14 +412,12 @@ Adapters are the only layer that knows driver details.
 - Read-only execution mode where the driver supports it.
 - Result explanation based on **actual returned rows**, not fabrication.
 
-### Execution policies
+### Execution mode
 
-| Policy | Behavior |
-|--------|----------|
-| `safe_auto` | Validate + risk gate; auto execute when low risk |
-| `expert` | Relaxed auto execute (still bound by the hard gates below) |
-| `sql_only` | Generate and validate; never execute |
-| `inspect_only` | Schema/profile answers; reject execution |
+DBAide exposes one mode: guarded read-only execution. The agent may generate,
+validate, diagnose, and run read-only SQL. SQL that passes validation and risk
+checks executes automatically; risky-but-read-only SQL pauses and asks the user
+for confirmation with the exact SQL and reason.
 
 ---
 
@@ -471,7 +454,6 @@ New connections default to **production**.
 | `max_row_limit` (hard) | 1000 | 5000 | 50000 |
 | `big_table_rows` | 1e6 | 5e6 | 5e7 |
 | `explain_max_rows` | 5e6 | 2e7 | 2e8 |
-| `max_join_tables` | 3 | 4 | 6 |
 
 ### Invariants
 
@@ -484,9 +466,9 @@ New connections default to **production**.
 - **Execution is audited** — `QueryLog` records caller, SQL, elapsed, rows, and status
   for every query. Inspect with `dbaide queries <conn> --tail N`, the GUI trace
   (agent SQL), or the jsonl file directly.
-- **Agent hard gates** (apply to `expert` too): `LIMIT` above `max_row_limit` is
-  rejected; unfiltered `SELECT *` is force-limited; `EXPLAIN` row estimate above
-  `explain_max_rows` requires confirmation; joins beyond `max_join_tables` require
+- **Agent hard gates**: `LIMIT` above `max_row_limit` requires confirmation;
+  unfiltered `SELECT *` is force-limited; `EXPLAIN` row estimate above
+  `explain_max_rows` requires confirmation; low-confidence joins require
   confirmation.
 
 ### Recommended production workflow
@@ -504,7 +486,7 @@ dbaide queries prod --tail 50
 
 ## Design Principles (anti-complexity)
 
-1. **Two execution paths, one core** — Loop decides steps; staged fallback reuses the same SQL/join/risk stack.
+1. **One execution path** — The Ask loop decides steps; failures become memory, not a hidden fallback pipeline.
 2. **Assets are an accelerator, not a hard dependency** — Live discovery works when assets are missing.
 3. **Join catalog is a fact layer** — User pins at 0.99; agent reads, does not CRUD during queries.
 4. **Risk gate only at execute** — Validation checks syntax/safety; `RiskController` checks whether to run.

@@ -172,7 +172,7 @@ class ProfileTools:
         for i, (cname, metric) in enumerate(layout):
             v = vals[i] if i < len(vals) else None
             out.setdefault(cname, {})[metric] = (
-                round(float(v), 4) if metric.endswith("_rate") and v is not None else truncate_cell(v)
+                round(float(v), 4) if _is_rate_metric(metric) and v is not None else truncate_cell(v)
             )
         return out
 
@@ -208,7 +208,7 @@ class ProfileTools:
                 vals = list(row.values())
                 for i, name in enumerate(names):
                     v = vals[i] if i < len(vals) else None
-                    stats[name] = round(float(v), 4) if name.endswith("_rate") and v is not None else truncate_cell(v)
+                    stats[name] = round(float(v), 4) if _is_rate_metric(name) and v is not None else truncate_cell(v)
             except Exception as exc:  # surface as a note rather than failing the tool
                 stats["error"] = str(exc)
         if "top_values" in metrics:
@@ -240,3 +240,7 @@ class ProfileTools:
             if any((doc.get("name") == table or doc.get("table") == table) for doc in self.assets.table_docs(self.instance, db_name, fingerprint=self.fingerprint)):
                 matches.append(db_name)
         return matches[0] if len(matches) == 1 else ""
+
+
+def _is_rate_metric(name: str) -> bool:
+    return str(name or "").rsplit("_", 1)[-1] == "rate"

@@ -49,7 +49,7 @@ def test_thought_attaches_to_next_step():
     assert m.steps[0].thought == "I should read the orders table"
 
 
-def test_substeps_nest_under_parent_and_count_agents():
+def test_children_nest_under_parent_and_count_agents():
     m = TraceModel()
     _feed(m, [
         progress_event(stage="execute_sql", title="Calling execute_sql", status="running", kind="tool", step=1),
@@ -57,7 +57,7 @@ def test_substeps_nest_under_parent_and_count_agents():
         subagent_event(agent="explain", title="EXPLAIN ~10 rows", parent="execute_sql", status="completed"),
     ])
     step = m.steps[0]
-    assert len(step.substeps) == 2
+    assert len(step.children) == 2
     assert "Risk gate" in step.agents
     assert "Cost estimate" in step.agents
 

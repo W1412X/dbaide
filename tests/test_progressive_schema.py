@@ -2,7 +2,6 @@ import sqlite3
 
 import pytest
 
-from dbaide.adapters import build_adapter
 from dbaide.agent.progressive_schema import ProgressiveSchemaAgent
 from dbaide.assets import AssetStore
 from dbaide.config import ConfigManager

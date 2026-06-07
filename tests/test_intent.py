@@ -5,7 +5,7 @@ answer + nested, non-colliding trace nodes)."""
 import sqlite3
 
 from dbaide.adapters import build_adapter
-from dbaide.agent.intent import IntentDecomposer, SubIntent
+from dbaide.agent.intent import IntentDecomposer
 from dbaide.agent.orchestrator import AskOrchestrator
 from dbaide.agent.progressive_schema import DiscoveryResult, SchemaHit
 from dbaide.agent.trace_model import TraceModel

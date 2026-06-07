@@ -182,9 +182,6 @@ class SqlTab(QWidget):
     def set_sql(self, sql: str) -> None:
         self.editor.setPlainText(sql)
 
-    def set_completions(self, names: list[str]) -> None:
-        self.editor.set_completions(names)
-
     def set_schema(self, schema: dict) -> None:
         self.editor.set_schema(schema)
 

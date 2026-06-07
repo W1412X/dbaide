@@ -2,7 +2,7 @@
 
 This module intentionally does not decide the final schema. It gathers only
 schema evidence the main loop can reason over: candidate tables, user notes,
-columns, asset metadata, conflicts, and missing signals.
+columns, asset metadata, and missing signals.
 """
 
 from __future__ import annotations
@@ -25,7 +25,6 @@ class SchemaContextReport:
     request: str
     actions_taken: list[str] = field(default_factory=list)
     candidates: list[SchemaCandidate] = field(default_factory=list)
-    conflicts: list[dict[str, Any]] = field(default_factory=list)
     missing: list[str] = field(default_factory=list)
     source_summary: str = ""
 
@@ -35,8 +34,6 @@ class SchemaContextReport:
             request=self.request,
             actions_taken=list(self.actions_taken),
             candidates=list(self.candidates),
-            joins=[],
-            conflicts=list(self.conflicts),
             missing=list(self.missing),
             source_summary=self.source_summary,
         )
@@ -47,7 +44,6 @@ class SchemaContextReport:
             "request": self.request,
             "actions_taken": list(self.actions_taken),
             "candidates": [_candidate_to_dict(c) for c in self.candidates],
-            "conflicts": list(self.conflicts),
             "missing": list(self.missing),
             "source_summary": self.source_summary,
             "instruction": (
@@ -108,8 +104,7 @@ class SchemaEvidenceRetriever:
             missing.append(f"progressive discovery failed: {exc}")
 
         scope_targets = _targets_from_scope(scope, database)
-        note_targets = self._annotation_targets(search_text, database)
-        targets = _dedupe_targets(scope_targets + note_targets)
+        targets = _dedupe_targets(scope_targets)
         hard_count = len(targets)
         if discovery is not None:
             for hit in discovery.hits:
@@ -120,11 +115,6 @@ class SchemaEvidenceRetriever:
                     key = (db, hit.table)
                     if key not in targets:
                         targets.append(key)
-        if note_targets:
-            actions.append(
-                "included user-note matched table evidence: "
-                + ", ".join(f"{db}.{tbl}" if db else tbl for db, tbl in note_targets[:8])
-            )
 
         self.orch.progress(subagent_event(
             agent="schema_link",
@@ -143,22 +133,19 @@ class SchemaEvidenceRetriever:
                 cols = [_column_from_payload(c) for c in candidate.columns]
                 self.orch.run_state.remember_table_schema(table, db, cols)
             if candidate.status != "active":
-                actions.append(f"kept excluded/deprecated evidence for {db}.{table}")
+                actions.append(f"kept inactive/missing evidence for {db}.{table}")
             else:
                 actions.append(f"loaded table evidence for {db}.{table}")
 
-        conflicts = _detect_conflicts(candidates)
         source_summary = (
             f"{len(candidates)} candidate table(s), "
-            f"{sum(1 for c in candidates if c.status == 'active')} active, "
-            f"{len(conflicts)} conflict(s)."
+            f"{sum(1 for c in candidates if c.status == 'active')} active."
         )
         report = SchemaContextReport(
             id=report_id,
             request=request,
             actions_taken=actions,
             candidates=candidates,
-            conflicts=conflicts,
             missing=missing,
             source_summary=source_summary,
         )
@@ -178,9 +165,6 @@ class SchemaEvidenceRetriever:
         column_notes = note_entry.get("columns") or {}
         status = "active"
         exclusion_reason = ""
-        if _is_deprecated_note(table_note):
-            status = "deprecated"
-            exclusion_reason = table_note
 
         columns: list[dict[str, Any]] = []
         row_count = None
@@ -285,30 +269,6 @@ class SchemaEvidenceRetriever:
             out[(db_l, tbl_l)] = entry
         return out
 
-    def _annotation_targets(self, search_text: str, database: str) -> list[tuple[str, str]]:
-        store = getattr(self.orch, "annotations", None)
-        if store is None:
-            return []
-        try:
-            records = store.list_records(self.orch.instance, database=database or "")
-        except Exception:
-            return []
-        out: list[tuple[str, str]] = []
-        for rec in records:
-            scope = str(rec.get("scope") or "").strip().lower()
-            if scope not in {"table", "column"}:
-                continue
-            table = str(rec.get("table") or "").strip()
-            if not table:
-                continue
-            db = str(rec.get("database") or database or "").strip()
-            column = str(rec.get("column") or "").strip()
-            note = sanitize_note(str(rec.get("note") or ""))
-            if _annotation_matches(search_text, db, table, note, column=column):
-                out.append((db, table))
-        return _dedupe_targets(out)
-
-
 def _request_text(request: str, focus_terms: list[str], need: str) -> str:
     parts = [str(request or "").strip()]
     if focus_terms:
@@ -378,30 +338,6 @@ def _dedupe_targets(targets: list[tuple[str, str]]) -> list[tuple[str, str]]:
     return out
 
 
-def _annotation_matches(search_text: str, database: str, table: str, note: str, *, column: str = "") -> bool:
-    haystack = f"{database} {table} {column} {note}".lower()
-    query = str(search_text or "").lower()
-    if table.lower() in query or f"{database}.{table}".lower() in query:
-        return True
-    tokens = _meaningful_tokens(query)
-    if not tokens:
-        return False
-    return sum(1 for token in tokens if token in haystack) >= 2
-
-
-def _meaningful_tokens(text: str) -> list[str]:
-    import re
-
-    tokens = re.findall(r"[a-zA-Z_][a-zA-Z0-9_]{2,}|[\u4e00-\u9fff]{2,}", text)
-    stop = {"检查", "一下", "数据", "是否", "一致", "主要", "关注", "identify", "table", "column", "need"}
-    out: list[str] = []
-    for token in tokens:
-        token = token.lower()
-        if token not in stop and token not in out:
-            out.append(token)
-    return out[:24]
-
-
 def _candidate_to_dict(c: SchemaCandidate) -> dict[str, Any]:
     return {
         "database": c.database,
@@ -426,51 +362,3 @@ def _column_from_payload(data: dict[str, Any]) -> ColumnInfo:
         indexed=bool(data.get("indexed")),
         note=str(data.get("note") or ""),
     )
-
-
-def _detect_conflicts(candidates: list[SchemaCandidate]) -> list[dict[str, Any]]:
-    conflicts: list[dict[str, Any]] = []
-    active = [c for c in candidates if c.status == "active"]
-    by_metric: dict[str, list[str]] = {}
-    for c in active:
-        label = f"{c.database}.{c.table}" if c.database else c.table
-        for col in c.columns:
-            name = str(col.get("name") or "").lower()
-            if _is_metric_column(name):
-                by_metric.setdefault(name, []).append(label)
-    for name, tables in by_metric.items():
-        if len(tables) >= 2:
-            conflicts.append({
-                "type": "metric_grain_choice",
-                "column": name,
-                "tables": tables,
-                "reason": (
-                    f"Multiple active candidate tables expose metric-like column `{name}`; "
-                    "table/grain choice may change the answer."
-                ),
-            })
-    deprecated = [c for c in candidates if c.status != "active"]
-    for c in deprecated:
-        conflicts.append({
-            "type": c.status,
-            "table": f"{c.database}.{c.table}" if c.database else c.table,
-            "reason": c.exclusion_reason or c.status,
-        })
-    return conflicts
-
-
-def _is_metric_column(name: str) -> bool:
-    if not name:
-        return False
-    if name in {"id", "dt", "date", "created_at", "updated_at"} or name.endswith("_id"):
-        return False
-    return any(token in name for token in (
-        "amount", "quantity", "qty", "count", "cnt", "num", "total", "sum",
-        "price", "cost", "sales", "orders", "pieces", "refund", "delivered",
-        "units", "revenue", "gmv",
-    ))
-
-
-def _is_deprecated_note(note: str) -> bool:
-    text = str(note or "").lower()
-    return any(token in text for token in ("弃用", "停用", "deprecated", "wrong", "do not use"))

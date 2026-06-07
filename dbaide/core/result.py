@@ -17,14 +17,6 @@ class WorkflowStatus(str, Enum):
     CANCELLED = "cancelled"
 
 
-class ExecutionPolicy(str, Enum):
-    """SQL execution policy."""
-    INSPECT_ONLY = "inspect_only"
-    SQL_ONLY = "sql_only"
-    SAFE_AUTO = "safe_auto"
-    EXPERT = "expert"
-
-
 class WorkflowResult:
     """Unified workflow result consumed by CLI and GUI.
 
@@ -33,7 +25,7 @@ class WorkflowResult:
 
     __slots__ = (
         "schema_version", "workflow_id", "status", "question",
-        "connection_name", "database_scope", "execution_policy",
+        "connection_name", "database_scope",
         "answer_markdown", "answer_plaintext",
         "query_plan", "sql_candidates", "selected_sql",
         "validation_report", "execution_result",
@@ -50,7 +42,6 @@ class WorkflowResult:
         question: str = "",
         connection_name: str = "",
         database_scope: list[str] | None = None,
-        execution_policy: ExecutionPolicy = ExecutionPolicy.SAFE_AUTO,
         answer_markdown: str = "",
         answer_plaintext: str = "",
         query_plan: QueryPlan | None = None,
@@ -75,7 +66,6 @@ class WorkflowResult:
         self.question = question
         self.connection_name = connection_name
         self.database_scope = database_scope or []
-        self.execution_policy = execution_policy
         self.answer_markdown = answer_markdown
         self.answer_plaintext = answer_plaintext
         self.query_plan = query_plan
@@ -104,7 +94,6 @@ class WorkflowResult:
             "question": self.question,
             "connection_name": self.connection_name,
             "database_scope": self.database_scope,
-            "execution_policy": self.execution_policy.value,
             "answer_markdown": self.answer_markdown,
             "answer_plaintext": self.answer_plaintext,
             "query_plan": self.query_plan.to_dict() if self.query_plan else None,
@@ -132,7 +121,7 @@ class WorkflowRequest:
 
     __slots__ = (
         "question", "connection_name", "database_scope", "mode",
-        "execution_policy", "limit", "timeout_seconds", "model_name",
+        "limit", "timeout_seconds", "model_name",
         "resume_state", "user_reply", "schema_scope", "stream_answers",
     )
 
@@ -143,7 +132,6 @@ class WorkflowRequest:
         connection_name: str = "",
         database_scope: list[str] | None = None,
         mode: str = "ask",
-        execution_policy: ExecutionPolicy = ExecutionPolicy.SAFE_AUTO,
         limit: int = 100,
         timeout_seconds: int = 60,
         model_name: str = "",
@@ -156,7 +144,6 @@ class WorkflowRequest:
         self.connection_name = connection_name
         self.database_scope = database_scope or []
         self.mode = mode
-        self.execution_policy = execution_policy
         self.limit = limit
         self.timeout_seconds = timeout_seconds
         self.model_name = model_name

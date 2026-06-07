@@ -21,7 +21,8 @@ from PyQt6.QtWidgets import (
 from dbaide.desktop.components.composer import ComposerWidget
 from dbaide.desktop.dialogs.build_assets import BuildAssetsDialog
 from dbaide.desktop.dialogs.settings import SettingsDialog
-from dbaide.desktop.theme import app_style
+from dbaide.desktop.components.icons import svg_icon
+from dbaide.desktop.theme import Theme, app_style
 from dbaide.desktop.event_bus import (
     ASSETS_CHANGED,
     CONNECTIONS_CHANGED,
@@ -277,8 +278,13 @@ class MainWindow(QMainWindow):
         self.topbar.new_conn_requested.connect(lambda: self.open_settings("connections"))
         layout.addWidget(self.topbar)
         self.tabbar = self.topbar.mode_tabs
+        mode_icons = {
+            "Assistant": "message-circle",
+            "Workbench": "terminal",
+        }
         for name in self._tab_names:
-            self.tabbar.addTab(_tab_label(name))
+            index = self.tabbar.addTab(svg_icon(mode_icons[name], color=Theme.TEXT_2, size=15), "")
+            self.tabbar.setTabToolTip(index, _tab_label(name))
         self.tabbar.currentChanged.connect(self._on_tab_changed)
 
         body = QSplitter(Qt.Orientation.Horizontal)
@@ -471,15 +477,14 @@ class MainWindow(QMainWindow):
             self._ensure_ui_state().apply_mode(ModeUiState(index=index, mode=self._tab_names[index]))
 
     def switch_tab(self, name: str) -> None:
-        """Route the old per-tab names to the new Assistant/Workbench modes."""
-        if name in ("Ask", "Assistant"):
+        if name == "Chat":
             self.tabbar.setCurrentIndex(0)
-        elif name in ("SQL", "Workbench"):
+            return
+        if name == "Workbench":
             self.tabbar.setCurrentIndex(1)
             self.workbench.focus_sql()
-        elif name == "Data":
-            self.tabbar.setCurrentIndex(1)
-            self.workbench.focus_data()
+            return
+        raise ValueError(f"Unknown top-level tab: {name!r}")
 
     def _connection_changed(self, _text: str) -> None:
         # Sessions are per-connection — drop the active session and clear the view so
@@ -712,7 +717,7 @@ class MainWindow(QMainWindow):
         self.tabbar.setCurrentIndex(1)
         self.workbench.open_sql(sql)
 
-    def submit_composer(self, question: str, policy: str) -> None:
+    def submit_composer(self, question: str) -> None:
         key = self._active_key
         # Active slot is awaiting a clarification reply → route there.
         if key and key in self._pending_resume:
@@ -745,15 +750,13 @@ class MainWindow(QMainWindow):
         schema_scope = self._build_attached_scope(attachments) if attachments else {}
         self.composer.clear_attachments()
         self.composer.clear_input()
-        self.ask_tab.append_user(key, question, connection=conn, database=database, policy=policy,
-                                 attachments=attachments)
+        self.ask_tab.append_user(key, question, connection=conn, database=database, attachments=attachments)
         # Fresh trace for this turn (streamed inline into the turn's status chip).
         self._slot_trace[key] = []
         self.conversation_controller.start_ask(key, {
             "connection_name": conn,
             "question": question,
             "database": database,
-            "execution_policy": policy,
             "session_id": self._slot_session.get(key, ""),
             "schema_scope": schema_scope,
         })
@@ -767,14 +770,13 @@ class MainWindow(QMainWindow):
         if not resume_state:
             # No pause for this slot — treat as a fresh question on the active slot.
             if key == self._active_key:
-                self.submit_composer(reply, self.composer.policy())
+                self.submit_composer(reply)
             return
         conn = self.current_connection()
         if not conn:
             self.toast(_i18n_t("toast.select_connection"))
             return
         database = self.current_database()
-        policy = self.composer.policy()
         original_question = str(resume_state.get("question") or self._slot_question.get(key, ""))
         # Consume the pause: controller queueing guarantees the reply is never
         # lost even when every run slot is busy (it waits for a free slot).
@@ -789,7 +791,6 @@ class MainWindow(QMainWindow):
             "user_reply": reply,
             "resume_state": resume_state,
             "database": database,
-            "execution_policy": policy,
             "session_id": self._slot_session.get(key, ""),
         })
 
@@ -1168,11 +1169,6 @@ class MainWindow(QMainWindow):
 
         self._run_background("test_model_profile", payload, on_done, on_error=on_fail)
 
-    @property
-    def sql_tab(self):
-        """Backward-compatible accessor: the current (or a fresh) SQL editor."""
-        return self.workbench.ensure_sql_editor()
-
     def _run_sql_from(self, editor, sql: str) -> None:
         self._active_sql_doc = editor
         self.execute_sql(sql)
@@ -1286,12 +1282,8 @@ class MainWindow(QMainWindow):
         self.query_history_store.clear(self.current_connection())
         self._refresh_query_history()
 
-    def inspect_schema(self, data: dict[str, Any]) -> None:
-        self.open_schema_asset(data)
-
-    def _show_asset(self, action: str, path: str) -> None:
-        # Asset preview now opens as a Workbench DocTab (the old Inspector panel is
-        # gone). Read the doc in the background so it never flips the global status to
+    def _show_asset(self, path: str) -> None:
+        # Read the doc in the background so it never flips the global status to
         # "running" and works even while a query is in flight.
         if not path:
             return
@@ -1301,13 +1293,13 @@ class MainWindow(QMainWindow):
 
         def on_loaded(res: dict[str, Any]) -> None:
             self.workbench.update_doc(path, res.get("markdown") or "")
-        self._run_background(action, {"path": path}, on_loaded)
+        self._run_background("asset_markdown", {"path": path}, on_loaded)
 
     def preview_schema(self, data: dict[str, Any]) -> None:
         path = str(data.get("path") or "")
         if not path:
             return
-        self._show_asset("preview_asset", path)
+        self._show_asset(path)
 
     def _edit_note(self, node: dict[str, Any]) -> None:
         """Edit the user note for a db/table/column node (schema-tree pencil icon).
@@ -1355,7 +1347,7 @@ class MainWindow(QMainWindow):
         if not path or path not in getattr(self.workbench, "_doc_tabs", {}):
             return
         self._run_background(
-            "preview_asset", {"path": path},
+            "asset_markdown", {"path": path},
             lambda res: self.workbench.update_doc(path, res.get("markdown") or ""),
         )
 
@@ -1382,7 +1374,7 @@ class MainWindow(QMainWindow):
                 return
             # Fall through: table with a malformed/short path → show as doc
         if path:
-            self._show_asset("asset_markdown", path)
+            self._show_asset(path)
 
     def _dialect(self) -> str:
         conn = self.current_connection()
@@ -1553,7 +1545,7 @@ class MainWindow(QMainWindow):
 
     def load_asset(self, path: str) -> None:
         if path:
-            self._show_asset("asset_markdown", path)
+            self._show_asset(path)
 
     def search_assets(self, query: str) -> None:
         conn = self.current_connection()
@@ -1600,7 +1592,7 @@ class MainWindow(QMainWindow):
             self._slot_session[sid] = sid
             self._slot_trace[sid] = (turns[-1].get("trace") if turns else []) or []
             self._activate_slot(sid)
-            self.switch_tab("Ask")
+            self.switch_tab("Chat")
 
         self._run_background("load_session", {"connection_name": conn, "session_id": session_id}, on_loaded)
 

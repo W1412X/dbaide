@@ -128,13 +128,13 @@ def test_apply_notes_to_doc_database(tmp_path):
 
     store = AnnotationStore(tmp_path / "ann")
     store.add("demo", scope="database", note="prod; ignore test_*", database="shop")
-    store.add("demo", scope="table", note="legacy", database="shop", table="orders")
+    store.add("demo", scope="table", note="retired", database="shop", table="orders")
     doc = {"kind": "database", "name": "shop", "tables": [
         {"name": "orders"}, {"name": "users"},
     ]}
     apply_notes_to_doc(store, "demo", doc)
     assert doc["user_note"] == "prod; ignore test_*"
-    assert doc["tables"][0]["user_note"] == "legacy"
+    assert doc["tables"][0]["user_note"] == "retired"
     assert "user_note" not in doc["tables"][1]
 
 
@@ -165,8 +165,8 @@ class _FakeOrch:
 
 
 def test_schema_linker_sees_table_note(tmp_path):
-    # The schema evidence layer must SEE the note and preserve it as excluded
-    # evidence for the main LLM; it no longer chooses the replacement itself.
+    # The schema evidence layer must SEE the note and preserve it for the main LLM;
+    # it must not choose the replacement or exclude the table by keyword.
     from dbaide.agent.progressive_schema import DiscoveryResult, SchemaHit
     from dbaide.agent.schema_link import SchemaEvidenceRetriever
 
@@ -178,8 +178,9 @@ def test_schema_linker_sees_table_note(tmp_path):
     )
     report = SchemaEvidenceRetriever(orch).retrieve("orders")
     orders = report.candidates[0]
-    assert orders.status == "deprecated"
-    assert "deprecated; use orders_v2 instead" in orders.exclusion_reason
+    assert orders.status == "active"
+    assert orders.exclusion_reason == ""
+    assert orders.notes["table"] == "deprecated; use orders_v2 instead"
 
 
 def test_schema_linker_shows_column_notes(tmp_path):

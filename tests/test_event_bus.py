@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import pytest
-
 from dbaide.desktop.event_bus import ASSETS_CHANGED, EventBus
 
 

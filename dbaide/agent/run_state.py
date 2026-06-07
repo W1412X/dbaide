@@ -6,10 +6,9 @@ pending clarification, confirmed business criteria, etc. It is created fresh at
 the start of every run (``AskOrchestrator._reset_loop_state``) and serialized for
 pause/resume (``dbaide.agent.loop_state``).
 
-Grouping these into one typed object (instead of ~two dozen ``_loop_*`` attributes
-scattered on the orchestrator) gives the run state a single home, an explicit
-field list, and a clear lifecycle — the components that read/write it now go
-through ``orchestrator.run_state.<field>``.
+Grouping these fields into one typed object gives the run state a single home,
+an explicit field list, and a clear lifecycle — the components that read/write it
+now go through ``orchestrator.run_state.<field>``.
 """
 
 from __future__ import annotations
@@ -83,9 +82,10 @@ class RunState:
     def schema_table_part(schema_key: str, database: str = "") -> str:
         db = str(database or "").strip()
         key = str(schema_key or "").strip()
-        prefix = f"{db}."
-        if db and key.startswith(prefix):
-            return key[len(prefix):]
+        if db and "." in key:
+            left, right = key.split(".", 1)
+            if left == db:
+                return right
         return key
 
     def note_working_database(self, database: str) -> None:
@@ -132,7 +132,7 @@ class RunState:
             schema_db = self.schema_db.get(schema_key, "")
             table_part = self.schema_table_part(schema_key, schema_db)
             database_ok = not database or schema_db == database
-            if database_ok and (schema_key == table or table_part == table or table_part.endswith(f".{table}")):
+            if database_ok and (schema_key == table or table_part == table):
                 matches.append(columns)
         if len(matches) == 1:
             return matches[0]

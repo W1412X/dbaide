@@ -406,7 +406,7 @@ QHeaderView::section {{
     background: {T.PANEL_2};
     color: {T.TEXT_2};
     border: none;
-    padding: 4px 8px;
+    padding: 4px 10px;
     font-weight: 600;
 }}
 QSplitter::handle {{
@@ -520,47 +520,32 @@ QTabBar[segmented="true"]::tab:last {{
     border-top-right-radius: 8px;
     border-bottom-right-radius: 8px;
 }}
-QTabBar[topMode="true"]::tab {{
-    background: transparent;
-    color: {T.MUTED};
-    padding: 5px 12px;
-    border: 1px solid transparent;
-    border-radius: 7px;
-    margin-right: 4px;
-    min-width: 72px;
-    max-height: 24px;
-}}
-QTabBar[topMode="true"]::tab:hover:!selected {{
+QTabBar[sidebarSwitch="true"] {{
     background: {T.PANEL};
-    color: {T.TEXT_2};
-    border: 1px solid {T.BORDER_SOFT};
-}}
-QTabBar[topMode="true"]::tab:selected {{
-    background: {T.PANEL_2};
-    color: {T.TEXT};
-    border: 1px solid {T.BORDER};
+    border: none;
+    border-radius: 10px;
+    padding: 3px;
 }}
 QTabBar[sidebarSwitch="true"]::tab {{
-    background: {T.PANEL};
+    background: transparent;
     color: {T.MUTED};
-    padding: 4px 10px;
-    border: 1px solid {T.BORDER_SOFT};
-    margin-right: 0;
+    padding: 5px 10px;
+    border: none;
+    border-radius: 7px;
+    margin: 0;
     min-width: 72px;
-    max-height: 24px;
+    min-height: 22px;
+    max-height: 22px;
+    font-weight: 650;
 }}
 QTabBar[sidebarSwitch="true"]::tab:selected {{
     background: {T.PANEL_2};
     color: {T.TEXT};
-    border: 1px solid {T.BORDER};
+    border: none;
 }}
-QTabBar[sidebarSwitch="true"]::tab:first {{
-    border-top-left-radius: 7px;
-    border-bottom-left-radius: 7px;
-}}
-QTabBar[sidebarSwitch="true"]::tab:last {{
-    border-top-right-radius: 7px;
-    border-bottom-right-radius: 7px;
+QTabBar[sidebarSwitch="true"]::tab:hover:!selected {{
+    background: {T.SURFACE};
+    color: {T.TEXT_2};
 }}
 QTabBar[panelTabs="true"] {{
     /* Theme the bar AREA itself (behind/around the tabs). SURFACE (the content
@@ -652,9 +637,3 @@ QCheckBox::indicator:disabled, QRadioButton::indicator:disabled {{
 }}
 """
 
-
-# ── Backward compatibility ───────────────────────────────────────────────────
-# Old code imported ``APP_STYLE`` as a constant. Keep it available as a lazy
-# property-like string so ``from theme import APP_STYLE`` still works at module
-# level, but the value is computed fresh each time it is *used*.
-APP_STYLE = app_style()

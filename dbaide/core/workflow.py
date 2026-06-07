@@ -8,10 +8,10 @@ from typing import Any, Callable, Iterator
 from dbaide.adapters import build_adapter
 from dbaide.agent.progress_events import progress_label
 from dbaide.agent import DataAssistant
+from dbaide.core.cancellation import CancelledError
 from dbaide.core.errors import DBAideError, ErrorCode, RepairAction
 from dbaide.core.events import TraceEvent, TraceKind, TraceLevel
 from dbaide.core.result import (
-    ExecutionPolicy,
     NextAction,
     QueryPlan,
     SQLCandidate,
@@ -62,7 +62,6 @@ class WorkflowEngine:
             question=request.question,
             connection_name=request.connection_name or self.connection.name,
             database_scope=request.database_scope,
-            execution_policy=request.execution_policy,
             created_at=time.time(),
         )
 
@@ -88,13 +87,8 @@ class WorkflowEngine:
             return result
 
         database = request.database_scope[0] if request.database_scope else ""
-        execute = request.execution_policy not in {ExecutionPolicy.INSPECT_ONLY, ExecutionPolicy.SQL_ONLY}
-        if request.execution_policy == ExecutionPolicy.INSPECT_ONLY:
-            self._trace(result, "context_collection", "Reading assets only", "agent")
-        elif request.execution_policy == ExecutionPolicy.SQL_ONLY:
-            self._trace(result, "planning", "Planning SQL without execution", "agent")
-        else:
-            self._trace(result, "planning", "Planning guarded read-only workflow", "agent")
+        execute = True
+        self._trace(result, "planning", "Planning guarded read-only workflow", "agent")
 
         assistant = self._build_assistant(request)
         self._trace(result, "agent_request", "Running assistant", "agent")
@@ -141,13 +135,11 @@ class WorkflowEngine:
                 resume_state=request.resume_state,
                 user_reply=request.user_reply,
             )
-        except Exception as exc:
-            if type(exc).__name__ == "CancelledError" or "cancelled" in str(exc).lower():
-                result.status = WorkflowStatus.CANCELLED
-                result.completed_at = time.time()
-                self._trace(result, "workflow_cancelled", "Workflow cancelled", "system")
-                return result
-            raise
+        except CancelledError:
+            result.status = WorkflowStatus.CANCELLED
+            result.completed_at = time.time()
+            self._trace(result, "workflow_cancelled", "Workflow cancelled", "system")
+            return result
 
         if getattr(response, "status", "completed") == "wait_user":
             result.status = WorkflowStatus.WAIT_USER
@@ -172,7 +164,8 @@ class WorkflowEngine:
             result.completed_at = time.time()
             return result
 
-        result.status = WorkflowStatus.COMPLETED
+        fail_reason = str(getattr(assistant._orchestrator.run_state, "fail_reason", "") or "")  # noqa: SLF001
+        result.status = WorkflowStatus.FAILED if fail_reason else WorkflowStatus.COMPLETED
         result.answer_markdown = response.answer
         result.answer_plaintext = response.answer
         result.warnings = response.warnings or []
@@ -200,7 +193,17 @@ class WorkflowEngine:
             result.execution_result = response.result
 
         self._trace(result, "result_interpreted", "Interpreting result", "agent")
-        self._trace(result, "workflow_completed", "Workflow completed", "system")
+        if fail_reason:
+            self._trace(
+                result,
+                "workflow_failed",
+                "Workflow failed",
+                "system",
+                level=TraceLevel.ERROR,
+                summary=fail_reason,
+            )
+        else:
+            self._trace(result, "workflow_completed", "Workflow completed", "system")
         result.completed_at = time.time()
         return result
 
@@ -217,7 +220,6 @@ class WorkflowEngine:
             default_limit=base_session.default_limit,
             timeout_seconds=base_session.timeout_seconds,
             agent_max_steps=base_session.agent_max_steps,
-            agent_sql_retries=base_session.agent_sql_retries,
         )
         if request.limit:
             session.default_limit = max(1, int(request.limit))
@@ -229,7 +231,6 @@ class WorkflowEngine:
             self.llm,
             asset_store=self.asset_store,
             join_catalog=self.join_catalog,
-            execution_policy=request.execution_policy,
         )
 
     def _get_adapter(self):
@@ -276,8 +277,8 @@ class WorkflowEngine:
             filters=[],
             joins=[],
             limit=max(1, int(limit or 100)),
-            assumptions=["Generated from available schema assets and guarded before execution."],
-            confidence=0.8 if tables else 0.55,
+            assumptions=[],
+            confidence=0.0,
         )
 
     def _trace(

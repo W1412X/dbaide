@@ -6,6 +6,8 @@ import io
 import json
 from typing import Any
 
+from dbaide.adapters.base import quote_identifier
+
 
 def export_json(rows: list[dict[str, Any]], columns: list[str] | None = None) -> str:
     """Export rows as a pretty-printed JSON array of objects."""
@@ -27,14 +29,15 @@ def _sql_literal(value: Any) -> str:
 
 
 def export_insert(rows: list[dict[str, Any]], columns: list[str] | None = None,
-                  table: str = "table") -> str:
+                  table: str = "table", dialect: str = "generic") -> str:
     """Export rows as INSERT statements (one per row)."""
     if not rows:
         return ""
     cols = columns or list(rows[0].keys())
-    col_list = ", ".join(cols)
+    table_name = quote_identifier(table, dialect)
+    col_list = ", ".join(quote_identifier(col, dialect) for col in cols)
     return "\n".join(
-        f"INSERT INTO {table} ({col_list}) VALUES (" + ", ".join(_sql_literal(row.get(c)) for c in cols) + ");"
+        f"INSERT INTO {table_name} ({col_list}) VALUES (" + ", ".join(_sql_literal(row.get(c)) for c in cols) + ");"
         for row in rows
     )
 

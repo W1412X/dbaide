@@ -4,7 +4,6 @@ from PyQt6.QtCore import QEvent, QSize, Qt, pyqtSignal
 from PyQt6.QtWidgets import QHBoxLayout, QLabel, QTextEdit, QVBoxLayout, QWidget
 
 from dbaide.desktop.components.base import compact_button, Panel
-from dbaide.desktop.components.composer_options import POLICIES, POLICY_TOOLTIPS
 from dbaide.desktop.components.icons import svg_icon
 from dbaide.desktop.components.inputs import configure_multiline_text_edit, sync_multiline_height
 from dbaide.desktop.components.menu import PillSelect
@@ -29,7 +28,7 @@ def _model_label(entry: dict) -> str:
 
 
 class ComposerWidget(Panel):
-    submit_requested = pyqtSignal(str, str)
+    submit_requested = pyqtSignal(str)
     stop_requested = pyqtSignal()
     model_changed = pyqtSignal(str)
     attach_requested = pyqtSignal()  # the "+" context button was clicked
@@ -59,13 +58,13 @@ class ComposerWidget(Panel):
             padding=_INPUT_PAD,
         )
         self.input.setStyleSheet(
-            f"""
-            QTextEdit {{
+            """
+            QTextEdit {
                 background: transparent;
                 border: none;
                 padding: 2px 2px;
                 font-size: 14px;
-            }}
+            }
             """
         )
         self.input.textChanged.connect(self._sync_input_height)
@@ -93,11 +92,6 @@ class ComposerWidget(Panel):
         self.attach_btn.setToolTip(t("composer.attach_tooltip"))
         self.attach_btn.clicked.connect(self.attach_requested.emit)
         footer.addWidget(self.attach_btn)
-        self.policy_select = PillSelect("Safe", max_width=108)
-        self.policy_select.set_options(POLICIES)
-        self.policy_select.set_option_tooltips(POLICY_TOOLTIPS)
-        self.policy_select.set_value("safe_auto")
-        footer.addWidget(self.policy_select)
         footer.addStretch(1)
         self.model_select = PillSelect("Model", max_width=132)
         self.model_select.value_changed.connect(self.model_changed.emit)
@@ -178,7 +172,6 @@ class ComposerWidget(Panel):
             self.action_btn.setIcon(svg_icon("arrow-up", color="#ffffff", size=18))
             self.action_btn.setToolTip(t("composer.send"))
         self.input.setEnabled(not running)
-        self.policy_select.setEnabled(not running)
         self.model_select.setEnabled(not running)
 
     def _on_spin(self) -> None:
@@ -196,7 +189,6 @@ class ComposerWidget(Panel):
     def set_disabled_no_connection(self, disabled: bool) -> None:
         self.input.setEnabled(not disabled)
         self.action_btn.setEnabled(not disabled)
-        self.policy_select.setEnabled(not disabled)
         self.model_select.setEnabled(not disabled)
 
     def clear_input(self) -> None:
@@ -251,9 +243,6 @@ class ComposerWidget(Panel):
     def mode(self) -> str:
         return "ask"
 
-    def policy(self) -> str:
-        return self.policy_select.value()
-
     def model_name(self) -> str:
         return self.model_select.value()
 
@@ -262,7 +251,7 @@ class ComposerWidget(Panel):
         if self._running:
             self.stop_requested.emit()
             return
-        self.submit_requested.emit(self.question(), self.policy())
+        self.submit_requested.emit(self.question())
 
 
 class _ContextChip(QWidget):

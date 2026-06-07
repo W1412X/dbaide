@@ -14,16 +14,21 @@ class SchemaGuard:
 
     def validate(self, sql: str, context: DisclosureContext) -> ValidationResult:
         issues: list[ValidationIssue] = []
-        known_tables = set(context.table_names()) | set(context.tables.keys())
-        known_tables |= {_bare_identifier(name) for name in list(known_tables)}
-        if not known_tables:
+        exact_refs, unique_bare_refs = _known_table_refs(context)
+        if not exact_refs and not unique_bare_refs:
             return ValidationResult(ok=True, normalized_sql=sql)
         cte_names = set(_cte_names(sql))
         for ref in _table_refs(sql):
             bare = _bare_identifier(ref)
             if bare in cte_names or ref in cte_names:
                 continue
-            if ref not in known_tables and bare not in known_tables:
+            if ref in exact_refs:
+                continue
+            if "." not in ref and ref in unique_bare_refs:
+                continue
+            if bare in cte_names:
+                continue
+            if ref not in exact_refs:
                 issues.append(ValidationIssue("UNKNOWN_TABLE", f"SQL references undisclosed or unknown table: {ref}"))
         return ValidationResult(ok=not issues, issues=issues, normalized_sql=sql)
 
@@ -78,7 +83,25 @@ def _normalize_ref(value: str) -> str:
 
 
 def _bare_identifier(value: str) -> str:
-    return _normalize_ref(value).split(".")[-1]
+    parts = _normalize_ref(value).split(".")
+    return parts[len(parts) - 1] if parts else ""
+
+
+def _known_table_refs(context: DisclosureContext) -> tuple[set[str], set[str]]:
+    exact_refs: set[str] = set()
+    bare_counts: dict[str, int] = {}
+    for ref, entry in context.tables.items():
+        table = _normalize_ref(entry.table.name)
+        database = _normalize_ref(entry.database or entry.table.schema or "")
+        stored_ref = _normalize_ref(ref)
+        if stored_ref:
+            exact_refs.add(stored_ref)
+        if table:
+            bare_counts[table] = bare_counts.get(table, 0) + 1
+        if database and table:
+            exact_refs.add(f"{database}.{table}")
+    unique_bare_refs = {name for name, count in bare_counts.items() if count == 1}
+    return exact_refs, unique_bare_refs
 
 
 def _strip_identifier_quotes(value: str) -> str:

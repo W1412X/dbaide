@@ -28,7 +28,7 @@ def main() -> int:
     app.setStyleSheet(app_style())
 
     from dbaide.desktop.dialogs.settings import SettingsDialog
-    from dbaide.desktop.dialogs.connection import ConnectionForm, ConnectionDialog
+    from dbaide.desktop.dialogs.connection import ConnectionDialog
     from dbaide.desktop.dialogs.build_assets import BuildAssetsDialog
 
     def settings(page):

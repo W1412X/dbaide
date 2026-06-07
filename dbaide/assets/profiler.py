@@ -75,25 +75,25 @@ def kind_from_type(column: ColumnInfo) -> str:
     Used up front so the adapter can decide which aggregates to fold into its
     single scan. The richer :func:`infer_data_kind` refines this afterwards.
     """
-    typ = (column.data_type or "").lower()
-    if any(k in typ for k in ["bool", "bit"]):
+    typ = _base_type(column.data_type)
+    if typ in {"bool", "boolean", "bit"}:
         return "boolean"
-    if any(k in typ for k in ["date", "time", "timestamp"]):
+    if typ in {"date", "time", "timestamp", "timestamptz", "datetime"}:
         return "temporal"
-    if any(k in typ for k in ["int", "real", "numeric", "decimal", "float", "double", "number"]):
+    if typ in {"int", "integer", "bigint", "smallint", "tinyint", "serial", "real", "numeric", "decimal", "float", "double", "number"}:
         return "numeric"
-    if any(k in typ for k in ["char", "text", "json", "uuid", "blob", "clob"]):
+    if typ in {"char", "varchar", "nchar", "nvarchar", "text", "json", "jsonb", "uuid", "blob", "clob"}:
         return "text"
     return "unknown"
 
 
 def infer_data_kind(column: ColumnInfo, profile: ColumnProfile | None = None) -> str:
-    typ = (column.data_type or "").lower()
-    if any(k in typ for k in ["bool", "bit"]):
+    typ = _base_type(column.data_type)
+    if typ in {"bool", "boolean", "bit"}:
         return "boolean"
-    if any(k in typ for k in ["date", "time", "timestamp"]):
+    if typ in {"date", "time", "timestamp", "timestamptz", "datetime"}:
         return "temporal"
-    if any(k in typ for k in ["int", "real", "numeric", "decimal", "float", "double", "number"]):
+    if typ in {"int", "integer", "bigint", "smallint", "tinyint", "serial", "real", "numeric", "decimal", "float", "double", "number"}:
         if (
             profile
             and profile.distinct_count is not None
@@ -109,9 +109,16 @@ def infer_data_kind(column: ColumnInfo, profile: ColumnProfile | None = None) ->
         and profile.distinct_count <= min(50, max(3, profile.row_count // 20))
     ):
         return "categorical"
-    if any(k in typ for k in ["char", "text", "json", "uuid", "blob", "clob"]):
+    if typ in {"char", "varchar", "nchar", "nvarchar", "text", "json", "jsonb", "uuid", "blob", "clob"}:
         return "text"
     return "unknown"
+
+
+def _base_type(data_type: str | None) -> str:
+    text = str(data_type or "").strip().lower()
+    if not text:
+        return ""
+    return text.split("(", 1)[0].split()[0]
 
 
 def build_distribution_summary(profile: ColumnProfile, *, top_k: int) -> dict[str, Any]:

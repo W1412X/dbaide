@@ -14,6 +14,7 @@ from dbaide.agent.loop_prompts import DecisionPromptBuilder, tool_prompt_line
 from dbaide.agent.llm_trace import llm_stage
 from dbaide.agent.runtime import AgentRuntime
 from dbaide.agent.toolkit import build_tool_registry, loop_tool_specs
+from dbaide.core.cancellation import CancelledError
 from dbaide.core.events import TraceEvent
 from dbaide.llm import LLMMessage
 from dbaide.models import AssistantResponse
@@ -47,21 +48,9 @@ def _executed_sql(tool_name: str, orch, result) -> str:
 
 
 def _risk_reply_confirms(reply: str) -> bool:
-    text = str(reply or "").strip().lower()
-    if not text:
-        return False
-    # Denials must win over broad allow tokens. Chinese replies such as "取消执行" or
-    # "不要执行" contain "执行"; treating substring presence as approval would run SQL
-    # the user explicitly cancelled.
-    if any(token in text for token in (
-        "cancel", "stop", "abort", "no", "do not", "don't", "deny",
-        "取消", "停止", "不要", "不执行", "别执行", "拒绝", "否",
-    )):
-        return False
-    return any(token in text for token in (
-        "execute", "proceed", "confirm", "approve", "yes", "run it",
-        "继续", "确认", "执行", "运行", "同意",
-    ))
+    text = " ".join(str(reply or "").split()).casefold()
+    approved = {"execute anyway", "仍然执行"}
+    return text in {item.casefold() for item in approved}
 RESULT_PREVIEW_LIMIT = 1400
 MAX_REPEATED_CALL_BLOCKS = 3
 
@@ -96,9 +85,10 @@ class AskAgentLoop:
         self.progress = progress or orchestrator.progress
         self.registry = build_tool_registry(orchestrator)
         self.prompts = DecisionPromptBuilder(orchestrator)
-        self.allowed_tool_names = frozenset(s.name for s in loop_tool_specs(self.registry))
+        self.allowed_tool_specs = loop_tool_specs(self.registry)
+        self.allowed_tool_names = frozenset(s.name for s in self.allowed_tool_specs)
         self._trace_parent = ""
-        self._loop_node_id = ""
+        self._agent_loop_node_id = ""
 
     def _ns_step(self, event: dict) -> dict:
         """Namespace a step event under the current intent's trace node (when this
@@ -106,9 +96,9 @@ class AskAgentLoop:
         nest under their intent."""
         if self._trace_parent and event.get("step"):
             event["node_id"] = f"{self._trace_parent}:step:{event['step']}"
-            event["parent_id"] = self._loop_node_id or self._trace_parent
-        elif event.get("step") and self._loop_node_id:
-            event["parent_id"] = self._loop_node_id
+            event["parent_id"] = self._agent_loop_node_id or self._trace_parent
+        elif event.get("step") and self._agent_loop_node_id:
+            event["parent_id"] = self._agent_loop_node_id
         return event
 
     def run(
@@ -133,13 +123,11 @@ class AskAgentLoop:
         it and step ids don't collide across intents)."""
         orch = self.orchestrator
         self._trace_parent = trace_parent
-        self._loop_node_id = f"{trace_parent}:loop" if trace_parent else "loop"
+        self._agent_loop_node_id = f"{trace_parent}:loop" if trace_parent else "loop"
         transcript: list[str] = []
         approved_risk_sql = ""
         approved_risk_args: dict[str, Any] = {}
         approved_risk_tool = "execute_sql"
-        sql_failures = 0
-        max_sql_retries = max(0, int(getattr(orch.session, "agent_sql_retries", 0)))
 
         if resume_state:
             transcript, execute = restore_loop_state(orch, resume_state)
@@ -220,7 +208,7 @@ class AskAgentLoop:
                     title="Agent loop",
                     status="running",
                     kind="phase",
-                    node_id=self._loop_node_id,
+                    node_id=self._agent_loop_node_id,
                     parent_id=self._trace_parent,
                     detail="resuming",
                 ),
@@ -242,7 +230,7 @@ class AskAgentLoop:
                     title="Agent loop",
                     status="running",
                     kind="phase",
-                    node_id=self._loop_node_id,
+                    node_id=self._agent_loop_node_id,
                     parent_id=self._trace_parent,
                     detail="started",
                 ),
@@ -253,14 +241,12 @@ class AskAgentLoop:
             adapter=orch.adapter,
             asset_store=orch.asset_store,
             session=orch.session,
-            execution_policy=orch.execution_policy.value,
             trace_sink=self._trace_sink,
             cancel_check=orch.cancel_check,
         )
         runtime = AgentRuntime(
             llm=orch.llm,
             tool_registry=self.registry,
-            execution_policy=orch.execution_policy,
             trace_sink=self._trace_sink,
             max_steps=orch.session.agent_max_steps,
             cancel_check=orch.cancel_check,
@@ -338,7 +324,7 @@ class AskAgentLoop:
                     f"{self._trace_parent}:decision:{step_no + 1}"
                     if self._trace_parent else f"decision:{step_no + 1}"
                 ),
-                parent_id=self._loop_node_id,
+                parent_id=self._agent_loop_node_id,
             )
             ev["decision"] = decision
             if decision_calls:
@@ -371,7 +357,7 @@ class AskAgentLoop:
                         title="Agent loop",
                         status="completed",
                         kind="phase",
-                        node_id=self._loop_node_id,
+                        node_id=self._agent_loop_node_id,
                         parent_id=self._trace_parent,
                         detail="finished",
                     ),
@@ -518,16 +504,6 @@ class AskAgentLoop:
                     done_event["database"] = db
             self.progress(done_event)
 
-            if self._counts_as_sql_failure(tool_name, result):
-                sql_failures += 1
-                if sql_failures > max_sql_retries:
-                    reason = (
-                        f"sql_repair_budget_exhausted after {sql_failures} failed "
-                        f"SQL generation/validation/execution attempt(s)"
-                    )
-                    logger.warning(reason)
-                    return self._build_failed_response(orch, reason, disclosures_before or [])
-
             # Any tool may pause for the user by returning a pending question.
             if result.ok and isinstance(result.data, dict) and result.data.get("pending"):
                 return self._build_wait_response(orch, state, transcript, disclosures_before or [])
@@ -563,8 +539,6 @@ class AskAgentLoop:
 
         - execute_sql succeeded → the data result is the answer;
         - execute_readonly_sql succeeded → keep looping; it is exploratory evidence;
-        - execute_sql was blocked by policy → present the SQL + the block reason;
-        - validate_sql succeeded under a non-executing policy → present the SQL only;
         - profile_table succeeded → its output is the answer.
         """
         if tool_name == "execute_sql" and result.ok:
@@ -574,28 +548,9 @@ class AskAgentLoop:
             reason = str(result.data.get("reason") or "Execution blocked")
             orch.run_state.answer = f"SQL:\n```sql\n{sql}\n```\n\n_{reason}_"
             return True
-        if tool_name == "validate_sql" and result.ok:
-            policy = orch.execution_policy
-            if not state.execute_allowed or policy.value in ("sql_only", "inspect_only"):
-                sql = orch.run_state.sql or ""
-                note = "已生成 SQL（未执行）。" if state.answer_language == "zh" else "Generated (not executed)."
-                orch.run_state.answer = f"SQL:\n```sql\n{sql}\n```\n\n_{note}_"
-                return True
         if tool_name == "profile_table" and result.ok:
             return True
         return False
-
-    @staticmethod
-    def _counts_as_sql_failure(tool_name: str, result: ToolResult) -> bool:
-        if tool_name not in {"generate_sql", "validate_sql", "execute_sql", "execute_readonly_sql"}:
-            return False
-        if result.ok:
-            return False
-        data = result.data if isinstance(result.data, dict) else {}
-        # Policy blocks are terminal decisions, not failed repair attempts.
-        if data.get("blocked"):
-            return False
-        return True
 
     def _fail(self, reason: str) -> None:
         self.orchestrator.run_state.fail_reason = reason
@@ -614,7 +569,7 @@ class AskAgentLoop:
                 status="failed",
                 kind="phase",
                 detail=reason,
-                node_id=self._loop_node_id or "",
+                node_id=self._agent_loop_node_id or "",
                 parent_id=self._trace_parent,
             ),
         )
@@ -643,9 +598,13 @@ class AskAgentLoop:
         updates = decision.get("memory_updates") if isinstance(decision.get("memory_updates"), dict) else {}
         for item in _list_update_items(updates.get("findings")):
             if isinstance(item, dict):
-                mem.add_finding(str(item.get("text") or ""), source=str(item.get("source") or "decision"))
+                mem.add_finding(
+                    str(item.get("text") or ""),
+                    source=str(item.get("source") or "model_note"),
+                    confidence="model_note",
+                )
             else:
-                mem.add_finding(str(item), source="decision")
+                mem.add_finding(str(item), source="model_note", confidence="model_note")
         for item in _list_update_items(updates.get("open_questions")):
             mem.add_open_question(str(item.get("text") if isinstance(item, dict) else item))
         for item in _list_update_items(updates.get("excluded_paths")):
@@ -660,12 +619,11 @@ class AskAgentLoop:
             mem.next_action_hint = hint[:500]
 
     def _decide(self, state: LoopState, transcript: list[str]) -> dict[str, Any]:
-        tools = loop_tool_specs(self.registry)
+        tools = self.allowed_tool_specs
         tool_lines = "\n".join(tool_prompt_line(s) for s in tools)
-        policy = self.orchestrator.execution_policy.value
         execute_note = "allowed" if state.execute_allowed else "disabled"
 
-        system = self.prompts.system_prompt(state, tool_lines, policy, execute_note)
+        system = self.prompts.system_prompt(state, tool_lines, execute_note)
         user = self.prompts.user_prompt(state, transcript)
 
         last_error = ""
@@ -836,6 +794,4 @@ def _list_update_items(value: Any) -> list[Any]:
 
 
 def _looks_cancelled(exc: Exception) -> bool:
-    name = type(exc).__name__.lower()
-    text = str(exc).lower()
-    return "cancel" in name or "cancelled" in text or "canceled" in text
+    return isinstance(exc, CancelledError)

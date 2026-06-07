@@ -46,6 +46,7 @@ def test_trace_panel_live_then_finalize(qapp):
     # The first tool step has two parallel sub-agent siblings (the two db scans).
     step1 = tree.topLevelItem(1)
     assert step1.childCount() == 2
+    assert step1.isExpanded() is False
 
 
 def test_trace_detail_dialog_shows_step(qapp):
@@ -70,11 +71,11 @@ def test_trace_panel_load_persisted_events(qapp):
     from dbaide.desktop.components.trace import InlineTrace
 
     panel = InlineTrace()
-    panel.load_events([
+    panel.set_events([
         {"stage": "workflow_started", "title": "s", "status": "completed", "kind": "agent", "timestamp": 1.0},
         {"stage": "execute_sql", "title": "ran", "status": "completed", "kind": "tool", "timestamp": 2.0, "duration_ms": 5},
         {"stage": "workflow_completed", "title": "done", "status": "completed", "kind": "agent", "timestamp": 3.0},
-    ])
+    ], live=False)
     # Framing events filtered; one real step + summary.
     assert panel._tree.topLevelItemCount() == 2
     assert panel.copy_text()  # copy works on the new widget
@@ -328,6 +329,27 @@ def test_conversation_copy_exports_all_turns(qapp):
     assert "3 paid orders." in text and "id, amount, status." in text  # both answers
     conv.clear()
     assert conv.copy_text() == ""
+
+
+def test_message_bubble_copy_actions_write_clipboard(qapp):
+    from dbaide.desktop.components.conversation import _Bubble
+
+    bubble = _Bubble("用户发的消息 abc", align_right=True)
+    bubble.copy_message()
+    assert QApplication.clipboard().text() == "用户发的消息 abc"
+
+    bubble._label.setSelection(0, 2)
+    bubble.copy_selection()
+    assert QApplication.clipboard().text() == "用户"
+
+
+def test_markdown_block_copy_action_writes_source_message(qapp):
+    from dbaide.desktop.components.conversation import _MarkdownBlock
+
+    markdown = "**Answer**\n\n```sql\nSELECT 1\n```"
+    block = _MarkdownBlock(markdown, title="DBAide")
+    block.copy_message()
+    assert QApplication.clipboard().text() == markdown
 
 
 def test_answer_without_stream_renders_immediately(qapp):

@@ -97,6 +97,35 @@ DESCRIBE_TABLE = ToolSpec(
     safe_for_auto_call=True,
 )
 
+INSPECT_METADATA = ToolSpec(
+    name="inspect_metadata",
+    description=(
+        "Inspect database metadata without running business-data SQL. Use this for "
+        "schema/system catalog questions such as checking exact table/column existence, "
+        "checking column existence across tables, or retrieving indexes/FKs for selected tables. "
+        "This is the controlled alternative to querying information_schema directly."
+    ),
+    input_schema={
+        "database": "string",
+        "tables": "list[string]",
+        "table_name": "string",
+        "column_name": "string",
+        "include_columns": "boolean",
+        "include_indexes": "boolean",
+        "include_foreign_keys": "boolean",
+        "limit": "integer",
+    },
+    output_schema={
+        "database": "string",
+        "tables": "list[dict]",
+        "matched_columns": "list[dict]",
+        "disclosed_tables": "list[string]",
+    },
+    permission_level=SAFE_METADATA,
+    timeout_seconds=20,
+    safe_for_auto_call=True,
+)
+
 RETRIEVE_JOIN_CONTEXT = ToolSpec(
     name="retrieve_join_context",
     description=(
@@ -380,8 +409,8 @@ RETRIEVE_SCHEMA_CONTEXT = ToolSpec(
     name="retrieve_schema_context",
     description=(
         "Retrieve schema evidence for the current question without deciding the final schema. "
-        "Returns candidate tables, columns, authoritative user notes, deprecated/excluded "
-        "paths, conflicts, and missing information. It does NOT retrieve join relations; "
+        "Returns candidate tables, columns, authoritative user notes, inactive/missing "
+        "paths, and missing information. It does NOT retrieve join relations; "
         "it also does not profile/sample rows or validate relationships. "
         "call retrieve_join_context after the main LLM decides relation evidence is needed. Use this as the default "
         "schema evidence tool for data questions; the main LLM must decide what to do next."
@@ -397,7 +426,6 @@ RETRIEVE_SCHEMA_CONTEXT = ToolSpec(
     output_schema={
         "report_id": "string",
         "candidates": "list[dict]",
-        "conflicts": "list[dict]",
         "missing": "list[string]",
     },
     permission_level=SAFE_METADATA,

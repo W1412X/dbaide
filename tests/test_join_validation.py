@@ -14,7 +14,7 @@ from dbaide.agent.join_validation import (
 from dbaide.agent.orchestrator import AskOrchestrator
 from dbaide.agent.toolkit import build_tool_registry
 from dbaide.llm import LLMClient, LLMMessage
-from dbaide.models import ColumnInfo, ConnectionConfig
+from dbaide.models import ConnectionConfig
 from dbaide.session import Session
 from dbaide.tools.registry import ToolContext
 from dbaide.models import QueryResult
@@ -83,10 +83,6 @@ def test_sample_validation_many_to_one(tmp_path):
     conn = ConnectionConfig(name="local", type="sqlite", path=str(db))
     adapter = build_adapter(conn)
     orch = AskOrchestrator(adapter, Session(connection=conn), JoinInferMockLLM())
-    disclosed = [
-        ("", "assets", [ColumnInfo(name="id", data_type="INTEGER", primary_key=True)]),
-        ("", "asset_sensors", [ColumnInfo(name="asset_id", data_type="INTEGER")]),
-    ]
     rel = {
         "table": "asset_sensors",
         "column": "asset_id",

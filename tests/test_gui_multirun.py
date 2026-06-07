@@ -119,13 +119,13 @@ def test_two_sessions_run_concurrently_and_route_to_own_slots(qapp, tmp_path):
     win._max_runs = 3
 
     # Session 1 (active) asks.
-    win.submit_composer("first question about t", "safe_auto")
+    win.submit_composer("first question about t")
     key1 = win._active_key
     assert key1 in win._runs
 
     # Switch to a new session and ask a second question concurrently.
     win.new_session()
-    win.submit_composer("second different question", "safe_auto")
+    win.submit_composer("second different question")
     key2 = win._active_key
     assert key2 != key1
     assert key1 in win._runs and key2 in win._runs   # both running at once
@@ -151,7 +151,7 @@ def test_running_new_chat_appears_as_pending_row(qapp, tmp_path):
     _drain(qapp)
     win._max_runs = 3
 
-    win.submit_composer("a question about table t", "safe_auto")
+    win.submit_composer("a question about table t")
     key = win._active_key
     assert key.startswith("new:") and key in win._runs
 

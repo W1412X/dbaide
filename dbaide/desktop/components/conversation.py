@@ -9,10 +9,12 @@ from typing import Any
 from PyQt6.QtCore import Qt, QTimer, pyqtSignal
 from PyQt6.QtGui import QFont, QIcon
 from PyQt6.QtWidgets import (
+    QApplication,
     QFrame,
     QHBoxLayout,
     QLabel,
     QLineEdit,
+    QMenu,
     QPushButton,
     QScrollArea,
     QSizePolicy,
@@ -28,10 +30,38 @@ from dbaide.desktop.components.base import compact_button
 from dbaide.desktop.conversation_state import ThinkingUiState, TurnTraceState
 from dbaide.desktop.components.icons import svg_icon
 from dbaide.desktop.components.inputs import configure_readonly_text_view, configure_wrapped_label
+from dbaide.desktop.components.menu import _style_menu
 from dbaide.desktop.components.spinner import BusyAnimator, spinner_icon
 from dbaide.desktop.components.trace import InlineTrace
 from dbaide.desktop.theme import Theme
 from dbaide.rendering.markdown import render_markdown_safe
+
+
+def _copy_to_clipboard(text: str) -> None:
+    if text:
+        QApplication.clipboard().setText(text)
+
+
+def _selected_label_text(label: QLabel) -> str:
+    return str(label.selectedText() or "").replace("\u2029", "\n")
+
+
+def _selected_browser_text(browser: QTextBrowser) -> str:
+    return str(browser.textCursor().selectedText() or "").replace("\u2029", "\n")
+
+
+def _show_copy_menu(widget: QWidget, pos, *, selected_text: str, full_text: str) -> None:
+    from dbaide.i18n import t
+
+    menu = QMenu(widget)
+    _style_menu(menu)
+    selection_action = menu.addAction(t("message.copy_selection"))
+    selection_action.setEnabled(bool(selected_text.strip()))
+    selection_action.triggered.connect(lambda: _copy_to_clipboard(selected_text))
+    message_action = menu.addAction(t("message.copy_message"))
+    message_action.setEnabled(bool(full_text.strip()))
+    message_action.triggered.connect(lambda: _copy_to_clipboard(full_text))
+    menu.exec(widget.mapToGlobal(pos))
 
 
 class _AttachmentTags(QWidget):
@@ -91,6 +121,8 @@ class _Bubble(QFrame):
         label.setWordWrap(True)
         label.setAlignment(Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignLeft)
         label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+        label.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        label.customContextMenuRequested.connect(self._show_label_menu)
         label.setFont(QFont("Inter", 13))
         label.setStyleSheet(
             f"""
@@ -119,6 +151,20 @@ class _Bubble(QFrame):
         # +44 covers the bubble's 16px horizontal padding each side, the border, and a
         # little metric jitter — so short text isn't wrapped a word early.
         self._label.setFixedWidth(max(48, min(cap, longest + 44)))
+
+    def _show_label_menu(self, pos) -> None:
+        _show_copy_menu(
+            self._label,
+            pos,
+            selected_text=_selected_label_text(self._label),
+            full_text=self._text,
+        )
+
+    def copy_message(self) -> None:
+        _copy_to_clipboard(self._text)
+
+    def copy_selection(self) -> None:
+        _copy_to_clipboard(_selected_label_text(self._label))
 
 
 class _ThinkingIndicator(QPushButton):
@@ -233,6 +279,7 @@ class _MarkdownBlock(QFrame):
     def __init__(self, markdown: str, *, title: str = "", boxed: bool = False,
                  accent: str = "", title_tooltip: str = "", parent=None) -> None:
         super().__init__(parent)
+        self._markdown = str(markdown or "")
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
         self.setObjectName("answerBlock")
         if boxed:
@@ -258,6 +305,8 @@ class _MarkdownBlock(QFrame):
             layout.addWidget(t)
         self._body = QTextBrowser()
         self._body.setOpenExternalLinks(True)
+        self._body.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self._body.customContextMenuRequested.connect(self._show_body_menu)
         self._body.setFrameShape(QFrame.Shape.NoFrame)
         self._body.setFont(QFont("Inter", 13))
         configure_readonly_text_view(self._body)
@@ -272,15 +321,30 @@ class _MarkdownBlock(QFrame):
         # full Markdown — blockquotes, headings, lists, code, tables — renders.
         from dbaide.desktop.components.md_css import markdown_stylesheet
         self._body.document().setDefaultStyleSheet(markdown_stylesheet())
-        self._body.setHtml(render_markdown_safe(markdown or ""))
+        self._body.setHtml(render_markdown_safe(self._markdown))
         layout.addWidget(self._body)
         self._body.document().documentLayout().documentSizeChanged.connect(self._sync_body_height)
         self._sync_body_height()
 
     def set_markdown(self, markdown: str) -> None:
         """Re-render the body (used by the progressive answer reveal)."""
-        self._body.setHtml(render_markdown_safe(markdown or ""))
+        self._markdown = str(markdown or "")
+        self._body.setHtml(render_markdown_safe(self._markdown))
         self._sync_body_height()
+
+    def _show_body_menu(self, pos) -> None:
+        _show_copy_menu(
+            self._body.viewport(),
+            pos,
+            selected_text=_selected_browser_text(self._body),
+            full_text=self._markdown or self._body.toPlainText(),
+        )
+
+    def copy_message(self) -> None:
+        _copy_to_clipboard(self._markdown or self._body.toPlainText())
+
+    def copy_selection(self) -> None:
+        _copy_to_clipboard(_selected_browser_text(self._body))
 
     def resizeEvent(self, event) -> None:  # noqa: N802
         super().resizeEvent(event)
@@ -407,10 +471,6 @@ class _ClarificationBar(QFrame):
         if text:
             self.submitted.emit(text)
 
-    def connect_option(self, callback) -> None:
-        """Back-compat shim: route the unified submission to the callback."""
-        self.submitted.connect(callback)
-
 
 class _ClarificationStepper(QFrame):
     """Multi-question clarification answered ONE question at a time. Each step shows
@@ -532,9 +592,6 @@ class _ClarificationStepper(QFrame):
             ans = self._answers[i] if i < len(self._answers) else ""
             lines.append(f"{i + 1}. {ans}")
         self.submitted.emit("\n".join(lines))
-
-    def connect_option(self, callback) -> None:
-        self.submitted.connect(callback)
 
 
 class TurnBlock(QFrame):
@@ -737,9 +794,8 @@ class ConversationView(QScrollArea):
         self._live_answer_text = ""
         turn = TurnBlock()
         if user_text.strip():
-            # Only surface the connection · db · policy caption when it changes from
-            # the previous turn — repeating unchanged context on every message is
-            # noise (Codex shows context once, not per turn).
+            # Only surface the connection · db caption when it changes from the
+            # previous turn — repeating unchanged context on every message is noise.
             show_meta = meta if (meta and meta != self._last_meta) else ""
             if meta:
                 self._last_meta = meta
@@ -757,7 +813,8 @@ class ConversationView(QScrollArea):
     def append_trace(self, message: str, *, kind: str = "", detail: str = "") -> None:
         if self._current_turn is None:
             self.begin_turn("")
-        assert self._current_turn is not None
+        if self._current_turn is None:
+            return
         if message.strip():
             self._current_turn.status.set_phase(message.strip())
         self._scroll_bottom()
@@ -765,7 +822,8 @@ class ConversationView(QScrollArea):
     def append_trace_event(self, event: dict[str, Any]) -> None:
         if self._current_turn is None:
             self.begin_turn("")
-        assert self._current_turn is not None
+        if self._current_turn is None:
+            return
         # Surface the current phase on the thinking chip (a friendly label like
         # "Linking schema"); the full detail goes to the right panel.
         phase = phase_for(str(event.get("stage") or ""))
@@ -784,7 +842,8 @@ class ConversationView(QScrollArea):
         if self._current_turn is None:
             self.begin_turn("")
         turn = self._current_turn
-        assert turn is not None
+        if turn is None:
+            return None
         turn.status.set_waiting()
         structured = [q for q in (questions or []) if str(q.get("ask") or "").strip()]
         if len(structured) > 1:
@@ -836,7 +895,8 @@ class ConversationView(QScrollArea):
         if self._current_turn is None:
             self.begin_turn("")
         turn = self._current_turn
-        assert turn is not None
+        if turn is None:
+            return
         # The persisted trace is the authoritative one; fall back to whatever streamed
         # in live. These events feed the right panel when the chip is clicked.
         events = list(trace_events) if trace_events else list(

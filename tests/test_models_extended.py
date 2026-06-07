@@ -66,8 +66,12 @@ class TestModelConfig:
         assert model.timeout_seconds == 600
 
     def test_provider_normalized(self):
-        model = ModelConfig(name="test", provider="OPENAI")
-        assert model.provider == "openai"
+        model = ModelConfig(name="test", provider="OPENAI_COMPATIBLE")
+        assert model.provider == "openai_compatible"
+
+    def test_invalid_provider_rejected(self):
+        with pytest.raises(ValueError, match="Invalid model provider"):
+            ModelConfig(name="test", provider="OPENAI")
 
     def test_provider_empty(self):
         model = ModelConfig(name="test", provider="")

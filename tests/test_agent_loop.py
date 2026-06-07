@@ -71,7 +71,7 @@ def test_agent_loop_data_query(tmp_path):
     assert response.result is not None or "sql" in response.answer.lower()
 
 
-def test_orchestrator_uses_loop_before_staged(tmp_path):
+def test_orchestrator_uses_single_loop(tmp_path):
     db = tmp_path / "app.db"
     make_db(db)
     conn = ConnectionConfig(name="local", type="sqlite", path=str(db))
@@ -82,9 +82,9 @@ def test_orchestrator_uses_loop_before_staged(tmp_path):
     assert response.answer
 
 
-def test_orchestrator_returns_honest_failure_no_staged_degrade(tmp_path):
+def test_orchestrator_returns_honest_failure_no_alternate_pipeline(tmp_path):
     """When the model can't produce a valid decision, the agent surfaces an honest
-    failure (with the reason) — it must NOT silently degrade to a staged pipeline."""
+    failure (with the reason) instead of silently switching execution paths."""
     from dbaide.llm import LLMClient
 
     class _BadLLM(LLMClient):
@@ -101,8 +101,30 @@ def test_orchestrator_returns_honest_failure_no_staged_degrade(tmp_path):
     resp = orch.run("和产线相关的表")
     blob = " ".join(resp.warnings)
     assert "decision_invalid" in blob                  # the real reason is surfaced
-    assert "staged pipeline" not in blob               # no degradation happened
+    assert "alternate pipeline" not in blob            # no degradation happened
     assert resp.result is None and not resp.sql        # no fabricated staged result
+
+
+def test_workflow_status_is_failed_when_agent_loop_fails(tmp_path):
+    from dbaide.core.result import WorkflowRequest, WorkflowStatus
+    from dbaide.core.workflow import WorkflowEngine
+    from dbaide.llm import LLMClient
+
+    class _BadLLM(LLMClient):
+        def complete_json(self, messages, *, schema_hint=""):
+            return {}
+
+        def complete_text(self, messages):
+            return ""
+
+    db = tmp_path / "workflow_fail.db"
+    make_db(db)
+    conn = ConnectionConfig(name="local", type="sqlite", path=str(db))
+    result = WorkflowEngine(conn, llm=_BadLLM()).run(WorkflowRequest(question="订单数量"))
+
+    assert result.status == WorkflowStatus.FAILED
+    assert result.warnings
+    assert any(event.stage == "workflow_failed" for event in result.trace)
 
 
 def test_join_relations_require_explicit_tool_call_after_multi_describe(tmp_path):

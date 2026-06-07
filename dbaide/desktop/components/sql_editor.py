@@ -105,13 +105,6 @@ class SqlEditor(QPlainTextEdit):
         self._all_columns = sorted({c for cols in self._columns_by_table.values() for c in cols})
         self._set_general_words()
 
-    def set_completions(self, names: list[str]) -> None:
-        """Back-compat: a flat identifier list (treated as tables + columns)."""
-        names = [str(n) for n in (names or []) if str(n).strip()]
-        self.set_schema({"tables": names, "columns_by_table": {}})
-        self._all_columns = sorted(set(names))
-        self._set_general_words()
-
     def completion_names(self) -> list[str]:
         """The active general completion vocabulary (for tests/introspection)."""
         return self._general_words()

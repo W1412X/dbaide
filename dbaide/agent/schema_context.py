@@ -6,9 +6,12 @@ from typing import TYPE_CHECKING, Any
 
 import logging
 
-from dbaide.db.identifiers import normalize_db_table, normalize_db_table_for_dialect
 from dbaide.llm import NullLLMClient
 from dbaide.models import ColumnInfo
+from dbaide.db.identifiers import (
+    normalize_db_table as _normalize_db_table,
+    normalize_db_table_for_dialect as _normalize_db_table_for_dialect,
+)
 
 if TYPE_CHECKING:
     from dbaide.agent.orchestrator import AskOrchestrator
@@ -17,6 +20,16 @@ if TYPE_CHECKING:
 logger = logging.getLogger("dbaide.schema_context")
 
 MAX_DISCLOSED_TABLES = 4
+
+
+def normalize_db_table(table: str, database: str = "") -> tuple[str, str]:
+    """Public schema-context entry for generic db/table normalization."""
+    return _normalize_db_table(table, database)
+
+
+def normalize_db_table_for_dialect(table: str, database: str = "", dialect: str = "") -> tuple[str, str]:
+    """Public schema-context entry for dialect-aware db/table normalization."""
+    return _normalize_db_table_for_dialect(table, database, dialect)
 
 
 def table_targets_from_hits(
@@ -299,9 +312,8 @@ def object_notes_for_tables(
 
     Returns a list of ``{"scope", "label", "note"}`` dicts the SQL writer and
     decision prompt render as an authoritative block. Column notes are included
-    here as a fallback for candidates that are not disclosed as SQL-eligible
-    columns (for example deprecated tables); when a table is disclosed normally,
-    the same note also rides on its ColumnInfo line."""
+    here as a fallback for candidates whose full columns were not disclosed; when
+    a table is disclosed normally, the same note also rides on its ColumnInfo line."""
     store = _annotation_store(orchestrator)
     if store is None or not tables:
         return []
@@ -326,9 +338,8 @@ def object_notes_for_tables(
 def decision_notes_block(orchestrator: AskOrchestrator, database: str = "") -> str:
     """Database/table notes for the whole instance, for the decision prompt.
 
-    Surfaced BEFORE the agent picks tables so notes (e.g. "this table is
-    deprecated, use X instead") can steer the choice. Bounded for prompt size;
-    the model interprets each note's meaning itself."""
+    Surfaced BEFORE the agent picks tables so notes can steer the choice. Bounded
+    for prompt size; the model interprets each note's meaning itself."""
     store = _annotation_store(orchestrator)
     if store is None:
         return ""
@@ -376,23 +387,33 @@ def merge_sql_context(base: dict[str, Any], relations: list[dict[str, Any]]) -> 
 
 
 def validation_feedback(issues: list[str]) -> str:
-    text = "; ".join(issues) or "SQL validation failed"
-    lowered = text.lower()
-    if "unknown table" in lowered or "unknown column" in lowered:
-        text += " Hint: call describe_table for missing objects before generate_sql."
-    return text
+    return "; ".join(issues) or "SQL validation failed"
 
 
 def join_confidence_for_sql(relations: list[dict[str, Any]], sql: str) -> float:
-    """Minimum confidence among join edges relevant to SQL (soft signal for risk gate)."""
+    """Minimum confidence among relation edges whose endpoints are explicitly used."""
     if not relations:
         return 1.0
-    sql_lower = sql.lower()
+    tables = _sql_table_names(sql)
+    if not tables:
+        return 0.0
     matched: list[dict[str, Any]] = []
     for rel in relations:
         left = str(rel.get("table") or "").strip().lower()
         right = str(rel.get("ref_table") or "").strip().lower()
-        if left and right and left in sql_lower and right in sql_lower:
+        if left and right and left in tables and right in tables:
             matched.append(rel)
-    pool = matched or relations
-    return min(float(rel.get("confidence") or 0.0) for rel in pool)
+    if not matched:
+        return 0.0
+    return min(float(rel.get("confidence") or 0.0) for rel in matched)
+
+
+def _sql_table_names(sql: str) -> set[str]:
+    tokens = str(sql or "").replace("\n", " ").replace(",", " ").split()
+    tables: set[str] = set()
+    for index, token in enumerate(tokens[:-1]):
+        if token.lower() in {"from", "join"}:
+            table = tokens[index + 1].strip('"`[](),;').lower()
+            if table and table not in {"select", "where"}:
+                tables.add(table)
+    return tables

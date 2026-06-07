@@ -12,7 +12,7 @@ from dbaide.adapters import build_adapter
 from dbaide.agent import DataAssistant, InstanceTarget, MultiInstanceAssistant
 from dbaide.assets import AssetBuilder, AssetSearch, AssetStore
 from dbaide.config import ConfigManager
-from dbaide.core.result import ExecutionPolicy, WorkflowRequest, WorkflowResult, WorkflowStatus
+from dbaide.core.result import WorkflowRequest, WorkflowResult, WorkflowStatus
 from dbaide.core.workflow import WorkflowEngine
 from dbaide.history.debug_bundle import create_debug_bundle
 from dbaide.joins import JoinCatalogStore
@@ -100,12 +100,10 @@ def build_parser() -> argparse.ArgumentParser:
     ask = sub.add_parser("ask", help="Ask a database question")
     add_common_conn_args(ask)
     ask.add_argument("question")
-    ask.add_argument("--no-execute", action="store_true")
     ask.add_argument("--show-disclosure", action="store_true")
     ask.add_argument("--debug-trace", action="store_true",
                      help="Full debug trace: every step's args/output + each LLM call's "
                           "prompt and response (set DBAIDE_TRACE_LLM=1 to capture LLM I/O).")
-    ask.add_argument("--policy", choices=["inspect-only", "sql-only", "safe-auto", "expert"], default="safe-auto")
     ask.add_argument("--export-debug", action="store_true")
     ask.add_argument("--json", action="store_true")
 
@@ -731,13 +729,12 @@ def run_workflow_cli(cfg: ConfigManager, args: argparse.Namespace):
         # run a single-instance WorkflowEngine (that re-executed the query against
         # targets[0] and returned its trace/JSON, inconsistent with the answer).
         assistant = build_any_assistant(cfg, args)
-        response = assistant.ask(args.question, database=args.database, execute=not args.no_execute)
+        response = assistant.ask(args.question, database=args.database, execute=True)
         return WorkflowResult(
             status=WorkflowStatus.COMPLETED,
             question=args.question,
             connection_name=", ".join(t.config.name for t in targets),
             database_scope=[t.database for t in targets if t.database],
-            execution_policy=ExecutionPolicy.SQL_ONLY if args.no_execute else _cli_policy(args.policy),
             answer_markdown=response.answer,
             answer_plaintext=response.answer,
             selected_sql=response.sql,
@@ -746,13 +743,11 @@ def run_workflow_cli(cfg: ConfigManager, args: argparse.Namespace):
         )
 
     target = targets[0]
-    policy = ExecutionPolicy.SQL_ONLY if args.no_execute else _cli_policy(args.policy)
     return WorkflowEngine(target.config, llm=safe_llm(cfg), asset_store=AssetStore()).run(
         WorkflowRequest(
             question=args.question,
             connection_name=target.config.name,
             database_scope=[target.database] if target.database else [],
-            execution_policy=policy,
             limit=args.limit,
             timeout_seconds=args.timeout,
         )
@@ -764,14 +759,6 @@ def safe_llm(cfg: ConfigManager):
         return build_llm_client(cfg.model())
     except Exception:
         return NullLLMClient()
-
-
-def _cli_policy(value: str) -> ExecutionPolicy:
-    normalized = value.replace("-", "_")
-    for policy in ExecutionPolicy:
-        if policy.value == normalized:
-            return policy
-    return ExecutionPolicy.SAFE_AUTO
 
 
 def _populate_disclosure(adapter, session: Session, instance: str, database: str) -> None:

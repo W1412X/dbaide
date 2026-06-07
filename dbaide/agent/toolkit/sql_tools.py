@@ -3,11 +3,11 @@ from __future__ import annotations
 
 import hashlib
 import inspect
+import json
 import logging
 from typing import Any
 
 from dbaide.agent.memory import SQLArtifact, next_prefixed_id
-from dbaide.core.result import ExecutionPolicy
 from dbaide.i18n import t
 from dbaide.tools.registry import ToolContext, ToolRegistry, ToolResult
 from dbaide.tools.specs import (
@@ -23,6 +23,7 @@ from dbaide.agent.toolkit.support import (
     _collect_disclosed_schemas, _err,
     _note_working_db, _tables_in_sql,
     _requested_table_names, _ambiguous_requested_tables,
+    _requested_table_labels,
 )
 
 logger = logging.getLogger("dbaide.agent.toolkit")
@@ -54,9 +55,10 @@ def register(registry: ToolRegistry, orchestrator) -> None:
                 f"{db}.{table}" if db else table
                 for db, table, _columns in disclosed
             }
+            requested_labels = _requested_table_labels(orchestrator, args)
             missing = [
-                name for name in requested_tables
-                if name not in found and name.split(".")[-1] not in {item.split(".")[-1] for item in found}
+                raw for raw, label in zip(requested_tables, requested_labels, strict=False)
+                if label not in found
             ]
             if missing:
                 return ToolResult(
@@ -164,6 +166,7 @@ def register(registry: ToolRegistry, orchestrator) -> None:
         )
 
     def _execute_sql(args: dict[str, Any], ctx: ToolContext, *, exploratory: bool = False) -> ToolResult:
+        tool_label = "execute_readonly_sql" if exploratory else "execute_sql"
         sql = str(args.get("sql") or orchestrator.run_state.sql or "").strip()
         database = str(args.get("database") or orchestrator.run_state.table_database or orchestrator.run_state.database or "")
         purpose = str(args.get("purpose") or "").strip()
@@ -171,19 +174,8 @@ def register(registry: ToolRegistry, orchestrator) -> None:
         limit = _positive_int(args.get("limit"), orchestrator.session.default_limit)
         timeout_seconds = _positive_int(args.get("timeout_seconds"), None)
         if not sql:
-            return ToolResult(ok=False, error=_err("execute_sql", "sql is required"))
+            return ToolResult(ok=False, error=_err(tool_label, "sql is required"))
 
-        policy = ExecutionPolicy(ctx.execution_policy) if ctx.execution_policy else orchestrator.execution_policy
-        if policy in {ExecutionPolicy.INSPECT_ONLY, ExecutionPolicy.SQL_ONLY}:
-            return ToolResult(
-                ok=False,
-                data={
-                    "blocked": True,
-                    "reason": f"Execution blocked by policy: {policy.value}",
-                    "sql": sql,
-                    "database": database,
-                },
-            )
         if not orchestrator.run_state.execute_allowed:
             return ToolResult(
                 ok=False,
@@ -199,7 +191,7 @@ def register(registry: ToolRegistry, orchestrator) -> None:
         if not validation.ok:
             issues = "; ".join(i.message for i in validation.issues)
             orchestrator.run_state.sql_feedback = validation_feedback([i.message for i in validation.issues])
-            return ToolResult(ok=False, error=_err("execute_sql", f"SQL invalid: {issues}"))
+            return ToolResult(ok=False, error=_err(tool_label, f"SQL invalid: {issues}"))
         if not exploratory:
             orchestrator.run_state.query_result = None
 
@@ -213,7 +205,8 @@ def register(registry: ToolRegistry, orchestrator) -> None:
         # (None) confidence falls back to the neutral default.
         _conf = orchestrator.run_state.sql_confidence
         confidence = 0.7 if _conf is None else float(_conf)
-        has_joins = " join " in validation.normalized_sql.lower()
+        table_count = max(1, len(_tables_in_sql(validation.normalized_sql)))
+        has_joins = table_count > 1
         join_conf = (
             join_confidence_for_sql(orchestrator.run_state.relations, validation.normalized_sql)
             if has_joins
@@ -229,16 +222,15 @@ def register(registry: ToolRegistry, orchestrator) -> None:
                     subagent_event(
                         agent="explain",
                         title=f"EXPLAIN ~{estimated_rows:,} rows",
-                        parent="execute_sql",
+                        parent=tool_label,
                         detail=f"cost gate limit {explain_max_rows:,}",
                         status="completed" if estimated_rows <= explain_max_rows else "info",
                     ),
                 )
         risk = orchestrator.risk.decide(
-            policy=policy,
             validation=validation_report,
             plan_confidence=confidence,
-            table_count=max(1, len(_tables_in_sql(validation.normalized_sql))),
+            table_count=table_count,
             has_joins=has_joins,
             join_confidence=join_conf,
             estimated_rows=estimated_rows,
@@ -248,7 +240,7 @@ def register(registry: ToolRegistry, orchestrator) -> None:
             subagent_event(
                 agent="risk",
                 title=f"Risk: {risk.action}",
-                parent="execute_sql",
+                parent=tool_label,
                 detail=risk.reason,
                 status="completed" if risk.action == "auto_execute" else "info",
             ),
@@ -334,7 +326,7 @@ def register(registry: ToolRegistry, orchestrator) -> None:
                 subagent_event(
                     agent="sql",
                     title=f"Executed · {result.row_count} rows · {result.elapsed_ms:.0f}ms",
-                    parent="execute_sql",
+                    parent=tool_label,
                     detail=validation.normalized_sql,
                     status="completed",
                 ),
@@ -357,7 +349,7 @@ def register(registry: ToolRegistry, orchestrator) -> None:
         except Exception as exc:
             if not exploratory:
                 orchestrator.run_state.sql_feedback = str(exc)
-            return ToolResult(ok=False, error=_err("execute_sql", str(exc), retryable=True))
+            return ToolResult(ok=False, error=_err(tool_label, str(exc), retryable=True))
 
     def _explain_sql(args: dict[str, Any], _ctx: ToolContext) -> ToolResult:
         sql = str(args.get("sql") or orchestrator.run_state.sql or "").strip()
@@ -365,15 +357,22 @@ def register(registry: ToolRegistry, orchestrator) -> None:
         if not sql:
             return ToolResult(ok=False, error=_err("explain_sql", "sql is required"))
         report = orchestrator.diagnose.diagnose_sql(sql, database=database)
-        # Surface the diagnosis as the loop answer so it is not lost if the model
-        # finishes without restating it (mirrors profile_table's behaviour).
-        hints = report.get("issues") or report.get("hints") or []
-        if hints:
+        if report.get("ok"):
+            explain = report.get("explain") or []
             if orchestrator.run_state.answer_language == "zh":
                 lines = [f"EXPLAIN 诊断：\n```sql\n{sql}\n```", ""]
             else:
                 lines = [f"EXPLAIN diagnosis for:\n```sql\n{sql}\n```", ""]
-            lines += [f"- {hint}" for hint in hints]
+            lines.append("```text")
+            lines.append(json.dumps(explain, ensure_ascii=False, default=str, indent=2))
+            lines.append("```")
+            orchestrator.run_state.answer = "\n".join(lines)
+        elif report.get("issues"):
+            if orchestrator.run_state.answer_language == "zh":
+                lines = [f"EXPLAIN 诊断：\n```sql\n{sql}\n```", ""]
+            else:
+                lines = [f"EXPLAIN diagnosis for:\n```sql\n{sql}\n```", ""]
+            lines += [f"- {issue}" for issue in report.get("issues") or []]
             orchestrator.run_state.answer = "\n".join(lines)
         return ToolResult(ok=bool(report.get("ok")), data=report)
 
@@ -387,10 +386,9 @@ def register(registry: ToolRegistry, orchestrator) -> None:
 def _sql_note_targets(orchestrator, selected: list[tuple[str, str]]) -> list[tuple[str, str]]:
     """Tables whose object notes must reach SQL generation.
 
-    The selected SQL tables are not enough: schema retrieval may have found a
-    deprecated/wrong candidate and deliberately kept it out of run_state.schemas.
-    Its note is still authoritative context for SQL writing, otherwise the model
-    can unknowingly use a replacement/nearby table while losing the warning.
+    The selected SQL tables are not enough: schema retrieval may have seen user
+    notes on nearby candidates. Those notes are still authoritative context for
+    SQL writing; the model decides what the note means.
     """
     out: list[tuple[str, str]] = []
     seen: set[tuple[str, str]] = set()
@@ -414,7 +412,7 @@ def _sql_note_targets(orchestrator, selected: list[tuple[str, str]]) -> list[tup
 
 
 def _sql_hash(sql: str) -> str:
-    return hashlib.sha1(" ".join(str(sql or "").split()).encode("utf-8")).hexdigest()
+    return hashlib.sha256(" ".join(str(sql or "").split()).encode("utf-8")).hexdigest()
 
 
 def _next_sql_artifact_id(memory: Any) -> str:

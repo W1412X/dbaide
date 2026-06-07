@@ -17,7 +17,7 @@ from dbaide.assets.summarizer import (
 )
 from dbaide.config import ConfigManager
 from dbaide.connection_identity import connection_fingerprint
-from dbaide.core import ExecutionPolicy, WorkflowRequest
+from dbaide.core import WorkflowRequest
 from dbaide.core.workflow import WorkflowEngine
 from dbaide.db.identifiers import normalize_db_table_for_dialect
 from dbaide.desktop.service_actions import build_action_handlers
@@ -761,9 +761,8 @@ class DesktopService:
         conn = self.cfg.get_connection(conn_name or None)
         self._guard_busy(conn.name)
         in_session_id = str(payload.get("session_id") or "")
-        policy = self._policy(str(payload.get("execution_policy") or payload.get("policy") or "safe_auto"))
         database = str(payload.get("database") or "")
-        request = self._build_request(payload, connection_name=conn.name, policy=policy, database=database)
+        request = self._build_request(payload, connection_name=conn.name, database=database)
         engine = WorkflowEngine(conn, self._safe_llm(), self.store, self.join_catalog)
         progress_cb = payload.get("progress")
         cancel_check = payload.get("cancel_check")
@@ -781,7 +780,6 @@ class DesktopService:
             question=request.question,
             connection_name=conn.name,
             database=database,
-            policy=policy.value,
         )
         # Group the turn into a chat session (会话). A session is created lazily on
         # the first completed turn; clarification pauses (wait_user) don't persist a
@@ -790,7 +788,7 @@ class DesktopService:
         return payload
 
     def _build_request(self, payload: dict[str, Any], *, connection_name: str,
-                       policy: ExecutionPolicy, database: str) -> WorkflowRequest:
+                       database: str) -> WorkflowRequest:
         """Assemble the WorkflowRequest from a GUI ask payload (defaults applied here so
         ask() reads as request → run → record)."""
         conn = self.cfg.get_connection(connection_name)
@@ -799,7 +797,6 @@ class DesktopService:
             question=str(payload.get("question") or ""),
             connection_name=connection_name,
             database_scope=[database] if database else [],
-            execution_policy=policy,
             limit=int(payload.get("limit") or resource_policy.default_row_limit),
             timeout_seconds=int(payload.get("timeout_seconds") or resource_policy.statement_timeout_seconds),
             resume_state=payload.get("resume_state"),
@@ -826,7 +823,7 @@ class DesktopService:
                 status=status,
                 workflow_id=result.workflow_id,
                 trace=[e.to_dict() for e in result.trace],
-                meta={"database": database, "policy": request.execution_policy.value},
+                meta={"database": database},
                 created_at=result.created_at or None,
             ))
         except Exception:  # noqa: BLE001 — session persistence must never break a query
@@ -1105,13 +1102,10 @@ class DesktopService:
         question: str,
         connection_name: str,
         database: str = "",
-        policy: str = "safe_auto",
     ) -> str:
         parts = ["dbaide ask", f'"{question.replace(chr(34), chr(92)+chr(34))}"', f"--connection {connection_name}"]
         if database:
             parts.append(f"--database {database}")
-        if policy and policy != "safe_auto":
-            parts.append(f"--policy {policy}")
         return " ".join(parts)
 
     def _query_tools(self, conn: ConnectionConfig) -> QueryTools:
@@ -1351,13 +1345,6 @@ class DesktopService:
 
     def _safe_llm(self):
         return build_llm_client(self.cfg.model())
-
-    def _policy(self, value: str) -> ExecutionPolicy:
-        normalized = value.replace("-", "_").lower()
-        for item in ExecutionPolicy:
-            if item.value == normalized:
-                return item
-        return ExecutionPolicy.SAFE_AUTO
 
     def pretty_json(self, payload: Any) -> str:
         return json.dumps(payload, ensure_ascii=False, indent=2, default=str)

@@ -48,7 +48,7 @@ def table_fingerprint(doc: dict[str, Any]) -> str:
     )
     comment = str(doc.get("source_comment") or "")
     blob = json.dumps([cols, indexes, fks, comment], ensure_ascii=False, sort_keys=True)
-    return hashlib.sha1(blob.encode("utf-8")).hexdigest()  # noqa: S324 — not security, just identity
+    return hashlib.sha256(blob.encode("utf-8")).hexdigest()
 
 
 @dataclass

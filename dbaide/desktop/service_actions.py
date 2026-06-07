@@ -46,7 +46,6 @@ ACTION_METHODS: tuple[tuple[str, str], ...] = (
     ("rename_session", "rename_session"),
     ("delete_session", "delete_session"),
     ("asset_markdown", "asset_markdown"),
-    ("preview_asset", "asset_markdown"),
     ("test_model", "test_model"),
     ("test_model_profile", "test_model_profile"),
     ("list_joins", "list_joins"),

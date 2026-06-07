@@ -60,6 +60,7 @@ def test_sidebar_schema_row_actions_use_more_menu():
     app.processEvents()
 
     db_item = sidebar.tree.topLevelItem(0)
+    assert db_item.isExpanded() is False
     db_actions = sidebar.tree.itemWidget(db_item, 1)
     db_buttons = db_actions.findChildren(QToolButton)
     assert len(db_buttons) == 2

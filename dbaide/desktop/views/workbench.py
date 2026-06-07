@@ -48,7 +48,6 @@ class WorkbenchView(QWidget):
         super().__init__(parent)
         from dbaide.i18n import t
         self._t = t
-        self._completions: list[str] = []
         self._schema: dict = {}
         self._query_seq = 0
         self._doc_tabs: dict[str, DocTab] = {}  # path → DocTab
@@ -157,8 +156,6 @@ class WorkbenchView(QWidget):
         editor = SqlTab()
         if self._schema:
             editor.set_schema(self._schema)
-        elif self._completions:
-            editor.set_completions(self._completions)
         if sql:
             editor.set_sql(sql)
         editor.run_requested.connect(
@@ -193,13 +190,6 @@ class WorkbenchView(QWidget):
             self.tabs.setCurrentWidget(cur)
             return cur
         return self.new_sql_editor(sql)
-
-    def set_sql_completions(self, names: list[str]) -> None:
-        self._completions = list(names)
-        for i in range(self.tabs.count()):
-            w = self.tabs.widget(i)
-            if isinstance(w, SqlTab):
-                w.set_completions(self._completions)
 
     def set_sql_schema(self, schema: dict) -> None:
         """Structured schema for context-aware (db/table/column) completion."""

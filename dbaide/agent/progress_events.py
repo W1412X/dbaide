@@ -10,6 +10,7 @@ TOOL_TRACE_STAGES = frozenset({
     "discover_schema",
     "retrieve_schema_context",
     "describe_table",
+    "inspect_metadata",
     "retrieve_join_context",
     "generate_sql",
     "validate_sql",
@@ -35,6 +36,7 @@ PHASE_LABELS: dict[str, str] = {
     "list_databases": "Exploring schema",
     "list_tables": "Exploring schema",
     "describe_table": "Reading tables",
+    "inspect_metadata": "Inspecting metadata",
     "retrieve_join_context": "Mapping relations",
     "validate_joins": "Mapping relations",
     "list_joins": "Mapping relations",
@@ -106,7 +108,7 @@ def step_type(event: dict[str, Any], *, is_tool: bool = False) -> str:
     if kind == "substep":
         return "substep"
     node_id = str(event.get("node_id") or "")
-    if kind == "phase" or stage == "build_assets" or node_id.startswith("build:"):
+    if kind == "phase" or stage == "build_assets" or _node_namespace(node_id) == "build":
         return "phase"
     if is_tool:
         return "tool"
@@ -224,7 +226,7 @@ def progress_label(payload: str | dict[str, Any]) -> str:
         text = f"{stage}: {title}"
     else:
         text = title or stage or detail or "Working…"
-    if detail and detail not in text:
+    if detail and detail not in {text, title, stage}:
         text = f"{text} — {detail[:80]}"
     return text[:240]
 
@@ -316,7 +318,7 @@ def _stage_title(stage: str, title: str) -> str:
     if not stage:
         return title
     t, s = title.lower(), stage.lower()
-    if t == s or t.startswith(s) or s in t:
+    if t == s:
         return title
     return f"{stage}: {title}"
 
@@ -339,7 +341,7 @@ def conversation_trace_step(event: dict[str, Any]) -> tuple[str, str, str] | Non
         line = title or summary or detail
         agent_name = str(event.get("agent") or "").strip()
         parent = str(event.get("parent") or "").strip()
-        if agent_name and line and not line.startswith(f"{agent_name}:"):
+        if agent_name and line and line.removeprefix(f"{agent_name}:") == line:
             line = f"{agent_name}: {line}"
         elif parent and line and parent not in line:
             line = f"{parent} › {line}"
@@ -356,7 +358,7 @@ def conversation_trace_step(event: dict[str, Any]) -> tuple[str, str, str] | Non
         return title or "SQL generated", "decision", output or detail
     if stage == "sql_validation":
         return title or "Validating SQL", "result", output or detail
-    if stage in {"execution_completed", "execute_sql"} or stage.startswith("execute"):
+    if stage in {"execution_completed", "execute_sql", "execute_readonly_sql"}:
         return title or summary or stage, "result", output or summary or detail
     if stage in {"workflow_completed", "result_interpreted", "waiting_for_user"}:
         return title or summary or stage, "info", detail or summary
@@ -372,3 +374,7 @@ def conversation_trace_step(event: dict[str, Any]) -> tuple[str, str, str] | Non
         return message, step_kind, step_detail
 
     return None
+
+
+def _node_namespace(node_id: str) -> str:
+    return str(node_id or "").split(":", 1)[0]

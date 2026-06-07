@@ -6,6 +6,7 @@ import logging
 import time
 from typing import Any, Callable
 
+from dbaide.core.cancellation import CancelledError
 from dbaide.core.events import TraceEvent, TraceKind, TraceLevel
 from dbaide.core.errors import DBAideError, ErrorCode, RepairAction
 from dbaide.tools.specs import ToolSpec
@@ -45,7 +46,7 @@ class ToolContext:
 
     __slots__ = (
         "workflow_id", "connection", "adapter", "asset_store",
-        "session", "execution_policy", "trace_sink", "cancel_check",
+        "session", "trace_sink", "cancel_check",
     )
 
     def __init__(
@@ -56,7 +57,6 @@ class ToolContext:
         adapter: Any = None,
         asset_store: Any = None,
         session: Any = None,
-        execution_policy: str = "safe_auto",
         trace_sink: Callable[[TraceEvent], None] | None = None,
         cancel_check: Callable[[], None] | None = None,
     ) -> None:
@@ -65,7 +65,6 @@ class ToolContext:
         self.adapter = adapter
         self.asset_store = asset_store
         self.session = session
-        self.execution_policy = execution_policy
         self.trace_sink = trace_sink
         self.cancel_check = cancel_check
 
@@ -216,13 +215,10 @@ class ToolRegistry:
             "workflow": ctx.workflow_id,
             "connection": conn_key,
             "session": session_key,
-            "execution_policy": ctx.execution_policy,
             "arguments": arguments,
         }
         return json.dumps(payload, sort_keys=True, default=str)
 
 
 def _looks_cancelled(exc: Exception) -> bool:
-    name = type(exc).__name__.lower()
-    text = str(exc).lower()
-    return "cancel" in name or "cancelled" in text or "canceled" in text
+    return isinstance(exc, CancelledError)

@@ -10,8 +10,6 @@ to the connection default (`product_data`) and failed.
 
 import sqlite3
 
-import pytest
-
 from dbaide.adapters import build_adapter
 from dbaide.agent.orchestrator import AskOrchestrator
 from dbaide.agent.toolkit import build_tool_registry
@@ -72,7 +70,7 @@ def test_execute_default_database_is_the_working_db(tmp_path):
     orch = _orch(tmp_path)
     reg = build_tool_registry(orch)
     orch._reset_loop_state("how many employees", database="", execute=True)
-    ctx = ToolContext(execution_policy="safe_auto")
+    ctx = ToolContext()
     reg.invoke("list_tables", {"database": "platform"}, ctx)
     reg.invoke("describe_table", {"table": "sys_user"}, ctx)
 

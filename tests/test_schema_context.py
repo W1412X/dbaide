@@ -208,6 +208,6 @@ def test_merge_sql_context_and_writer_format():
     assert "foreign_keys" not in llm.last_user
 
 
-def test_validation_feedback_hints_missing_schema():
+def test_validation_feedback_returns_validation_text_only():
     msg = validation_feedback(["Unknown column: orders.missing_col"])
-    assert "describe_table" in msg
+    assert msg == "Unknown column: orders.missing_col"

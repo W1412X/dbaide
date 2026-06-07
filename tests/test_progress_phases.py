@@ -13,6 +13,7 @@ def test_phase_for_known_stages():
     assert phase_for("execute_sql") == "Running query"
     assert phase_for("execute_readonly_sql") == "Running query"
     assert phase_for("generate_sql") == "Writing SQL"
+    assert phase_for("inspect_metadata") == "Inspecting metadata"
     assert phase_for("discover_schema") == "Exploring schema"
     assert phase_for("describe_table") == "Reading tables"
     assert phase_for("validate_joins") == "Mapping relations"

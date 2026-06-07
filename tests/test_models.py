@@ -69,5 +69,9 @@ class TestModelConfig:
         assert cfg.timeout_seconds == 600
 
     def test_provider_normalized(self):
-        cfg = ModelConfig(provider="  OpenAI  ")
-        assert cfg.provider == "openai"
+        cfg = ModelConfig(provider="  OPENAI_COMPATIBLE  ")
+        assert cfg.provider == "openai_compatible"
+
+    def test_invalid_provider_rejected(self):
+        with pytest.raises(ValueError, match="Invalid model provider"):
+            ModelConfig(provider="openai")

@@ -8,6 +8,7 @@ from dataclasses import asdict, dataclass, field
 from typing import TYPE_CHECKING, Callable
 
 from dbaide.adapters.base import DatabaseAdapter
+from dbaide.assets.profiler import kind_from_type
 from dbaide.assets.store import AssetStore
 
 if TYPE_CHECKING:
@@ -701,9 +702,4 @@ def should_profile_column(column, *, mode: str) -> bool:
     # auto: keys, temporal, boolean and numeric columns.
     if column.primary_key or column.indexed:
         return True
-    typ = str(column.data_type or "").lower()
-    if any(k in typ for k in ["date", "time", "timestamp", "bool", "bit"]):
-        return True
-    if any(k in typ for k in ["int", "real", "numeric", "decimal", "float", "double", "number"]):
-        return True
-    return False
+    return kind_from_type(column) in {"temporal", "boolean", "numeric"}

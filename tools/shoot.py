@@ -60,7 +60,7 @@ def build_window(app: QApplication) -> MainWindow:
     cfg = ConfigManager(path=tmp / "config.toml")
     cfg.upsert_connection(ConnectionConfig(name="shop", type="sqlite", path=str(db)), make_default=True)
     cfg.upsert_model(
-        ModelConfig(name="gpt-4o", provider="openai", base_url="https://api.openai.com/v1",
+        ModelConfig(name="gpt-4o", provider="openai_compatible", base_url="https://api.openai.com/v1",
                     api_key="sk-test", model="gpt-4o"),
         make_default=True,
     )
@@ -95,7 +95,7 @@ def populate(win: MainWindow) -> None:
     win._active_key = key
     ask.set_active(key)
     ask.begin_turn(key, "Which cities have the most paying users, and what's their total order value?",
-                   connection="shop", database="auto", policy="safe_auto")
+                   connection="shop", database="auto")
     events = [
         {"stage": "loop", "title": "started", "status": "completed", "kind": "agent"},
         {"stage": "decompose", "title": "1 intent · data_query", "status": "completed", "kind": "phase", "step": 0},

@@ -7,7 +7,6 @@ from PyQt6.QtWidgets import QApplication, QHBoxLayout, QSizePolicy, QStackedWidg
 
 from dbaide.desktop.components.base import compact_button
 from dbaide.desktop.components.conversation import ConversationView
-from dbaide.desktop.components.composer_options import POLICY_LABELS
 from dbaide.desktop.components.empty_state import EmptyState
 
 
@@ -148,17 +147,15 @@ class AskTab(QWidget):
 
     # ── keyed conversation operations ─────────────────────────────────────────
 
-    def begin_turn(self, key: str, question: str, *, connection: str, database: str, policy: str,
+    def begin_turn(self, key: str, question: str, *, connection: str, database: str,
                    attachments: list[dict] | None = None) -> None:
-        policy_label = POLICY_LABELS.get(policy, policy)
-        meta = " · ".join(x for x in (connection, database or "auto", policy_label) if x)
+        meta = " · ".join(x for x in (connection, database or "auto") if x)
         self._hint_shown = True
         self.ensure_slot(key).begin_turn(question, meta=meta, attachments=attachments)
 
-    def append_user(self, key: str, question: str, *, connection: str, database: str, policy: str,
+    def append_user(self, key: str, question: str, *, connection: str, database: str,
                     attachments: list[dict] | None = None) -> None:
-        self.begin_turn(key, question, connection=connection, database=database, policy=policy,
-                        attachments=attachments)
+        self.begin_turn(key, question, connection=connection, database=database, attachments=attachments)
 
     def append_activity(self, key: str, message: str) -> None:
         view = self._views.get(key)
@@ -191,7 +188,7 @@ class AskTab(QWidget):
         view = self.ensure_slot(key)
         bar = view.append_clarification(question=question, options=options, questions=questions)
         if bar is not None:
-            bar.connect_option(lambda reply, k=key: self.clarification_choice.emit(k, reply))
+            bar.submitted.connect(lambda reply, k=key: self.clarification_choice.emit(k, reply))
 
     def append_result(self, key: str, result: dict[str, Any]) -> None:
         if str(result.get("status") or "") == "wait_user":
@@ -243,17 +240,13 @@ class AskTab(QWidget):
 
     def load_session(self, key: str, turns: list[dict[str, Any]], *, connection: str = "") -> None:
         """Render a saved session's turns into ``key``'s view (creating it)."""
-        from dbaide.desktop.components.composer_options import POLICY_LABELS as _PL
         view = self.ensure_slot(key)
         view.clear()
         self._hint_shown = True
         for turn in turns:
             meta = turn.get("meta") or {}
             database = str(meta.get("database") or "")
-            policy = str(meta.get("policy") or "safe_auto")
-            meta_line = " · ".join(
-                x for x in (connection, database or "auto", _PL.get(policy, policy)) if x
-            )
+            meta_line = " · ".join(x for x in (connection, database or "auto") if x)
             view.begin_turn(str(turn.get("question") or ""), meta=meta_line, placeholder=False)
             sql = str(turn.get("selected_sql") or "")
             status = str(turn.get("status") or "completed")

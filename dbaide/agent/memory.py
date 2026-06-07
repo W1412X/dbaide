@@ -74,8 +74,6 @@ class SchemaEvidenceReport:
     request: str
     actions_taken: list[str] = field(default_factory=list)
     candidates: list[SchemaCandidate] = field(default_factory=list)
-    joins: list[dict[str, Any]] = field(default_factory=list)
-    conflicts: list[dict[str, Any]] = field(default_factory=list)
     missing: list[str] = field(default_factory=list)
     source_summary: str = ""
 
@@ -234,7 +232,10 @@ class AgentMemory:
             return
         entry = f"{key} -> {reason}" if reason else key
         normalized_key = key.lower()
-        self.do_not_repeat = [x for x in self.do_not_repeat if not x.lower().startswith(normalized_key)]
+        self.do_not_repeat = [
+            x for x in self.do_not_repeat
+            if x.lower().split(" -> ", 1)[0] != normalized_key
+        ]
         self.do_not_repeat.append(entry)
         self.do_not_repeat = self.do_not_repeat[-MAX_DO_NOT_REPEAT:]
 
@@ -291,7 +292,7 @@ class AgentMemory:
         excluded = [c for c in report.candidates if c.status != "active"]
         self.add_finding(
             f"Schema report {report.id}: {len(active)} active candidate table(s), "
-            f"{len(excluded)} excluded/deprecated candidate(s), {len(report.conflicts)} conflict(s).",
+            f"{len(excluded)} inactive/missing candidate(s).",
             source=report.id,
         )
         for c in excluded:
@@ -301,11 +302,6 @@ class AgentMemory:
                 evidence_ref=report.id,
                 source_priority="user_note" if c.notes else "evidence",
             )
-        for conflict in report.conflicts:
-            reason = str(conflict.get("reason") or conflict.get("type") or "").strip()
-            if reason:
-                self.add_open_question(f"Schema ambiguity in {report.id}: {reason}")
-
     def add_join_report(self, report: JoinEvidenceReport) -> None:
         self.join_reports.append(report)
         self.join_reports = self.join_reports[-MAX_JOIN_REPORTS:]
@@ -329,6 +325,8 @@ class AgentMemory:
                           summary: str = "") -> None:
         if action == "describe_table":
             self._learn_described_table(args, data)
+        elif action == "inspect_metadata":
+            self._learn_metadata_result(data)
         elif action in {"retrieve_schema_context", "discover_schema"}:
             self._learn_schema_result(data)
         elif action == "column_stats":
@@ -360,7 +358,6 @@ class AgentMemory:
             f"indexes={len(data.get('indexes') or [])}, fks={len(data.get('foreign_keys') or [])}.",
             source=f"describe_table:{label}",
         )
-        self._resolve_questions_from_columns(label, columns)
 
     def _learn_schema_result(self, data: dict[str, Any]) -> None:
         report_id = str(data.get("report_id") or "").strip()
@@ -407,6 +404,28 @@ class AgentMemory:
             )
         for item in noted_labels:
             self.add_finding(f"User-note schema evidence: {item}", source=report_id or "schema")
+
+    def _learn_metadata_result(self, data: dict[str, Any]) -> None:
+        tables = [t for t in data.get("tables") or [] if isinstance(t, dict)]
+        matched_columns = [c for c in data.get("matched_columns") or [] if isinstance(c, dict)]
+        labels = [_table_label(t) for t in tables[:8]]
+        bits: list[str] = []
+        if labels:
+            bits.append(f"tables={', '.join([x for x in labels if x][:8])}")
+        if matched_columns:
+            cols = []
+            for col in matched_columns[:10]:
+                label = _table_label(col)
+                name = str(col.get("name") or "").strip()
+                if label and name:
+                    cols.append(f"{label}.{name}")
+            if cols:
+                bits.append(f"matched_columns={', '.join(cols)}")
+        if bits:
+            self.add_finding(
+                f"Metadata inspection: {'; '.join(bits)}.",
+                source="inspect_metadata",
+            )
 
     def _learn_column_stats(self, args: dict[str, Any], data: dict[str, Any]) -> None:
         database = str(data.get("database") or args.get("database") or "").strip()
@@ -493,31 +512,6 @@ class AgentMemory:
             source="validate_joins",
         )
 
-    def _resolve_questions_from_columns(self, label: str, columns: list[str]) -> None:
-        table = label.split(".")[-1].lower()
-        normalized_cols = {c.lower() for c in columns}
-        remaining: list[str] = []
-        for question in self.open_questions:
-            q = question.lower()
-            mentions_table = table and table in q
-            if label.lower() in q:
-                mentions_table = True
-            resolved_by = ""
-            if mentions_table and any(token in q for token in ("是否包含", "是否存在", "contains", "has")):
-                if any(token in q for token in ("妥投", "deliver")) and _has_semantic_column(normalized_cols, ("deliver", "delivered")):
-                    resolved_by = f"{label} has delivered-related column(s): {', '.join(_matching_columns(columns, ('deliver', 'delivered'))[:6])}"
-                elif any(token in q for token in ("国家", "country")) and _has_semantic_column(normalized_cols, ("country",)):
-                    resolved_by = f"{label} has country column(s): {', '.join(_matching_columns(columns, ('country',))[:6])}"
-                elif any(token in q for token in ("退款", "refund")) and _has_semantic_column(normalized_cols, ("refund",)):
-                    resolved_by = f"{label} has refund column(s): {', '.join(_matching_columns(columns, ('refund',))[:6])}"
-                elif any(token in q for token in ("时间", "日期", "date", "time")) and _has_time_column(normalized_cols):
-                    resolved_by = f"{label} has time/date column(s): {', '.join(_time_columns(columns)[:6])}"
-            if resolved_by:
-                self.add_resolved_question(question, resolved_by)
-            else:
-                remaining.append(question)
-        self.open_questions = remaining
-
     def prompt_block(self) -> str:
         lines: list[str] = []
         lines += ["[Goal]", self.goal or "(unknown)", ""]
@@ -535,7 +529,13 @@ class AgentMemory:
                 lines.append(f"- {step.id} {step.action} {step.status}{refs}: {step.result_summary}")
             lines.append("")
         if self.findings:
-            lines += ["[Current Evidence]", *[f"- {f.text} ({f.source})" if f.source else f"- {f.text}" for f in self.findings[-12:]], ""]
+            lines.append("[Observed Evidence / Model Working Notes]")
+            for f in self.findings[-12:]:
+                qualifier = f.confidence if f.confidence != "observed" else "observed"
+                suffix_parts = [part for part in (f.source, qualifier) if part]
+                suffix = f" ({'; '.join(suffix_parts)})" if suffix_parts else ""
+                lines.append(f"- {f.text}{suffix}")
+            lines.append("")
         if self.resolved_questions:
             lines += ["[Resolved Questions]", *[f"- {q}" for q in self.resolved_questions[-MAX_RESOLVED_QUESTIONS:]], ""]
         if self.schema_reports:
@@ -560,8 +560,6 @@ class AgentMemory:
                         bits.append(f"declared_fk={len(c.foreign_keys)}")
                     cand.append(" / ".join(bits))
                 lines.append(f"- {report.id}: " + "; ".join(cand))
-                if report.conflicts:
-                    lines.append(f"  conflicts: {_compact_json(report.conflicts[:4], limit=600)}")
             lines.append("")
         if self.join_reports:
             lines += ["[Join Evidence]"]
@@ -602,7 +600,7 @@ class AgentMemory:
         if self.archive:
             lines += ["[Raw Evidence Archive]"]
             for item in self.archive[-MAX_ARCHIVE_INDEX:]:
-                refs = f" aliases={', '.join(item.source_refs[:6])}" if item.source_refs else ""
+                refs = f" refs={', '.join(item.source_refs[:6])}" if item.source_refs else ""
                 lines.append(f"- {item.id} {item.action}{refs}: {item.summary}")
             lines.append("Use retrieve_memory_item(ref=...) when a compressed summary is insufficient.")
             lines.append("")
@@ -719,8 +717,6 @@ def _schema_report_from_dict(data: dict[str, Any]) -> SchemaEvidenceReport:
         request=str(data.get("request") or ""),
         actions_taken=[str(x) for x in _list_or_empty(data.get("actions_taken"))],
         candidates=candidates,
-        joins=_list_or_empty(data.get("joins")),
-        conflicts=_list_or_empty(data.get("conflicts")),
         missing=[str(x) for x in _list_or_empty(data.get("missing"))],
         source_summary=str(data.get("source_summary") or ""),
     )
@@ -795,7 +791,7 @@ def _next_index_from_ids(ids: list[str], prefix: str) -> int:
     high = 0
     for item in ids:
         text = str(item or "")
-        if not text.startswith(prefix):
+        if text[:len(prefix)] != prefix:
             continue
         try:
             high = max(high, int(text[len(prefix):]))
@@ -854,12 +850,13 @@ def _column_names(columns: Any) -> list[str]:
 
 
 def _key_columns(columns: list[str]) -> list[str]:
-    priority = (
-        "id", "spu", "sku", "country", "date", "dt", "delivered", "refund",
-        "quantity", "order", "created", "updated", "at",
-    )
-    selected = [c for c in columns if any(p in c.lower() for p in priority)]
-    return selected or columns
+    seen: set[str] = set()
+    out: list[str] = []
+    for column in columns:
+        if column not in seen:
+            seen.add(column)
+            out.append(column)
+    return out
 
 
 def _table_label(candidate: dict[str, Any]) -> str:
@@ -868,24 +865,3 @@ def _table_label(candidate: dict[str, Any]) -> str:
     if not table:
         return ""
     return f"{database}.{table}" if database else table
-
-
-def _has_semantic_column(columns: set[str], needles: tuple[str, ...]) -> bool:
-    return bool(_matching_columns(list(columns), needles))
-
-
-def _matching_columns(columns: list[str], needles: tuple[str, ...]) -> list[str]:
-    return [c for c in columns if any(needle in c.lower() for needle in needles)]
-
-
-def _has_time_column(columns: set[str]) -> bool:
-    return bool(_time_columns(list(columns)))
-
-
-def _time_columns(columns: list[str]) -> list[str]:
-    out: list[str] = []
-    for c in columns:
-        low = c.lower()
-        if low in {"dt", "date"} or low.endswith("_at") or "date" in low or "time" in low:
-            out.append(c)
-    return out

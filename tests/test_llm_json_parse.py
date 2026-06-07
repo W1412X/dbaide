@@ -35,6 +35,12 @@ def test_parse_still_rejects_truly_invalid_json():
         _client()._parse_json_object("not json at all {")
 
 
+def test_openai_client_rejects_non_http_base_url():
+    with pytest.raises(ValueError, match="http"):
+        OpenAICompatibleClient(ModelConfig(
+            provider="openai_compatible", base_url="file:///tmp/model", api_key="k", model="m"))
+
+
 def test_streamer_handles_literal_newline_in_answer():
     out = []
     s = JsonFieldStreamer(out.append, field="answer")

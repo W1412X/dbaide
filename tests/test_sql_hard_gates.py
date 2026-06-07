@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dbaide.core.result import ExecutionPolicy, ValidationReport
+from dbaide.core.result import ValidationReport
 from dbaide.agent.controllers import RiskController
 from dbaide.agent.loop import _risk_reply_confirms
 from dbaide.agent.orchestrator import AskOrchestrator
@@ -48,10 +48,9 @@ class TestRiskControllerHardGates:
         return ValidationReport(ok=True, normalized_sql="SELECT 1", issues=[], warnings=[],
                                 risk_level="low", requires_confirmation=False)
 
-    def test_expert_still_blocked_by_explain_cost(self):
+    def test_safe_confirms_explain_cost(self):
         rc = RiskController()
         decision = rc.decide(
-            policy=ExecutionPolicy.EXPERT,
             validation=self._ok_report(),
             plan_confidence=0.99,
             table_count=1,
@@ -60,20 +59,18 @@ class TestRiskControllerHardGates:
         )
         assert decision.action == "confirm"
 
-    def test_expert_not_blocked_by_join_count(self):
+    def test_safe_not_blocked_by_join_count_alone(self):
         rc = RiskController()
         decision = rc.decide(
-            policy=ExecutionPolicy.EXPERT,
             validation=self._ok_report(),
             plan_confidence=0.99,
             table_count=5,
         )
         assert decision.action == "auto_execute"
 
-    def test_expert_auto_executes_when_within_limits(self):
+    def test_guarded_query_executes_when_within_limits(self):
         rc = RiskController()
         decision = rc.decide(
-            policy=ExecutionPolicy.EXPERT,
             validation=self._ok_report(),
             plan_confidence=0.99,
             table_count=2,
@@ -96,7 +93,7 @@ def test_execute_sql_pauses_for_large_limit_then_runs_after_confirmation(tmp_pat
     orch = AskOrchestrator(adapter, Session(connection=cfg), NullLLMClient())
     orch._reset_loop_state("show rows", "", True)
     registry = build_tool_registry(orch)
-    ctx = ToolContext(execution_policy=ExecutionPolicy.SAFE_AUTO.value)
+    ctx = ToolContext()
 
     first = registry.invoke(
         "execute_sql",
@@ -136,30 +133,4 @@ def test_risk_confirmation_reply_denial_wins_over_execute_word():
     assert _risk_reply_confirms("Cancel") is False
     assert _risk_reply_confirms("取消执行") is False
     assert _risk_reply_confirms("不要执行") is False
-
-
-def test_policy_blocked_execute_returns_requested_sql(tmp_path):
-    import sqlite3
-
-    db = tmp_path / "blocked.db"
-    conn = sqlite3.connect(db)
-    conn.executescript("CREATE TABLE t(id INTEGER PRIMARY KEY); INSERT INTO t VALUES (1);")
-    conn.commit()
-    conn.close()
-
-    cfg = ConnectionConfig(name="local", type="sqlite", path=str(db))
-    orch = AskOrchestrator(build_adapter(cfg), Session(connection=cfg), NullLLMClient())
-    orch._reset_loop_state("show rows", "main", True)
-    orch.run_state.sql = "SELECT stale_value"
-    registry = build_tool_registry(orch)
-
-    result = registry.invoke(
-        "execute_sql",
-        {"sql": "SELECT id FROM t", "database": "main"},
-        ToolContext(execution_policy=ExecutionPolicy.SQL_ONLY.value),
-    )
-
-    assert result.ok is False
-    assert result.data["blocked"] is True
-    assert result.data["sql"] == "SELECT id FROM t"
-    assert result.data["database"] == "main"
+    assert _risk_reply_confirms("确认执行") is False

@@ -149,6 +149,15 @@ def _requested_table_names(args: dict[str, Any]) -> list[str]:
     return _string_list(args.get("tables"))
 
 
+def _requested_table_labels(orchestrator: AskOrchestrator, args: dict[str, Any]) -> list[str]:
+    database_default = str(args.get("database") or orchestrator.run_state.table_database or orchestrator.run_state.database or "")
+    labels: list[str] = []
+    for raw in _requested_table_names(args):
+        db, table = _normalize_tool_table(orchestrator, raw, database_default)
+        labels.append(f"{db}.{table}" if db else table)
+    return labels
+
+
 def _ambiguous_requested_tables(orchestrator: AskOrchestrator, args: dict[str, Any]) -> dict[str, list[str]]:
     """Bare table names are ambiguous when the loop has disclosed the same table in
     multiple databases. Do not silently pick the current working database; ask the

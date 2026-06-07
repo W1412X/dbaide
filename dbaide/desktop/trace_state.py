@@ -31,7 +31,8 @@ class InlineTraceState:
     def append_live_event(self, event: dict[str, Any]) -> None:
         if self.model is None:
             self.begin_live()
-        assert self.model is not None
+        if self.model is None:
+            return
         self.model.ingest(event)
 
     def end_live(self) -> None:

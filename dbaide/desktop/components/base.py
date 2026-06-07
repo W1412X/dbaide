@@ -109,11 +109,11 @@ class StatusBadge(Pill):
             f"<span style='color:{color}; font-size:10px;'>●</span>"
             f"&nbsp;<span style='color:{Theme.TEXT_2};'>{text}</span>"
         )
-        self.setFixedHeight(24)
+        self.setFixedHeight(30)
         self.setAlignment(Qt.AlignmentFlag.AlignVCenter)
         self.setStyleSheet(
             f"background:{Theme.PANEL_2}; border:1px solid {Theme.BORDER_SOFT};"
-            " border-radius:9px; padding:0 11px; font-size:11px; font-weight:600;"
+            " border-radius:10px; padding:0 12px; font-size:12px; font-weight:600;"
         )
 
 

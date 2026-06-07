@@ -53,12 +53,12 @@ def test_diff_removed_table_and_db():
 
 
 def test_diff_changed_table_columns():
-    old = {"shop": {"orders": _tbl([("id", "int", True, False), ("legacy", "text", False, True)])}}
+    old = {"shop": {"orders": _tbl([("id", "int", True, False), ("obsolete", "text", False, True)])}}
     new = {"shop": {"orders": _tbl([("id", "int", True, False), ("amount", "real", False, True)])}}
     d = diff_catalog(old, new)
     assert ("shop", "orders") in d.changed_tables
     assert ("shop", "orders", "amount") in d.added_columns
-    assert ("shop", "orders", "legacy") in d.removed_columns
+    assert ("shop", "orders", "obsolete") in d.removed_columns
 
 
 def test_diff_unchanged_is_empty():

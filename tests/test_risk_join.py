@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dbaide.agent.controllers import RiskController
 from dbaide.agent.schema_context import join_confidence_for_sql
-from dbaide.core.result import ExecutionPolicy, ValidationReport
+from dbaide.core.result import ValidationReport
 
 
 def test_join_confidence_for_sql_uses_matching_edges():
@@ -16,13 +16,13 @@ def test_join_confidence_for_sql_uses_matching_edges():
     assert join_confidence_for_sql(relations, sql) == 0.95
 
 
-def test_join_confidence_for_sql_falls_back_to_all_relations():
+def test_join_confidence_for_sql_returns_zero_without_exact_relation_match():
     relations = [
         {"table": "orders", "ref_table": "users", "confidence": 0.72},
         {"table": "orders", "ref_table": "products", "confidence": 0.61},
     ]
     sql = "SELECT * FROM orders"
-    assert join_confidence_for_sql(relations, sql) == 0.61
+    assert join_confidence_for_sql(relations, sql) == 0.0
 
 
 def test_join_confidence_for_sql_empty_relations():
@@ -32,7 +32,6 @@ def test_join_confidence_for_sql_empty_relations():
 def test_risk_controller_low_join_confidence_requests_confirm():
     risk = RiskController()
     decision = risk.decide(
-        policy=ExecutionPolicy.SAFE_AUTO,
         validation=ValidationReport(ok=True, normalized_sql="SELECT 1", issues=[]),
         plan_confidence=0.9,
         has_joins=True,
@@ -45,7 +44,6 @@ def test_risk_controller_low_join_confidence_requests_confirm():
 def test_risk_controller_high_join_confidence_auto_executes():
     risk = RiskController()
     decision = risk.decide(
-        policy=ExecutionPolicy.SAFE_AUTO,
         validation=ValidationReport(ok=True, normalized_sql="SELECT 1", issues=[]),
         plan_confidence=0.9,
         table_count=2,

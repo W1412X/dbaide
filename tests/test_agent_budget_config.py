@@ -10,7 +10,6 @@ from dbaide.session import Session
 def test_resource_policy_has_agent_budget_defaults():
     p = ResourcePolicy()
     assert p.agent_max_steps == 32
-    assert p.agent_sql_retries == 2
 
 
 def test_user_overrides_flow_through_resolve_policy():
@@ -20,15 +19,15 @@ def test_user_overrides_flow_through_resolve_policy():
         instance="",  # bypass cache
     )
     assert policy.agent_max_steps == 30
-    assert policy.agent_sql_retries == 5
+    assert not hasattr(policy, "agent_sql_retries")
 
 
 def test_session_from_policy_carries_agent_budget():
     conn = ConnectionConfig(name="x", type="sqlite", path=":memory:")
-    policy = ResourcePolicy(agent_max_steps=7, agent_sql_retries=1)
+    policy = ResourcePolicy(agent_max_steps=7)
     session = Session.from_policy(conn, policy)
     assert session.agent_max_steps == 7
-    assert session.agent_sql_retries == 1
+    assert not hasattr(session, "agent_sql_retries")
 
 
 def test_runtime_step_budget_is_overridable():
@@ -50,4 +49,4 @@ def test_config_resource_defaults_persist_agent_budget(tmp_path):
     conn = ConnectionConfig(name="y", type="sqlite", path=":memory:")
     policy = reloaded.policy_for(conn)
     assert policy.agent_max_steps == 20
-    assert policy.agent_sql_retries == 4
+    assert not hasattr(policy, "agent_sql_retries")

@@ -24,7 +24,7 @@ def test_refresh_applies_diff_and_cascades_notes(tmp_path, monkeypatch):
     c.executescript(
         """
         CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT);
-        CREATE TABLE orders (id INTEGER PRIMARY KEY, amount REAL, legacy TEXT);
+        CREATE TABLE orders (id INTEGER PRIMARY KEY, amount REAL, obsolete TEXT);
         """
     )
     c.commit(); c.close()
@@ -36,11 +36,11 @@ def test_refresh_applies_diff_and_cascades_notes(tmp_path, monkeypatch):
     ann = AnnotationStore()
     ann.add("shop", scope="database", note="prod db", database="main")
     ann.add("shop", scope="table", note="current orders", database="main", table="orders")
-    ann.add("shop", scope="table", note="legacy table", database="main", table="users")        # → table dropped
+    ann.add("shop", scope="table", note="retired table", database="main", table="users")       # → table dropped
     ann.add("shop", scope="column", note="net amount", database="main", table="orders", column="amount")   # survives
-    ann.add("shop", scope="column", note="old col", database="main", table="orders", column="legacy")      # → column dropped
+    ann.add("shop", scope="column", note="retired col", database="main", table="orders", column="obsolete")  # → column dropped
 
-    # Mutate the live schema: drop users, add products, change orders (drop `legacy`,
+    # Mutate the live schema: drop users, add products, change orders (drop `obsolete`,
     # add `note`, change `amount` REAL→BIGINT).
     c = sqlite3.connect(db)
     c.executescript(
@@ -64,7 +64,7 @@ def test_refresh_applies_diff_and_cascades_notes(tmp_path, monkeypatch):
     store = AssetStore()
     odoc = store.table_doc("shop", "main", "orders")
     cols = {col["name"] for col in odoc["columns"]}
-    assert cols == {"id", "amount", "note"} and "legacy" not in cols
+    assert cols == {"id", "amount", "note"} and "obsolete" not in cols
     assert odoc.get("base_fingerprint")  # changed table re-fingerprinted
     # The denormalized column_count must track the new structure (not stay stale).
     assert odoc.get("column_count") == 3
@@ -79,7 +79,7 @@ def test_refresh_applies_diff_and_cascades_notes(tmp_path, monkeypatch):
     assert ("table", "orders", "") in notes                    # orders table note kept
     assert ("column", "orders", "amount") in notes             # surviving column note kept
     assert ("table", "users", "") not in notes                 # dropped table → note cascaded
-    assert ("column", "orders", "legacy") not in notes         # dropped column → note cascaded
+    assert ("column", "orders", "obsolete") not in notes       # dropped column → note cascaded
 
 
 def test_refresh_marks_enrichment_stale_on_structural_change(tmp_path, monkeypatch):

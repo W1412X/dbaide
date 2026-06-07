@@ -1,7 +1,7 @@
 """Schema evidence retrieval for the single-brain agent.
 
 The schema layer no longer chooses a minimal schema or asks the user by itself.
-It recalls candidates, preserves alternatives/deprecated paths, detects conflicts,
+It recalls candidates and preserves user notes for recalled candidates,
 and records a compressed report in AgentMemory. Join evidence is tested separately
 because relation retrieval is a different tool responsibility.
 """
@@ -98,7 +98,7 @@ def test_schema_context_keeps_table_metadata_without_join_workflow(tmp_path):
     assert not orch.run_state.memory.join_reports
 
 
-def test_metric_candidates_become_conflict_not_auto_question(tmp_path):
+def test_schema_context_does_not_infer_conflicts_from_column_names(tmp_path):
     orch = _orch(
         tmp_path,
         hits=["orders", "order_amount_daily"],
@@ -106,13 +106,10 @@ def test_metric_candidates_become_conflict_not_auto_question(tmp_path):
     )
     report = SchemaEvidenceRetriever(orch).retrieve("total amount")
 
-    conflicts = [c for c in report.conflicts if c.get("type") == "metric_grain_choice"]
-    assert conflicts
-    assert set(conflicts[0]["tables"]) == {"main.orders", "main.order_amount_daily"}
     assert orch.run_state.pending_question == ""  # main LLM decides whether to ask
 
 
-def test_deprecated_table_note_is_preserved_as_excluded_evidence(tmp_path):
+def test_table_note_is_preserved_as_candidate_evidence(tmp_path):
     annotations = AnnotationStore(tmp_path / "ann")
     annotations.add("shop", scope="table", note="deprecated; use orders_v2 instead", database="main", table="orders")
     orch = _orch(tmp_path, hits=["orders", "items"], annotations=annotations)
@@ -120,13 +117,13 @@ def test_deprecated_table_note_is_preserved_as_excluded_evidence(tmp_path):
     report = SchemaEvidenceRetriever(orch).retrieve("order amount")
     orders = next(c for c in report.candidates if c.table == "orders")
 
-    assert orders.status == "deprecated"
-    assert "deprecated" in orders.exclusion_reason
-    assert any(x.target == "main.orders" for x in orch.run_state.memory.excluded_paths)
-    assert any(c.get("type") == "deprecated" for c in report.conflicts)
+    assert orders.status == "active"
+    assert orders.exclusion_reason == ""
+    assert orders.notes["table"] == "deprecated; use orders_v2 instead"
+    assert not any(x.target == "main.orders" for x in orch.run_state.memory.excluded_paths)
 
 
-def test_user_note_matched_table_is_not_dropped_by_limit(tmp_path):
+def test_user_note_text_does_not_auto_add_candidate(tmp_path):
     annotations = AnnotationStore(tmp_path / "ann")
     annotations.add(
         "shop",
@@ -154,11 +151,11 @@ def test_user_note_matched_table_is_not_dropped_by_limit(tmp_path):
     )
 
     labels = {f"{c.database}.{c.table}" for c in report.candidates}
-    assert "main.spu_delivered_refunds_stats_daily" in labels
-    assert any("included user-note matched table evidence" in x for x in report.actions_taken)
+    assert "main.spu_delivered_refunds_stats_daily" not in labels
+    assert not any("user-note matched" in x for x in report.actions_taken)
 
 
-def test_column_note_matched_table_is_schema_candidate(tmp_path):
+def test_column_note_text_does_not_auto_add_candidate(tmp_path):
     annotations = AnnotationStore(tmp_path / "ann")
     annotations.add(
         "shop",
@@ -176,10 +173,7 @@ def test_column_note_matched_table_is_schema_candidate(tmp_path):
         limit=1,
     )
 
-    orders = next((c for c in report.candidates if c.table == "orders"), None)
-    assert orders is not None
-    created_at = next(c for c in orders.columns if c["name"] == "created_at")
-    assert "UTC" in created_at["note"]
+    assert all(c.table != "orders" for c in report.candidates)
 
 
 def test_join_evidence_is_separate_and_maps_active_candidates(tmp_path):

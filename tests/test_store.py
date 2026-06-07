@@ -1,8 +1,5 @@
-import pytest
 from dbaide.assets.store import AssetStore, safe_name
 from dbaide.models import ConnectionConfig
-from pathlib import Path
-import tempfile
 
 
 class TestSafeName:

@@ -7,7 +7,7 @@ from typing import Any
 from dbaide.tools.registry import ToolContext, ToolRegistry, ToolResult
 from dbaide.tools.specs import (
     DISCOVER_SCHEMA, RETRIEVE_SCHEMA_CONTEXT,
-    LIST_DATABASES, LIST_TABLES, DESCRIBE_TABLE,
+    LIST_DATABASES, LIST_TABLES, DESCRIBE_TABLE, INSPECT_METADATA,
 )
 from dbaide.agent.schema_context import apply_column_notes, object_notes_for_tables
 from dbaide.agent.toolkit.support import (
@@ -159,12 +159,13 @@ def register(registry: ToolRegistry, orchestrator) -> None:
             if tdoc.get("sample_rows"):
                 data["sample_rows"] = tdoc["sample_rows"]
         else:
+            metadata_warnings: list[str] = []
             try:
                 indexes = [idx.to_dict() if hasattr(idx, "to_dict") else idx for idx in orchestrator.adapter.indexes(table, database=database)]
                 if indexes:
                     data["indexes"] = indexes
-            except Exception:
-                pass
+            except Exception as exc:
+                metadata_warnings.append(f"indexes unavailable: {exc}")
             try:
                 fks = [
                     {
@@ -178,12 +179,125 @@ def register(registry: ToolRegistry, orchestrator) -> None:
                 ]
                 if fks:
                     data["foreign_keys"] = fks
-            except Exception:
-                pass
+            except Exception as exc:
+                metadata_warnings.append(f"foreign keys unavailable: {exc}")
+            if metadata_warnings:
+                data["metadata_warnings"] = metadata_warnings
         return ToolResult(ok=True, data=data)
+
+    def _inspect_metadata(args: dict[str, Any], _ctx: ToolContext) -> ToolResult:
+        database = str(args.get("database") or orchestrator.run_state.table_database or orchestrator.run_state.database or "")
+        table_filter = str(args.get("table_name") or "").strip()
+        column_filter = str(args.get("column_name") or "").strip()
+        include_columns = bool(args.get("include_columns", True))
+        include_indexes = bool(args.get("include_indexes", False))
+        include_foreign_keys = bool(args.get("include_foreign_keys", False))
+        limit = _positive_int(args.get("limit"), 50)
+        explicit_tables = _string_list(args.get("tables"))
+
+        if explicit_tables:
+            table_refs: list[tuple[str, str]] = []
+            for raw in explicit_tables:
+                ref_db, ref_table = _normalize_tool_table(orchestrator, raw, database)
+                table_refs.append((ref_db, ref_table))
+        else:
+            tables = orchestrator.schema.list_tables(database=database)
+            table_refs = []
+            for table in tables:
+                name = str(table.name or "").strip()
+                if not name:
+                    continue
+                if table_filter and table_filter != name:
+                    continue
+                table_refs.append((database or str(table.schema or ""), name))
+                if not column_filter and len(table_refs) >= limit:
+                    break
+
+        out_tables: list[dict[str, Any]] = []
+        matched_columns: list[dict[str, Any]] = []
+        for table_db, table_name in table_refs:
+            columns: list[ColumnInfo] = []
+            if include_columns or column_filter:
+                columns = orchestrator.schema.describe_table(table_name, database=table_db)
+                if columns:
+                    apply_column_notes(orchestrator, [(table_db, table_name, columns)])
+                    _remember_table_schema(orchestrator, table_name, table_db, columns)
+            matching_columns = [
+                col for col in columns
+                if not column_filter or column_filter == col.name
+            ]
+            if column_filter and not matching_columns and not explicit_tables:
+                continue
+            table_payload: dict[str, Any] = {
+                "database": table_db,
+                "table": table_name,
+            }
+            if include_columns:
+                table_payload["columns"] = [_column_payload(col) for col in matching_columns]
+            if column_filter:
+                for col in matching_columns:
+                    matched_columns.append({
+                        "database": table_db,
+                        "table": table_name,
+                        **_column_payload(col),
+                    })
+            if include_indexes:
+                try:
+                    indexes = orchestrator.adapter.indexes(table_name, database=table_db)
+                    table_payload["indexes"] = [
+                        idx.to_dict() if hasattr(idx, "to_dict") else idx
+                        for idx in indexes
+                    ]
+                except Exception as exc:
+                    table_payload["index_error"] = str(exc)
+            if include_foreign_keys:
+                try:
+                    fks = orchestrator.schema.foreign_keys(table_name, database=table_db)
+                    table_payload["foreign_keys"] = [
+                        {
+                            "table": fk.table,
+                            "column": fk.column,
+                            "ref_table": fk.ref_table,
+                            "ref_column": fk.ref_column,
+                        }
+                        for fk in fks
+                    ]
+                except Exception as exc:
+                    table_payload["foreign_key_error"] = str(exc)
+            out_tables.append(table_payload)
+            if len(out_tables) >= limit or (column_filter and len(matched_columns) >= limit):
+                break
+
+        return ToolResult(ok=True, data={
+            "database": database,
+            "table_count": len(out_tables),
+            "tables": out_tables,
+            "matched_columns": matched_columns,
+            "disclosed_tables": _disclosed_table_names(orchestrator),
+        })
 
     registry.register(DISCOVER_SCHEMA, _discover_schema)
     registry.register(RETRIEVE_SCHEMA_CONTEXT, _retrieve_schema_context)
     registry.register(LIST_DATABASES, _list_databases)
     registry.register(LIST_TABLES, _list_tables)
     registry.register(DESCRIBE_TABLE, _describe_table)
+    registry.register(INSPECT_METADATA, _inspect_metadata)
+
+
+def _positive_int(value: Any, default: int) -> int:
+    try:
+        return max(1, int(value))
+    except (TypeError, ValueError):
+        return default
+
+
+def _column_payload(column: ColumnInfo) -> dict[str, Any]:
+    return {
+        "name": column.name,
+        "data_type": column.data_type,
+        "nullable": column.nullable,
+        "primary_key": column.primary_key,
+        "indexed": column.indexed,
+        "comment": (column.comment or "")[:120],
+        "note": column.note,
+    }

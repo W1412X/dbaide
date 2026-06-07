@@ -64,9 +64,9 @@ class MenuButton(QToolButton):
         self._icon_only = icon_only
         if icon_only and icon is not None:
             self.setIcon(icon)
-            self.setIconSize(QSize(15, 15))
+            self.setIconSize(QSize(16, 16))
             self.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonIconOnly)
-            self.setFixedSize(26, 26)
+            self.setFixedSize(30, 30)
             self.setAutoRaise(True)
             if tooltip:
                 self.setToolTip(tooltip)
@@ -92,7 +92,7 @@ class MenuButton(QToolButton):
                 QToolButton {{
                     background: {Theme.PANEL_2};
                     border: none;
-                    border-radius: 7px;
+                    border-radius: 9px;
                     padding: 0;
                 }}
                 QToolButton:hover {{

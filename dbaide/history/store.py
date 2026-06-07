@@ -91,8 +91,8 @@ class WorkflowHistoryStore:
                 continue
 
         # "Recent" must mean most-recent by time. Filenames are random uuids, so
-        # sorting by name (the old behaviour) returned an arbitrary subset and could
-        # drop genuinely recent workflows once there were more than `limit` files.
+        # name sorting would return an arbitrary subset and could drop genuinely
+        # recent workflows once there were more than `limit` files.
         entries.sort(key=lambda e: (e.get("created_at") or 0, e.get("completed_at") or 0), reverse=True)
         return entries[: max(0, limit)]
 

@@ -87,7 +87,7 @@ def test_connection_name_cannot_escape_base_dir(tmp_path: Path):
 
 
 def test_normal_connection_names_are_unchanged(tmp_path: Path):
-    """Ordinary names (the common case) keep their exact filename — no migration."""
+    """Ordinary names (the common case) keep their exact filename."""
     s = QueryHistoryStore(base_dir=tmp_path)
     s.record("prod", "select 1")
     assert (tmp_path / "prod.jsonl").exists()

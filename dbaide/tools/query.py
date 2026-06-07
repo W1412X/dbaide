@@ -115,7 +115,7 @@ class QueryTools:
 
 def _strip_leading_explain(sql: str) -> str:
     text = sql.strip().rstrip(";")
-    lowered = text.lower()
-    if lowered.startswith("explain "):
-        return text[8:].strip()
+    parts = text.split(None, 1)
+    if parts and parts[0].casefold() == "explain":
+        return parts[1].strip() if len(parts) > 1 else ""
     return text

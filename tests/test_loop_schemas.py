@@ -94,6 +94,31 @@ def test_describe_table_returns_table_metadata(tmp_path):
     assert result.data["foreign_keys"][0]["ref_table"] == "users"
 
 
+def test_inspect_metadata_finds_exact_column_name(tmp_path):
+    db = tmp_path / "app.db"
+    make_multi_db(db)
+    conn = sqlite3.connect(db)
+    conn.execute("CREATE TABLE product_sku (id INTEGER PRIMARY KEY, attribute_id INTEGER, sku TEXT)")
+    conn.commit()
+    conn.close()
+    cfg = ConnectionConfig(name="local", type="sqlite", path=str(db))
+    orch = AskOrchestrator(build_adapter(cfg), Session(connection=cfg), PromptCaptureLLM())
+    registry = build_tool_registry(orch)
+    orch._reset_loop_state("find attribute columns", "main", True)
+
+    result = registry.invoke(
+        "inspect_metadata",
+        {"database": "main", "column_name": "attribute_id", "include_columns": True},
+        ToolContext(),
+    )
+
+    assert result.ok
+    assert result.data["matched_columns"]
+    assert result.data["matched_columns"][0]["table"] == "product_sku"
+    assert result.data["matched_columns"][0]["name"] == "attribute_id"
+    assert "product_sku" in result.data["disclosed_tables"]
+
+
 def test_describe_table_splits_qualified_table_when_database_is_explicit(tmp_path):
     db = tmp_path / "app.db"
     make_multi_db(db)
@@ -194,7 +219,7 @@ def test_execute_readonly_sql_honors_tool_limit(tmp_path):
     result = registry.invoke(
         "execute_readonly_sql",
         {"sql": "SELECT id FROM orders ORDER BY id", "database": "main", "limit": 2},
-        ToolContext(execution_policy="safe_auto"),
+        ToolContext(),
     )
 
     assert result.ok

@@ -135,7 +135,7 @@ class SQLWriter:
             "unless the query genuinely spans MORE THAN ONE database. "
             "Return confidence 0.0-1.0 based on how sure you are about the mapping. "
             "User notes are AUTHORITATIVE: they override DB comments and any inference — "
-            "if a note says an object is deprecated/wrong, do NOT use it. "
+            "if a note says an object is deprecated, replaced, or must not be used, do NOT use it. "
             + self._dialect_rules()
             + answer_language_directive(language or None)
         )
@@ -258,7 +258,7 @@ class SQLWriter:
         lines = [
             "User notes (AUTHORITATIVE — override DB comments, schema guesses and any "
             "inference; follow what each note says, e.g. if it says an object is "
-            "deprecated/wrong, do not use it):"
+            "deprecated, replaced, or must not be used, do not use it):"
         ]
         for n in notes:
             lines.append(f"- {n.get('scope')} {n.get('label')}: {str(n.get('note')).strip()}")

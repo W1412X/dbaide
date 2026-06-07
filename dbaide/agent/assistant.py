@@ -8,7 +8,6 @@ from dbaide.adapters.base import DatabaseAdapter
 from dbaide.agent.orchestrator import AgentContext, AgentStep, AskOrchestrator, format_inspect
 from dbaide.assets import AssetStore
 from dbaide.joins import JoinCatalogStore
-from dbaide.core.result import ExecutionPolicy
 from dbaide.llm import LLMClient
 from dbaide.models import AssistantResponse
 from dbaide.session import Session
@@ -32,7 +31,6 @@ class DataAssistant:
         *,
         asset_store: AssetStore | None = None,
         join_catalog: JoinCatalogStore | None = None,
-        execution_policy: ExecutionPolicy = ExecutionPolicy.SAFE_AUTO,
         progress: Callable[[str], None] | None = None,
     ) -> None:
         self._orchestrator = AskOrchestrator(
@@ -41,7 +39,6 @@ class DataAssistant:
             llm,
             asset_store=asset_store,
             join_catalog=join_catalog,
-            execution_policy=execution_policy,
             progress=progress,
         )
         self.adapter = adapter

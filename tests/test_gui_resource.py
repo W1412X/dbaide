@@ -8,7 +8,6 @@ import pytest
 
 from dbaide.assets import AssetStore
 from dbaide.config import ConfigManager
-from dbaide.core import ExecutionPolicy
 from dbaide.desktop.service import DesktopService
 from dbaide.models import ConnectionConfig
 
@@ -93,7 +92,6 @@ def test_service_ask_request_defaults_use_resource_policy(tmp_path):
     request = svc._build_request(
         {"question": "q"},
         connection_name="local",
-        policy=ExecutionPolicy.SAFE_AUTO,
         database="",
     )
 

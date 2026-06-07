@@ -29,7 +29,7 @@ def test_unknown_key_returns_key():
     assert i18n.t("no.such.key") == "no.such.key"
 
 
-def test_normalize_aliases():
+def test_normalize_language_names():
     assert i18n.normalize("zh-CN") == "zh"
     assert i18n.normalize("English") == "en"
     assert i18n.normalize("nonsense") == "en"
