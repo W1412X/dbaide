@@ -7,7 +7,8 @@ run the tests, and the conventions we follow.
 
 DBAide is a single Python package with a CLI and a PyQt6 desktop app that share one core
 (see the architecture overview in the [README](README.md#architecture) and the full
-design in [docs/DESIGN.md](docs/DESIGN.md)).
+design in [docs/DESIGN.md](docs/DESIGN.md)). For team operations and troubleshooting,
+see [docs/TEAM.md](docs/TEAM.md).
 
 - `dbaide/agent/` — the agent tool loop, clarifier, SQL writer, controllers, orchestrator.
 - `dbaide/desktop/` — the PyQt6 app (`views/`, `components/`, `dialogs/`).

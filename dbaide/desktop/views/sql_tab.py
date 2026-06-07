@@ -188,14 +188,20 @@ class SqlTab(QWidget):
         self._highlighter.set_dialect(dialect)
 
     def show_result(self, payload: dict) -> None:
+        from dbaide.i18n import t
+        truncated = bool(payload.get("truncated"))
         self.result_table.load(
             columns=payload.get("columns") or [],
             rows=payload.get("rows") or [],
             row_count=payload.get("row_count") or 0,
-            truncated=bool(payload.get("truncated")),
+            truncated=truncated,
             elapsed_ms=float(payload.get("elapsed_ms") or 0),
         )
-        self.messages.setPlainText(f"Executed in {payload.get('elapsed_ms', 0):.0f}ms")
+        elapsed = float(payload.get("elapsed_ms") or 0)
+        msg = f"Executed in {elapsed:.0f}ms"
+        if truncated:
+            msg += f"\n\n{t('sql.result_truncated')}"
+        self.messages.setPlainText(msg)
         self.tabs.setCurrentWidget(self.result_table)
 
     def show_error(self, message: str) -> None:

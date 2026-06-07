@@ -304,12 +304,25 @@ class ConversationRunController:
         win._slot_connection.pop(key, None)
         win._pending_resume.pop(key, None)
         if win.ask_tab.turn_open(key):
-            msg = ("**Cancelled**: Task stopped by user."
-                   if isinstance(exc, CancelledError) else f"**Error**: {exc}")
-            win.ask_tab.finish_turn_error(key, msg)
-        win.toast(_i18n_t("toast.cancelled") if isinstance(exc, CancelledError) else str(exc))
+            win.ask_tab.finish_turn_error(key, self._format_turn_error(exc))
+        from dbaide.llm_errors import is_llm_related, classify_llm_error, user_message_for_error
+        if isinstance(exc, CancelledError):
+            toast_msg = _i18n_t("toast.cancelled")
+        elif is_llm_related(exc):
+            toast_msg = user_message_for_error(classify_llm_error(exc))
+        else:
+            toast_msg = str(exc)
+        win.toast(toast_msg)
         self.drain_queue()
         self.sync_work_ui()
+
+    def _format_turn_error(self, exc: object) -> str:
+        if isinstance(exc, CancelledError):
+            return "**Cancelled**: Task stopped by user."
+        from dbaide.llm_errors import classify_llm_error, is_llm_related, user_message_for_error
+        if is_llm_related(exc):
+            return f"**Error**: {user_message_for_error(classify_llm_error(exc))}"
+        return f"**Error**: {exc}"
 
     def bind_slot_to_session(self, temporary_key: str, session_id: str) -> None:
         self.win.ask_tab.remap(temporary_key, session_id)

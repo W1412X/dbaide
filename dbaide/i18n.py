@@ -386,6 +386,38 @@ _STRINGS: dict[str, dict[str, str]] = {
         "en": "Write SQL here. Drag the handle below to resize. Ctrl+Space for suggestions.",
         "zh": "在此编写 SQL。拖动下方分隔条调整高度；Ctrl+Space 触发补全。",
     },
+    "sql.result_truncated": {
+        "en": "Result truncated to the row limit. Narrow the query with WHERE/LIMIT, or raise the limit in Settings → Resources.",
+        "zh": "结果已截断至行数上限。请用 WHERE/LIMIT 缩小范围，或在 设置 → 资源 中提高限制。",
+    },
+    "error.llm.unconfigured": {
+        "en": "No LLM configured. Open Settings → Models and add an API key.",
+        "zh": "未配置 LLM。请打开 设置 → 模型 并填写 API Key。",
+    },
+    "error.llm.auth": {
+        "en": "Model authentication failed. Check the API key and base URL in Settings → Models.",
+        "zh": "模型鉴权失败。请检查 设置 → 模型 中的 API Key 与 Base URL。",
+    },
+    "error.llm.rate_limit": {
+        "en": "Model rate limit hit. Wait a moment and try again.",
+        "zh": "模型请求被限流。请稍后再试。",
+    },
+    "error.llm.timeout": {
+        "en": "Model request timed out. Try again or increase the timeout in Settings → Models.",
+        "zh": "模型请求超时。请重试，或在 设置 → 模型 中增大超时时间。",
+    },
+    "error.llm.network": {
+        "en": "Could not reach the model endpoint. Check network, proxy, and base URL.",
+        "zh": "无法连接模型服务。请检查网络、代理与 Base URL。",
+    },
+    "error.llm.server": {
+        "en": "Model server error. Try again in a few minutes.",
+        "zh": "模型服务端错误。请稍后再试。",
+    },
+    "error.llm.generic": {
+        "en": "Model call failed. See the trace or export a debug bundle for details.",
+        "zh": "模型调用失败。可查看轨迹或导出调试包获取详情。",
+    },
     # Sidebar
     "sidebar.filter": {"en": "Search schema…", "zh": "搜索结构…"},
     "sidebar.chats": {"en": "Chats", "zh": "对话"},
@@ -475,6 +507,10 @@ _STRINGS: dict[str, dict[str, str]] = {
     "toast.join_deleted": {"en": "Join deleted", "zh": "关联已删除"},
     "toast.debug_trace_on": {"en": "Debug trace on — next query captures full LLM I/O", "zh": "调试轨迹已开启——下次查询将记录完整 LLM 输入输出"},
     "toast.debug_trace_off": {"en": "Debug trace off", "zh": "调试轨迹已关闭"},
+    "toast.debug_exported": {
+        "en": "Debug bundle saved to {path}",
+        "zh": "调试包已保存至 {path}",
+    },
     "toast.note_saved": {"en": "Note saved", "zh": "备注已保存"},
     "toast.note_updated": {"en": "Note updated", "zh": "备注已更新"},
     "toast.note_deleted": {"en": "Note deleted", "zh": "备注已删除"},
@@ -486,6 +522,7 @@ _STRINGS: dict[str, dict[str, str]] = {
     "panel.clear_conversation": {"en": "Clear conversation", "zh": "清空对话"},
     "menu.history": {"en": "History…", "zh": "历史记录…"},
     "menu.joins": {"en": "Saved joins…", "zh": "已保存的关联…"},
+    "menu.export_debug": {"en": "Export debug bundle…", "zh": "导出调试包…"},
     "menu.sync_schema": {"en": "Sync schema with database", "zh": "与数据库同步库结构"},
     "toast.syncing": {"en": "Syncing schema with the database…", "zh": "正在与数据库同步库结构…"},
     "toast.synced": {"en": "Schema synced · {summary}", "zh": "库结构已同步 · {summary}"},

@@ -118,6 +118,7 @@ class TopBar(QWidget):
     joins_requested = pyqtSignal()
     sync_schema_requested = pyqtSignal()
     copy_conversation_requested = pyqtSignal()
+    export_debug_requested = pyqtSignal()
     new_query_requested = pyqtSignal()
     new_conn_requested = pyqtSignal()
 
@@ -163,6 +164,7 @@ class TopBar(QWidget):
         self.menu.add_separator()
         self.menu.add_action(t("menu.joins"), self.joins_requested.emit)
         self.menu.add_action(t("panel.copy_conversation"), self.copy_conversation_requested.emit)
+        self.menu.add_action(t("menu.export_debug"), self.export_debug_requested.emit)
         self.menu.add_separator()
         self.menu.add_action(t("topbar.settings") + "…", self.settings.emit)
         row.addWidget(self.menu)

@@ -96,6 +96,20 @@ class TaskManager(QObject):
             if not handle.is_cancelled:
                 handle.cancel()
 
+    def cancel_matching(self, predicate) -> int:
+        """Cancel active tasks matching ``predicate(handle)``. Returns count cancelled."""
+        cancelled = 0
+        for handle in list(self._tasks.values()):
+            if handle.is_cancelled:
+                continue
+            try:
+                if predicate(handle):
+                    handle.cancel()
+                    cancelled += 1
+            except Exception:
+                continue
+        return cancelled
+
     def active_count(self, *, action: str | None = None) -> int:
         if action is None:
             return len(self._tasks)

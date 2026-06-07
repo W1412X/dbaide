@@ -274,7 +274,10 @@ def test_refresh_all_failure_clears_loading_status():
     win._ensure_ui_state = lambda: type("Ui", (), {  # type: ignore[method-assign]
         "statusbar_message": lambda _self, message, timeout_ms=0: messages.append(message),
     })()
-    win._restore_status_badge = lambda: restored.append(True)  # type: ignore[method-assign]
+    win._restore_status_badge = lambda **kwargs: restored.append(True)  # type: ignore[method-assign]
+    win.conversation_controller = type("Ctrl", (), {  # type: ignore[method-assign]
+        "sync_work_ui": lambda _self: restored.append(True),
+    })()
     win.toast = lambda message: messages.append(f"toast:{message}")  # type: ignore[method-assign]
 
     def run_background(action, payload, on_success, *, on_error=None, on_progress=None):

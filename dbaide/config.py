@@ -12,6 +12,9 @@ logger = logging.getLogger("dbaide.config")
 DEFAULT_CONFIG_DIR = Path.home() / ".dbaide"
 DEFAULT_CONFIG_PATH = DEFAULT_CONFIG_DIR / "config.toml"
 
+# Bump when config.toml layout changes; ``ConfigManager`` migrates on load.
+CONFIG_VERSION = 1
+
 # Default number of agent runs (sessions) allowed to execute concurrently.
 DEFAULT_MAX_CONCURRENT_RUNS = 3
 
@@ -21,6 +24,63 @@ _CONNECTION_KEYS = {
     "load_profile", "session_timezone",
 }
 _MODEL_KEYS = {"name", "provider", "base_url", "api_key_env", "api_key", "model", "timeout_seconds"}
+
+
+def _config_version(data: dict[str, Any]) -> int:
+    meta = data.get("meta") or {}
+    if not isinstance(meta, dict):
+        return 0
+    try:
+        return max(0, int(meta.get("config_version") or 0))
+    except (TypeError, ValueError):
+        return 0
+
+
+def migrate_config(data: dict[str, Any]) -> tuple[dict[str, Any], bool]:
+    """Upgrade legacy on-disk config to the current schema. Returns (data, changed)."""
+    data = dict(data or {})
+    version = _config_version(data)
+    changed = False
+
+    if version < 1:
+        data.setdefault("connections", {})
+        data.setdefault("models", {})
+        data.setdefault("ui", {})
+        data.setdefault("resource_defaults", {})
+        meta = dict(data.get("meta") or {}) if isinstance(data.get("meta"), dict) else {}
+        meta["config_version"] = CONFIG_VERSION
+        data["meta"] = meta
+        version = CONFIG_VERSION
+        changed = True
+
+    if version > CONFIG_VERSION:
+        logger.warning(
+            "config version %s is newer than this app (%s); reading best-effort",
+            version,
+            CONFIG_VERSION,
+        )
+
+    return data, changed
+
+
+def sanitize_config_data(data: dict[str, Any]) -> dict[str, Any]:
+    """Redact secrets for debug bundles / support exports."""
+    clean = migrate_config(dict(data or {}))[0]
+
+    def _scrub(section: str, keys: frozenset[str]) -> None:
+        groups = clean.get(section) or {}
+        if not isinstance(groups, dict):
+            return
+        for name, item in groups.items():
+            if not isinstance(item, dict):
+                continue
+            for key in keys:
+                if key in item and item[key]:
+                    item[key] = "***"
+
+    _scrub("connections", frozenset({"password"}))
+    _scrub("models", frozenset({"api_key"}))
+    return clean
 
 
 def _toml_quote(value: str) -> str:
@@ -65,12 +125,25 @@ class ConfigManager:
                 self._data = {"connections": {}, "models": {}}
         else:
             self._data = {"connections": {}, "models": {}}
+        self._data, migrated = migrate_config(self._data)
+        if migrated:
+            logger.info("migrated config to version %s", CONFIG_VERSION)
+            try:
+                self.save()
+            except OSError as exc:
+                logger.warning("failed to persist migrated config: %s", exc)
+
+    def config_version(self) -> int:
+        return _config_version(self._data)
 
     def ensure_parent(self) -> None:
         self.path.parent.mkdir(parents=True, exist_ok=True)
 
     def save(self) -> None:
         self.ensure_parent()
+        meta = dict(self._data.get("meta") or {}) if isinstance(self._data.get("meta"), dict) else {}
+        meta["config_version"] = CONFIG_VERSION
+        self._data["meta"] = meta
         content = self._render_toml(self._data)
         fd, tmp = tempfile.mkstemp(dir=str(self.path.parent), suffix=".tmp")
         try:
@@ -271,6 +344,14 @@ class ConfigManager:
 
     def _render_toml(self, data: dict[str, Any]) -> str:
         lines: list[str] = []
+        meta = data.get("meta") or {}
+        if isinstance(meta, dict) and meta:
+            lines.append("[meta]")
+            for key, value in meta.items():
+                if value in (None, "", {}, []):
+                    continue
+                lines.append(f"{key} = {self._format_value(value)}")
+            lines.append("")
         if data.get("default_connection"):
             lines.append(f"default_connection = {_toml_quote(str(data['default_connection']))}")
             lines.append("")

@@ -275,6 +275,7 @@ class MainWindow(QMainWindow):
         self.topbar.joins_requested.connect(self.open_joins)
         self.topbar.sync_schema_requested.connect(self.sync_schema)
         self.topbar.copy_conversation_requested.connect(self.copy_conversation)
+        self.topbar.export_debug_requested.connect(self.export_debug_bundle)
         self.topbar.new_query_requested.connect(self._shortcut_new_query)
         self.topbar.new_conn_requested.connect(lambda: self.open_settings("connections"))
         layout.addWidget(self.topbar)
@@ -437,6 +438,15 @@ class MainWindow(QMainWindow):
         "schema_tree",
     })
 
+    _BACKGROUND_CANCEL_ACTIONS = _ASSET_STATUS_ACTIONS | frozenset({
+        "execute_sql",
+        "explain_sql",
+        "browse_table",
+        "count_table",
+        "list_databases",
+        "bootstrap",
+    })
+
     def _asset_status_label(self, action: str) -> str:
         return {
             "build_assets": _i18n_t("status.building"),
@@ -592,6 +602,7 @@ class MainWindow(QMainWindow):
         # Sessions are per-connection — drop the active session and clear the view so
         # one connection's conversation never bleeds into another. (Not fired during
         # bootstrap: set_connections blocks signals.)
+        self._cancel_stale_background_work()
         self._reset_all_slots()
         # Table viewers show the old connection's data — close them. SQL editors are
         # portable text and stay; History re-loads for the new connection below.
@@ -610,6 +621,14 @@ class MainWindow(QMainWindow):
         self.ask_tab.reset_all()
         self.current_session_id = ""
         self.conversation_controller.sync_work_ui()
+
+    def _cancel_stale_background_work(self) -> None:
+        """Stop in-flight schema/build/SQL/browse tasks when switching connections."""
+        worker = self._oneoff_worker
+        if worker is not None and not worker.is_cancelled:
+            worker.cancel()
+        self.tasks.cancel_matching(lambda handle: handle.action in self._BACKGROUND_CANCEL_ACTIONS)
+        self._asset_work_stack.clear()
 
     def _refresh_connection_context(self, conn_name: str) -> None:
         self._load_schema(conn_name)
@@ -1770,6 +1789,31 @@ class MainWindow(QMainWindow):
             return
         QApplication.clipboard().setText(text)
         self.toast(_i18n_t("toast.conversation_copied"))
+
+    def export_debug_bundle(self) -> None:
+        """Write a support ZIP (sanitized config, trace, log tail) under ~/.dbaide/debug/."""
+        from dbaide.config import sanitize_config_data
+        from dbaide.history.debug_bundle import create_desktop_debug_bundle
+        from dbaide.observability.app_logging import tail_log_lines
+
+        key = self._active_key
+        context = {
+            "connection_name": self.current_connection(),
+            "session_id": self.current_session_id,
+            "active_slot": key,
+            "trace": list(self._slot_trace.get(key, [])) if key else [],
+            "question": self._slot_question.get(key, "") if key else "",
+        }
+        try:
+            path = create_desktop_debug_bundle(
+                config=sanitize_config_data(self.service.cfg._data),
+                context=context,
+                log_tail=tail_log_lines(),
+            )
+        except OSError as exc:
+            self.fail(exc, modal=False)
+            return
+        self.toast(_i18n_t("toast.debug_exported", path=str(path)))
 
     def _empty_action(self, action_id: str) -> None:
         if action_id == "settings":

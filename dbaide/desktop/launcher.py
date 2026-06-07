@@ -9,6 +9,8 @@ from dbaide.desktop.ui import DBAideDesktop
 
 def main(argv: list[str] | None = None) -> int:
     _ = argv or sys.argv[1:]
+    from dbaide.observability.app_logging import setup_app_logging
+    setup_app_logging()
     from dbaide.i18n import set_language
     from dbaide.desktop.theme import set_theme
     from dbaide.agent.llm_trace import set_tracing

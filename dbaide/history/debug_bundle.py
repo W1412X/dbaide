@@ -20,14 +20,26 @@ class DebugBundle:
 
     Bundle contents:
         manifest.json      - metadata (version, platform, timestamps)
-        result.json         - full WorkflowResult
+        result.json         - full WorkflowResult (when available)
         trace.json          - trace events
         environment.json    - Python version, platform, packages
         config.json         - sanitized config (no secrets)
+        context.json        - optional desktop/session context
+        app.log.tail.txt    - last lines of the app log (when available)
     """
 
-    def __init__(self, result: WorkflowResult) -> None:
+    def __init__(
+        self,
+        result: WorkflowResult | None = None,
+        *,
+        config: dict[str, Any] | None = None,
+        context: dict[str, Any] | None = None,
+        log_tail: list[str] | None = None,
+    ) -> None:
         self.result = result
+        self.config = config or {}
+        self.context = context or {}
+        self.log_tail = list(log_tail or [])
         self.created_at = time.time()
 
     def to_bytes(self) -> bytes:
@@ -35,9 +47,21 @@ class DebugBundle:
         buf = BytesIO()
         with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
             zf.writestr("manifest.json", json.dumps(self._manifest(), indent=2))
-            zf.writestr("result.json", json.dumps(self.result.to_dict(), indent=2, default=str))
-            zf.writestr("trace.json", json.dumps([e.to_dict() for e in self.result.trace], indent=2))
+            if self.result is not None:
+                zf.writestr("result.json", json.dumps(self.result.to_dict(), indent=2, default=str))
+                zf.writestr(
+                    "trace.json",
+                    json.dumps([e.to_dict() for e in self.result.trace], indent=2, default=str),
+                )
+            elif self.context.get("trace"):
+                zf.writestr("trace.json", json.dumps(self.context.get("trace"), indent=2, default=str))
             zf.writestr("environment.json", json.dumps(self._environment(), indent=2))
+            if self.config:
+                zf.writestr("config.json", json.dumps(self.config, indent=2, default=str))
+            if self.context:
+                zf.writestr("context.json", json.dumps(self.context, indent=2, default=str))
+            if self.log_tail:
+                zf.writestr("app.log.tail.txt", "\n".join(self.log_tail) + "\n")
         return buf.getvalue()
 
     def save(self, path: Path) -> Path:
@@ -48,9 +72,20 @@ class DebugBundle:
         return path
 
     def _manifest(self) -> dict[str, Any]:
-        return {
-            "schema_version": 1,
+        base: dict[str, Any] = {
+            "schema_version": 2,
             "created_at": self.created_at,
+            "bundle_kind": "workflow" if self.result is not None else "desktop",
+        }
+        if self.result is None:
+            base.update({
+                "connection_name": self.context.get("connection_name", ""),
+                "active_session": self.context.get("session_id", ""),
+                "trace_count": len(self.context.get("trace") or []),
+            })
+            return base
+        return {
+            **base,
             "workflow_id": self.result.workflow_id,
             "question": self.result.question,
             "status": self.result.status.value,
@@ -76,9 +111,25 @@ class DebugBundle:
 
 
 def create_debug_bundle(result: WorkflowResult, output_dir: Path | None = None) -> Path:
-    """Create and save a debug bundle."""
+    """Create and save a debug bundle from a workflow result (CLI path)."""
     bundle = DebugBundle(result)
     if output_dir is None:
         output_dir = Path.home() / ".dbaide" / "debug"
     filename = f"dbaide-debug-{result.workflow_id}-{int(time.time())}.zip"
+    return bundle.save(output_dir / filename)
+
+
+def create_desktop_debug_bundle(
+    *,
+    config: dict[str, Any],
+    context: dict[str, Any] | None = None,
+    log_tail: list[str] | None = None,
+    output_dir: Path | None = None,
+) -> Path:
+    """Create a support bundle from the running desktop app."""
+    bundle = DebugBundle(None, config=config, context=context or {}, log_tail=log_tail)
+    if output_dir is None:
+        output_dir = Path.home() / ".dbaide" / "debug"
+    conn = str((context or {}).get("connection_name") or "desktop")
+    filename = f"dbaide-debug-{conn}-{int(time.time())}.zip"
     return bundle.save(output_dir / filename)

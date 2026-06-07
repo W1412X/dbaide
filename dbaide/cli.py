@@ -45,19 +45,8 @@ def main(argv: list[str] | None = None) -> int:
 
 
 def _setup_logging(verbosity: int, quiet: bool = False) -> None:
-    if quiet:
-        level = logging.ERROR
-    elif verbosity >= 2:
-        level = logging.DEBUG
-    elif verbosity >= 1:
-        level = logging.INFO
-    else:
-        level = logging.WARNING
-    logging.basicConfig(
-        level=level,
-        format="%(asctime)s %(levelname)s %(name)s: %(message)s",
-        datefmt="%H:%M:%S",
-    )
+    from dbaide.observability.app_logging import setup_app_logging
+    setup_app_logging(verbose=verbosity, quiet=quiet)
 
 
 def build_parser() -> argparse.ArgumentParser:
