@@ -296,8 +296,9 @@ class _ContextChip(QWidget):
         lay.addWidget(text)
         close = QToolButton()
         close.setObjectName("ctxChipClose")
-        close.setText("✕")  # a text glyph renders reliably (svg icon on a transparent
-        close.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextOnly)  # button did not)
+        close.setIcon(svg_icon("x", color=Theme.MUTED, size=12, width=2.2))
+        close.setIconSize(QSize(12, 12))
+        close.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonIconOnly)
         close.setCursor(Qt.CursorShape.PointingHandCursor)
         close.setToolTip("Remove")
         close.setFixedSize(18, 18)
@@ -312,8 +313,8 @@ class _ContextChip(QWidget):
             f" border: 1px solid {Theme.BORDER}; border-radius: 13px; }}"
             f"QWidget#ctxChip QLabel {{ background: transparent; border: none; }}"
             # padding:0 / min-width:0 are essential — the global QToolButton rule
-            # sets `padding: 0 10px; min-height: 26px`, which on an 18px button leaves
-            # no room for the ✕ glyph (so it silently doesn't paint).
+            # sets `padding: 0 10px; min-height: 26px`, which would leave no room
+            # for the compact close icon.
             f"QToolButton#ctxChipClose {{ background: transparent; border: none;"
             f" border-radius: 9px; color: {Theme.MUTED}; font-size: 13px;"
             f" padding: 0; min-width: 0; min-height: 0; }}"

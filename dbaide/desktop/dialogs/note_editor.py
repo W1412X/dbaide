@@ -13,6 +13,7 @@ from PyQt6.QtWidgets import (
     QVBoxLayout,
 )
 
+from dbaide.desktop.components.icons import svg_icon
 from dbaide.desktop.theme import app_style, Theme
 from dbaide.i18n import t as _t
 
@@ -44,6 +45,12 @@ class NoteEditorDialog(QDialog):
         buttons = QDialogButtonBox(
             QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel,
         )
+        ok_btn = buttons.button(QDialogButtonBox.StandardButton.Ok)
+        cancel_btn = buttons.button(QDialogButtonBox.StandardButton.Cancel)
+        if ok_btn is not None:
+            ok_btn.setIcon(svg_icon("check", color=Theme.GREEN, size=14))
+        if cancel_btn is not None:
+            cancel_btn.setIcon(svg_icon("x", color=Theme.TEXT_2, size=14))
         buttons.accepted.connect(self.accept)
         buttons.rejected.connect(self.reject)
         layout.addWidget(buttons)

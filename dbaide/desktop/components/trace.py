@@ -12,7 +12,6 @@ from PyQt6.QtWidgets import (
     QHBoxLayout,
     QHeaderView,
     QLabel,
-    QPushButton,
     QTextBrowser,
     QToolButton,
     QTreeWidget,
@@ -28,6 +27,7 @@ from dbaide.agent.trace_model import (
     localized_status,
     localized_summary_line,
 )
+from dbaide.desktop.components.base import compact_button
 from dbaide.desktop.components.icons import svg_icon
 from dbaide.desktop.components.inputs import configure_readonly_text_view
 from dbaide.desktop.components.spinner import BusyAnimator, spinner_icon
@@ -322,12 +322,18 @@ class TraceDetailDialog(QDialog):
         row.setContentsMargins(0, 0, 0, 0)
         row.addStretch(1)
         if self._raw_text:
-            self._copy_raw = QPushButton(t("trace.copy_raw"))
-            self._copy_raw.setCursor(Qt.CursorShape.PointingHandCursor)
+            self._copy_raw = compact_button(
+                t("trace.copy_raw"),
+                icon=svg_icon("copy", color=Theme.TEXT_2, size=14),
+                width=112,
+            )
             self._copy_raw.clicked.connect(self._do_copy_raw)
             row.addWidget(self._copy_raw)
-        close = QPushButton(t("dialog.close"))
-        close.setCursor(Qt.CursorShape.PointingHandCursor)
+        close = compact_button(
+            t("dialog.close"),
+            icon=svg_icon("x", color=Theme.TEXT_2, size=14),
+            width=84,
+        )
         close.clicked.connect(self.close)
         row.addWidget(close)
         layout.addLayout(row)
@@ -336,7 +342,12 @@ class TraceDetailDialog(QDialog):
         if self._raw_text:
             QApplication.clipboard().setText(self._raw_text)
             self._copy_raw.setText("✓")
-            QTimer.singleShot(1200, lambda: self._copy_raw.setText(_copy_raw_label()))
+            self._copy_raw.setIcon(svg_icon("check", color=Theme.GREEN, size=14))
+            QTimer.singleShot(1200, self._restore_copy_raw_button)
+
+    def _restore_copy_raw_button(self) -> None:
+        self._copy_raw.setText(_copy_raw_label())
+        self._copy_raw.setIcon(svg_icon("copy", color=Theme.TEXT_2, size=14))
 
 
 def _copy_raw_label() -> str:

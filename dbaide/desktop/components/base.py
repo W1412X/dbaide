@@ -47,6 +47,8 @@ def compact_button(
     text: str,
     *,
     primary: bool = False,
+    icon: QIcon | None = None,
+    tooltip: str = "",
     width: int | None = None,
     parent=None,
 ) -> QPushButton:
@@ -56,6 +58,11 @@ def compact_button(
     btn.setDefault(False)
     btn.setFixedHeight(26)
     btn.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
+    if icon is not None:
+        btn.setIcon(icon)
+        btn.setIconSize(QSize(14, 14))
+    if tooltip:
+        btn.setToolTip(tooltip)
     if width is not None:
         btn.setFixedWidth(width)
     else:

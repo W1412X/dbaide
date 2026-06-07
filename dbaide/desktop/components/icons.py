@@ -32,6 +32,7 @@ _GLYPHS: dict[str, str] = {
     "trash": ('<path d="M3 6h18"/><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/>'
               '<path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/><line x1="10" x2="10" y1="11" y2="17"/>'
               '<line x1="14" x2="14" y1="11" y2="17"/>'),
+    "save": '<path d="M15.2 3a2 2 0 0 1 1.4.6l3.8 3.8A2 2 0 0 1 21 8.8V19a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2z"/><path d="M17 21v-8H7v8"/><path d="M7 3v5h8"/>',
     "x": '<path d="M18 6 6 18"/><path d="m6 6 12 12"/>',
     "send": '<path d="M22 2 11 13"/><path d="M22 2 15 22l-4-9-9-4Z"/>',
     "arrow-up": '<path d="m5 12 7-7 7 7"/><path d="M12 19V5"/>',
@@ -55,6 +56,7 @@ _GLYPHS: dict[str, str] = {
     "loader": '<path d="M21 12a9 9 0 1 1-6.219-8.56"/>',  # 270° arc — the spinner
     "table": '<rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18"/><path d="M9 3v18"/>',
     "columns": '<path d="M12 3v18"/><path d="M3 12h18"/>',
+    "hash": '<line x1="4" x2="20" y1="9" y2="9"/><line x1="4" x2="20" y1="15" y2="15"/><line x1="10" x2="8" y1="3" y2="21"/><line x1="16" x2="14" y1="3" y2="21"/>',
     # Format / beautify SQL.
     "sparkles": ('<path d="M9.937 15.5A2 2 0 0 0 8.5 14.063l-6.135-1.582a.5.5 0 0 1 0-.962L8.5 9.936A2 2 0 0 0 '
                  '9.937 8.5l1.582-6.135a.5.5 0 0 1 .962 0L14.063 8.5A2 2 0 0 0 15.5 9.937l6.135 1.581a.5.5 0 0 1 '

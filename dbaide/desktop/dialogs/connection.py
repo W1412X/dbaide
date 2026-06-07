@@ -14,6 +14,7 @@ from PyQt6.QtWidgets import (
 )
 
 from dbaide.desktop.components.base import compact_button
+from dbaide.desktop.components.icons import svg_icon
 from dbaide.desktop.components.inputs import FORM_INNER_LABEL_RULES, Combo, configure_form, form_label
 from dbaide.desktop.theme import Theme
 
@@ -203,6 +204,12 @@ class ConnectionDialog(QDialog):
         buttons = QDialogButtonBox(
             QDialogButtonBox.StandardButton.Save | QDialogButtonBox.StandardButton.Cancel
         )
+        save_btn = buttons.button(QDialogButtonBox.StandardButton.Save)
+        cancel_btn = buttons.button(QDialogButtonBox.StandardButton.Cancel)
+        if save_btn is not None:
+            save_btn.setIcon(svg_icon("save", color=Theme.GREEN, size=14))
+        if cancel_btn is not None:
+            cancel_btn.setIcon(svg_icon("x", color=Theme.TEXT_2, size=14))
         buttons.accepted.connect(self.accept)
         buttons.rejected.connect(self.reject)
         layout.addWidget(buttons)

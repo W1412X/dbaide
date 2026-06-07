@@ -13,13 +13,14 @@ from PyQt6.QtWidgets import (
     QHeaderView,
     QLabel,
     QPlainTextEdit,
-    QPushButton,
     QTableWidget,
     QTableWidgetItem,
     QVBoxLayout,
     QWidget,
 )
 
+from dbaide.desktop.components.base import compact_button
+from dbaide.desktop.components.icons import svg_icon
 from dbaide.desktop.components.menu import MenuButton
 from dbaide.desktop.theme import Theme
 from dbaide.rendering.table import export_csv, export_insert, export_json, export_markdown_table
@@ -354,10 +355,11 @@ class CellValueDialog(QDialog):
         view.setPlainText(value)
         layout.addWidget(view, 1)
         buttons = QDialogButtonBox()
-        copy_btn = QPushButton("Copy")
+        copy_btn = compact_button("Copy", icon=svg_icon("copy", color=Theme.TEXT_2, size=14), width=78)
         copy_btn.clicked.connect(lambda: QApplication.clipboard().setText(value))
         buttons.addButton(copy_btn, QDialogButtonBox.ButtonRole.ActionRole)
-        buttons.addButton(QDialogButtonBox.StandardButton.Close)
+        close_btn = compact_button("Close", icon=svg_icon("x", color=Theme.TEXT_2, size=14), width=82)
+        buttons.addButton(close_btn, QDialogButtonBox.ButtonRole.RejectRole)
         buttons.rejected.connect(self.reject)
         buttons.accepted.connect(self.accept)
         layout.addWidget(buttons)

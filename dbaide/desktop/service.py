@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 import logging
-from typing import Any, Callable
+from typing import Any
 
 logger = logging.getLogger("dbaide.desktop.service")
 
@@ -20,6 +20,7 @@ from dbaide.connection_identity import connection_fingerprint
 from dbaide.core import ExecutionPolicy, WorkflowRequest
 from dbaide.core.workflow import WorkflowEngine
 from dbaide.db.identifiers import normalize_db_table_for_dialect
+from dbaide.desktop.service_actions import build_action_handlers
 from dbaide.history.store import WorkflowHistoryStore
 from dbaide.history.session_store import ChatSessionStore, make_turn
 from dbaide.llm import LLMMessage, NullLLMClient, build_llm_client
@@ -136,60 +137,10 @@ class DesktopService:
 
     def dispatch(self, action: str, payload: dict[str, Any] | None = None) -> Any:
         payload = payload or {}
-        handlers = self._handlers()
+        handlers = build_action_handlers(self)
         if action not in handlers:
             raise ValueError(f"Unknown desktop action: {action}")
         return handlers[action](payload)
-
-    def _handlers(self) -> dict[str, Callable[[dict[str, Any]], Any]]:
-        """Action registry consumed by ``ServiceWorker`` and synchronous UI calls."""
-        return {
-            "bootstrap": self.bootstrap,
-            "build_assets": self.build_assets,
-            "project_instance": self.project_instance,
-            "refresh_instance": self.refresh_instance,
-            "enrich_table": self.enrich_table,
-            "list_databases": self.list_databases,
-            "schema_tree": self.schema_tree,
-            "search_assets": self.search_assets,
-            "read_asset": self.read_asset,
-            "save_connection": self.save_connection,
-            "delete_connection": self.delete_connection,
-            "save_model": self.save_model,
-            "delete_model": self.delete_model,
-            "set_default_model": self.set_default_model,
-            "ask": self.ask,
-            "test_connection": self.test_connection,
-            "validate_sql": self.validate_sql,
-            "execute_sql": self.execute_sql,
-            "browse_table": self.browse_table,
-            "count_table": self.count_table,
-            "table_ddl": self.table_ddl,
-            "explain_sql": self.explain_sql,
-            "list_history": self.list_history,
-            "load_history": self.load_history,
-            "delete_history": self.delete_history,
-            "list_sessions": self.list_sessions,
-            "load_session": self.load_session,
-            "create_session": self.create_session,
-            "rename_session": self.rename_session,
-            "delete_session": self.delete_session,
-            "asset_markdown": self.asset_markdown,
-            "preview_asset": self.asset_markdown,
-            "test_model": self.test_model,
-            "test_model_profile": self.test_model_profile,
-            "list_joins": self.list_joins,
-            "add_join": self.add_join,
-            "update_join": self.update_join,
-            "delete_join": self.delete_join,
-            "list_annotations": self.list_annotations,
-            "add_annotation": self.add_annotation,
-            "update_annotation": self.update_annotation,
-            "delete_annotation": self.delete_annotation,
-            "resource_defaults": self.resource_defaults,
-            "save_resource_defaults": self.save_resource_defaults,
-            "recent_queries": self.recent_queries,
-        }
 
     def bootstrap(self, _payload: dict[str, Any] | None = None) -> dict[str, Any]:
         conns = self.cfg.connections()

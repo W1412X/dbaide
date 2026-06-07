@@ -4,6 +4,7 @@ import sqlite3
 from dbaide.assets import AssetStore
 from dbaide.config import ConfigManager
 from dbaide.desktop.service import DesktopService
+from dbaide.desktop.service_actions import ACTION_METHODS, build_action_handlers
 from dbaide.models import ConnectionConfig
 from tests.llm_mock import AgentMockLLM
 
@@ -25,6 +26,14 @@ def make_db(path):
     )
     conn.commit()
     conn.close()
+
+
+def test_desktop_service_action_registry_matches_service_methods(tmp_path):
+    service = DesktopService(ConfigManager(tmp_path / "config.toml"), AssetStore(tmp_path / "assets"))
+    handlers = build_action_handlers(service)
+
+    assert set(handlers) == {action for action, _method in ACTION_METHODS}
+    assert all(callable(handler) for handler in handlers.values())
 
 
 def test_gui_build_assets_uses_configured_store_and_serializes_slots_dataclass(tmp_path):

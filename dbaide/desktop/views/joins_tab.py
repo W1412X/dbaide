@@ -15,11 +15,12 @@ from PyQt6.QtWidgets import (
     QListWidget,
     QListWidgetItem,
     QMessageBox,
-    QPushButton,
     QVBoxLayout,
     QWidget,
 )
 
+from dbaide.desktop.components.base import compact_button
+from dbaide.desktop.components.icons import svg_icon
 from dbaide.desktop.components.inputs import configure_form, form_label
 from dbaide.desktop.theme import app_style, Theme
 
@@ -50,6 +51,12 @@ class JoinEditorDialog(QDialog):
         buttons = QDialogButtonBox(
             QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel,
         )
+        ok_btn = buttons.button(QDialogButtonBox.StandardButton.Ok)
+        cancel_btn = buttons.button(QDialogButtonBox.StandardButton.Cancel)
+        if ok_btn is not None:
+            ok_btn.setIcon(svg_icon("check", color=Theme.GREEN, size=14))
+        if cancel_btn is not None:
+            cancel_btn.setIcon(svg_icon("x", color=Theme.TEXT_2, size=14))
         buttons.accepted.connect(self.accept)
         buttons.rejected.connect(self.reject)
         layout.addRow(buttons)
@@ -81,10 +88,10 @@ class JoinsTab(QWidget):
         hint.setStyleSheet(f"color: {Theme.MUTED}; font-size: 11px;")
         layout.addWidget(hint)
         row = QHBoxLayout()
-        self.btn_add = QPushButton("Add")
-        self.btn_edit = QPushButton("Edit")
-        self.btn_delete = QPushButton("Delete")
-        self.btn_refresh = QPushButton("Refresh")
+        self.btn_add = compact_button("Add", icon=svg_icon("plus", color=Theme.TEXT_2, size=14), width=76)
+        self.btn_edit = compact_button("Edit", icon=svg_icon("pencil", color=Theme.TEXT_2, size=14), width=76)
+        self.btn_delete = compact_button("Delete", icon=svg_icon("trash", color=Theme.TEXT_2, size=14), width=86)
+        self.btn_refresh = compact_button("Refresh", icon=svg_icon("refresh", color=Theme.TEXT_2, size=14), width=92)
         for btn in (self.btn_add, self.btn_edit, self.btn_delete, self.btn_refresh):
             row.addWidget(btn)
         row.addStretch(1)
