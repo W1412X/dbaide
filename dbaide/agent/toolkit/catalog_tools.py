@@ -8,10 +8,12 @@ from dbaide.tools.specs import (
     RETRIEVE_JOIN_CONTEXT, VALIDATE_JOINS, LIST_JOINS,
     ADD_JOIN, UPDATE_JOIN, DELETE_JOIN, ANNOTATE_OBJECT,
 )
-from dbaide.agent.schema_context import disclosed_schemas_for_tables, normalize_db_table
+from dbaide.agent.schema_context import disclosed_schemas_for_tables
 from dbaide.agent.join_validation import validate_join_relations
 from dbaide.joins import USER_JOIN_CONFIDENCE, catalog_record_to_relation
-from dbaide.agent.toolkit.support import _err, _relations_payload, _targets_from_relations
+from dbaide.agent.toolkit.support import (
+    _err, _normalize_tool_table, _relations_payload, _string_list, _targets_from_relations,
+)
 
 
 def register(registry: ToolRegistry, orchestrator) -> None:
@@ -20,8 +22,8 @@ def register(registry: ToolRegistry, orchestrator) -> None:
 
     def _normalize_endpoint(args: dict[str, Any]) -> tuple[str, dict[str, str]]:
         db_default = _db_default(args)
-        left_db, table = normalize_db_table(str(args.get("table") or args.get("left_table") or ""), db_default)
-        right_db, ref_table = normalize_db_table(str(args.get("ref_table") or args.get("right_table") or ""), db_default)
+        left_db, table = _normalize_tool_table(orchestrator, str(args.get("table") or args.get("left_table") or ""), db_default)
+        right_db, ref_table = _normalize_tool_table(orchestrator, str(args.get("ref_table") or args.get("right_table") or ""), db_default)
         database = left_db or right_db or db_default
         return database, {
             "table": table,
@@ -34,8 +36,7 @@ def register(registry: ToolRegistry, orchestrator) -> None:
         from dbaide.agent.join_evidence import JoinEvidenceRetriever
 
         request = str(args.get("request") or orchestrator.run_state.question or "").strip()
-        tables_arg = args.get("tables")
-        tables = [str(t).strip() for t in tables_arg if str(t).strip()] if isinstance(tables_arg, list) else []
+        tables = _string_list(args.get("tables"))
         database = _db_default(args)
         # Default to catalog/FK evidence only. Semantic inference and sample validation
         # are extra work and must be explicitly requested by the main LLM.
@@ -78,8 +79,9 @@ def register(registry: ToolRegistry, orchestrator) -> None:
         database = _db_default(args)
         tables_arg = args.get("tables")
         tables: list[str] | None = None
-        if isinstance(tables_arg, list):
-            normalized: list[tuple[str, str]] = [normalize_db_table(str(t), database) for t in tables_arg if str(t).strip()]
+        table_items = _string_list(tables_arg)
+        if table_items:
+            normalized: list[tuple[str, str]] = [_normalize_tool_table(orchestrator, str(t), database) for t in table_items]
             explicit_dbs = {db for db, _table in normalized if db}
             if len(explicit_dbs) == 1:
                 database = next(iter(explicit_dbs))
@@ -175,7 +177,7 @@ def register(registry: ToolRegistry, orchestrator) -> None:
         if not note:
             return ToolResult(ok=False, error=_err("annotate_object", "note is required"))
         database = _db_default(args)
-        database, table = normalize_db_table(str(args.get("table") or "").strip(), database)
+        database, table = _normalize_tool_table(orchestrator, str(args.get("table") or "").strip(), database)
         column = str(args.get("column") or "").strip()
         scope = str(args.get("scope") or "").strip().lower()
         if scope not in {"database", "table", "column"}:

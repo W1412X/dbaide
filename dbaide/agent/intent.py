@@ -15,6 +15,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from dbaide.i18n import detect_user_language, normalize
 from dbaide.llm import LLMClient, LLMMessage, NullLLMClient
 
 # The kinds of thing Ask can answer. Used to label sub-intents and (lightly) hint
@@ -39,16 +40,32 @@ _LABELS = {
     "other": "Question",
 }
 
+_LABELS_ZH = {
+    "data_query": "数据查询",
+    "schema_explore": "结构",
+    "relations": "关系",
+    "data_profile": "数据画像",
+    "sql_diagnose": "SQL 诊断",
+    "sql_rewrite": "SQL 改写",
+    "other": "问题",
+}
+
 
 @dataclass(slots=True)
 class SubIntent:
     id: str
     type: str
     text: str
+    language: str = "en"
 
     @property
     def label(self) -> str:
         return _LABELS.get(self.type, "Question")
+
+    def label_for(self, language: str | None = None) -> str:
+        lang = normalize(language or self.language)
+        labels = _LABELS_ZH if lang == "zh" else _LABELS
+        return labels.get(self.type, labels["other"])
 
 
 class IntentDecomposer:
@@ -61,20 +78,22 @@ class IntentDecomposer:
 
     def decompose(self, question: str) -> list[SubIntent]:
         question = (question or "").strip()
+        fallback_language = detect_user_language(question)
         if not question or isinstance(self.llm, NullLLMClient):
-            return [SubIntent(id="i1", type="other", text=question)]
+            return [SubIntent(id="i1", type="other", text=question, language=fallback_language)]
         try:
             payload = self.llm.complete_json(
                 [
                     LLMMessage("system", _SYSTEM),
                     LLMMessage("user", f"Question:\n{question}\n\n{_INSTRUCT}"),
                 ],
-                schema_hint='{"intents":[{"type":"data_query","text":"..."}]}',
+                schema_hint='{"intents":[{"type":"data_query","text":"...","language":"en|zh"}]}',
             )
         except Exception:
-            return [SubIntent(id="i1", type="other", text=question)]
+            return [SubIntent(id="i1", type="other", text=question, language=fallback_language)]
 
         raw = payload.get("intents") if isinstance(payload, dict) else None
+        top_language = normalize(payload.get("language")) if isinstance(payload, dict) and payload.get("language") else fallback_language
         intents: list[SubIntent] = []
         for item in (raw or [])[: self.MAX_INTENTS]:
             if not isinstance(item, dict):
@@ -85,9 +104,10 @@ class IntentDecomposer:
             itype = str(item.get("type") or "other").strip().lower()
             if itype not in INTENT_TYPES:
                 itype = "other"
-            intents.append(SubIntent(id=f"i{len(intents) + 1}", type=itype, text=text))
+            language = normalize(item.get("language")) if item.get("language") else top_language
+            intents.append(SubIntent(id=f"i{len(intents) + 1}", type=itype, text=text, language=language))
         if not intents:
-            return [SubIntent(id="i1", type="other", text=question)]
+            return [SubIntent(id="i1", type="other", text=question, language=fallback_language)]
         return intents
 
 
@@ -96,11 +116,13 @@ _SYSTEM = (
     "questions are a SINGLE intent — return exactly one unless the user clearly asks "
     "for multiple distinct things (e.g. a schema lookup AND a data count). Never split "
     "one coherent SQL request into pieces. Each sub-intent must be self-contained and "
-    "of one type. Return JSON only."
+    "of one type. Also identify the user's question language as language ∈ {en, zh}. "
+    "Return JSON only."
 )
 
 _INSTRUCT = (
-    'Return {"intents":[{"type":"...","text":"a self-contained sub-question"}]}. '
+    'Return {"intents":[{"type":"...","text":"a self-contained sub-question","language":"en|zh"}]}. '
     "type ∈ {data_query, schema_explore, relations, data_profile, sql_diagnose, "
-    "sql_rewrite, other}. Prefer one intent."
+    "sql_rewrite, other}. Prefer one intent. Preserve the original question language "
+    "for each sub-intent unless the user explicitly mixes languages."
 )

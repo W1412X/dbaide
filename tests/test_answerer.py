@@ -174,12 +174,11 @@ class TestSummarizeRowsBranches:
         assert _timing_line(r, True) == "共 5 条记录，耗时 3ms（仅展示前 5 条）"
 
 
-def test_answer_language_directive_is_ui_authoritative():
+def test_answer_language_directive_targets_question_language():
     from dbaide.i18n import answer_language_directive
     zh = answer_language_directive("zh")
     en = answer_language_directive("en")
     assert "简体中文" in zh and "Chinese" in zh
     assert "English" in en
-    # No longer flips to the question's language — the UI language is authoritative.
-    assert "match the user's language" not in zh.lower()
-    assert "match the user's language" not in en.lower()
+    assert "question language" in zh.lower()
+    assert "question language" in en.lower()

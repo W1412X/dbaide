@@ -61,6 +61,24 @@ def test_bare_table_name_resolves_database(tmp_path):
     assert seeded and seeded[0].database == "main"
 
 
+def test_scoped_table_is_prioritized_even_when_discovery_also_finds_it(tmp_path):
+    agent = _agent(_store_with_assets(tmp_path))
+
+    def keep_all(_question, *, level, items, context, progress=None, parent=""):
+        return [item["index"] for item in items]
+
+    agent._filter_indices = keep_all
+    res = agent.discover(
+        "orders and users",
+        scope={"tables": [{"database": "main", "table": "users"}]},
+        column_detail=False,
+    )
+    table_hits = [h for h in res.hits if h.kind == "table"]
+
+    assert table_hits[0].table == "users"
+    assert table_hits[0].reason == "user-provided"
+
+
 def test_build_attached_scope(qapp_unused=None):
     # Pure helper on MainWindow — test the parsing logic in isolation.
     import os

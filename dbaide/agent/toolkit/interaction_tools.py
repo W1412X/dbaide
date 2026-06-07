@@ -5,7 +5,7 @@ from typing import Any
 
 from dbaide.tools.registry import ToolContext, ToolRegistry, ToolResult
 from dbaide.tools.specs import ASK_USER
-from dbaide.agent.toolkit.support import _err
+from dbaide.agent.toolkit.support import _err, _string_list
 
 
 def register(registry: ToolRegistry, orchestrator) -> None:
@@ -13,10 +13,7 @@ def register(registry: ToolRegistry, orchestrator) -> None:
         question = str(args.get("question") or "").strip()
         if not question:
             return ToolResult(ok=False, error=_err("ask_user", "question is required"))
-        options_raw = args.get("options")
-        options: list[str] = []
-        if isinstance(options_raw, list):
-            options = [str(item).strip() for item in options_raw if str(item).strip()]
+        options = _string_list(args.get("options"))
         orchestrator.run_state.pending_question = question
         orchestrator.run_state.pending_options = options
         orchestrator.run_state.pending_questions = [{"ask": question, "options": options}]

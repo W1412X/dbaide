@@ -23,6 +23,7 @@ MAX_JOIN_REPORTS = 5
 MAX_SQL_ARTIFACTS = 8
 MAX_RESOLVED_QUESTIONS = 12
 MAX_DO_NOT_REPEAT = 18
+MAX_ARCHIVE_INDEX = 12
 
 
 @dataclass(slots=True)
@@ -34,6 +35,7 @@ class WorkStep:
     result_summary: str = ""
     judgment: str = ""
     artifact_refs: list[str] = field(default_factory=list)
+    raw_ref: str = ""
     status: str = "completed"
 
 
@@ -103,6 +105,15 @@ class SQLArtifact:
 
 
 @dataclass(slots=True)
+class MemoryArchiveItem:
+    id: str
+    action: str
+    summary: str = ""
+    source_refs: list[str] = field(default_factory=list)
+    payload: dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass(slots=True)
 class AgentMemory:
     goal: str = ""
     intent: str = ""
@@ -121,6 +132,9 @@ class AgentMemory:
     resolved_questions: list[str] = field(default_factory=list)
     do_not_repeat: list[str] = field(default_factory=list)
     next_action_hint: str = ""
+    archive: list[MemoryArchiveItem] = field(default_factory=list)
+    next_work_index: int = 1
+    next_archive_index: int = 1
 
     def reset_goal(self, question: str, *, database: str = "", execute_allowed: bool = True) -> None:
         self.goal = str(question or "").strip()
@@ -140,16 +154,33 @@ class AgentMemory:
         artifacts: list[str] | None = None,
         data: dict[str, Any] | None = None,
     ) -> None:
-        step_id = f"w{len(self.work_log) + 1}"
+        step_id = f"w{self.next_work_index}"
+        self.next_work_index += 1
         input_summary = _compact_json(args or {}, limit=360)
         result_summary = _trim(summary, 700)
+        artifact_refs = list(artifacts or [])
+        raw_ref = self.archive_raw(
+            action=action,
+            summary=result_summary,
+            source_refs=[step_id, *artifact_refs],
+            payload={
+                "work_step": step_id,
+                "action": action,
+                "args": args or {},
+                "ok": ok,
+                "summary": summary,
+                "artifact_refs": artifact_refs,
+                "data": data if isinstance(data, dict) else {},
+            },
+        )
         self.work_log.append(WorkStep(
             id=step_id,
             action=action,
             input_summary=input_summary,
             result_summary=result_summary,
             status="completed" if ok else "failed",
-            artifact_refs=list(artifacts or []),
+            artifact_refs=artifact_refs,
+            raw_ref=raw_ref,
         ))
         self.work_log = self.work_log[-MAX_WORK_STEPS:]
         ledger_key = f"{action}:{input_summary}"
@@ -159,6 +190,42 @@ class AgentMemory:
         self.add_do_not_repeat(ledger_key, f"{'completed' if ok else 'failed'}: {result_summary}")
         if ok and isinstance(data, dict):
             self.learn_tool_result(action=action, args=args or {}, data=data, summary=result_summary)
+
+    def archive_raw(
+        self,
+        *,
+        action: str,
+        summary: str = "",
+        source_refs: list[str] | None = None,
+        payload: dict[str, Any] | None = None,
+    ) -> str:
+        """Store original evidence outside the prompt and return a stable ref.
+
+        The prompt sees only compact summaries plus this id. The agent can call
+        retrieve_memory_item(ref=...) to inspect the full payload when the summary is
+        insufficient. Archive entries are intentionally not trimmed with the prompt
+        sections; losing raw evidence would make compression non-auditable.
+        """
+        ref = f"mem:{self.next_archive_index}"
+        self.next_archive_index += 1
+        refs = [str(x).strip() for x in (source_refs or []) if str(x).strip()]
+        self.archive.append(MemoryArchiveItem(
+            id=ref,
+            action=str(action or "").strip(),
+            summary=_trim(summary, 500),
+            source_refs=refs,
+            payload=payload or {},
+        ))
+        return ref
+
+    def retrieve_archive(self, ref: str) -> MemoryArchiveItem | None:
+        needle = str(ref or "").strip()
+        if not needle:
+            return None
+        for item in reversed(self.archive):
+            if item.id == needle or needle in item.source_refs:
+                return item
+        return None
 
     def add_do_not_repeat(self, key: str, reason: str = "") -> None:
         key = _trim(key, 420)
@@ -264,7 +331,15 @@ class AgentMemory:
             self._learn_described_table(args, data)
         elif action in {"retrieve_schema_context", "discover_schema"}:
             self._learn_schema_result(data)
+        elif action == "column_stats":
+            self._learn_column_stats(args, data)
+        elif action == "profile_table":
+            self._learn_profile_table(args, data)
+        elif action == "validate_joins":
+            self._learn_validated_joins(data)
         elif action in {"execute_sql", "execute_readonly_sql"}:
+            if data.get("pending") or data.get("blocked"):
+                return
             sql = str(data.get("sql") or args.get("sql") or "").strip()
             rows = data.get("row_count")
             self.add_finding(
@@ -290,6 +365,28 @@ class AgentMemory:
     def _learn_schema_result(self, data: dict[str, Any]) -> None:
         report_id = str(data.get("report_id") or "").strip()
         candidates = [c for c in data.get("candidates") or [] if isinstance(c, dict)]
+        hits = [h for h in data.get("hits") or [] if isinstance(h, dict)]
+        if hits and not candidates:
+            labels: list[str] = []
+            noted_labels: list[str] = []
+            for hit in hits[:12]:
+                database = str(hit.get("database") or "").strip()
+                table = str(hit.get("table") or hit.get("name") or "").strip()
+                path = str(hit.get("path") or "").strip()
+                label = f"{database}.{table}" if database and table else (path or table)
+                if label:
+                    labels.append(label)
+                    note = str(hit.get("note") or "").strip()
+                    if note:
+                        noted_labels.append(f"{label}: {_trim(note, 120)}")
+            if labels:
+                self.add_finding(
+                    f"Schema discovery found: {', '.join(labels[:10])}.",
+                    source=report_id or "discover_schema",
+                )
+            for item in noted_labels[:8]:
+                self.add_finding(f"User-note schema discovery hit: {item}", source=report_id or "discover_schema")
+            return
         if not candidates:
             return
         active_labels: list[str] = []
@@ -310,6 +407,91 @@ class AgentMemory:
             )
         for item in noted_labels:
             self.add_finding(f"User-note schema evidence: {item}", source=report_id or "schema")
+
+    def _learn_column_stats(self, args: dict[str, Any], data: dict[str, Any]) -> None:
+        database = str(data.get("database") or args.get("database") or "").strip()
+        table = str(data.get("table") or args.get("table") or "").strip()
+        label = f"{database}.{table}" if database else table
+        columns = [c for c in data.get("columns") or [] if isinstance(c, dict)]
+        if not label or not columns:
+            return
+        bits: list[str] = []
+        for col in columns[:8]:
+            name = str(col.get("column") or "").strip()
+            stats = col.get("stats") if isinstance(col.get("stats"), dict) else {}
+            if not name or not stats:
+                continue
+            metric_bits: list[str] = []
+            for key in ("null_rate", "distinct_count", "min", "max", "avg", "min_length", "max_length"):
+                if key in stats:
+                    metric_bits.append(f"{key}={_trim(str(stats.get(key)), 60)}")
+            top = stats.get("top_values")
+            if isinstance(top, list) and top:
+                vals = []
+                for item in top[:4]:
+                    if isinstance(item, dict):
+                        vals.append(f"{_trim(str(item.get('value')), 40)}:{item.get('count')}")
+                if vals:
+                    metric_bits.append("top_values=" + ", ".join(vals))
+            if metric_bits:
+                bits.append(f"{name} ({'; '.join(metric_bits[:8])})")
+        if bits:
+            self.add_finding(
+                f"Column stats for {label}: " + " | ".join(bits),
+                source=f"column_stats:{label}",
+            )
+
+    def _learn_profile_table(self, args: dict[str, Any], data: dict[str, Any]) -> None:
+        database = str(data.get("database") or args.get("database") or "").strip()
+        table = str(data.get("table") or args.get("table") or "").strip()
+        label = f"{database}.{table}" if database else table
+        profiles = [p for p in data.get("profiles") or [] if isinstance(p, dict)]
+        if not label or not profiles:
+            return
+        bits: list[str] = []
+        for profile in profiles[:8]:
+            column = str(profile.get("column") or "").strip()
+            if not column:
+                continue
+            metrics: list[str] = []
+            for key in ("row_count", "null_count", "distinct_count", "min_value", "max_value"):
+                if profile.get(key) is not None:
+                    metrics.append(f"{key}={_trim(str(profile.get(key)), 60)}")
+            top = profile.get("top_values")
+            if isinstance(top, list) and top:
+                values = []
+                for item in top[:4]:
+                    if isinstance(item, dict):
+                        values.append(f"{_trim(str(item.get('value')), 40)}:{item.get('count')}")
+                if values:
+                    metrics.append("top_values=" + ", ".join(values))
+            if metrics:
+                bits.append(f"{column} ({'; '.join(metrics[:8])})")
+        if bits:
+            self.add_finding(
+                f"Profile for {label}: " + " | ".join(bits),
+                source=f"profile_table:{label}",
+            )
+
+    def _learn_validated_joins(self, data: dict[str, Any]) -> None:
+        relations = [r for r in data.get("relations") or [] if isinstance(r, dict)]
+        if not relations:
+            return
+        bits: list[str] = []
+        for rel in relations[:6]:
+            left = f"{rel.get('table')}.{rel.get('column')}"
+            right = f"{rel.get('ref_table')}.{rel.get('ref_column')}"
+            confidence = rel.get("confidence")
+            suffix = f" conf={confidence}" if confidence is not None else ""
+            validation = rel.get("validation") if isinstance(rel.get("validation"), dict) else {}
+            match_rate = validation.get("match_rate")
+            if match_rate is not None:
+                suffix += f" match_rate={match_rate}"
+            bits.append(f"{left}->{right}{suffix}")
+        self.add_finding(
+            "Validated join evidence: " + "; ".join(bits),
+            source="validate_joins",
+        )
 
     def _resolve_questions_from_columns(self, label: str, columns: list[str]) -> None:
         table = label.split(".")[-1].lower()
@@ -346,7 +528,10 @@ class AgentMemory:
         if self.work_log:
             lines += ["[Work Done]"]
             for step in self.work_log[-12:]:
-                refs = f" refs={', '.join(step.artifact_refs)}" if step.artifact_refs else ""
+                refs_list = [*step.artifact_refs]
+                if step.raw_ref:
+                    refs_list.append(f"raw={step.raw_ref}")
+                refs = f" refs={', '.join(refs_list)}" if refs_list else ""
                 lines.append(f"- {step.id} {step.action} {step.status}{refs}: {step.result_summary}")
             lines.append("")
         if self.findings:
@@ -364,6 +549,9 @@ class AgentMemory:
                         bits.append(f"note={_trim(str(c.notes['table']), 90)}")
                     if c.exclusion_reason:
                         bits.append(f"excluded={_trim(c.exclusion_reason, 90)}")
+                    col_names = _column_names(c.columns)
+                    if col_names:
+                        bits.append(f"cols={', '.join(_key_columns(col_names)[:10])}")
                     if c.row_count is not None:
                         bits.append(f"rows~{c.row_count}")
                     if c.indexes:
@@ -411,6 +599,13 @@ class AgentMemory:
             lines.append("")
         if self.action_ledger:
             lines += ["[Recent Action Ledger]", *[f"- {x}" for x in self.action_ledger[-10:]], ""]
+        if self.archive:
+            lines += ["[Raw Evidence Archive]"]
+            for item in self.archive[-MAX_ARCHIVE_INDEX:]:
+                refs = f" aliases={', '.join(item.source_refs[:6])}" if item.source_refs else ""
+                lines.append(f"- {item.id} {item.action}{refs}: {item.summary}")
+            lines.append("Use retrieve_memory_item(ref=...) when a compressed summary is insufficient.")
+            lines.append("")
         if self.next_action_hint:
             lines += ["[Last Suggested Next Step]", self.next_action_hint, ""]
         return "\n".join(lines).strip()
@@ -425,39 +620,212 @@ class AgentMemory:
             return mem
         mem.goal = str(data.get("goal") or "")
         mem.intent = str(data.get("intent") or "")
-        mem.constraints = [str(x) for x in data.get("constraints") or []]
-        mem.work_log = [WorkStep(**x) for x in data.get("work_log") or [] if isinstance(x, dict)]
-        mem.findings = [Finding(**x) for x in data.get("findings") or [] if isinstance(x, dict)]
-        mem.open_questions = [str(x) for x in data.get("open_questions") or []]
-        mem.excluded_paths = [ExcludedPath(**x) for x in data.get("excluded_paths") or [] if isinstance(x, dict)]
-        mem.hypotheses = [str(x) for x in data.get("hypotheses") or []]
-        mem.schema_reports = [_schema_report_from_dict(x) for x in data.get("schema_reports") or [] if isinstance(x, dict)]
-        mem.join_reports = [JoinEvidenceReport(**x) for x in data.get("join_reports") or [] if isinstance(x, dict)]
-        mem.sql_artifacts = [SQLArtifact(**x) for x in data.get("sql_artifacts") or [] if isinstance(x, dict)]
-        mem.confirmed_facts = [str(x) for x in data.get("confirmed_facts") or []]
-        mem.pending_confirmations = [str(x) for x in data.get("pending_confirmations") or []]
-        mem.action_ledger = [str(x) for x in data.get("action_ledger") or []]
-        mem.resolved_questions = [str(x) for x in data.get("resolved_questions") or []]
-        mem.do_not_repeat = [str(x) for x in data.get("do_not_repeat") or []]
+        mem.constraints = [str(x) for x in _list_or_empty(data.get("constraints"))]
+        mem.work_log = [_work_step_from_dict(x) for x in _list_or_empty(data.get("work_log")) if isinstance(x, dict)][-MAX_WORK_STEPS:]
+        mem.findings = [_finding_from_dict(x) for x in _list_or_empty(data.get("findings")) if isinstance(x, dict)][-MAX_FINDINGS:]
+        mem.open_questions = [str(x) for x in _list_or_empty(data.get("open_questions"))][-MAX_OPEN_QUESTIONS:]
+        mem.excluded_paths = [
+            _excluded_path_from_dict(x) for x in _list_or_empty(data.get("excluded_paths")) if isinstance(x, dict)
+        ][-MAX_EXCLUDED:]
+        mem.hypotheses = [str(x) for x in _list_or_empty(data.get("hypotheses"))]
+        mem.schema_reports = [
+            _schema_report_from_dict(x) for x in _list_or_empty(data.get("schema_reports")) if isinstance(x, dict)
+        ][-MAX_SCHEMA_REPORTS:]
+        mem.join_reports = [
+            _join_report_from_dict(x) for x in _list_or_empty(data.get("join_reports")) if isinstance(x, dict)
+        ][-MAX_JOIN_REPORTS:]
+        mem.sql_artifacts = [
+            _sql_artifact_from_dict(x) for x in _list_or_empty(data.get("sql_artifacts")) if isinstance(x, dict)
+        ][-MAX_SQL_ARTIFACTS:]
+        mem.confirmed_facts = [str(x) for x in _list_or_empty(data.get("confirmed_facts"))][-12:]
+        mem.pending_confirmations = [str(x) for x in _list_or_empty(data.get("pending_confirmations"))]
+        mem.action_ledger = [str(x) for x in _list_or_empty(data.get("action_ledger"))][-MAX_WORK_STEPS:]
+        mem.resolved_questions = [str(x) for x in _list_or_empty(data.get("resolved_questions"))][-MAX_RESOLVED_QUESTIONS:]
+        mem.do_not_repeat = [str(x) for x in _list_or_empty(data.get("do_not_repeat"))][-MAX_DO_NOT_REPEAT:]
         mem.next_action_hint = str(data.get("next_action_hint") or "")
+        mem.archive = [_archive_item_from_dict(x) for x in _list_or_empty(data.get("archive")) if isinstance(x, dict)]
+        archive_work_refs = [
+            ref
+            for item in mem.archive
+            for ref in item.source_refs
+        ]
+        inferred_work = _next_index_from_ids([x.id for x in mem.work_log] + archive_work_refs, "w")
+        inferred_archive = _next_index_from_ids([x.id for x in mem.archive], "mem:")
+        mem.next_work_index = max(
+            _positive_int(data.get("next_work_index"), default=inferred_work),
+            inferred_work,
+        )
+        mem.next_archive_index = _positive_int(
+            data.get("next_archive_index"),
+            default=inferred_archive,
+        )
+        mem.next_archive_index = max(mem.next_archive_index, inferred_archive)
         return mem
+
+
+def _work_step_from_dict(data: dict[str, Any]) -> WorkStep:
+    return WorkStep(
+        id=str(data.get("id") or ""),
+        action=str(data.get("action") or ""),
+        purpose=str(data.get("purpose") or ""),
+        input_summary=str(data.get("input_summary") or ""),
+        result_summary=str(data.get("result_summary") or ""),
+        judgment=str(data.get("judgment") or ""),
+        artifact_refs=[str(x) for x in _list_or_empty(data.get("artifact_refs"))],
+        raw_ref=str(data.get("raw_ref") or ""),
+        status=str(data.get("status") or "completed"),
+    )
+
+
+def _finding_from_dict(data: dict[str, Any]) -> Finding:
+    return Finding(
+        text=str(data.get("text") or ""),
+        source=str(data.get("source") or ""),
+        confidence=str(data.get("confidence") or "observed"),
+    )
+
+
+def _excluded_path_from_dict(data: dict[str, Any]) -> ExcludedPath:
+    return ExcludedPath(
+        target=str(data.get("target") or ""),
+        reason=str(data.get("reason") or ""),
+        evidence_ref=str(data.get("evidence_ref") or ""),
+        source_priority=str(data.get("source_priority") or "evidence"),
+    )
+
+
+def _schema_candidate_from_dict(data: dict[str, Any]) -> SchemaCandidate:
+    return SchemaCandidate(
+        database=str(data.get("database") or ""),
+        table=str(data.get("table") or ""),
+        columns=[dict(x) for x in _list_or_empty(data.get("columns")) if isinstance(x, dict)],
+        summary=str(data.get("summary") or ""),
+        notes=dict(data.get("notes") or {}) if isinstance(data.get("notes"), dict) else {},
+        status=str(data.get("status") or "active"),
+        exclusion_reason=str(data.get("exclusion_reason") or ""),
+        row_count=_optional_int(data.get("row_count")),
+        indexes=_list_or_empty(data.get("indexes")),
+        foreign_keys=_list_or_empty(data.get("foreign_keys")),
+    )
 
 
 def _schema_report_from_dict(data: dict[str, Any]) -> SchemaEvidenceReport:
     candidates = [
-        SchemaCandidate(**c) for c in data.get("candidates") or []
+        _schema_candidate_from_dict(c) for c in _list_or_empty(data.get("candidates"))
         if isinstance(c, dict)
     ]
     return SchemaEvidenceReport(
         id=str(data.get("id") or ""),
         request=str(data.get("request") or ""),
-        actions_taken=[str(x) for x in data.get("actions_taken") or []],
+        actions_taken=[str(x) for x in _list_or_empty(data.get("actions_taken"))],
         candidates=candidates,
-        joins=list(data.get("joins") or []),
-        conflicts=list(data.get("conflicts") or []),
-        missing=[str(x) for x in data.get("missing") or []],
+        joins=_list_or_empty(data.get("joins")),
+        conflicts=_list_or_empty(data.get("conflicts")),
+        missing=[str(x) for x in _list_or_empty(data.get("missing"))],
         source_summary=str(data.get("source_summary") or ""),
     )
+
+
+def _join_report_from_dict(data: dict[str, Any]) -> JoinEvidenceReport:
+    return JoinEvidenceReport(
+        id=str(data.get("id") or ""),
+        request=str(data.get("request") or ""),
+        tables=[str(x) for x in _list_or_empty(data.get("tables"))],
+        actions_taken=[str(x) for x in _list_or_empty(data.get("actions_taken"))],
+        relations=[dict(x) for x in _list_or_empty(data.get("relations")) if isinstance(x, dict)],
+        source_summary=str(data.get("source_summary") or ""),
+        warnings=[str(x) for x in _list_or_empty(data.get("warnings"))],
+    )
+
+
+def _sql_artifact_from_dict(data: dict[str, Any]) -> SQLArtifact:
+    return SQLArtifact(
+        id=str(data.get("id") or ""),
+        purpose=str(data.get("purpose") or ""),
+        sql=str(data.get("sql") or ""),
+        database=str(data.get("database") or ""),
+        row_count=_int_or_zero(data.get("row_count")),
+        columns=[str(x) for x in _list_or_empty(data.get("columns"))],
+        rows_preview=[dict(x) for x in _list_or_empty(data.get("rows_preview")) if isinstance(x, dict)],
+        result_summary=str(data.get("result_summary") or ""),
+        warnings=[str(x) for x in _list_or_empty(data.get("warnings"))],
+    )
+
+
+def _archive_item_from_dict(data: dict[str, Any]) -> MemoryArchiveItem:
+    payload = data.get("payload") if isinstance(data.get("payload"), dict) else {}
+    return MemoryArchiveItem(
+        id=str(data.get("id") or ""),
+        action=str(data.get("action") or ""),
+        summary=str(data.get("summary") or ""),
+        source_refs=[str(x) for x in _list_or_empty(data.get("source_refs"))],
+        payload=payload,
+    )
+
+
+def _positive_int(value: Any, *, default: int) -> int:
+    try:
+        out = int(value)
+    except Exception:
+        out = int(default)
+    return max(1, out)
+
+
+def _int_or_zero(value: Any) -> int:
+    try:
+        return int(value)
+    except Exception:
+        return 0
+
+
+def _optional_int(value: Any) -> int | None:
+    if value is None:
+        return None
+    try:
+        return int(value)
+    except Exception:
+        return None
+
+
+def _list_or_empty(value: Any) -> list:
+    return list(value) if isinstance(value, list) else []
+
+
+def _next_index_from_ids(ids: list[str], prefix: str) -> int:
+    high = 0
+    for item in ids:
+        text = str(item or "")
+        if not text.startswith(prefix):
+            continue
+        try:
+            high = max(high, int(text[len(prefix):]))
+        except Exception:
+            continue
+    return high + 1
+
+
+def next_prefixed_id(memory: AgentMemory, prefix: str, *, collections: tuple[str, ...] = ()) -> str:
+    """Return a stable next id for compact memory artifacts.
+
+    Prompt-facing collections are trimmed, but raw archive refs are retained. ID
+    generation therefore scans both current compact collections and archived refs
+    so later evidence cannot reuse an older report/artifact id.
+    """
+    ids: list[str] = []
+    for name in collections:
+        for item in getattr(memory, name, []) or []:
+            ids.append(str(getattr(item, "id", "") or ""))
+    for item in getattr(memory, "archive", []) or []:
+        ids.append(str(getattr(item, "id", "") or ""))
+        ids.extend(str(ref or "") for ref in getattr(item, "source_refs", []) or [])
+        payload = getattr(item, "payload", {}) or {}
+        if isinstance(payload, dict):
+            ids.extend(str(ref or "") for ref in payload.get("artifact_refs") or [])
+            data = payload.get("data") if isinstance(payload.get("data"), dict) else {}
+            if isinstance(data, dict):
+                for key in ("report_id", "artifact_id"):
+                    ids.append(str(data.get(key) or ""))
+    return f"{prefix}{_next_index_from_ids(ids, prefix)}"
 
 
 def _trim(text: str, limit: int) -> str:

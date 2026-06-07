@@ -368,7 +368,7 @@ def test_explain_diagnose_path(_connections):
     ref["orch"] = orch
     resp = AskAgentLoop(orch).run("解释这个查询为什么慢", execute=True)
     assert resp.status != "wait_user"
-    assert "EXPLAIN diagnosis" in (resp.answer or "")
+    assert "EXPLAIN 诊断" in (resp.answer or "")
     assert _DiagnoseMock.SQL in (resp.answer or "")
 
 
@@ -399,7 +399,7 @@ def test_multi_intent_runs_each_and_aggregates(_connections):
     assert getattr(resp, "status", "completed") != "wait_user"
     sections = [ln for ln in (resp.answer or "").splitlines() if ln.startswith("## ")]
     assert len(sections) == 2                       # both sub-intents produced a section
-    assert "Schema" in sections[0] and "Data query" in sections[1]
+    assert "结构" in sections[0] and "数据查询" in sections[1]
     assert resp.result is not None                  # the data sub-intent's result is surfaced
     assert "FROM orders" in (resp.sql or "")
 

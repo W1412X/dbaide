@@ -40,12 +40,12 @@ def drain_qt_pool():
     yield
     try:
         from PyQt6.QtCore import QCoreApplication, QThreadPool
+        from PyQt6 import sip
     except Exception:
         return
     app = QCoreApplication.instance()
-    if app is not None:
+    if app is not None and not sip.isdeleted(app):
         QThreadPool.globalInstance().waitForDone(3000)
-        app.processEvents()
 
 
 @pytest.fixture(autouse=True)

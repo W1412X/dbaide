@@ -89,6 +89,7 @@ DESCRIBE_TABLE = ToolSpec(
         "foreign_keys": "list[dict]",
         "row_count": "integer",
         "sample_rows": "list[dict]",
+        "object_notes": "list[dict]",
         "disclosed_tables": "list[string]",
     },
     permission_level=SAFE_METADATA,
@@ -264,7 +265,10 @@ EXPLAIN_SQL = ToolSpec(
 
 EXECUTE_READONLY_SQL = ToolSpec(
     name="execute_readonly_sql",
-    description="Execute a validated read-only SQL query; may be used for final answers or exploratory evidence",
+    description=(
+        "Execute a validated read-only SQL query as exploratory/intermediate evidence. "
+        "The agent loop continues after success; use execute_sql for the final answer query."
+    ),
     input_schema={
         "sql": "string",
         "database": "string",
@@ -282,7 +286,7 @@ EXECUTE_READONLY_SQL = ToolSpec(
 
 EXECUTE_SQL = ToolSpec(
     name="execute_sql",
-    description="Alias for execute_readonly_sql — run validated read-only SQL for final or exploratory evidence",
+    description="Run the final validated read-only SQL answer query. The agent loop may finish after success.",
     input_schema={
         "sql": "string",
         "database": "string",
@@ -335,9 +339,30 @@ ASK_USER = ToolSpec(
         "remaining business choice with concrete options."
     ),
     input_schema={"question": "string", "options": "list[string]"},
-    output_schema={"answer": "string"},
+    output_schema={"pending": "boolean", "question": "string", "options": "list[string]"},
     permission_level=SAFE_METADATA,
     timeout_seconds=300,
+    safe_for_auto_call=True,
+)
+
+RETRIEVE_MEMORY_ITEM = ToolSpec(
+    name="retrieve_memory_item",
+    description=(
+        "Retrieve archived raw evidence from compressed working memory by ref. "
+        "Use when prompt memory has a raw ref (for example mem:3, w2, schema:1, sql:1) "
+        "and the compressed summary is not enough. This avoids repeating database tools "
+        "only to recover details already observed."
+    ),
+    input_schema={"ref": "string"},
+    output_schema={
+        "id": "string",
+        "action": "string",
+        "summary": "string",
+        "source_refs": "list[string]",
+        "payload": "dict",
+    },
+    permission_level=SAFE_METADATA,
+    timeout_seconds=5,
     safe_for_auto_call=True,
 )
 

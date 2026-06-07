@@ -257,6 +257,82 @@ def test_generate_sql_uses_all_disclosed_schemas(tmp_path):
     assert "user_id" in llm.last_user
 
 
+def test_generate_sql_fails_when_explicit_table_selection_is_incomplete(tmp_path):
+    db = tmp_path / "app.db"
+    make_multi_db(db)
+    cfg = ConnectionConfig(name="local", type="sqlite", path=str(db))
+    llm = PromptCaptureLLM()
+    orch = AskOrchestrator(build_adapter(cfg), Session(connection=cfg), llm)
+    registry = build_tool_registry(orch)
+    orch._reset_loop_state("join orders with missing", "main", True)
+
+    registry.invoke("describe_table", {"table": "orders", "database": "main"}, ToolContext())
+    result = registry.invoke(
+        "generate_sql",
+        {"question": "join orders with missing", "tables": ["orders", "missing_table"], "database": "main"},
+        ToolContext(),
+    )
+
+    assert not result.ok
+    assert result.data["missing_tables"] == ["missing_table"]
+    assert "requested table(s) not found" in result.error.message
+    assert llm.last_user == ""
+
+
+def test_generate_sql_rejects_ambiguous_bare_table_selection(tmp_path):
+    db = tmp_path / "app.db"
+    make_multi_db(db)
+    cfg = ConnectionConfig(name="local", type="sqlite", path=str(db))
+    llm = PromptCaptureLLM()
+    orch = AskOrchestrator(build_adapter(cfg), Session(connection=cfg), llm)
+    registry = build_tool_registry(orch)
+    orch._reset_loop_state("orders", "", True)
+    orch.run_state.schemas = {
+        "sales.orders": [ColumnInfo(name="id", data_type="int")],
+        "archive.orders": [ColumnInfo(name="id", data_type="int")],
+    }
+    orch.run_state.schema_db = {"sales.orders": "sales", "archive.orders": "archive"}
+
+    result = registry.invoke(
+        "generate_sql",
+        {"question": "orders", "tables": ["orders"]},
+        ToolContext(),
+    )
+
+    assert not result.ok
+    assert result.data["ambiguous_tables"]["orders"] == ["archive.orders", "sales.orders"]
+    assert "ambiguous requested table" in result.error.message
+    assert llm.last_user == ""
+
+
+def test_generate_sql_mysql_explicit_database_table_overrides_working_db(tmp_path):
+    db = tmp_path / "app.db"
+    make_multi_db(db)
+    cfg = ConnectionConfig(name="local", type="sqlite", path=str(db))
+    llm = PromptCaptureLLM()
+    orch = AskOrchestrator(build_adapter(cfg), Session(connection=cfg), llm)
+    orch.adapter.dialect = "mysql"
+    orch.sql_writer.dialect = "mysql"
+    registry = build_tool_registry(orch)
+    orch._reset_loop_state("orders", "main", True)
+    orch.run_state.table_database = "main"
+    orch.run_state.schemas = {
+        "sales.orders": [ColumnInfo(name="id", data_type="int")],
+    }
+    orch.run_state.schema_db = {"sales.orders": "sales"}
+
+    result = registry.invoke(
+        "generate_sql",
+        {"question": "orders", "tables": ["sales.orders"]},
+        ToolContext(),
+    )
+
+    assert result.ok
+    assert result.data["tables"] == ["orders"]
+    assert orch.run_state.table_database == "sales"
+    assert "main.sales.orders" not in llm.last_user
+
+
 def test_sql_writer_single_table_unchanged():
     llm = PromptCaptureLLM()
     writer = SQLWriter(llm, dialect="sqlite")

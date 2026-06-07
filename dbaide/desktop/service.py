@@ -19,7 +19,7 @@ from dbaide.config import ConfigManager
 from dbaide.connection_identity import connection_fingerprint
 from dbaide.core import ExecutionPolicy, WorkflowRequest
 from dbaide.core.workflow import WorkflowEngine
-from dbaide.agent.schema_context import normalize_db_table
+from dbaide.db.identifiers import normalize_db_table_for_dialect
 from dbaide.history.store import WorkflowHistoryStore
 from dbaide.history.session_store import ChatSessionStore, make_turn
 from dbaide.llm import LLMMessage, NullLLMClient, build_llm_client
@@ -136,7 +136,14 @@ class DesktopService:
 
     def dispatch(self, action: str, payload: dict[str, Any] | None = None) -> Any:
         payload = payload or {}
-        handlers: dict[str, Callable[[dict[str, Any]], Any]] = {
+        handlers = self._handlers()
+        if action not in handlers:
+            raise ValueError(f"Unknown desktop action: {action}")
+        return handlers[action](payload)
+
+    def _handlers(self) -> dict[str, Callable[[dict[str, Any]], Any]]:
+        """Action registry consumed by ``ServiceWorker`` and synchronous UI calls."""
+        return {
             "bootstrap": self.bootstrap,
             "build_assets": self.build_assets,
             "project_instance": self.project_instance,
@@ -183,9 +190,6 @@ class DesktopService:
             "save_resource_defaults": self.save_resource_defaults,
             "recent_queries": self.recent_queries,
         }
-        if action not in handlers:
-            raise ValueError(f"Unknown desktop action: {action}")
-        return handlers[action](payload)
 
     def bootstrap(self, _payload: dict[str, Any] | None = None) -> dict[str, Any]:
         conns = self.cfg.connections()
@@ -1234,7 +1238,7 @@ class DesktopService:
         tables = payload.get("tables")
         table_list = None
         if isinstance(tables, list):
-            normalized = [normalize_db_table(str(t), database) for t in tables if str(t).strip()]
+            normalized = [self._normalize_conn_table(conn, str(t), database) for t in tables if str(t).strip()]
             explicit_dbs = {db for db, _table in normalized if db}
             if len(explicit_dbs) == 1:
                 database = next(iter(explicit_dbs))
@@ -1314,8 +1318,13 @@ class DesktopService:
         return {"deleted": True}
 
     def _join_endpoint(self, payload: dict[str, Any], *, default_database: str = "") -> tuple[str, dict[str, str]]:
-        left_db, table = normalize_db_table(str(payload.get("table") or payload.get("left_table") or ""), default_database)
-        right_db, ref_table = normalize_db_table(str(payload.get("ref_table") or payload.get("right_table") or ""), default_database)
+        conn = self.cfg.get_connection(str(payload.get("connection_name") or payload.get("name") or None))
+        left_db, table = self._normalize_conn_table(
+            conn, str(payload.get("table") or payload.get("left_table") or ""), default_database
+        )
+        right_db, ref_table = self._normalize_conn_table(
+            conn, str(payload.get("ref_table") or payload.get("right_table") or ""), default_database
+        )
         database = left_db or right_db or default_database
         return database, {
             "table": table,
@@ -1323,6 +1332,11 @@ class DesktopService:
             "ref_table": ref_table,
             "ref_column": str(payload.get("ref_column") or payload.get("right_column") or "").strip(),
         }
+
+    @staticmethod
+    def _normalize_conn_table(conn: ConnectionConfig, table: str, database: str = "") -> tuple[str, str]:
+        dialect = "mysql" if str(conn.type or "").lower() in {"mysql", "mariadb"} else str(conn.type or "").lower()
+        return normalize_db_table_for_dialect(table, database, dialect)
 
     # ── Object annotations (user notes on db/table/column) ──────────────────
 

@@ -8,10 +8,7 @@ from __future__ import annotations
 from dbaide.tools.registry import ToolRegistry
 from dbaide.agent.toolkit import (
     schema_tools, catalog_tools, sql_tools, profile_tools, interaction_tools,
-)
-# Re-exported for tests/tools that import this helper from `dbaide.agent.toolkit`.
-from dbaide.agent.toolkit.support import (  # noqa: F401
-    _remember_table_schema,
+    memory_tools,
 )
 
 # Tools exposed to the Ask loop LLM (catalog CRUD stays on GUI/service only).
@@ -21,7 +18,7 @@ LOOP_DECISION_TOOL_NAMES = frozenset({
     "list_joins", "validate_joins",
     "generate_sql", "validate_sql", "execute_sql",
     "execute_readonly_sql", "explain_sql", "profile_table", "column_stats",
-    "ask_user", "annotate_object",
+    "ask_user", "annotate_object", "retrieve_memory_item",
 })
 
 
@@ -37,4 +34,5 @@ def build_tool_registry(orchestrator) -> ToolRegistry:
     sql_tools.register(registry, orchestrator)
     profile_tools.register(registry, orchestrator)
     interaction_tools.register(registry, orchestrator)
+    memory_tools.register(registry, orchestrator)
     return registry

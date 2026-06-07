@@ -22,8 +22,6 @@ def qapp():
 
 def _drain(qapp, ms=4000):
     QThreadPool.globalInstance().waitForDone(ms)
-    for _ in range(10):
-        qapp.processEvents()
 
 
 def _make_window(tmp_path, qapp):

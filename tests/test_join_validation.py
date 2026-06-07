@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import sqlite3
+from types import SimpleNamespace
 
 from dbaide.adapters import build_adapter
 from dbaide.agent.join_validation import (
@@ -16,6 +17,7 @@ from dbaide.llm import LLMClient, LLMMessage
 from dbaide.models import ColumnInfo, ConnectionConfig
 from dbaide.session import Session
 from dbaide.tools.registry import ToolContext
+from dbaide.models import QueryResult
 
 
 class JoinInferMockLLM(LLMClient):
@@ -172,3 +174,36 @@ def test_join_sql_has_no_correlated_subquery(tmp_path):
     # No "(SELECT COUNT(*) FROM <t> ... WHERE ... = ...)" correlated pattern.
     for sql in sqls:
         assert not re.search(r"\(\s*select\s+count\(\*\)\s+from\s+\w+\s+\w+\s+where", sql)
+
+
+def test_join_sample_sql_keeps_each_side_database():
+    recorded: list[tuple[str, str]] = []
+
+    class FakeQuery:
+        def execute_sql(self, sql, *, database="", limit=10):
+            recorded.append((database, sql))
+            if "COUNT(DISTINCT l.v)" in sql:
+                return QueryResult(columns=["sampled", "matched"], rows=[{"sampled": 1, "matched": 1}], row_count=1)
+            return QueryResult(columns=["max_cnt"], rows=[{"max_cnt": 1}], row_count=1)
+
+    orch = SimpleNamespace(
+        adapter=SimpleNamespace(dialect="mysql"),
+        query=FakeQuery(),
+        run_state=SimpleNamespace(table_database="", database=""),
+    )
+    validator = JoinSampleValidator(orch, sample_size=50, dialect="mysql")
+    stats = validator._sample_stats(
+        "orders",
+        "sku",
+        "refunds",
+        "sku",
+        database="",
+        left_database="order_data",
+        right_database="stats_data",
+    )
+
+    assert stats["match_rate"] == 1
+    assert recorded
+    assert all(database == "order_data" for database, _ in recorded)
+    assert all("`order_data`.`orders`" in sql for _, sql in recorded)
+    assert all("`stats_data`.`refunds`" in sql for _, sql in recorded)

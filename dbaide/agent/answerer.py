@@ -1,13 +1,17 @@
 from __future__ import annotations
 
-from dbaide.i18n import get_language
+from dbaide.i18n import get_language, normalize
 from dbaide.models import ColumnProfile, QueryResult, TableInfo
 
 
-def _zh() -> bool:
-    """Whether deterministic summaries should render in Chinese — driven by the UI
-    language so they stay consistent with the LLM's answer language and the rest of
-    the app (not by the characters in the question)."""
+def _zh(language: str | None = None) -> bool:
+    """Whether deterministic summaries should render in Chinese.
+
+    Final answer paths pass the user's question language. UI-owned helper calls can
+    omit it and keep using the interface language.
+    """
+    if language:
+        return normalize(language) == "zh"
     try:
         return get_language() == "zh"
     except Exception:  # noqa: BLE001
@@ -15,8 +19,8 @@ def _zh() -> bool:
 
 
 class AnswerFormatter:
-    def tables(self, tables: list[TableInfo]) -> str:
-        zh = _zh()
+    def tables(self, tables: list[TableInfo], *, language: str | None = None) -> str:
+        zh = _zh(language)
         if not tables:
             return "未发现可见的表。" if zh else "No visible tables found."
         head = f"找到 {len(tables)} 张表：" if zh else f"Found {len(tables)} table(s):"
@@ -27,8 +31,8 @@ class AnswerFormatter:
             lines.append(f"- {table.ref} ({table.table_type}{row_info}){comment}")
         return "\n".join(lines)
 
-    def profiles(self, profiles: list[ColumnProfile]) -> str:
-        zh = _zh()
+    def profiles(self, profiles: list[ColumnProfile], *, language: str | None = None) -> str:
+        zh = _zh(language)
         if not profiles:
             return "未生成列画像。" if zh else "No column profiles generated."
         head = f"列画像（{len(profiles)} 列）：" if zh else f"Column profiles ({len(profiles)} columns):"
@@ -57,9 +61,10 @@ class AnswerFormatter:
         sql: str = "",
         rationale: str = "",
         interpretation: dict | None = None,
+        language: str | None = None,
     ) -> str:
         """Natural-language answer — no separate result table."""
-        zh = _zh()
+        zh = _zh(language)
         parts: list[str] = []
         if rationale:
             parts.append(rationale.strip())

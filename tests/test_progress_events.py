@@ -25,6 +25,20 @@ def test_brief_tool_summary_discover():
     assert "5" in brief_tool_summary("discover_schema", Result())
 
 
+def test_exploratory_sql_progress_is_tool_and_query():
+    class Result:
+        ok = True
+        data = {"row_count": 3}
+
+    assert brief_tool_summary("execute_readonly_sql", Result()) == "3 rows"
+    step = conversation_trace_step(
+        progress_event(stage="execute_readonly_sql", title="execute_readonly_sql done", status="completed", kind="tool")
+    )
+    assert step is not None
+    assert step[1] == "tool"
+    assert "execute_readonly_sql" in step[0]
+
+
 def test_progress_label_includes_detail():
     label = progress_label(
         progress_event(stage="describe_table", title="Calling describe_table", detail="orders")

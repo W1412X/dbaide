@@ -12,9 +12,10 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
-from dbaide.agent.memory import JoinEvidenceReport
+from dbaide.agent.memory import JoinEvidenceReport, next_prefixed_id
 from dbaide.agent.progress_events import child_node, subagent_event
-from dbaide.agent.schema_context import collect_relations, disclosed_schemas_for_tables, normalize_db_table
+from dbaide.agent.schema_context import collect_relations, disclosed_schemas_for_tables
+from dbaide.db.identifiers import normalize_db_table_for_dialect
 
 if TYPE_CHECKING:
     from dbaide.agent.orchestrator import AskOrchestrator
@@ -75,7 +76,11 @@ class JoinEvidenceRetriever:
         sample_size: int = 150,
     ) -> JoinContextReport:
         base = self.orch.run_state.trace_node or self.PARENT
-        report_id = f"join:{len(self.orch.run_state.memory.join_reports) + 1}"
+        report_id = next_prefixed_id(
+            self.orch.run_state.memory,
+            "join:",
+            collections=("join_reports",),
+        )
         targets = self._targets(tables or [], database)
         actions: list[str] = []
         warnings: list[str] = []
@@ -152,8 +157,9 @@ class JoinEvidenceRetriever:
         db_default = database or self.orch.run_state.table_database or self.orch.run_state.database or ""
         targets: list[tuple[str, str]] = []
         seen: set[tuple[str, str]] = set()
+        dialect = str(getattr(self.orch.adapter, "dialect", "") or "").lower()
         for raw in tables:
-            db, table = normalize_db_table(str(raw or ""), db_default)
+            db, table = normalize_db_table_for_dialect(str(raw or ""), db_default, dialect)
             if table:
                 key = (db, table)
                 if key not in seen:
@@ -161,10 +167,8 @@ class JoinEvidenceRetriever:
                     targets.append(key)
         if targets:
             return targets
-        for key in self.orch.run_state.schemas:
-            db = self.orch.run_state.schema_db.get(key, db_default)
-            prefix = f"{db}."
-            table = key[len(prefix):] if db and key.startswith(prefix) else key
+        for db, table in self.orch.run_state.disclosed_table_keys():
+            db = db or db_default
             pair = (db, table)
             if pair not in seen:
                 seen.add(pair)

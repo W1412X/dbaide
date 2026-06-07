@@ -134,6 +134,9 @@ class SemanticJoinInferencer:
             parts.append(f"comment={comment[:200]}")
         if semantic and semantic != comment:
             parts.append(f"semantic={semantic[:200]}")
+        note = str(getattr(column, "note", "") or "").strip()
+        if note:
+            parts.append(f"user_note(AUTHORITATIVE)={note[:200]}")
         return ", ".join(parts)
 
     def _column_asset_doc(self, database: str, table: str, col_name: str) -> dict[str, Any] | None:

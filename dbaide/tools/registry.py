@@ -177,6 +177,8 @@ class ToolRegistry:
             return result
 
         except Exception as exc:
+            if _looks_cancelled(exc):
+                raise
             elapsed = (time.perf_counter() - start) * 1000
             error = DBAideError.from_exception(exc, stage=name, code=ErrorCode.VALIDATION_FAILED)
 
@@ -218,3 +220,9 @@ class ToolRegistry:
             "arguments": arguments,
         }
         return json.dumps(payload, sort_keys=True, default=str)
+
+
+def _looks_cancelled(exc: Exception) -> bool:
+    name = type(exc).__name__.lower()
+    text = str(exc).lower()
+    return "cancel" in name or "cancelled" in text or "canceled" in text

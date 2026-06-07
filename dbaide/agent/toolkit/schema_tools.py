@@ -9,9 +9,10 @@ from dbaide.tools.specs import (
     DISCOVER_SCHEMA, RETRIEVE_SCHEMA_CONTEXT,
     LIST_DATABASES, LIST_TABLES, DESCRIBE_TABLE,
 )
-from dbaide.agent.schema_context import normalize_db_table
+from dbaide.agent.schema_context import apply_column_notes, object_notes_for_tables
 from dbaide.agent.toolkit.support import (
     _err, _note_working_db, _remember_table_schema, _disclosed_table_names,
+    _normalize_tool_table, _string_list,
 )
 from dbaide.models import ColumnInfo
 
@@ -32,7 +33,16 @@ def register(registry: ToolRegistry, orchestrator) -> None:
             if len(hit_dbs) == 1:
                 _note_working_db(orchestrator, next(iter(hit_dbs)))
             hits = [
-                {"kind": h.kind, "path": h.path, "name": h.name, "database": h.database, "summary": h.summary[:240]}
+                {
+                    "kind": h.kind,
+                    "path": h.path,
+                    "name": h.name,
+                    "database": h.database,
+                    "table": h.table,
+                    "summary": h.summary[:240],
+                    "reason": h.reason,
+                    "note": h.note,
+                }
                 for h in discovery.hits
             ]
             return ToolResult(ok=True, data={"hits": hits, "trace": discovery.trace, "count": len(hits)})
@@ -51,7 +61,7 @@ def register(registry: ToolRegistry, orchestrator) -> None:
             report = SchemaEvidenceRetriever(orchestrator).retrieve(
                 request,
                 database=database,
-                focus_terms=[str(x) for x in (args.get("focus_terms") or [])],
+                focus_terms=_string_list(args.get("focus_terms")),
                 scope=args.get("scope") if isinstance(args.get("scope"), dict) else None,
                 need=str(args.get("need") or ""),
                 limit=int(args.get("limit") or 8),
@@ -81,7 +91,7 @@ def register(registry: ToolRegistry, orchestrator) -> None:
         # Tolerate a db-qualified name like "platform.sys_user" (with empty database) —
         # split it so the catalog lookup finds the real table instead of returning
         # empty columns and sending the model into a re-describe loop.
-        database, table = normalize_db_table(table, database)
+        database, table = _normalize_tool_table(orchestrator, table, database)
         tdoc = orchestrator.asset_store.table_doc(
             orchestrator.instance,
             database,
@@ -113,6 +123,7 @@ def register(registry: ToolRegistry, orchestrator) -> None:
                 ),
                 data={"table": table, "database": database, "columns": []},
             )
+        apply_column_notes(orchestrator, [(database, table, columns)])
         _remember_table_schema(orchestrator, table, database, columns)
         payload = [
             {
@@ -122,6 +133,7 @@ def register(registry: ToolRegistry, orchestrator) -> None:
                 "primary_key": c.primary_key,
                 "indexed": c.indexed,
                 "comment": (c.comment or "")[:120],
+                "note": c.note,
             }
             for c in columns
         ]
@@ -131,6 +143,9 @@ def register(registry: ToolRegistry, orchestrator) -> None:
             "columns": payload,
             "disclosed_tables": _disclosed_table_names(orchestrator),
         }
+        object_notes = object_notes_for_tables(orchestrator, [(database, table)])
+        if object_notes:
+            data["object_notes"] = object_notes
         # Full table description includes intrinsic table metadata. This is not an
         # automatic relation workflow: it is the expected payload for a direct
         # describe_table request.

@@ -10,9 +10,8 @@ from typing import Any, Callable
 from dbaide.agent.answer_stream import JsonFieldStreamer
 from dbaide.agent.loop_state import dump_loop_state, restore_loop_state
 from dbaide.agent.progress_events import brief_tool_summary, from_trace_event, progress_event
-from dbaide.agent.schema_context import decision_notes_block
+from dbaide.agent.loop_prompts import DecisionPromptBuilder, tool_prompt_line
 from dbaide.agent.llm_trace import llm_stage
-from dbaide.i18n import answer_language_directive
 from dbaide.agent.runtime import AgentRuntime
 from dbaide.agent.toolkit import build_tool_registry, loop_tool_specs
 from dbaide.core.events import TraceEvent
@@ -64,8 +63,6 @@ def _risk_reply_confirms(reply: str) -> bool:
         "继续", "确认", "执行", "运行", "同意",
     ))
 RESULT_PREVIEW_LIMIT = 1400
-RAW_HISTORY_ITEMS = 5
-RAW_HISTORY_ITEM_LIMIT = 900
 MAX_REPEATED_CALL_BLOCKS = 3
 
 
@@ -86,6 +83,7 @@ class LoopState:
     question: str
     database: str
     execute_allowed: bool
+    answer_language: str = "en"
     calls: list[ToolCallRecord] = field(default_factory=list)
     repeated_blocks: dict[str, int] = field(default_factory=dict)
 
@@ -97,6 +95,7 @@ class AskAgentLoop:
         self.orchestrator = orchestrator
         self.progress = progress or orchestrator.progress
         self.registry = build_tool_registry(orchestrator)
+        self.prompts = DecisionPromptBuilder(orchestrator)
         self.allowed_tool_names = frozenset(s.name for s in loop_tool_specs(self.registry))
         self._trace_parent = ""
         self._loop_node_id = ""
@@ -122,6 +121,7 @@ class AskAgentLoop:
         resume_state: dict[str, Any] | None = None,
         user_reply: str = "",
         trace_parent: str = "",
+        answer_language: str | None = None,
     ) -> AssistantResponse:
         """Run the tool loop — the single execution path (no staged fallback). Recovers
         from a bad model decision by retrying within the loop (budget-bounded); if it
@@ -137,6 +137,7 @@ class AskAgentLoop:
         transcript: list[str] = []
         approved_risk_sql = ""
         approved_risk_args: dict[str, Any] = {}
+        approved_risk_tool = "execute_sql"
         sql_failures = 0
         max_sql_retries = max(0, int(getattr(orch.session, "agent_sql_retries", 0)))
 
@@ -158,8 +159,12 @@ class AskAgentLoop:
                         f"User confirmed the following criteria — {pending_question}\n"
                         f"User's answer: {reply}"
                     )
-                    orch.run_state.clarifications.append(fact)
-                    orch.run_state.memory.confirmed_facts.append(fact)
+                    if fact not in orch.run_state.clarifications:
+                        orch.run_state.clarifications.append(fact)
+                        orch.run_state.clarifications = orch.run_state.clarifications[-12:]
+                    if fact not in orch.run_state.memory.confirmed_facts:
+                        orch.run_state.memory.confirmed_facts.append(fact)
+                        orch.run_state.memory.confirmed_facts = orch.run_state.memory.confirmed_facts[-12:]
                     orch.run_state.memory.resolve_open_question(pending_question)
                     orch.run_state.clarify_questions = ""
                     orch.run_state.pending_question = ""
@@ -171,6 +176,9 @@ class AskAgentLoop:
                         sql_hash = str(risk.get("sql_hash") or "").strip()
                         approved_risk_sql = str(risk.get("sql") or orch.run_state.sql or "").strip()
                         approved_risk_args = dict(risk.get("execute_args") or {})
+                        approved_risk_tool = str(risk.get("tool") or "execute_sql").strip() or "execute_sql"
+                        if approved_risk_tool not in _EXECUTE_TOOLS:
+                            approved_risk_tool = "execute_sql"
                         if approved_risk_sql:
                             approved_risk_args["sql"] = approved_risk_sql
                         if sql_hash and sql_hash not in orch.run_state.confirmed_risk_sqls:
@@ -182,8 +190,9 @@ class AskAgentLoop:
                         transcript.append("Risk confirmation: user approved execution.")
                     else:
                         sql = str(risk.get("sql") or orch.run_state.sql or "").strip()
+                        cancelled = "执行已取消。" if orch.run_state.answer_language == "zh" else "Execution cancelled."
                         orch.run_state.answer = (
-                            "Execution cancelled.\n\n"
+                            f"{cancelled}\n\n"
                             f"SQL:\n```sql\n{sql}\n```"
                         )
                         orch.run_state.risk_confirmation = {}
@@ -203,6 +212,7 @@ class AskAgentLoop:
                 question=str(resume_state.get("question") or question),
                 database=str(resume_state.get("database") or database),
                 execute_allowed=execute,
+                answer_language=orch.run_state.answer_language,
             )
             self.progress(
                 progress_event(
@@ -218,9 +228,14 @@ class AskAgentLoop:
             if orch.run_state.answer and not orch.run_state.query_result:
                 return self._build_response(orch, orch.run_state.answer, disclosures_before or [])
         else:
-            orch._reset_loop_state(question, database, execute)
+            orch._reset_loop_state(question, database, execute, answer_language=answer_language)
             orch.schema.disclose_instance()
-            state = LoopState(question=question, database=database, execute_allowed=execute)
+            state = LoopState(
+                question=question,
+                database=database,
+                execute_allowed=execute,
+                answer_language=orch.run_state.answer_language,
+            )
             self.progress(
                 progress_event(
                     stage="loop",
@@ -254,7 +269,7 @@ class AskAgentLoop:
         if approved_risk_sql:
             self.progress(
                 self._ns_step(progress_event(
-                    stage="execute_sql",
+                    stage=approved_risk_tool,
                     title="Executing confirmed SQL",
                     status="running",
                     kind="tool",
@@ -262,27 +277,43 @@ class AskAgentLoop:
                     step=1,
                 )),
             )
-            result = runtime.call_tool("execute_sql", approved_risk_args or {"sql": approved_risk_sql}, tool_ctx)
+            result = runtime.call_tool(approved_risk_tool, approved_risk_args or {"sql": approved_risk_sql}, tool_ctx)
+            data = result.data if isinstance(result.data, dict) else {}
+            if result.error:
+                data = dict(data)
+                data["error"] = result.error.to_dict()
+            artifacts = [str(data[key]) for key in ("report_id", "artifact_id") if data.get(key)]
+            orch.run_state.memory.record_work(
+                action=approved_risk_tool,
+                args=approved_risk_args or {"sql": approved_risk_sql},
+                ok=result.ok,
+                summary=_summarize_tool_result(approved_risk_tool, result),
+                artifacts=artifacts,
+                data=data if isinstance(data, dict) else None,
+            )
             done_event = self._ns_step(progress_event(
-                stage="execute_sql",
-                title="execute_sql done",
+                stage=approved_risk_tool,
+                title=f"{approved_risk_tool} done",
                 status="completed" if result.ok else "failed",
                 kind="tool",
-                detail=brief_tool_summary("execute_sql", result),
+                detail=brief_tool_summary(approved_risk_tool, result),
                 step=1,
             ))
             if result.ok:
                 done_event["sql"] = approved_risk_sql
-                data = result.data if isinstance(result.data, dict) else {}
                 if data.get("row_count") is not None:
                     done_event["row_count"] = data.get("row_count")
             self.progress(done_event)
-            if result.ok and orch.run_state.query_result:
-                return self._build_response(orch, self._answer_from_state(orch), disclosures_before or [])
-            reason = result.error or brief_tool_summary("execute_sql", result) or "confirmed_execution_failed"
-            return self._build_failed_response(orch, reason, disclosures_before or [])
+            if result.ok:
+                summary = _summarize_tool_result(approved_risk_tool, result)
+                transcript.append(f"Tool `{approved_risk_tool}` → {summary}")
+                if orch.run_state.query_result:
+                    return self._build_response(orch, self._answer_from_state(orch), disclosures_before or [])
+            else:
+                reason = result.error or brief_tool_summary(approved_risk_tool, result) or "confirmed_execution_failed"
+                return self._build_failed_response(orch, reason, disclosures_before or [])
 
-        step_no = 0
+        step_no = 1 if approved_risk_sql else 0
         recorder = getattr(orch, "llm_recorder", None)
         while runtime.steps_remaining > 0:
             decide_start = recorder.snapshot_len() if recorder else 0
@@ -419,6 +450,9 @@ class AskAgentLoop:
             transcript.append(f"Tool `{tool_name}` → {summary}")
             artifacts = []
             data_for_memory = result.data if isinstance(result.data, dict) else {}
+            if result.error:
+                data_for_memory = dict(data_for_memory)
+                data_for_memory["error"] = result.error.to_dict()
             if isinstance(data_for_memory, dict):
                 for key in ("report_id", "artifact_id"):
                     if data_for_memory.get(key):
@@ -528,11 +562,12 @@ class AskAgentLoop:
         answer side-effects, in one place. Returns True to break the loop.
 
         - execute_sql succeeded → the data result is the answer;
+        - execute_readonly_sql succeeded → keep looping; it is exploratory evidence;
         - execute_sql was blocked by policy → present the SQL + the block reason;
         - validate_sql succeeded under a non-executing policy → present the SQL only;
         - profile_table succeeded → its output is the answer.
         """
-        if tool_name in _EXECUTE_TOOLS and result.ok:
+        if tool_name == "execute_sql" and result.ok:
             return True
         if tool_name in _EXECUTE_TOOLS and isinstance(result.data, dict) and result.data.get("blocked"):
             sql = str(result.data.get("sql") or orch.run_state.sql or "")
@@ -543,7 +578,8 @@ class AskAgentLoop:
             policy = orch.execution_policy
             if not state.execute_allowed or policy.value in ("sql_only", "inspect_only"):
                 sql = orch.run_state.sql or ""
-                orch.run_state.answer = f"SQL:\n```sql\n{sql}\n```\n\n_Generated (not executed)._"
+                note = "已生成 SQL（未执行）。" if state.answer_language == "zh" else "Generated (not executed)."
+                orch.run_state.answer = f"SQL:\n```sql\n{sql}\n```\n\n_{note}_"
                 return True
         if tool_name == "profile_table" and result.ok:
             return True
@@ -602,121 +638,17 @@ class AskAgentLoop:
         if text:
             self.progress({"kind": "answer_chunk", "text": text})
 
-    def _decision_system_prompt(self, state: "LoopState", tool_lines: str,
-                                policy: str, execute_note: str) -> str:
-        """The static decision-policy system prompt (how the agent should work)."""
-        return (
-"You are DBAide, a database assistant operating in a tool loop.\n"
-            "You are the only decision-making brain. Tools collect evidence; they do not decide "
-            "which schema, metric, filter, or final answer is correct. Think, act, incorporate the "
-            "result into memory, then choose the next step until the user's single intent is solved.\n\n"
-            "How to work:\n"
-            "• Keep global sight of the original goal and the compressed memory. Avoid repeating "
-            "actions already listed in the action ledger unless new evidence changes the situation.\n"
-            "• Use retrieve_schema_context first for data questions. It returns only schema evidence: "
-            "candidate tables, user notes, deprecated/excluded paths, conflicts and columns. If it shows "
-            "several plausible active tables/columns/grains whose choice changes the answer, ask_user "
-            "with concrete options or inspect more evidence. Do not silently collapse candidates.\n"
-            "• Join/relation evidence is a separate responsibility. After you have narrowed the relevant "
-            "tables and the SQL needs a join, call retrieve_join_context with those table names. By default "
-            "it reads only user-saved joins and declared FKs. Set infer_semantic=true or validate_sample=true "
-            "only when you explicitly need that extra evidence; you still decide whether the relation matches "
-            "the user's intent and grain.\n"
-            "• User notes are authoritative. If a note says a table/column is deprecated, wrong, has a "
-            "timezone, or defines a status value, obey it and preserve that fact in memory.\n"
-            "• SQL is an exploration tool as well as the final query. You may run multiple focused "
-            "read-only SQL statements to inspect counts, samples, consistency, or compare hypotheses, "
-            "then use their artifact ids and summaries in later reasoning.\n"
-            "• Ask the user only for irreducible business intent. Do NOT ask for information tools "
-            "can discover: table/column existence, field source, joins/FKs, indexes, row samples, "
-            "value distributions, SQL feasibility, or timezone/date conversion implied by schema or "
-            "authoritative user notes. First inspect with retrieve_schema_context, describe_table, "
-            "retrieve_join_context, column_stats, or focused read-only SQL. If uncertainty remains "
-            "after evidence is exhausted, ask with exact candidate table/column/value options and cite "
-            "what you already verified. Before every ask_user call, explicitly reason in `thought`: "
-            "what has been checked, why the remaining uncertainty cannot be resolved by tools, and why "
-            "the user's answer is necessary for the business result.\n"
-            "• Do not invent tables, columns, SQL features, status meanings, units, or timezones. The "
-            f"current connection session timezone is configured in the connection; SQL writer also sees it.\n\n"
-            f"Execution policy: {policy} (execute_sql is {execute_note})\n\n"
-            "Available tools:\n"
-            f"{tool_lines}\n\n"
-            "Return JSON only. You may include memory_updates so the next round has compressed context:\n"
-            '  {"action":"call_tool","tool":"retrieve_schema_context","args":{"request":"..."},"thought":"...",'
-            '"memory_updates":{"findings":[],"excluded_paths":[],"open_questions":[]},"next_action_hint":"..."}\n'
-            '  {"action":"finish","answer":"markdown answer for the user","memory_updates":{"findings":[]}}\n\n'
-            "Tool guidance:\n"
-            "- Schema / where-is questions: discover_schema or retrieve_schema_context → finish\n"
-            "- Data queries: retrieve_schema_context, inspect/profile/run exploratory SQL as needed, call retrieve_join_context if joins are needed, ask_user if necessary, then generate_sql → validate_sql"
-            + (" → execute_sql → finish" if state.execute_allowed and policy not in ("sql_only", "inspect_only") else " → finish")
-            + "\n"
-            "- generate_sql uses all currently disclosed schemas unless you pass tables. If retrieve_schema_context returned many candidates, pass only the table names you intentionally chose; otherwise inspect or ask first.\n"
-            "- retrieve_join_context does not run semantic inference or sample validation unless you ask for those flags. Call validate_joins only when the user explicitly asks to re-check already loaded joins.\n"
-            "- Use list_joins only when the user asks to inspect saved joins.\n"
-            "- If schema is ambiguous or multiple valid interpretations exist at any point, inspect more evidence before asking. Ask only when the remaining ambiguity is a business choice the database cannot answer. Ground options in actual candidate table names, column names, or observed values; never ask an open 'which field?' question when the candidates are known.\n"
-            "- Anti-premature-clarification check: when you feel like asking, first ask yourself whether another schema/profile/join/SQL tool call could answer it. If yes, call that tool instead of ask_user.\n"
-            "- ask_user pauses the run until the user replies; the next user message resumes the same workflow.\n"
-            "- If validate_sql reports unknown tables/columns, describe_table then retry generate_sql.\n"
-            "- describe_table returns the table's full structure (columns, types, indexes, FKs) plus a small sample — the table is the lowest pre-built level; there are no per-column docs.\n"
-            "- For a column's value ranges / null rate / distinct / length, call column_stats (pick only the metrics you need); for a whole-table overview omit columns. To learn a column's actual values (e.g. which status/flag value means what), use column_stats with metrics=[\"top_values\"].\n"
-            "- Do NOT repeat the same tool call with the same args. If a tool didn't give you what you need, change approach or ask_user.\n"
-            "- Profile questions: discover_schema → describe_table → column_stats → finish\n"
-            "- SQL explain: validate_sql or explain_sql as needed → finish\n"
-            "- Do not invent tables or columns. Prefer precision over listing everything.\n"
-            "- When you have enough to answer, use action=finish.\n"
-            "- Remember durable facts: when the user states or confirms a "
-            "lasting fact about an object — a column's timezone/encoding, what a status value means, "
-            "that a table is deprecated and which replaces it — call annotate_object to save it so "
-            "future questions benefit. Only save what the user actually stated; never invent a note.\n"
-            f"- {answer_language_directive()}"
-        )
-
-    def _decision_user_prompt(self, state: "LoopState", transcript: list[str]) -> str:
-        """Per-step user prompt: question, scope, authoritative notes, confirmed
-        criteria, pinned schema, and recent tool history."""
-
-        history = _compact_history(transcript) if transcript else "(no recent raw tool calls)"
-        # Surface the user's pinned schema (composer attachments) so the model knows
-        # which tables were explicitly attached and can retrieve schema evidence on them directly
-        # instead of re-discovering the whole database.
-        pins = _pinned_scope_labels(getattr(self.orchestrator, "schema_scope", None))
-        pin_line = (f"User-attached schema (prefer these; retrieve_schema_context on them directly, "
-                    f"no broad discovery needed): {', '.join(pins)}\n\n") if pins else ""
-        notes = decision_notes_block(self.orchestrator, state.database)
-        notes_line = f"{notes}\n\n" if notes else ""
-        # Confirmed business criteria (口径) the user already settled — surface them so the
-        # decision model doesn't re-clarify or finish in a way that ignores them.
-        confirmed = [c for c in self.orchestrator.run_state.clarifications if str(c).strip()]
-        criteria_line = ""
-        if confirmed:
-            criteria_line = (
-                "Confirmed criteria (already settled with the user — honour these, do NOT re-ask):\n"
-                + "\n".join(f"- {c}" for c in confirmed) + "\n\n"
-            )
-        timezone = str(getattr(self.orchestrator.session.connection, "session_timezone", "UTC") or "UTC")
-        user = (
-            f"User question:\n{state.question}\n\n"
-            f"Database scope: {state.database or '(any)'}\n\n"
-            f"Connection session timezone: {timezone}\n\n"
-            f"{notes_line}"
-            f"{criteria_line}"
-            f"{pin_line}"
-            f"Compressed working memory:\n{self.orchestrator.run_state.memory.prompt_block() or '(empty)'}\n\n"
-            f"Recent raw tool results (only for extra detail; prefer memory):\n{history}"
-        )
-        return user
-
     def _apply_decision_memory(self, decision: dict[str, Any]) -> None:
         mem = self.orchestrator.run_state.memory
         updates = decision.get("memory_updates") if isinstance(decision.get("memory_updates"), dict) else {}
-        for item in updates.get("findings") or []:
+        for item in _list_update_items(updates.get("findings")):
             if isinstance(item, dict):
                 mem.add_finding(str(item.get("text") or ""), source=str(item.get("source") or "decision"))
             else:
                 mem.add_finding(str(item), source="decision")
-        for item in updates.get("open_questions") or []:
+        for item in _list_update_items(updates.get("open_questions")):
             mem.add_open_question(str(item.get("text") if isinstance(item, dict) else item))
-        for item in updates.get("excluded_paths") or []:
+        for item in _list_update_items(updates.get("excluded_paths")):
             if isinstance(item, dict):
                 mem.add_exclusion(
                     str(item.get("target") or ""),
@@ -729,12 +661,12 @@ class AskAgentLoop:
 
     def _decide(self, state: LoopState, transcript: list[str]) -> dict[str, Any]:
         tools = loop_tool_specs(self.registry)
-        tool_lines = "\n".join(_tool_prompt_line(s) for s in tools)
+        tool_lines = "\n".join(tool_prompt_line(s) for s in tools)
         policy = self.orchestrator.execution_policy.value
         execute_note = "allowed" if state.execute_allowed else "disabled"
 
-        system = self._decision_system_prompt(state, tool_lines, policy, execute_note)
-        user = self._decision_user_prompt(state, transcript)
+        system = self.prompts.system_prompt(state, tool_lines, policy, execute_note)
+        user = self.prompts.user_prompt(state, transcript)
 
         last_error = ""
         for attempt in range(DECISION_RETRIES):
@@ -800,14 +732,16 @@ class AskAgentLoop:
                 elapsed_ms=orch.run_state.query_result.elapsed_ms,
                 truncated=orch.run_state.query_result.truncated,
                 warnings=[],
+                language=orch.run_state.answer_language,
             )
             return orch.formatter.query_result(
                 orch.run_state.query_result,
                 rationale=draft_rationale,
                 interpretation=interpretation,
+                language=orch.run_state.answer_language,
             )
         if orch.run_state.sql and not orch.run_state.query_result:
-            note = "SQL generated (not executed)."
+            note = "已生成 SQL（未执行）。" if orch.run_state.answer_language == "zh" else "SQL generated (not executed)."
             return f"SQL:\n```sql\n{orch.run_state.sql}\n```\n\n_{note}_"
         return orch.run_state.answer or ""
 
@@ -874,24 +808,6 @@ class AskAgentLoop:
         self.progress(from_trace_event(event))
 
 
-def _pinned_scope_labels(scope: dict | None) -> list[str]:
-    """Human-readable labels for the user's pinned schema scope (composer attachments):
-    'db.table' for tables, 'db.*' for whole databases. Empty when nothing is pinned."""
-    if not isinstance(scope, dict) or not scope:
-        return []
-    labels: list[str] = []
-    for t in scope.get("tables") or []:
-        db = str((t or {}).get("database") or "").strip()
-        tbl = str((t or {}).get("table") or "").strip()
-        if tbl:
-            labels.append(f"{db}.{tbl}" if db else tbl)
-    for db in scope.get("databases") or []:
-        db = str(db or "").strip()
-        if db:
-            labels.append(f"{db}.*")
-    return labels
-
-
 def _summarize_tool_result(tool: str, result: ToolResult) -> str:
     if not result.ok and result.error:
         return f"ERROR: {result.error.message}"
@@ -904,22 +820,19 @@ def _summarize_tool_result(tool: str, result: ToolResult) -> str:
     return text
 
 
-def _compact_history(transcript: list[str]) -> str:
-    items = [_shorten(item, RAW_HISTORY_ITEM_LIMIT) for item in transcript[-RAW_HISTORY_ITEMS:]]
-    return "\n\n".join(items)
-
-
 def _shorten(text: str, limit: int) -> str:
     text = " ".join(str(text or "").split())
     return text if len(text) <= limit else text[:limit] + "…[truncated]"
 
 
-def _tool_prompt_line(spec) -> str:
-    schema = getattr(spec, "input_schema", None) or {}
-    if schema:
-        args = ", ".join(f"{key}: {value}" for key, value in schema.items())
-        return f"- {spec.name}(args: {{{args}}}): {spec.description}"
-    return f"- {spec.name}(args: {{}}): {spec.description}"
+def _list_update_items(value: Any) -> list[Any]:
+    """Only list-valued memory_updates are accepted.
+
+    Model-side shape mistakes should not poison compressed memory by iterating a
+    string/dict as many tiny items. The next decision retry or tool evidence can
+    still provide valid structured updates.
+    """
+    return value if isinstance(value, list) else []
 
 
 def _looks_cancelled(exc: Exception) -> bool:

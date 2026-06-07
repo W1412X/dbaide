@@ -193,14 +193,24 @@ class JoinSampleValidator:
         )
 
         db_map = table_db or {}
+        left_database = db_map.get(left_table) or ""
+        right_database = db_map.get(right_table) or ""
         database = (
-            db_map.get(left_table)
-            or db_map.get(right_table)
+            left_database
+            or right_database
             or self.orchestrator.run_state.table_database
             or self.orchestrator.run_state.database
             or ""
         )
-        stats = self._sample_stats(left_table, left_col, right_table, right_col, database=database)
+        stats = self._sample_stats(
+            left_table,
+            left_col,
+            right_table,
+            right_col,
+            database=database,
+            left_database=left_database,
+            right_database=right_database,
+        )
         join_type = classify_join_type(
             max_right_per_left=int(stats.get("max_right_per_left") or 0),
             max_left_per_right=int(stats.get("max_left_per_right") or 0),
@@ -254,13 +264,15 @@ class JoinSampleValidator:
         right_col: str,
         *,
         database: str,
+        left_database: str = "",
+        right_database: str = "",
     ) -> dict[str, Any]:
-        left_db, left_table = normalize_db_table(left_table, database)
-        right_db, right_table = normalize_db_table(right_table, database)
+        left_db, left_table = normalize_db_table(left_table, left_database or database)
+        right_db, right_table = normalize_db_table(right_table, right_database or database)
         database = left_db or right_db or database
-        lt = quote_identifier(left_table, self.dialect)
+        lt = quote_identifier(_qualified_sample_table(left_db, left_table, self.dialect), self.dialect)
         lc = quote_identifier(left_col, self.dialect)
-        rt = quote_identifier(right_table, self.dialect)
+        rt = quote_identifier(_qualified_sample_table(right_db, right_table, self.dialect), self.dialect)
         rc = quote_identifier(right_col, self.dialect)
         n = self.sample_size
 
@@ -378,3 +390,9 @@ def validate_join_relations(
 
 def _column_type_index(disclosed: list[DisclosedSchema]) -> dict[tuple[str, str], str]:
     return {(table, col.name): col.data_type for _, table, columns in disclosed for col in columns}
+
+
+def _qualified_sample_table(database: str, table: str, dialect: str) -> str:
+    if dialect == "mysql" and database and "." not in table:
+        return f"{database}.{table}"
+    return table

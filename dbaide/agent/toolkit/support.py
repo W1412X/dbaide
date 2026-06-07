@@ -5,12 +5,34 @@ import logging
 from typing import TYPE_CHECKING, Any
 
 from dbaide.core.errors import DBAideError, ErrorCode
+from dbaide.db.identifiers import normalize_db_table_for_dialect
 from dbaide.models import ColumnInfo
 
 if TYPE_CHECKING:
     from dbaide.agent.orchestrator import AskOrchestrator
 
 logger = logging.getLogger("dbaide.agent.toolkit")
+
+
+def _string_list(value: Any) -> list[str]:
+    """Normalize model-provided string/list arguments.
+
+    LLMs sometimes return a single string for an array field. Treat delimited
+    strings as several items and an undelimited string as one item; never iterate
+    a string character-by-character.
+    """
+    if isinstance(value, list):
+        return [str(item).strip() for item in value if str(item).strip()]
+    if isinstance(value, tuple):
+        return [str(item).strip() for item in value if str(item).strip()]
+    if isinstance(value, str):
+        text = value.strip()
+        if not text:
+            return []
+        for sep in ("\n", ";", "；", "，", ","):
+            text = text.replace(sep, ",")
+        return [item.strip() for item in text.split(",") if item.strip()]
+    return []
 
 
 def _relations_payload(relations: list[dict[str, Any]]) -> dict[str, Any]:
@@ -40,26 +62,12 @@ def _targets_from_relations(orchestrator: AskOrchestrator, relations: list[dict[
     for name in sorted(names):
         db = db_default
         for schema_key, schema_db in orchestrator.run_state.schema_db.items():
-            table_part = _schema_table_part(schema_key, schema_db)
+            table_part = orchestrator.run_state.schema_table_part(schema_key, schema_db)
             if table_part == name or schema_key == name:
                 db = schema_db
                 break
         targets.append((db, name))
     return targets
-
-
-def _schema_key(database: str, table: str) -> str:
-    db = database.strip()
-    return f"{db}.{table}" if db else table
-
-
-def _schema_table_part(schema_key: str, database: str = "") -> str:
-    db = str(database or "").strip()
-    key = str(schema_key or "").strip()
-    prefix = f"{db}."
-    if db and key.startswith(prefix):
-        return key[len(prefix):]
-    return key
 
 
 def _note_working_db(orchestrator: AskOrchestrator, database: str) -> None:
@@ -69,39 +77,31 @@ def _note_working_db(orchestrator: AskOrchestrator, database: str) -> None:
     with an empty one."""
     db = (database or "").strip()
     if db:
-        orchestrator.run_state.table_database = db
+        orchestrator.run_state.note_working_database(db)
+
+
+def _normalize_tool_table(orchestrator: AskOrchestrator, table: str, database: str = "") -> tuple[str, str]:
+    """Normalize a model-provided table reference at a tool boundary.
+
+    MySQL/MariaDB use ``database.table`` for cross-database qualification, so an
+    explicit dotted reference must override the current working database. Postgres
+    uses dotted ``schema.table`` inside the connected database, so it keeps the
+    existing generic normalization behavior.
+    """
+    dialect = str(getattr(orchestrator.adapter, "dialect", "") or "").lower()
+    return normalize_db_table_for_dialect(table, database, dialect)
 
 
 def _remember_table_schema(orchestrator: AskOrchestrator, table: str, database: str, columns: list[ColumnInfo]) -> None:
-    key = _schema_key(database, table)
-    orchestrator.run_state.schemas[key] = columns
-    orchestrator.run_state.schema_db[key] = database
-    orchestrator.run_state.table = table
-    _note_working_db(orchestrator, database)
-    orchestrator.run_state.columns = columns
+    orchestrator.run_state.remember_table_schema(table, database, columns)
 
 
 def _disclosed_table_names(orchestrator: AskOrchestrator) -> list[str]:
-    names: list[str] = []
-    for key in orchestrator.run_state.schemas:
-        names.append(_schema_table_part(key, orchestrator.run_state.schema_db.get(key, "")))
-    return names
+    return orchestrator.run_state.disclosed_table_names()
 
 
 def _find_schema_columns(orchestrator: AskOrchestrator, table: str, database: str) -> list[ColumnInfo] | None:
-    key = _schema_key(database, table)
-    if key in orchestrator.run_state.schemas:
-        return orchestrator.run_state.schemas[key]
-    matches: list[list[ColumnInfo]] = []
-    for schema_key, columns in orchestrator.run_state.schemas.items():
-        schema_db = orchestrator.run_state.schema_db.get(schema_key, "")
-        table_part = _schema_table_part(schema_key, schema_db)
-        database_ok = not database or schema_db == database
-        if database_ok and (schema_key == table or table_part == table or table_part.endswith(f".{table}")):
-            matches.append(columns)
-    if len(matches) == 1:
-        return matches[0]
-    return None
+    return orchestrator.run_state.find_schema_columns(table, database)
 
 
 def _collect_disclosed_schemas(
@@ -112,14 +112,10 @@ def _collect_disclosed_schemas(
     tables_arg = args.get("tables")
     selected: list[tuple[str, str, list[ColumnInfo]]] = []
 
-    if isinstance(tables_arg, list) and tables_arg:
-        from dbaide.agent.schema_context import normalize_db_table
-
-        for raw in tables_arg:
-            name = str(raw).strip()
-            if not name:
-                continue
-            db, name = normalize_db_table(name, database_default)
+    table_names = _string_list(tables_arg)
+    if table_names:
+        for name in table_names:
+            db, name = _normalize_tool_table(orchestrator, name, database_default)
             columns = _find_schema_columns(orchestrator, name, db)
             if columns is None:
                 columns = orchestrator.schema.describe_table(name, database=db)
@@ -131,17 +127,15 @@ def _collect_disclosed_schemas(
     if orchestrator.run_state.schemas:
         for key, columns in orchestrator.run_state.schemas.items():
             db = orchestrator.run_state.schema_db.get(key, database_default)
-            table = _schema_table_part(key, db)
+            table = orchestrator.run_state.schema_table_part(key, db)
             selected.append((db, table, columns))
         return selected
 
     table = str(args.get("table") or orchestrator.run_state.table or "").strip()
     if not table:
         return []
-    from dbaide.agent.schema_context import normalize_db_table
-
     db = str(args.get("database") or orchestrator.run_state.table_database or database_default)
-    db, table = normalize_db_table(table, db)
+    db, table = _normalize_tool_table(orchestrator, table, db)
     columns = _find_schema_columns(orchestrator, table, db)
     if columns is None:
         columns = orchestrator.schema.describe_table(table, database=db)
@@ -149,6 +143,30 @@ def _collect_disclosed_schemas(
     if not columns:
         return []
     return [(db, table, columns)]
+
+
+def _requested_table_names(args: dict[str, Any]) -> list[str]:
+    return _string_list(args.get("tables"))
+
+
+def _ambiguous_requested_tables(orchestrator: AskOrchestrator, args: dict[str, Any]) -> dict[str, list[str]]:
+    """Bare table names are ambiguous when the loop has disclosed the same table in
+    multiple databases. Do not silently pick the current working database; ask the
+    model to specify database.table so the selected context is explicit."""
+    if str(args.get("database") or "").strip():
+        return {}
+    out: dict[str, list[str]] = {}
+    for raw in _requested_table_names(args):
+        if "." in raw:
+            continue
+        labels: list[str] = []
+        for schema_key, database in orchestrator.run_state.schema_db.items():
+            table = orchestrator.run_state.schema_table_part(schema_key, database)
+            if table == raw:
+                labels.append(schema_key)
+        if len(set(labels)) > 1:
+            out[raw] = sorted(set(labels))
+    return out
 
 
 def _err(stage: str, message: str, *, retryable: bool = False) -> DBAideError:

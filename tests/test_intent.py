@@ -31,19 +31,21 @@ class _DecompMock(LLMClient):
 
 def test_decomposer_single_intent_fast_path():
     # No model → exactly one intent (the original question).
-    intents = IntentDecomposer(NullLLMClient()).decompose("count orders")
-    assert len(intents) == 1 and intents[0].text == "count orders"
+    intents = IntentDecomposer(NullLLMClient()).decompose("统计订单数量")
+    assert len(intents) == 1 and intents[0].text == "统计订单数量"
+    assert intents[0].language == "zh"
 
 
 def test_decomposer_parses_multiple_typed_intents():
     mock = _DecompMock({"intents": [
-        {"type": "schema_explore", "text": "what columns does orders have"},
-        {"type": "data_query", "text": "count paid orders"},
+        {"type": "schema_explore", "text": "what columns does orders have", "language": "en"},
+        {"type": "data_query", "text": "count paid orders", "language": "en"},
         {"type": "bogus", "text": "and avg amount"},  # unknown type → 'other'
     ]})
     intents = IntentDecomposer(mock).decompose("...")
     assert [i.type for i in intents] == ["schema_explore", "data_query", "other"]
     assert intents[1].label == "Data query"
+    assert [i.language for i in intents] == ["en", "en", "en"]
 
 
 def test_decomposer_caps_and_falls_back_on_garbage():

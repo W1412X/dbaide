@@ -10,10 +10,9 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
-from dbaide.agent.memory import SchemaCandidate, SchemaEvidenceReport
+from dbaide.agent.memory import SchemaCandidate, SchemaEvidenceReport, next_prefixed_id
 from dbaide.agent.progress_events import child_node, subagent_event
 from dbaide.agent.schema_context import normalize_db_table, sanitize_note
-from dbaide.agent.toolkit.support import _remember_table_schema
 from dbaide.models import ColumnInfo
 
 if TYPE_CHECKING:
@@ -76,7 +75,12 @@ class SchemaEvidenceRetriever:
         limit: int = 8,
     ) -> SchemaContextReport:
         base = self.orch.run_state.trace_node or self.PARENT
-        report_id = f"schema:{len(self.orch.run_state.memory.schema_reports) + 1}"
+        report_id = next_prefixed_id(
+            self.orch.run_state.memory,
+            "schema:",
+            collections=("schema_reports",),
+        )
+        scope = _normalize_scope(scope, database)
         actions: list[str] = []
         candidates: list[SchemaCandidate] = []
         missing: list[str] = []
@@ -137,7 +141,7 @@ class SchemaEvidenceRetriever:
             candidates.append(candidate)
             if candidate.status == "active" and candidate.columns:
                 cols = [_column_from_payload(c) for c in candidate.columns]
-                _remember_table_schema(self.orch, table, db, cols)
+                self.orch.run_state.remember_table_schema(table, db, cols)
             if candidate.status != "active":
                 actions.append(f"kept excluded/deprecated evidence for {db}.{table}")
             else:
@@ -286,17 +290,21 @@ class SchemaEvidenceRetriever:
         if store is None:
             return []
         try:
-            records = store.list_records(self.orch.instance, scope="table", database=database or "")
+            records = store.list_records(self.orch.instance, database=database or "")
         except Exception:
             return []
         out: list[tuple[str, str]] = []
         for rec in records:
+            scope = str(rec.get("scope") or "").strip().lower()
+            if scope not in {"table", "column"}:
+                continue
             table = str(rec.get("table") or "").strip()
             if not table:
                 continue
             db = str(rec.get("database") or database or "").strip()
+            column = str(rec.get("column") or "").strip()
             note = sanitize_note(str(rec.get("note") or ""))
-            if _annotation_matches(search_text, db, table, note):
+            if _annotation_matches(search_text, db, table, note, column=column):
                 out.append((db, table))
         return _dedupe_targets(out)
 
@@ -326,6 +334,39 @@ def _targets_from_scope(scope: dict[str, Any] | None, database: str) -> list[tup
     return out
 
 
+def _normalize_scope(scope: dict[str, Any] | None, database: str) -> dict[str, Any] | None:
+    if not isinstance(scope, dict):
+        return None
+    tables: list[dict[str, str]] = []
+    raw_tables = scope.get("tables")
+    if isinstance(raw_tables, list):
+        iterable = raw_tables
+    elif isinstance(raw_tables, str):
+        iterable = [item.strip() for item in raw_tables.replace("；", ",").replace("，", ",").split(",") if item.strip()]
+    else:
+        iterable = []
+    for item in iterable:
+        if isinstance(item, dict):
+            table = str(item.get("table") or item.get("name") or "").strip()
+            db = str(item.get("database") or database or "").strip()
+        else:
+            db, table = normalize_db_table(str(item or "").strip(), database)
+        if table:
+            tables.append({"database": db, "table": table})
+    databases: list[str] = []
+    raw_dbs = scope.get("databases")
+    if isinstance(raw_dbs, list):
+        databases = [str(item).strip() for item in raw_dbs if str(item).strip()]
+    elif isinstance(raw_dbs, str) and raw_dbs.strip():
+        databases = [item.strip() for item in raw_dbs.replace("；", ",").replace("，", ",").split(",") if item.strip()]
+    out: dict[str, Any] = {}
+    if tables:
+        out["tables"] = tables
+    if databases:
+        out["databases"] = databases
+    return out or None
+
+
 def _dedupe_targets(targets: list[tuple[str, str]]) -> list[tuple[str, str]]:
     out: list[tuple[str, str]] = []
     seen: set[tuple[str, str]] = set()
@@ -337,8 +378,8 @@ def _dedupe_targets(targets: list[tuple[str, str]]) -> list[tuple[str, str]]:
     return out
 
 
-def _annotation_matches(search_text: str, database: str, table: str, note: str) -> bool:
-    haystack = f"{database} {table} {note}".lower()
+def _annotation_matches(search_text: str, database: str, table: str, note: str, *, column: str = "") -> bool:
+    haystack = f"{database} {table} {column} {note}".lower()
     query = str(search_text or "").lower()
     if table.lower() in query or f"{database}.{table}".lower() in query:
         return True

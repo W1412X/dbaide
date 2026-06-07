@@ -14,6 +14,7 @@ TOOL_TRACE_STAGES = frozenset({
     "generate_sql",
     "validate_sql",
     "execute_sql",
+    "execute_readonly_sql",
     "validate_joins",
     "list_joins",
     "add_join",
@@ -44,6 +45,7 @@ PHASE_LABELS: dict[str, str] = {
     "validate_sql": "Validating SQL",
     "explain_sql": "Checking query cost",
     "execute_sql": "Running query",
+    "execute_readonly_sql": "Running query",
     "profile_table": "Profiling data",
     "column_stats": "Profiling data",
     "ask_user": "Waiting for you",
@@ -264,7 +266,7 @@ def brief_tool_summary(tool: str, result: Any) -> str:
             issue.get("message", str(issue)) if isinstance(issue, dict) else str(issue)
             for issue in (data.get("issues") or [])[:3]
         ) or "invalid"
-    if tool == "execute_sql":
+    if tool in {"execute_sql", "execute_readonly_sql"}:
         return f"{data.get('row_count', '?')} rows"
     if tool == "ask_user":
         return str(data.get("question") or "waiting for user")[:160]

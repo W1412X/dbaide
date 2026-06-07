@@ -6,7 +6,7 @@ import inspect
 import logging
 from typing import Any
 
-from dbaide.agent.memory import SQLArtifact
+from dbaide.agent.memory import SQLArtifact, next_prefixed_id
 from dbaide.core.result import ExecutionPolicy
 from dbaide.i18n import t
 from dbaide.tools.registry import ToolContext, ToolRegistry, ToolResult
@@ -22,6 +22,7 @@ from dbaide.agent.schema_context import (
 from dbaide.agent.toolkit.support import (
     _collect_disclosed_schemas, _err,
     _note_working_db, _tables_in_sql,
+    _requested_table_names, _ambiguous_requested_tables,
 )
 
 logger = logging.getLogger("dbaide.agent.toolkit")
@@ -34,7 +35,39 @@ def register(registry: ToolRegistry, orchestrator) -> None:
         # retrieve_schema_context is evidence-only; it does not produce a final schema
         # selection. If several candidates were recalled, the LLM should pass `tables`
         # for the ones it intentionally chose, ask_user, or inspect more evidence.
+        requested_tables = _requested_table_names(args)
+        ambiguous_tables = _ambiguous_requested_tables(orchestrator, args)
+        if ambiguous_tables:
+            return ToolResult(
+                ok=False,
+                error=_err(
+                    "generate_sql",
+                    "ambiguous requested table(s); specify database.table or database: "
+                    + ", ".join(f"{name} -> {', '.join(labels)}" for name, labels in ambiguous_tables.items()),
+                    retryable=True,
+                ),
+                data={"ambiguous_tables": ambiguous_tables},
+            )
         disclosed = _collect_disclosed_schemas(orchestrator, args)
+        if requested_tables and len(disclosed) != len(requested_tables):
+            found = {
+                f"{db}.{table}" if db else table
+                for db, table, _columns in disclosed
+            }
+            missing = [
+                name for name in requested_tables
+                if name not in found and name.split(".")[-1] not in {item.split(".")[-1] for item in found}
+            ]
+            if missing:
+                return ToolResult(
+                    ok=False,
+                    error=_err(
+                        "generate_sql",
+                        "requested table(s) not found or not readable: " + ", ".join(missing),
+                        retryable=True,
+                    ),
+                    data={"requested_tables": requested_tables, "found_tables": sorted(found), "missing_tables": missing},
+                )
         if not disclosed:
             return ToolResult(ok=False, error=_err("generate_sql", "table is required (retrieve_schema_context or describe_table first)"))
         # Backfill user column notes regardless of how `disclosed` was built (the
@@ -44,6 +77,7 @@ def register(registry: ToolRegistry, orchestrator) -> None:
             targets = [(db, table) for db, table, _ in disclosed]
             relations = list(orchestrator.run_state.relations or [])
             ctx = merge_sql_context(orchestrator.session.disclosure.summary(), relations)
+            ctx["answer_language"] = orchestrator.run_state.answer_language
             if orchestrator.run_state.clarifications:
                 ctx["criteria"] = list(orchestrator.run_state.clarifications)  # confirmed 口径
             object_notes = object_notes_for_tables(orchestrator, _sql_note_targets(orchestrator, targets))
@@ -79,6 +113,7 @@ def register(registry: ToolRegistry, orchestrator) -> None:
             orchestrator.run_state.sql = draft.sql
             orchestrator.run_state.sql_rationale = draft.rationale
             orchestrator.run_state.sql_confidence = draft.confidence
+            orchestrator.run_state.query_result = None
             orchestrator.progress(
                 subagent_event(
                     agent="sql_writer",
@@ -108,9 +143,12 @@ def register(registry: ToolRegistry, orchestrator) -> None:
         sql = str(args.get("sql") or orchestrator.run_state.sql or "").strip()
         if not sql:
             return ToolResult(ok=False, error=_err("validate_sql", "sql is required"))
+        previous_sql = str(orchestrator.run_state.sql or "").strip()
         report = orchestrator.query.validate_sql_report(sql, add_limit=True)
         if report.ok:
             orchestrator.run_state.sql = report.normalized_sql
+            if _sql_hash(report.normalized_sql) != _sql_hash(previous_sql):
+                orchestrator.run_state.query_result = None
         else:
             orchestrator.run_state.sql_feedback = validation_feedback(report.issues)
         return ToolResult(
@@ -125,7 +163,7 @@ def register(registry: ToolRegistry, orchestrator) -> None:
             },
         )
 
-    def _execute_sql(args: dict[str, Any], ctx: ToolContext) -> ToolResult:
+    def _execute_sql(args: dict[str, Any], ctx: ToolContext, *, exploratory: bool = False) -> ToolResult:
         sql = str(args.get("sql") or orchestrator.run_state.sql or "").strip()
         database = str(args.get("database") or orchestrator.run_state.table_database or orchestrator.run_state.database or "")
         purpose = str(args.get("purpose") or "").strip()
@@ -139,15 +177,31 @@ def register(registry: ToolRegistry, orchestrator) -> None:
         if policy in {ExecutionPolicy.INSPECT_ONLY, ExecutionPolicy.SQL_ONLY}:
             return ToolResult(
                 ok=False,
-                data={"blocked": True, "reason": f"Execution blocked by policy: {policy.value}"},
+                data={
+                    "blocked": True,
+                    "reason": f"Execution blocked by policy: {policy.value}",
+                    "sql": sql,
+                    "database": database,
+                },
             )
         if not orchestrator.run_state.execute_allowed:
-            return ToolResult(ok=False, data={"blocked": True, "reason": "Execution disabled for this request"})
+            return ToolResult(
+                ok=False,
+                data={
+                    "blocked": True,
+                    "reason": "Execution disabled for this request",
+                    "sql": sql,
+                    "database": database,
+                },
+            )
 
         validation = orchestrator.query.validate_sql(sql, add_limit=True, limit=limit)
         if not validation.ok:
             issues = "; ".join(i.message for i in validation.issues)
+            orchestrator.run_state.sql_feedback = validation_feedback([i.message for i in validation.issues])
             return ToolResult(ok=False, error=_err("execute_sql", f"SQL invalid: {issues}"))
+        if not exploratory:
+            orchestrator.run_state.query_result = None
 
         validation_report = orchestrator.query.validate_sql_report(
             validation.normalized_sql,
@@ -227,6 +281,7 @@ def register(registry: ToolRegistry, orchestrator) -> None:
                     "sql": validation.normalized_sql,
                     "sql_hash": sql_hash,
                     "execute_args": execute_args,
+                    "tool": "execute_readonly_sql" if exploratory else "execute_sql",
                     "reason": risk.reason,
                     "risk_action": risk.action,
                     "risk_level": risk.risk_level,
@@ -258,14 +313,15 @@ def register(registry: ToolRegistry, orchestrator) -> None:
             if "confirmed" in inspect.signature(orchestrator.query.execute_sql).parameters:
                 execute_kwargs["confirmed"] = True
             result = orchestrator.query.execute_sql(validation.normalized_sql, **execute_kwargs)
-            orchestrator.run_state.query_result = result
-            orchestrator.run_state.sql = validation.normalized_sql
-            orchestrator.run_state.sql_feedback = ""
-            artifact_id = save_as or f"sql:{len(orchestrator.run_state.memory.sql_artifacts) + 1}"
+            if not exploratory:
+                orchestrator.run_state.query_result = result
+                orchestrator.run_state.sql = validation.normalized_sql
+                orchestrator.run_state.sql_feedback = ""
+            artifact_id = save_as or _next_sql_artifact_id(orchestrator.run_state.memory)
             result_summary = _result_summary(result)
             orchestrator.run_state.memory.add_sql_artifact(SQLArtifact(
                 id=artifact_id,
-                purpose=purpose or "SQL execution",
+                purpose=purpose or ("Exploratory SQL evidence" if exploratory else "SQL execution"),
                 sql=validation.normalized_sql,
                 database=database,
                 row_count=int(result.row_count or 0),
@@ -299,7 +355,8 @@ def register(registry: ToolRegistry, orchestrator) -> None:
                 },
             )
         except Exception as exc:
-            orchestrator.run_state.sql_feedback = str(exc)
+            if not exploratory:
+                orchestrator.run_state.sql_feedback = str(exc)
             return ToolResult(ok=False, error=_err("execute_sql", str(exc), retryable=True))
 
     def _explain_sql(args: dict[str, Any], _ctx: ToolContext) -> ToolResult:
@@ -312,14 +369,17 @@ def register(registry: ToolRegistry, orchestrator) -> None:
         # finishes without restating it (mirrors profile_table's behaviour).
         hints = report.get("issues") or report.get("hints") or []
         if hints:
-            lines = [f"EXPLAIN diagnosis for:\n```sql\n{sql}\n```", ""]
+            if orchestrator.run_state.answer_language == "zh":
+                lines = [f"EXPLAIN 诊断：\n```sql\n{sql}\n```", ""]
+            else:
+                lines = [f"EXPLAIN diagnosis for:\n```sql\n{sql}\n```", ""]
             lines += [f"- {hint}" for hint in hints]
             orchestrator.run_state.answer = "\n".join(lines)
         return ToolResult(ok=bool(report.get("ok")), data=report)
 
     registry.register(GENERATE_SQL, _generate_sql)
     registry.register(VALIDATE_SQL, _validate_sql)
-    registry.register(EXECUTE_READONLY_SQL, _execute_sql)
+    registry.register(EXECUTE_READONLY_SQL, lambda args, ctx: _execute_sql(args, ctx, exploratory=True))
     registry.register(EXECUTE_SQL, _execute_sql)
     registry.register(EXPLAIN_SQL, _explain_sql)
 
@@ -355,6 +415,10 @@ def _sql_note_targets(orchestrator, selected: list[tuple[str, str]]) -> list[tup
 
 def _sql_hash(sql: str) -> str:
     return hashlib.sha1(" ".join(str(sql or "").split()).encode("utf-8")).hexdigest()
+
+
+def _next_sql_artifact_id(memory: Any) -> str:
+    return next_prefixed_id(memory, "sql:", collections=("sql_artifacts",))
 
 
 def _result_summary(result: Any) -> str:

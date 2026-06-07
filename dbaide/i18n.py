@@ -2,8 +2,8 @@
 
 A single string table keyed by a stable id, plus a process-wide "current language".
 ``t("key")`` returns the string for the current language (falling back to English,
-then the key itself). This drives both the desktop UI labels and the default
-language the model answers in.
+then the key itself). This drives desktop UI labels. Agent answers use the
+language detected from the user's current question.
 
 The current language is set once at startup from config (``[ui].language``) and can
 be switched at runtime; callers that hold already-rendered widgets re-read ``t()``
@@ -155,15 +155,15 @@ _STRINGS: dict[str, dict[str, str]] = {
     "trace.type.llm": {"en": "Model", "zh": "模型"},
     "trace.type.decision": {"en": "Think", "zh": "思考"},
     "trace.type.io": {"en": "I/O", "zh": "输入输出"},
-    "trace.field.input": {"en": "Input", "zh": "输入"},
-    "trace.field.output": {"en": "Output", "zh": "输出"},
+    "trace.field.input": {"en": "args", "zh": "输入"},
+    "trace.field.output": {"en": "output", "zh": "输出"},
     "trace.field.result_data": {"en": "Structured output", "zh": "结构化输出"},
     "trace.field.llm_calls": {"en": "LLM calls", "zh": "模型调用"},
     "trace.field.prompt": {"en": "Prompt", "zh": "提示词"},
     "trace.field.response": {"en": "Response", "zh": "响应"},
     "trace.field.decision": {"en": "Decision", "zh": "决策"},
     "trace.field.thought": {"en": "Thought", "zh": "思考"},
-    "trace.field.question": {"en": "Question", "zh": "问题"},
+    "trace.field.question": {"en": "question", "zh": "问题"},
     "trace.field.options": {"en": "Options", "zh": "选项"},
     "trace.field.sql": {"en": "SQL", "zh": "SQL"},
     "trace.field.status": {"en": "Status", "zh": "状态"},
@@ -223,8 +223,8 @@ _STRINGS: dict[str, dict[str, str]] = {
     "settings.set_default": {"en": "Set as default", "zh": "设为默认"},
     "settings.remove": {"en": "Remove", "zh": "删除"},
     "settings.language.hint": {
-        "en": "Interface, prompts and the model's default answer language.",
-        "zh": "界面、提示以及模型默认回答所使用的语言。",
+        "en": "Interface language. Answers follow the user's question language.",
+        "zh": "界面语言。回答会跟随用户提问语言。",
     },
     "settings.restart_required": {
         "en": "This setting will apply after you restart DBAide.",
@@ -521,6 +521,21 @@ def get_language() -> str:
     return _current
 
 
+def detect_user_language(text: str | None) -> str:
+    """Detect the language the user used for this question.
+
+    The app currently supports English and Simplified Chinese. Keep this fallback
+    deterministic and conservative; the LLM intent step may provide a language field,
+    but this local detector covers fast paths, null-model tests and malformed output.
+    """
+    value = str(text or "")
+    cjk = sum(1 for ch in value if "\u4e00" <= ch <= "\u9fff")
+    letters = sum(1 for ch in value if ("a" <= ch.lower() <= "z"))
+    if cjk > 0 and cjk >= max(1, letters // 6):
+        return "zh"
+    return DEFAULT_LANGUAGE
+
+
 def t(key: str, /, **kwargs: object) -> str:
     entry = _STRINGS.get(key)
     if not entry:
@@ -541,14 +556,16 @@ def on_change(callback: Callable[[str], None]) -> Callable[[], None]:
 
 
 def answer_language_directive(lang: str | None = None) -> str:
-    """Instruction appended to the agent's prompts so ALL user-facing prose matches
-    the app's UI language — answers, summaries and clarification questions stay
-    consistent with the rest of the interface, regardless of the question's language.
-    SQL, identifiers and code are kept verbatim."""
+    """Instruction appended to prompts for the target answer language.
+
+    Callers should pass the language detected from the user's current question.
+    Falling back to the UI language is only for legacy call sites and UI-owned prose.
+    SQL, identifiers and code are kept verbatim.
+    """
     code = normalize(lang if lang is not None else _current)
     target = "Simplified Chinese (简体中文)" if code == "zh" else "English"
     return (
-        f"Language: write ALL user-facing prose — explanations, summaries, notes and "
-        f"clarification questions — in {target}. Do NOT switch languages based on the "
-        f"question's language. Keep SQL, table/column identifiers and code verbatim."
+        f"Language: write ALL final user-facing prose for this answer — explanations, "
+        f"summaries, notes and clarification questions — in {target}, because that is "
+        f"the user's question language. Keep SQL, table/column identifiers and code verbatim."
     )

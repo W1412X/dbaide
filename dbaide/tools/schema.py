@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dbaide.adapters.base import DatabaseAdapter
 from dbaide.assets import AssetStore
-from dbaide.agent.schema_context import normalize_db_table
+from dbaide.db.identifiers import normalize_db_table_for_dialect
 from dbaide.connection_identity import connection_fingerprint
 from dbaide.context.disclosure import DisclosureContext
 from dbaide.models import ColumnInfo, ForeignKeyInfo, TableInfo
@@ -56,7 +56,7 @@ class SchemaTools:
         return tables
 
     def describe_table(self, table: str, database: str = "") -> list[ColumnInfo]:
-        database, table = normalize_db_table(table, database)
+        database, table = normalize_db_table_for_dialect(table, database, self.adapter.dialect)
         database = database or self._asset_database_for_table(table) or self._default_asset_database()
         docs = self.assets.column_docs(self.instance, database, table, fingerprint=self.fingerprint) if database else []
         if docs:
@@ -69,11 +69,11 @@ class SchemaTools:
         return columns
 
     def foreign_keys(self, table: str, database: str = "") -> list[ForeignKeyInfo]:
-        database, table = normalize_db_table(table, database)
+        database, table = normalize_db_table_for_dialect(table, database, self.adapter.dialect)
         return self.adapter.foreign_keys(table, database=database)
 
     def inspect_table(self, table: str, database: str = "") -> dict:
-        database, table = normalize_db_table(table, database)
+        database, table = normalize_db_table_for_dialect(table, database, self.adapter.dialect)
         columns = self.describe_table(table, database=database)
         fks = self.foreign_keys(table, database=database)
         return {

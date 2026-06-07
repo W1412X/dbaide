@@ -35,11 +35,17 @@ def test_normalize_aliases():
     assert i18n.normalize("nonsense") == "en"
 
 
-def test_answer_language_directive_follows_language():
-    i18n.set_language("zh")
-    assert "Chinese" in i18n.answer_language_directive()
+def test_answer_language_directive_uses_explicit_question_language():
     i18n.set_language("en")
-    assert "English" in i18n.answer_language_directive()
+    assert "Chinese" in i18n.answer_language_directive("zh")
+    i18n.set_language("zh")
+    assert "English" in i18n.answer_language_directive("en")
+    assert "question language" in i18n.answer_language_directive("en")
+
+
+def test_detect_user_language():
+    assert i18n.detect_user_language("统计订单数量") == "zh"
+    assert i18n.detect_user_language("count orders") == "en"
 
 
 def test_on_change_listener_fires():
@@ -64,13 +70,13 @@ def test_config_ui_language_roundtrip(tmp_path: Path):
     assert again.ui_language() == "zh" and "c1" in again.connections()
 
 
-def test_result_interpreter_uses_default_language():
+def test_result_interpreter_uses_question_language():
     from dbaide.agent.controllers import ResultInterpreter
     i18n.set_language("zh")
     out = ResultInterpreter().interpret(question="show data", sql="SELECT 1", row_count=0,
                                         columns=[], elapsed_ms=1, truncated=False, warnings=[])
-    assert "查询" in out["summary"]  # Chinese even for an English question when default=zh
+    assert "query" in out["summary"].lower()
     i18n.set_language("en")
-    out2 = ResultInterpreter().interpret(question="show data", sql="SELECT 1", row_count=0,
+    out2 = ResultInterpreter().interpret(question="显示数据", sql="SELECT 1", row_count=0,
                                          columns=[], elapsed_ms=1, truncated=False, warnings=[])
-    assert "query" in out2["summary"].lower()
+    assert "查询" in out2["summary"]

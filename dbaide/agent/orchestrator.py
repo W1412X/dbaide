@@ -18,7 +18,7 @@ from dbaide.annotations import AnnotationStore
 from dbaide.assets import AssetStore
 from dbaide.connection_identity import connection_fingerprint
 from dbaide.core.result import ExecutionPolicy
-from dbaide.i18n import t as _i18n_t
+from dbaide.i18n import detect_user_language, normalize, t as _i18n_t
 from dbaide.llm import LLMClient, NullLLMClient
 from dbaide.models import AssistantResponse, TaskType
 from dbaide.session import Session
@@ -114,13 +114,15 @@ class AskOrchestrator:
         self.interpreter = ResultInterpreter()
         self._reset_loop_state("", "", False)
 
-    def _reset_loop_state(self, question: str, database: str, execute: bool) -> None:
+    def _reset_loop_state(self, question: str, database: str, execute: bool,
+                          *, answer_language: str | None = None) -> None:
         """Start a fresh per-run state for one question (see RunState)."""
         self.run_state = RunState(
             question=question,
             database=database,
             execute_allowed=execute,
             table_database=database,
+            answer_language=normalize(answer_language or detect_user_language(question)),
         )
         self.run_state.memory.reset_goal(question, database=database, execute_allowed=execute)
 
@@ -157,7 +159,12 @@ class AskOrchestrator:
             # If the pause happened inside a multi-intent plan, resume the WHOLE plan
             # (the paused intent + any not-yet-run ones) rather than dropping the rest.
             if multi is not None:
-                return self._continue_multi(multi, resp, database=database, execute=execute)
+                resume_database = (
+                    str(resume_state.get("database") or database)
+                    if isinstance(resume_state, dict)
+                    else database
+                )
+                return self._continue_multi(multi, resp, database=resume_database, execute=execute)
             return resp
 
         from dbaide.agent.intent import IntentDecomposer
@@ -184,7 +191,7 @@ class AskOrchestrator:
         )
         ev["result_data"] = {
             "intents": [
-                {"id": it.id, "type": it.type, "text": it.text, "label": it.label}
+                {"id": it.id, "type": it.type, "text": it.text, "language": it.language, "label": it.label}
                 for it in intents
             ],
         }
@@ -193,7 +200,9 @@ class AskOrchestrator:
         self.progress(ev)
         if len(intents) > 1:
             return self._run_multi(question, intents, database=database, execute=execute)
-        return self._run_single(question, database=database, execute=execute)
+        answer_language = intents[0].language if intents else detect_user_language(question)
+        return self._run_single(question, database=database, execute=execute,
+                                answer_language=answer_language)
 
     def _run_single(
         self,
@@ -204,6 +213,7 @@ class AskOrchestrator:
         resume_state: dict[str, Any] | None = None,
         user_reply: str = "",
         trace_parent: str = "",
+        answer_language: str | None = None,
     ) -> AssistantResponse:
         self.run_state.fail_reason = ""  # fresh per run (never carry a stale reason)
         disclosures = list(self.session.disclosure.events)
@@ -224,6 +234,7 @@ class AskOrchestrator:
                 resume_state=resume_state,
                 user_reply=user_reply,
                 trace_parent=trace_parent,
+                answer_language=answer_language,
             )
         except Exception as exc:
             logger.warning("agent_loop_failed: %s", exc, exc_info=True)
@@ -252,7 +263,8 @@ class AskOrchestrator:
                 stage="intent", title=f"{idx}. {intent.label}: {intent.text}",
                 status="running", kind="phase", node_id=node_id,
             ))
-            resp = self._run_single(intent.text, database=database, execute=execute, trace_parent=node_id)
+            resp = self._run_single(intent.text, database=database, execute=execute,
+                                    trace_parent=node_id, answer_language=intent.language)
             self.progress(progress_event(
                 stage="intent", title=f"{idx}. {intent.label}: {intent.text}",
                 status="failed" if (resp.warnings and not resp.answer) else "completed",
@@ -272,7 +284,7 @@ class AskOrchestrator:
 
     @staticmethod
     def _ser_intent(intent) -> dict[str, Any]:
-        return {"id": intent.id, "type": intent.type, "text": intent.text}
+        return {"id": intent.id, "type": intent.type, "text": intent.text, "language": intent.language}
 
     def _attach_multi(self, resume_state, question, done_results, paused_intent, remaining,
                       *, disclosures_before: list[str] | None = None) -> dict[str, Any]:
@@ -298,12 +310,10 @@ class AskOrchestrator:
     def _continue_multi(self, multi: dict[str, Any], paused_resp: AssistantResponse,
                         *, database: str, execute: bool) -> AssistantResponse:
         """After a paused sub-intent resumes, finish it + run the remaining sub-intents."""
-        from dbaide.agent.intent import SubIntent
-
         question = str(multi.get("question") or "")
         done: list[tuple[Any, AssistantResponse]] = [
             (
-                SubIntent(**d["intent"]),
+                _sub_intent_from_dict(d.get("intent") if isinstance(d, dict) else {}),
                 AssistantResponse(
                     answer=d.get("answer") or "",
                     sql=d.get("sql") or "",
@@ -311,23 +321,25 @@ class AskOrchestrator:
                 ),
             )
             for d in (multi.get("done") or [])
+            if isinstance(d, dict)
         ]
-        paused_intent = SubIntent(**multi["paused"])
+        paused_intent = _sub_intent_from_dict(multi.get("paused"))
 
         # The resumed intent paused AGAIN → re-attach the plan and keep waiting.
         if getattr(paused_resp, "status", "completed") == "wait_user":
             paused_resp.resume_state = self._attach_multi(
                 paused_resp.resume_state, question, done, paused_intent,
-                [SubIntent(**r) for r in (multi.get("remaining") or [])],
+                [_sub_intent_from_dict(r) for r in (multi.get("remaining") or []) if isinstance(r, dict)],
                 disclosures_before=list(multi.get("disclosures_before") or []),
             )
             return paused_resp
 
         results = done + [(paused_intent, paused_resp)]
-        remaining = [SubIntent(**r) for r in (multi.get("remaining") or [])]
+        remaining = [_sub_intent_from_dict(r) for r in (multi.get("remaining") or []) if isinstance(r, dict)]
         for i, intent in enumerate(remaining):
             resp = self._run_single(intent.text, database=database, execute=execute,
-                                    trace_parent=f"intent:{intent.id}")
+                                    trace_parent=f"intent:{intent.id}",
+                                    answer_language=intent.language)
             if getattr(resp, "status", "completed") == "wait_user":
                 resp.resume_state = self._attach_multi(
                     resp.resume_state, question, results, intent, remaining[i + 1:],
@@ -352,8 +364,13 @@ class AskOrchestrator:
         warnings: list[str] = []
         disclosures: list[str] = []
         primary: AssistantResponse | None = None
+        answer_language = detect_user_language(question)
+        empty_answer = "（无回答）" if answer_language == "zh" else "(no answer)"
         for idx, (intent, resp) in enumerate(results, start=1):
-            sections.append(f"## {idx}. {intent.label} — {intent.text}\n\n{resp.answer or '(no answer)'}")
+            sections.append(
+                f"## {idx}. {intent.label_for(answer_language)} — {intent.text}\n\n"
+                f"{resp.answer or empty_answer}"
+            )
             warnings.extend(resp.warnings or [])
             disclosures.extend(resp.disclosures or [])
             if primary is None and resp.result is not None:
@@ -442,3 +459,18 @@ def format_inspect(info: dict) -> str:
         for fk in fks:
             lines.append(f"- {fk.table}.{fk.column} -> {fk.ref_table}.{fk.ref_column}")
     return "\n".join(lines)
+
+
+def _sub_intent_from_dict(data: Any):
+    from dbaide.agent.intent import INTENT_TYPES, SubIntent
+
+    data = data if isinstance(data, dict) else {}
+    itype = str(data.get("type") or "other").strip().lower()
+    if itype not in INTENT_TYPES:
+        itype = "other"
+    return SubIntent(
+        id=str(data.get("id") or "i1"),
+        type=itype,
+        text=str(data.get("text") or ""),
+        language=normalize(data.get("language") or "en"),
+    )

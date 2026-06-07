@@ -173,3 +173,19 @@ def test_sql_writer_formats_semantic_joins():
     writer.write("q", "asset_sensors", [ColumnInfo(name="asset_id", data_type="INTEGER")], context=ctx)
     assert "Semantic join hints" in llm.last_user
     assert "conf=90%" in llm.last_user
+
+
+def test_semantic_join_prompt_includes_authoritative_column_notes(tmp_path):
+    llm = JoinInferMockLLM()
+    inf = SemanticJoinInferencer(llm, AssetStore(tmp_path / "assets"), "local")
+
+    inf.infer(
+        "join orders to users",
+        [
+            ("main", "orders", [ColumnInfo(name="user_code", data_type="TEXT", note="business user key")]),
+            ("main", "users", [ColumnInfo(name="code", data_type="TEXT")]),
+        ],
+        declared=[],
+    )
+
+    assert "user_note(AUTHORITATIVE)=business user key" in llm.last_user

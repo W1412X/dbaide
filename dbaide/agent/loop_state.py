@@ -7,6 +7,7 @@ from typing import Any
 
 from dbaide.agent.memory import AgentMemory
 from dbaide.agent.progressive_schema import DiscoveryResult, SchemaHit
+from dbaide.i18n import normalize
 from dbaide.models import ColumnInfo
 
 LOOP_STATE_VERSION = 1
@@ -21,6 +22,7 @@ def column_to_dict(col: ColumnInfo) -> dict[str, Any]:
         "comment": col.comment,
         "primary_key": col.primary_key,
         "indexed": col.indexed,
+        "note": col.note,
     }
 
 
@@ -33,6 +35,7 @@ def column_from_dict(data: dict[str, Any]) -> ColumnInfo:
         comment=str(data.get("comment") or ""),
         primary_key=bool(data.get("primary_key")),
         indexed=bool(data.get("indexed")),
+        note=str(data.get("note") or ""),
     )
 
 
@@ -49,11 +52,24 @@ def discovery_to_dict(discovery: DiscoveryResult | None) -> dict[str, Any] | Non
 def discovery_from_dict(data: dict[str, Any] | None) -> DiscoveryResult | None:
     if not data:
         return None
-    hits = [SchemaHit(**item) for item in data.get("hits") or []]
+    hits = [_schema_hit_from_dict(item) for item in data.get("hits") or [] if isinstance(item, dict)]
     return DiscoveryResult(
         question=str(data.get("question") or ""),
         hits=hits,
-        trace=list(data.get("trace") or []),
+        trace=[str(x) for x in _list_or_empty(data.get("trace"))],
+    )
+
+
+def _schema_hit_from_dict(data: dict[str, Any]) -> SchemaHit:
+    return SchemaHit(
+        kind=str(data.get("kind") or ""),
+        path=str(data.get("path") or ""),
+        name=str(data.get("name") or ""),
+        database=str(data.get("database") or ""),
+        table=str(data.get("table") or ""),
+        summary=str(data.get("summary") or ""),
+        reason=str(data.get("reason") or ""),
+        note=str(data.get("note") or ""),
     )
 
 
@@ -74,6 +90,7 @@ def dump_loop_state(
         "question": orchestrator.run_state.question,
         "database": orchestrator.run_state.database,
         "execute_allowed": execute_allowed,
+        "answer_language": orchestrator.run_state.answer_language,
         "transcript": list(transcript),
         "orchestrator": {
             "_loop_discovery": discovery_to_dict(orchestrator.run_state.discovery),
@@ -96,42 +113,73 @@ def dump_loop_state(
             "_loop_clarifications": list(orchestrator.run_state.clarifications),
             "_loop_clarify_questions": orchestrator.run_state.clarify_questions,
             "_loop_memory": orchestrator.run_state.memory.to_dict(),
+            "_loop_scope_used": bool(orchestrator.run_state.scope_used),
         },
     }
 
 
 def restore_loop_state(orchestrator: Any, snapshot: dict[str, Any]) -> tuple[list[str], bool]:
     """Restore orchestrator loop fields. Returns (transcript, execute_allowed)."""
+    snapshot = snapshot if isinstance(snapshot, dict) else {}
     orchestrator.run_state.question = str(snapshot.get("question") or "")
     orchestrator.run_state.database = str(snapshot.get("database") or "")
+    orchestrator.run_state.answer_language = normalize(snapshot.get("answer_language") or "en")
     execute_allowed = bool(snapshot.get("execute_allowed", True))
-    transcript = list(snapshot.get("transcript") or [])
-    payload = snapshot.get("orchestrator") or {}
+    transcript = [str(x) for x in _list_or_empty(snapshot.get("transcript"))]
+    payload = snapshot.get("orchestrator") if isinstance(snapshot.get("orchestrator"), dict) else {}
 
     orchestrator.run_state.discovery = discovery_from_dict(payload.get("_loop_discovery"))
     orchestrator.run_state.table = str(payload.get("_loop_table") or "")
     orchestrator.run_state.table_database = str(payload.get("_loop_table_database") or "")
-    orchestrator.run_state.columns = [column_from_dict(item) for item in payload.get("_loop_columns") or []]
+    orchestrator.run_state.columns = [
+        column_from_dict(item) for item in _list_or_empty(payload.get("_loop_columns")) if isinstance(item, dict)
+    ]
+    schemas_payload = payload.get("_loop_schemas") if isinstance(payload.get("_loop_schemas"), dict) else {}
     orchestrator.run_state.schemas = {
-        key: [column_from_dict(item) for item in cols]
-        for key, cols in (payload.get("_loop_schemas") or {}).items()
+        str(key): [column_from_dict(item) for item in cols if isinstance(item, dict)]
+        for key, cols in schemas_payload.items()
+        if isinstance(cols, list)
     }
-    orchestrator.run_state.schema_db = dict(payload.get("_loop_schema_db") or {})
-    orchestrator.run_state.relations = list(payload.get("_loop_relations") or [])
+    orchestrator.run_state.schema_db = _dict_or_empty(payload.get("_loop_schema_db"))
+    orchestrator.run_state.relations = _list_or_empty(payload.get("_loop_relations"))
     orchestrator.run_state.sql = str(payload.get("_loop_sql") or "")
     orchestrator.run_state.sql_rationale = str(payload.get("_loop_sql_rationale") or "")
     _conf = payload.get("_loop_sql_confidence")
-    orchestrator.run_state.sql_confidence = None if _conf is None else float(_conf)
+    orchestrator.run_state.sql_confidence = _float_or_none(_conf)
     orchestrator.run_state.sql_feedback = str(payload.get("_loop_sql_feedback") or "")
     orchestrator.run_state.answer = str(payload.get("_loop_answer") or "")
     orchestrator.run_state.pending_question = str(payload.get("_loop_pending_question") or "")
-    orchestrator.run_state.pending_options = list(payload.get("_loop_pending_options") or [])
-    orchestrator.run_state.pending_questions = list(payload.get("_loop_pending_questions") or [])
-    orchestrator.run_state.risk_confirmation = dict(payload.get("_loop_risk_confirmation") or {})
-    orchestrator.run_state.confirmed_risk_sqls = list(payload.get("_loop_confirmed_risk_sqls") or [])
-    orchestrator.run_state.clarifications = list(payload.get("_loop_clarifications") or [])
+    orchestrator.run_state.pending_options = _list_or_empty(payload.get("_loop_pending_options"))
+    orchestrator.run_state.pending_questions = _list_or_empty(payload.get("_loop_pending_questions"))
+    orchestrator.run_state.risk_confirmation = _dict_or_empty(payload.get("_loop_risk_confirmation"))
+    orchestrator.run_state.confirmed_risk_sqls = [str(x) for x in _list_or_empty(payload.get("_loop_confirmed_risk_sqls"))]
+    orchestrator.run_state.clarifications = [str(x) for x in _list_or_empty(payload.get("_loop_clarifications"))]
     orchestrator.run_state.clarify_questions = str(payload.get("_loop_clarify_questions") or "")
     orchestrator.run_state.memory = AgentMemory.from_dict(payload.get("_loop_memory"))
+    orchestrator.run_state.scope_used = bool(payload.get("_loop_scope_used", False))
     orchestrator.run_state.execute_allowed = execute_allowed
+    if not orchestrator.run_state.memory.goal and orchestrator.run_state.question:
+        orchestrator.run_state.memory.reset_goal(
+            orchestrator.run_state.question,
+            database=orchestrator.run_state.database,
+            execute_allowed=execute_allowed,
+        )
     orchestrator.run_state.query_result = None
     return transcript, execute_allowed
+
+
+def _float_or_none(value: Any) -> float | None:
+    if value is None:
+        return None
+    try:
+        return float(value)
+    except Exception:
+        return None
+
+
+def _list_or_empty(value: Any) -> list:
+    return list(value) if isinstance(value, list) else []
+
+
+def _dict_or_empty(value: Any) -> dict:
+    return dict(value) if isinstance(value, dict) else {}

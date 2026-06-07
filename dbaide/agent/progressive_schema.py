@@ -130,6 +130,7 @@ class ProgressiveSchemaAgent:
         tables. Returns empty hits if the scope matches no assets (caller broadens)."""
         target_dbs = {str(d) for d in scope_dbs if str(d).strip()}
         norm_tables: list[tuple[str, str]] = []
+        seen_tables: set[tuple[str, str]] = set()
         for t in scope_tables:
             tbl = str(t.get("table") or t.get("name") or "").strip()
             if not tbl:
@@ -139,7 +140,10 @@ class ProgressiveSchemaAgent:
             db = db or self._find_table_database(tbl)
             if db:
                 target_dbs.add(db)
-            norm_tables.append((db, tbl))
+            key = (db, tbl)
+            if key not in seen_tables:
+                seen_tables.add(key)
+                norm_tables.append(key)
 
         self._emit_progress(
             progress, parent, "", "Using user-provided schema scope",
@@ -153,14 +157,20 @@ class ProgressiveSchemaAgent:
         )
         # Ensure every explicitly provided table is present and prioritised, with its
         # columns seeded (the user picked it, so don't let screening drop it).
-        have = {(h.database, h.table) for h in result.hits if h.kind == "table"}
+        pinned_hits: list[SchemaHit] = []
         for db, tbl in norm_tables:
-            if not db or (db, tbl) in have:
+            if not db:
                 continue
-            result.hits.insert(0, SchemaHit(
+            existing = next((h for h in result.hits if h.kind == "table" and h.database == db and h.table == tbl), None)
+            if existing is not None:
+                existing.reason = existing.reason or "user-provided"
+                pinned_hits.append(existing)
+                continue
+            pinned = SchemaHit(
                 kind="table", path=f"{self.instance}.{db}.{tbl}", name=tbl,
                 database=db, table=tbl, reason="user-provided",
-            ))
+            )
+            pinned_hits.append(pinned)
             for cdoc in self.store.column_docs(self.instance, db, tbl, fingerprint=self._asset_fingerprint())[:48]:
                 cn = str(cdoc.get("name") or cdoc.get("column") or "")
                 if cn:
@@ -169,6 +179,13 @@ class ProgressiveSchemaAgent:
                         database=db, table=tbl,
                         summary=str(cdoc.get("semantic_summary") or cdoc.get("source_comment") or ""),
                     ))
+        if pinned_hits:
+            pinned_keys = {(h.database, h.table) for h in pinned_hits}
+            rest = [
+                h for h in result.hits
+                if not (h.kind == "table" and (h.database, h.table) in pinned_keys)
+            ]
+            result.hits = pinned_hits + rest
         return result
 
     def _discover_from_assets(

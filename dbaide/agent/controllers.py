@@ -140,9 +140,10 @@ class ResultInterpreter:
         elapsed_ms: float,
         truncated: bool,
         warnings: list[str],
+        language: str | None = None,
     ) -> dict[str, Any]:
         """Interpret query result."""
-        zh = _prefers_chinese(question)
+        zh = _prefers_chinese(question, language)
         parts = []
 
         if row_count == 0:
@@ -209,12 +210,6 @@ class ResultInterpreter:
         }
 
 
-def _prefers_chinese(text: str) -> bool:
-    # The UI language is authoritative, so result interpretations stay consistent
-    # with the rest of the app (and with the LLM's answer language) rather than
-    # flipping based on the characters in the question.
-    try:
-        from dbaide.i18n import get_language
-        return get_language() == "zh"
-    except Exception:
-        return False
+def _prefers_chinese(text: str, language: str | None = None) -> bool:
+    from dbaide.i18n import detect_user_language, normalize
+    return normalize(language) == "zh" if language else detect_user_language(text) == "zh"

@@ -6,6 +6,7 @@ from typing import TYPE_CHECKING, Any
 
 import logging
 
+from dbaide.db.identifiers import normalize_db_table, normalize_db_table_for_dialect
 from dbaide.llm import NullLLMClient
 from dbaide.models import ColumnInfo
 
@@ -16,31 +17,6 @@ if TYPE_CHECKING:
 logger = logging.getLogger("dbaide.schema_context")
 
 MAX_DISCLOSED_TABLES = 4
-
-
-def normalize_db_table(table: str, database: str = "") -> tuple[str, str]:
-    """Split a db-qualified table name into (database, table).
-
-    The model may hand back a display name like
-    ``platform.sys_user`` in the *table* field — describing a table literally named
-    "platform.sys_user" then finds nothing. If no database is already known, a
-    two-part table value is treated as ``database.table``. If a database is already
-    known, a different prefix is kept as part of the table name so Postgres
-    ``schema.table`` refs survive. Quotes/backticks are stripped. Returns
-    (database, table)."""
-    def _clean(s: str) -> str:
-        return str(s or "").strip().strip('`"[]').strip()
-
-    table = _clean(table)
-    database = _clean(database)
-    if "." in table:
-        prefix, rest = table.split(".", 1)
-        prefix, rest = _clean(prefix), _clean(rest)
-        if prefix and rest:
-            if not database or prefix == database:
-                return prefix, rest
-            return database, f"{prefix}.{rest}"
-    return database, table
 
 
 def table_targets_from_hits(
@@ -211,14 +187,7 @@ def _disclosed_schemas_for_tables(
 ) -> list[tuple[str, str, list[ColumnInfo]]]:
     schemas: list[tuple[str, str, list[ColumnInfo]]] = []
     for database, table in tables:
-        schema_key = f"{database}.{table}" if database else table
-        columns = orchestrator.run_state.schemas.get(schema_key)
-        if columns is None:
-            for key, cols in orchestrator.run_state.schemas.items():
-                if key == table or key.endswith(f".{table}"):
-                    columns = cols
-                    database = orchestrator.run_state.schema_db.get(key, database)
-                    break
+        columns = orchestrator.run_state.find_schema_columns(table, database)
         if columns is None:
             columns = orchestrator.schema.describe_table(table, database=database)
         schemas.append((database, table, columns))
@@ -396,13 +365,7 @@ def _norm_scope(record: dict[str, Any]) -> str:
 
 def disclosed_table_keys(orchestrator: AskOrchestrator) -> list[tuple[str, str]]:
     """(database, table) pairs already described in the tool loop."""
-    keys: list[tuple[str, str]] = []
-    for schema_key in orchestrator.run_state.schemas:
-        db = str(orchestrator.run_state.schema_db.get(schema_key) or orchestrator.run_state.table_database or orchestrator.run_state.database or "")
-        prefix = f"{db}."
-        table = schema_key[len(prefix):] if db and schema_key.startswith(prefix) else schema_key
-        keys.append((db, table))
-    return keys
+    return orchestrator.run_state.disclosed_table_keys()
 
 
 def merge_sql_context(base: dict[str, Any], relations: list[dict[str, Any]]) -> dict[str, Any]:

@@ -59,7 +59,7 @@ class SQLWriter:
     ) -> SQLDraft:
         """LLM-based SQL generation with robust output parsing."""
         user_prompt = self._user_prompt(question, table, columns, context)
-        return self._complete_sql(user_prompt, feedback)
+        return self._complete_sql(user_prompt, feedback, language=str(context.get("answer_language") or ""))
 
     def _llm_write_disclosed(
         self,
@@ -72,14 +72,20 @@ class SQLWriter:
             db, table, columns = disclosed_schemas[0]
             return self._llm_write(question, table, columns, context, feedback)
         user_prompt = self._user_prompt_multi(question, disclosed_schemas, context)
-        return self._complete_sql(user_prompt, feedback, multi_table=True)
+        return self._complete_sql(
+            user_prompt,
+            feedback,
+            multi_table=True,
+            language=str(context.get("answer_language") or ""),
+        )
 
-    def _complete_sql(self, user_prompt: str, feedback: str, *, multi_table: bool = False) -> SQLDraft:
+    def _complete_sql(self, user_prompt: str, feedback: str, *, multi_table: bool = False,
+                      language: str = "") -> SQLDraft:
         if feedback.strip():
             user_prompt += f"\n\nPrevious SQL failed validation or execution. Fix it:\n{feedback.strip()}"
         payload = self.llm.complete_json(
             [
-                LLMMessage("system", self._system_prompt(multi_table=multi_table)),
+                LLMMessage("system", self._system_prompt(multi_table=multi_table, language=language)),
                 LLMMessage("user", user_prompt),
             ],
             schema_hint='Return JSON only: {"sql": "...", "rationale": "...", "confidence": 0.0}.',
@@ -118,7 +124,7 @@ class SQLWriter:
                 return default
             raise
 
-    def _system_prompt(self, *, multi_table: bool = False) -> str:
+    def _system_prompt(self, *, multi_table: bool = False, language: str = "") -> str:
         base = (
             "You generate safe read-only SQL for a CLI database assistant. "
             "Use only disclosed tables and columns. Return one SELECT/WITH statement. "
@@ -131,7 +137,7 @@ class SQLWriter:
             "User notes are AUTHORITATIVE: they override DB comments and any inference — "
             "if a note says an object is deprecated/wrong, do NOT use it. "
             + self._dialect_rules()
-            + answer_language_directive()
+            + answer_language_directive(language or None)
         )
         if multi_table:
             base += (

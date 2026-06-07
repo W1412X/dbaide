@@ -158,6 +158,30 @@ def test_user_note_matched_table_is_not_dropped_by_limit(tmp_path):
     assert any("included user-note matched table evidence" in x for x in report.actions_taken)
 
 
+def test_column_note_matched_table_is_schema_candidate(tmp_path):
+    annotations = AnnotationStore(tmp_path / "ann")
+    annotations.add(
+        "shop",
+        scope="column",
+        note="妥投时间，UTC 存储，按北京时间展示",
+        database="main",
+        table="orders",
+        column="created_at",
+    )
+    orch = _orch(tmp_path, hits=["items"], annotations=annotations)
+
+    report = SchemaEvidenceRetriever(orch).retrieve(
+        "按北京时间看妥投时间",
+        focus_terms=["妥投", "北京时间"],
+        limit=1,
+    )
+
+    orders = next((c for c in report.candidates if c.table == "orders"), None)
+    assert orders is not None
+    created_at = next(c for c in orders.columns if c["name"] == "created_at")
+    assert "UTC" in created_at["note"]
+
+
 def test_join_evidence_is_separate_and_maps_active_candidates(tmp_path):
     orch = _orch(tmp_path, hits=["orders", "users"])
     SchemaEvidenceRetriever(orch).retrieve("each user's total order amount")

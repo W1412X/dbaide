@@ -119,6 +119,5 @@ def test_empty_db_does_not_clobber_working_db(tmp_path):
     orch._reset_loop_state("q", database="", execute=True)
     ctx = ToolContext()
     reg.invoke("list_tables", {"database": "platform"}, ctx)
-    from dbaide.agent.toolkit import _remember_table_schema
-    _remember_table_schema(orch, "other", "", [ColumnInfo(name="id", data_type="int")])
+    orch.run_state.remember_table_schema("other", "", [ColumnInfo(name="id", data_type="int")])
     assert orch.run_state.table_database == "platform"

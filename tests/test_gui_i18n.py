@@ -1,4 +1,4 @@
-"""Offscreen test: GUI language switch updates labels, persists, drives model language."""
+"""Offscreen test: GUI language switch updates labels and persists."""
 
 from __future__ import annotations
 

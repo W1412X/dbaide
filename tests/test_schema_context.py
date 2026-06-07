@@ -6,6 +6,7 @@ from dbaide.agent.progressive_schema import DiscoveryResult, SchemaHit
 from dbaide.agent.schema_context import (
     collect_relations,
     merge_sql_context,
+    normalize_db_table_for_dialect,
     table_targets_from_discovery,
     table_targets_from_hits,
     validation_feedback,
@@ -72,6 +73,11 @@ def test_table_targets_from_discovery():
         ],
     )
     assert table_targets_from_discovery(discovery, "app") == [("app", "orders"), ("app", "users")]
+
+
+def test_normalize_db_table_for_dialect_respects_mysql_database_prefix():
+    assert normalize_db_table_for_dialect("sales.orders", "main", "mysql") == ("sales", "orders")
+    assert normalize_db_table_for_dialect("sales.orders", "main", "postgres") == ("main", "sales.orders")
 
 
 def test_collect_relations_from_live_catalog(tmp_path):
