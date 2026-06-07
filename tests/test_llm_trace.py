@@ -28,7 +28,7 @@ def test_render_includes_llm_calls():
                        "response": '{"sql": "SELECT 1"}'}],
     }]
     txt = render_events_text(events)
-    assert "llm calls: 1" in txt
+    assert "LLM calls: 1" in txt
     assert "generate safe read-only SQL" in txt
     assert "Table: orders" in txt
     assert "SELECT 1" in txt

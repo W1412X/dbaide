@@ -7,6 +7,7 @@ import re
 from typing import TYPE_CHECKING, Any, Callable
 
 from dbaide.adapters.base import quote_identifier
+from dbaide.agent.schema_context import normalize_db_table
 from dbaide.models import ColumnInfo
 
 if TYPE_CHECKING:
@@ -192,7 +193,13 @@ class JoinSampleValidator:
         )
 
         db_map = table_db or {}
-        database = db_map.get(left_table) or db_map.get(right_table) or self.orchestrator.run_state.database or ""
+        database = (
+            db_map.get(left_table)
+            or db_map.get(right_table)
+            or self.orchestrator.run_state.table_database
+            or self.orchestrator.run_state.database
+            or ""
+        )
         stats = self._sample_stats(left_table, left_col, right_table, right_col, database=database)
         join_type = classify_join_type(
             max_right_per_left=int(stats.get("max_right_per_left") or 0),
@@ -248,6 +255,9 @@ class JoinSampleValidator:
         *,
         database: str,
     ) -> dict[str, Any]:
+        left_db, left_table = normalize_db_table(left_table, database)
+        right_db, right_table = normalize_db_table(right_table, database)
+        database = left_db or right_db or database
         lt = quote_identifier(left_table, self.dialect)
         lc = quote_identifier(left_col, self.dialect)
         rt = quote_identifier(right_table, self.dialect)

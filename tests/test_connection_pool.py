@@ -34,6 +34,21 @@ def test_connection_pool_reuses_idle_connections():
     assert len(created) == 1
 
 
+def test_connection_pool_separates_session_timezones():
+    reset_registry()
+    created = []
+
+    def factory():
+        conn = FakeConnection(len(created))
+        created.append(conn)
+        return conn
+
+    utc_pool = for_key(PoolKey("shop", "mysql", "main", "+00:00"), max_size=2, factory=factory)
+    shanghai_pool = for_key(PoolKey("shop", "mysql", "main", "+08:00"), max_size=2, factory=factory)
+
+    assert utc_pool is not shanghai_pool
+
+
 def test_connection_pool_caps_concurrent_physical_connections():
     reset_registry()
     created = []

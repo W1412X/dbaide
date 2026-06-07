@@ -123,8 +123,10 @@ class ToolRegistry:
         spec = self._specs[name]
         handler = self._handlers[name]
 
-        # Check cache
-        cache_key = f"{name}:{hash(json.dumps(arguments, sort_keys=True, default=str))}"
+        # Check cache. Session caches must be scoped to the active connection and
+        # session, otherwise a later workflow can reuse another database's result
+        # when the tool name + arguments happen to match.
+        cache_key = self._cache_key(name, arguments, ctx)
         if spec.cache_policy == "session" and cache_key in self._cache:
             ts, cached = self._cache[cache_key]
             logger.debug("cache hit: %s", name)
@@ -191,3 +193,28 @@ class ToolRegistry:
             ))
 
             return ToolResult(ok=False, error=error, duration_ms=elapsed)
+
+    @staticmethod
+    def _cache_key(name: str, arguments: dict[str, Any], ctx: ToolContext) -> str:
+        conn = ctx.connection or getattr(ctx.adapter, "config", None)
+        try:
+            from dbaide.connection_identity import connection_fingerprint
+            conn_key = connection_fingerprint(conn) if conn is not None else ""
+        except Exception:
+            conn_key = ""
+        session = ctx.session
+        session_key = ""
+        if session is not None:
+            session_key = ":".join(
+                str(getattr(session, attr, "") or "")
+                for attr in ("default_limit", "timeout_seconds", "agent_max_steps")
+            )
+        payload = {
+            "tool": name,
+            "workflow": ctx.workflow_id,
+            "connection": conn_key,
+            "session": session_key,
+            "execution_policy": ctx.execution_policy,
+            "arguments": arguments,
+        }
+        return json.dumps(payload, sort_keys=True, default=str)

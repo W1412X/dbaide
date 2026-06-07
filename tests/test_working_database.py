@@ -92,6 +92,26 @@ def test_execute_default_database_is_the_working_db(tmp_path):
     assert captured["database"] == "platform"  # not the connection default
 
 
+def test_explain_default_database_is_the_working_db(tmp_path):
+    orch = _orch(tmp_path)
+    reg = build_tool_registry(orch)
+    orch._reset_loop_state("explain employees", database="", execute=True)
+    ctx = ToolContext()
+    reg.invoke("list_tables", {"database": "platform"}, ctx)
+    reg.invoke("describe_table", {"table": "sys_user"}, ctx)
+    captured = {}
+
+    def _diagnose(sql, *, database=""):
+        captured["database"] = database
+        return {"ok": True, "issues": []}
+
+    orch.diagnose.diagnose_sql = _diagnose
+    res = reg.invoke("explain_sql", {"sql": "SELECT COUNT(*) FROM sys_user"}, ctx)
+
+    assert res.ok
+    assert captured["database"] == "platform"
+
+
 def test_empty_db_does_not_clobber_working_db(tmp_path):
     """A later describe with no resolvable db must not reset the working db to ''."""
     orch = _orch(tmp_path)

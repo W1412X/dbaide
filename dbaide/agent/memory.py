@@ -21,6 +21,8 @@ MAX_EXCLUDED = 12
 MAX_SCHEMA_REPORTS = 5
 MAX_JOIN_REPORTS = 5
 MAX_SQL_ARTIFACTS = 8
+MAX_RESOLVED_QUESTIONS = 12
+MAX_DO_NOT_REPEAT = 18
 
 
 @dataclass(slots=True)
@@ -116,6 +118,8 @@ class AgentMemory:
     confirmed_facts: list[str] = field(default_factory=list)
     pending_confirmations: list[str] = field(default_factory=list)
     action_ledger: list[str] = field(default_factory=list)
+    resolved_questions: list[str] = field(default_factory=list)
+    do_not_repeat: list[str] = field(default_factory=list)
     next_action_hint: str = ""
 
     def reset_goal(self, question: str, *, database: str = "", execute_allowed: bool = True) -> None:
@@ -134,6 +138,7 @@ class AgentMemory:
         ok: bool = True,
         summary: str = "",
         artifacts: list[str] | None = None,
+        data: dict[str, Any] | None = None,
     ) -> None:
         step_id = f"w{len(self.work_log) + 1}"
         input_summary = _compact_json(args or {}, limit=360)
@@ -151,6 +156,20 @@ class AgentMemory:
         if ledger_key not in self.action_ledger:
             self.action_ledger.append(ledger_key)
             self.action_ledger = self.action_ledger[-MAX_WORK_STEPS:]
+        self.add_do_not_repeat(ledger_key, f"{'completed' if ok else 'failed'}: {result_summary}")
+        if ok and isinstance(data, dict):
+            self.learn_tool_result(action=action, args=args or {}, data=data, summary=result_summary)
+
+    def add_do_not_repeat(self, key: str, reason: str = "") -> None:
+        key = _trim(key, 420)
+        reason = _trim(reason, 260)
+        if not key:
+            return
+        entry = f"{key} -> {reason}" if reason else key
+        normalized_key = key.lower()
+        self.do_not_repeat = [x for x in self.do_not_repeat if not x.lower().startswith(normalized_key)]
+        self.do_not_repeat.append(entry)
+        self.do_not_repeat = self.do_not_repeat[-MAX_DO_NOT_REPEAT:]
 
     def add_finding(self, text: str, *, source: str = "", confidence: str = "observed") -> None:
         text = _trim(text, 500)
@@ -172,7 +191,20 @@ class AgentMemory:
         if not text:
             return
         needle = text.strip().lower()
+        removed = [q for q in self.open_questions if q.strip().lower() == needle]
         self.open_questions = [q for q in self.open_questions if q.strip().lower() != needle]
+        for q in removed:
+            self.add_resolved_question(q, "answered by user/tool evidence")
+
+    def add_resolved_question(self, question: str, resolution: str) -> None:
+        question = _trim(question, 300)
+        resolution = _trim(resolution, 360)
+        if not question:
+            return
+        entry = f"{question} -> {resolution}" if resolution else question
+        if entry not in self.resolved_questions:
+            self.resolved_questions.append(entry)
+            self.resolved_questions = self.resolved_questions[-MAX_RESOLVED_QUESTIONS:]
 
     def add_exclusion(self, target: str, reason: str, *, evidence_ref: str = "", source_priority: str = "evidence") -> None:
         target = _trim(target, 180)
@@ -226,6 +258,84 @@ class AgentMemory:
             source=artifact.id,
         )
 
+    def learn_tool_result(self, *, action: str, args: dict[str, Any], data: dict[str, Any],
+                          summary: str = "") -> None:
+        if action == "describe_table":
+            self._learn_described_table(args, data)
+        elif action in {"retrieve_schema_context", "discover_schema"}:
+            self._learn_schema_result(data)
+        elif action in {"execute_sql", "execute_readonly_sql"}:
+            sql = str(data.get("sql") or args.get("sql") or "").strip()
+            rows = data.get("row_count")
+            self.add_finding(
+                f"Executed SQL returned {rows if rows is not None else '?'} row(s): {_trim(sql, 220)}",
+                source=str(data.get("artifact_id") or action),
+            )
+
+    def _learn_described_table(self, args: dict[str, Any], data: dict[str, Any]) -> None:
+        database = str(data.get("database") or args.get("database") or "").strip()
+        table = str(data.get("table") or args.get("table") or "").strip()
+        label = f"{database}.{table}" if database else table
+        columns = _column_names(data.get("columns") or [])
+        if not label or not columns:
+            return
+        key_cols = _key_columns(columns)
+        self.add_finding(
+            f"Described {label}: columns include {', '.join(key_cols[:18])}; "
+            f"indexes={len(data.get('indexes') or [])}, fks={len(data.get('foreign_keys') or [])}.",
+            source=f"describe_table:{label}",
+        )
+        self._resolve_questions_from_columns(label, columns)
+
+    def _learn_schema_result(self, data: dict[str, Any]) -> None:
+        report_id = str(data.get("report_id") or "").strip()
+        candidates = [c for c in data.get("candidates") or [] if isinstance(c, dict)]
+        if not candidates:
+            return
+        active_labels: list[str] = []
+        noted_labels: list[str] = []
+        for c in candidates[:10]:
+            label = _table_label(c)
+            if not label:
+                continue
+            if str(c.get("status") or "active") == "active":
+                active_labels.append(label)
+            notes = c.get("notes") if isinstance(c.get("notes"), dict) else {}
+            if notes and str(notes.get("table") or "").strip():
+                noted_labels.append(f"{label}: {_trim(str(notes.get('table')), 120)}")
+        if active_labels:
+            self.add_finding(
+                f"Schema evidence {report_id or ''} active candidates: {', '.join(active_labels[:8])}.",
+                source=report_id or "schema",
+            )
+        for item in noted_labels:
+            self.add_finding(f"User-note schema evidence: {item}", source=report_id or "schema")
+
+    def _resolve_questions_from_columns(self, label: str, columns: list[str]) -> None:
+        table = label.split(".")[-1].lower()
+        normalized_cols = {c.lower() for c in columns}
+        remaining: list[str] = []
+        for question in self.open_questions:
+            q = question.lower()
+            mentions_table = table and table in q
+            if label.lower() in q:
+                mentions_table = True
+            resolved_by = ""
+            if mentions_table and any(token in q for token in ("是否包含", "是否存在", "contains", "has")):
+                if any(token in q for token in ("妥投", "deliver")) and _has_semantic_column(normalized_cols, ("deliver", "delivered")):
+                    resolved_by = f"{label} has delivered-related column(s): {', '.join(_matching_columns(columns, ('deliver', 'delivered'))[:6])}"
+                elif any(token in q for token in ("国家", "country")) and _has_semantic_column(normalized_cols, ("country",)):
+                    resolved_by = f"{label} has country column(s): {', '.join(_matching_columns(columns, ('country',))[:6])}"
+                elif any(token in q for token in ("退款", "refund")) and _has_semantic_column(normalized_cols, ("refund",)):
+                    resolved_by = f"{label} has refund column(s): {', '.join(_matching_columns(columns, ('refund',))[:6])}"
+                elif any(token in q for token in ("时间", "日期", "date", "time")) and _has_time_column(normalized_cols):
+                    resolved_by = f"{label} has time/date column(s): {', '.join(_time_columns(columns)[:6])}"
+            if resolved_by:
+                self.add_resolved_question(question, resolved_by)
+            else:
+                remaining.append(question)
+        self.open_questions = remaining
+
     def prompt_block(self) -> str:
         lines: list[str] = []
         lines += ["[Goal]", self.goal or "(unknown)", ""]
@@ -241,6 +351,8 @@ class AgentMemory:
             lines.append("")
         if self.findings:
             lines += ["[Current Evidence]", *[f"- {f.text} ({f.source})" if f.source else f"- {f.text}" for f in self.findings[-12:]], ""]
+        if self.resolved_questions:
+            lines += ["[Resolved Questions]", *[f"- {q}" for q in self.resolved_questions[-MAX_RESOLVED_QUESTIONS:]], ""]
         if self.schema_reports:
             lines += ["[Schema Evidence]"]
             for report in self.schema_reports[-3:]:
@@ -293,6 +405,10 @@ class AgentMemory:
             for item in self.excluded_paths[-MAX_EXCLUDED:]:
                 lines.append(f"- {item.target}: {item.reason} ({item.source_priority}; {item.evidence_ref})")
             lines.append("")
+        if self.do_not_repeat:
+            lines += ["[Completed / Blocked Tool Calls — Do Not Repeat Exactly]"]
+            lines.extend(f"- {x}" for x in self.do_not_repeat[-MAX_DO_NOT_REPEAT:])
+            lines.append("")
         if self.action_ledger:
             lines += ["[Recent Action Ledger]", *[f"- {x}" for x in self.action_ledger[-10:]], ""]
         if self.next_action_hint:
@@ -321,6 +437,8 @@ class AgentMemory:
         mem.confirmed_facts = [str(x) for x in data.get("confirmed_facts") or []]
         mem.pending_confirmations = [str(x) for x in data.get("pending_confirmations") or []]
         mem.action_ledger = [str(x) for x in data.get("action_ledger") or []]
+        mem.resolved_questions = [str(x) for x in data.get("resolved_questions") or []]
+        mem.do_not_repeat = [str(x) for x in data.get("do_not_repeat") or []]
         mem.next_action_hint = str(data.get("next_action_hint") or "")
         return mem
 
@@ -353,3 +471,53 @@ def _compact_json(data: Any, *, limit: int) -> str:
     except Exception:
         text = str(data)
     return _trim(text, limit)
+
+
+def _column_names(columns: Any) -> list[str]:
+    out: list[str] = []
+    for col in columns or []:
+        if isinstance(col, dict):
+            name = str(col.get("name") or "").strip()
+        else:
+            name = str(getattr(col, "name", "") or "").strip()
+        if name:
+            out.append(name)
+    return out
+
+
+def _key_columns(columns: list[str]) -> list[str]:
+    priority = (
+        "id", "spu", "sku", "country", "date", "dt", "delivered", "refund",
+        "quantity", "order", "created", "updated", "at",
+    )
+    selected = [c for c in columns if any(p in c.lower() for p in priority)]
+    return selected or columns
+
+
+def _table_label(candidate: dict[str, Any]) -> str:
+    database = str(candidate.get("database") or "").strip()
+    table = str(candidate.get("table") or "").strip()
+    if not table:
+        return ""
+    return f"{database}.{table}" if database else table
+
+
+def _has_semantic_column(columns: set[str], needles: tuple[str, ...]) -> bool:
+    return bool(_matching_columns(list(columns), needles))
+
+
+def _matching_columns(columns: list[str], needles: tuple[str, ...]) -> list[str]:
+    return [c for c in columns if any(needle in c.lower() for needle in needles)]
+
+
+def _has_time_column(columns: set[str]) -> bool:
+    return bool(_time_columns(list(columns)))
+
+
+def _time_columns(columns: list[str]) -> list[str]:
+    out: list[str] = []
+    for c in columns:
+        low = c.lower()
+        if low in {"dt", "date"} or low.endswith("_at") or "date" in low or "time" in low:
+            out.append(c)
+    return out

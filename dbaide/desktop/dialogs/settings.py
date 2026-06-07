@@ -643,11 +643,9 @@ class SettingsDialog(QDialog):
         if not name or name not in self._connections:
             QMessageBox.warning(self, "Settings", "Save the connection first.")
             return
-        self._default_connection = name
         payload = dict(self._connections[name])
         payload["make_default"] = True
         self.connection_saved.emit(payload)
-        self._reload_connection_list()
 
     def _remove_connection(self) -> None:
         name = self.conn_form.payload()["name"]
@@ -656,6 +654,8 @@ class SettingsDialog(QDialog):
         if QMessageBox.question(self, "Settings", f"Remove connection '{name}'?") != QMessageBox.StandardButton.Yes:
             return
         self.connection_deleted.emit(name)
+
+    def remove_connection_entry(self, name: str) -> None:
         self._connections.pop(name, None)
         if self._default_connection == name:
             self._default_connection = next(iter(self._connections), "")
@@ -687,11 +687,9 @@ class SettingsDialog(QDialog):
         if not name or name not in self._models:
             QMessageBox.warning(self, "Settings", "Save the model profile first.")
             return
-        self._default_model = name
         payload = dict(self._models[name])
         payload["make_default"] = True
         self.model_saved.emit(payload)
-        self._reload_model_list()
 
     def _remove_model(self) -> None:
         name = self.model_form.payload()["name"]
@@ -700,6 +698,8 @@ class SettingsDialog(QDialog):
         if QMessageBox.question(self, "Settings", f"Remove model profile '{name}'?") != QMessageBox.StandardButton.Yes:
             return
         self.model_deleted.emit(name)
+
+    def remove_model_entry(self, name: str) -> None:
         self._models.pop(name, None)
         if self._default_model == name:
             self._default_model = next(iter(self._models), "")

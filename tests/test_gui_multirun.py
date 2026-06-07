@@ -238,6 +238,74 @@ def test_query_completed_event_ignores_other_connections():
     assert calls == ["current"]
 
 
+def test_active_or_new_key_updates_window_and_ask_tab():
+    import dbaide.desktop.views.main_window as mw
+    from dbaide.desktop.ui_state import ConversationRunState
+
+    win = mw.MainWindow.__new__(mw.MainWindow)
+    active_calls: list[str] = []
+    win.run_state = ConversationRunState()
+    win.current_session_id = "old"
+    win.ask_tab = type("Ask", (), {"set_active": lambda _self, key: active_calls.append(key)})()
+
+    key = win._active_or_new_key()
+
+    assert key == "new:1"
+    assert win._active_key == "new:1"
+    assert win.current_session_id == ""
+    assert active_calls == ["new:1"]
+
+
+def test_refresh_all_failure_clears_loading_status():
+    import dbaide.desktop.views.main_window as mw
+
+    win = mw.MainWindow.__new__(mw.MainWindow)
+    messages: list[str] = []
+    restored: list[bool] = []
+    background_calls: list[tuple] = []
+    win._ensure_ui_state = lambda: type("Ui", (), {  # type: ignore[method-assign]
+        "statusbar_message": lambda _self, message, timeout_ms=0: messages.append(message),
+    })()
+    win._restore_status_badge = lambda: restored.append(True)  # type: ignore[method-assign]
+    win.toast = lambda message: messages.append(f"toast:{message}")  # type: ignore[method-assign]
+
+    def run_background(action, payload, on_success, *, on_error=None, on_progress=None):
+        background_calls.append((action, payload, on_success, on_error, on_progress))
+
+    win._run_background = run_background  # type: ignore[method-assign]
+
+    win.refresh_all()
+    assert messages == ["Loading…"]
+    assert background_calls[0][0] == "bootstrap"
+    assert background_calls[0][3] == win._on_bootstrap_failed
+
+    win._on_bootstrap_failed(RuntimeError("boom"))
+
+    assert restored == [True]
+    assert messages[-2:] == ["Load failed: boom", "toast:boom"]
+
+
+def test_status_badge_restore_respects_owner_token():
+    import dbaide.desktop.views.main_window as mw
+
+    win = mw.MainWindow.__new__(mw.MainWindow)
+    calls: list[tuple[str, list]] = []
+    win._status_owner = "sync:old"
+    win.bootstrap = {"connections": [{"name": "current", "asset_status": "ready"}]}
+    win.current_connection = lambda: "current"  # type: ignore[method-assign]
+    win._ensure_ui_state = lambda: type("Ui", (), {  # type: ignore[method-assign]
+        "restore_connection_status": lambda _self, conn, conns: calls.append((conn, conns)),
+    })()
+
+    win._restore_status_badge(owner="sync:new")
+    assert calls == []
+    assert win._status_owner == "sync:old"
+
+    win._restore_status_badge(owner="sync:old")
+    assert calls == [("current", [{"name": "current", "asset_status": "ready"}])]
+    assert win._status_owner == ""
+
+
 def test_stale_ask_completion_is_ignored():
     import dbaide.desktop.views.main_window as mw
 

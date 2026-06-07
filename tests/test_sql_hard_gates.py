@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dbaide.core.result import ExecutionPolicy, ValidationReport
 from dbaide.agent.controllers import RiskController
+from dbaide.agent.loop import _risk_reply_confirms
 from dbaide.agent.orchestrator import AskOrchestrator
 from dbaide.agent.toolkit import build_tool_registry
 from dbaide.adapters import build_adapter
@@ -97,14 +98,41 @@ def test_execute_sql_pauses_for_large_limit_then_runs_after_confirmation(tmp_pat
     registry = build_tool_registry(orch)
     ctx = ToolContext(execution_policy=ExecutionPolicy.SAFE_AUTO.value)
 
-    first = registry.invoke("execute_sql", {"sql": "SELECT * FROM t LIMIT 50000"}, ctx)
+    first = registry.invoke(
+        "execute_sql",
+        {
+            "sql": "SELECT * FROM t LIMIT 50000",
+            "database": "main",
+            "limit": 7,
+            "timeout_seconds": 12,
+            "purpose": "manual export",
+            "save_as": "risky_export",
+        },
+        ctx,
+    )
     assert first.ok is True
     assert first.data["pending"] is True
     assert "Confirm before executing" in first.data["question"]
     assert orch.run_state.risk_confirmation["sql_hash"]
+    assert orch.run_state.risk_confirmation["execute_args"] == {
+        "sql": "SELECT * FROM t LIMIT 50000",
+        "database": "main",
+        "limit": 7,
+        "purpose": "manual export",
+        "save_as": "risky_export",
+        "timeout_seconds": 12,
+    }
 
     orch.run_state.confirmed_risk_sqls.append(orch.run_state.risk_confirmation["sql_hash"])
     orch.run_state.risk_confirmation = {}
     second = registry.invoke("execute_sql", {"sql": "SELECT * FROM t LIMIT 50000"}, ctx)
     assert second.ok is True
     assert second.data["row_count"] == 1
+
+
+def test_risk_confirmation_reply_denial_wins_over_execute_word():
+    assert _risk_reply_confirms("Execute anyway") is True
+    assert _risk_reply_confirms("仍然执行") is True
+    assert _risk_reply_confirms("Cancel") is False
+    assert _risk_reply_confirms("取消执行") is False
+    assert _risk_reply_confirms("不要执行") is False

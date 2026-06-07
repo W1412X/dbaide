@@ -207,6 +207,7 @@ DELETE_JOIN = ToolSpec(
     description="Delete a saved join by id or by full endpoint.",
     input_schema={
         "id": "string",
+        "database": "string",
         "table": "string",
         "column": "string",
         "ref_table": "string",
@@ -282,7 +283,14 @@ EXECUTE_READONLY_SQL = ToolSpec(
 EXECUTE_SQL = ToolSpec(
     name="execute_sql",
     description="Alias for execute_readonly_sql — run validated read-only SQL for final or exploratory evidence",
-    input_schema={"sql": "string", "database": "string", "purpose": "string", "save_as": "string"},
+    input_schema={
+        "sql": "string",
+        "database": "string",
+        "purpose": "string",
+        "save_as": "string",
+        "limit": "integer",
+        "timeout_seconds": "integer",
+    },
     output_schema={"artifact_id": "string", "rows": "list[dict]", "columns": "list[string]", "row_count": "integer"},
     permission_level=SQL_EXECUTE,
     timeout_seconds=30,
@@ -318,7 +326,14 @@ COLUMN_STATS = ToolSpec(
 
 ASK_USER = ToolSpec(
     name="ask_user",
-    description="Ask the user a clarification question",
+    description=(
+        "Ask the user a clarification question only for irreducible business intent. "
+        "Do not use for evidence the tools can inspect first: table/column existence, "
+        "field source, joins/FKs, indexes, row samples, value distributions, SQL "
+        "feasibility, or timezone/date conversion implied by schema/user notes. "
+        "Gather evidence with schema/profile/SQL tools first, then ask only the "
+        "remaining business choice with concrete options."
+    ),
     input_schema={"question": "string", "options": "list[string]"},
     output_schema={"answer": "string"},
     permission_level=SAFE_METADATA,
@@ -352,6 +367,7 @@ RETRIEVE_SCHEMA_CONTEXT = ToolSpec(
         "focus_terms": "list[string]",
         "need": "string",
         "limit": "integer",
+        "scope": "dict",
     },
     output_schema={
         "report_id": "string",
@@ -364,38 +380,11 @@ RETRIEVE_SCHEMA_CONTEXT = ToolSpec(
     safe_for_auto_call=True,
 )
 
-CLARIFY_SEMANTICS = ToolSpec(
-    name="clarify_semantics",
-    description=(
-        "Pin down the business definition (口径) of a data query before generating SQL: "
-        "check disclosed schema evidence for material ambiguities in TIME/timezone, METRIC "
-        "definition, NULL handling, and scope/filters. If any would change the result, "
-        "it PAUSES to confirm the exact criteria with the user; otherwise it records the "
-        "assumptions and returns clear. It does not sample live values; call column_stats "
-        "explicitly first if actual value encodings are needed. Run it after schema evidence, before generate_sql."
-    ),
-    input_schema={"question": "string"},
-    output_schema={"clear": "bool", "pending": "bool", "assumptions": "list[string]"},
-    permission_level=SAFE_METADATA,
-    timeout_seconds=60,
-    safe_for_auto_call=True,
-)
-
 GENERATE_SQL = ToolSpec(
     name="generate_sql",
     description="Generate read-only SQL using disclosed table column metadata (all described/retrieved tables, or explicit tables arg)",
     input_schema={"question": "string", "table": "string", "tables": "list[string]", "database": "string"},
     output_schema={"sql": "string", "rationale": "string", "confidence": "float", "tables": "list[string]"},
-    permission_level=SAFE_METADATA,
-    timeout_seconds=30,
-    safe_for_auto_call=True,
-)
-
-SYNTHESIZE_SCHEMA_ANSWER = ToolSpec(
-    name="synthesize_schema_answer",
-    description="Write a markdown answer from progressive schema discovery",
-    input_schema={"question": "string"},
-    output_schema={"answer": "string"},
     permission_level=SAFE_METADATA,
     timeout_seconds=30,
     safe_for_auto_call=True,

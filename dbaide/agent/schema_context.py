@@ -1,4 +1,4 @@
-"""Shared schema disclosure helpers for tool loop and staged fallback."""
+"""Shared schema disclosure helpers for the ask tool loop."""
 
 from __future__ import annotations
 
@@ -22,20 +22,24 @@ def normalize_db_table(table: str, database: str = "") -> tuple[str, str]:
     """Split a db-qualified table name into (database, table).
 
     The model may hand back a display name like
-    ``platform.sys_user`` in the *table* field with an empty database — describing a
-    table literally named "platform.sys_user" then finds nothing. When the table
-    carries a dot and no explicit database is given, treat the prefix as the database.
-    Quotes/backticks are stripped. Returns (database, table)."""
+    ``platform.sys_user`` in the *table* field — describing a table literally named
+    "platform.sys_user" then finds nothing. If no database is already known, a
+    two-part table value is treated as ``database.table``. If a database is already
+    known, a different prefix is kept as part of the table name so Postgres
+    ``schema.table`` refs survive. Quotes/backticks are stripped. Returns
+    (database, table)."""
     def _clean(s: str) -> str:
         return str(s or "").strip().strip('`"[]').strip()
 
     table = _clean(table)
     database = _clean(database)
-    if not database and "." in table:
+    if "." in table:
         prefix, rest = table.split(".", 1)
         prefix, rest = _clean(prefix), _clean(rest)
         if prefix and rest:
-            return prefix, rest
+            if not database or prefix == database:
+                return prefix, rest
+            return database, f"{prefix}.{rest}"
     return database, table
 
 
@@ -114,7 +118,7 @@ def collect_relations(
     table_names = {table for _, table in tables}
     active_db = ""
     if tables:
-        active_db = tables[0][0] or orchestrator.run_state.database or ""
+        active_db = tables[0][0] or orchestrator.run_state.table_database or orchestrator.run_state.database or ""
 
     catalog_relations: list[dict[str, Any]] = []
     catalog = getattr(orchestrator, "join_catalog", None)
@@ -325,8 +329,10 @@ def object_notes_for_tables(
     """Database/table-level user notes for the given targets.
 
     Returns a list of ``{"scope", "label", "note"}`` dicts the SQL writer and
-    decision prompt render as an authoritative block. The note text is passed
-    verbatim — the model reads it and decides what it implies."""
+    decision prompt render as an authoritative block. Column notes are included
+    here as a fallback for candidates that are not disclosed as SQL-eligible
+    columns (for example deprecated tables); when a table is disclosed normally,
+    the same note also rides on its ColumnInfo line."""
     store = _annotation_store(orchestrator)
     if store is None or not tables:
         return []
@@ -341,6 +347,10 @@ def object_notes_for_tables(
     for (db, table), note in (view.get("tables") or {}).items():
         label = f"{db}.{table}" if db else table
         out.append({"scope": "table", "label": label, "note": sanitize_note(note)})
+    for (db, table), columns in (view.get("columns") or {}).items():
+        table_label = f"{db}.{table}" if db else table
+        for column, note in (columns or {}).items():
+            out.append({"scope": "column", "label": f"{table_label}.{column}", "note": sanitize_note(note)})
     return out
 
 
@@ -388,8 +398,9 @@ def disclosed_table_keys(orchestrator: AskOrchestrator) -> list[tuple[str, str]]
     """(database, table) pairs already described in the tool loop."""
     keys: list[tuple[str, str]] = []
     for schema_key in orchestrator.run_state.schemas:
-        db = str(orchestrator.run_state.schema_db.get(schema_key) or orchestrator.run_state.database or "")
-        table = schema_key.split(".", 1)[1] if "." in schema_key else schema_key
+        db = str(orchestrator.run_state.schema_db.get(schema_key) or orchestrator.run_state.table_database or orchestrator.run_state.database or "")
+        prefix = f"{db}."
+        table = schema_key[len(prefix):] if db and schema_key.startswith(prefix) else schema_key
         keys.append((db, table))
     return keys
 

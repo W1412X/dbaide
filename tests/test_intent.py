@@ -98,7 +98,7 @@ def test_run_multi_aggregates_and_nests_trace(tmp_path):
     orch = AskOrchestrator(build_adapter(conn), Session(connection=conn), MultiMock(),
                            asset_store=store, join_catalog=JoinCatalogStore(base_dir=tmp_path / "joins"),
                            progress=events.append)
-    orch._discover = lambda q, *, parent="", column_detail=True: DiscoveryResult(
+    orch._discover = lambda q, *, parent="", column_detail=True, scope=None: DiscoveryResult(
         question=q, hits=[SchemaHit(kind="table", path="shop.main.orders", name="orders",
                                     database="main", table="orders", summary="orders")])
 
@@ -117,13 +117,15 @@ def test_run_multi_aggregates_and_nests_trace(tmp_path):
             model.ingest(e)
     model.finalize()
     assert model.find("intent:i1") is not None and model.find("intent:i2") is not None
-    # the data-query intent's execute step nests under intent i2
+    # the data-query intent's execute step nests under that intent's main loop
+    assert model.find("intent:i2:loop") is not None and model.find("intent:i2:loop").parent_id == "intent:i2"
     exec_node = model.find("intent:i2:step:4")
-    assert exec_node is not None and exec_node.parent_id == "intent:i2"
+    assert exec_node is not None and exec_node.parent_id == "intent:i2:loop"
 
 
-def test_single_intent_skips_intent_nodes(tmp_path):
-    """A one-thing question runs the plain loop — no intent wrapper nodes."""
+def test_single_intent_records_decomposition_without_wrapping_loop(tmp_path):
+    """A one-thing question still records the decomposition action, but does not
+    wrap the main loop in per-intent child nodes."""
     db = tmp_path / "s.db"
     c = sqlite3.connect(db)
     c.execute("CREATE TABLE t(id INTEGER PRIMARY KEY)")
@@ -139,6 +141,11 @@ def test_single_intent_skips_intent_nodes(tmp_path):
     events: list = []
     orch = AskOrchestrator(build_adapter(conn), Session(connection=conn), OneMock(),
                            asset_store=AssetStore(tmp_path / "a"), progress=events.append)
-    orch._discover = lambda q, *, parent="", column_detail=True: DiscoveryResult(question=q, hits=[])
+    orch._discover = lambda q, *, parent="", column_detail=True, scope=None: DiscoveryResult(question=q, hits=[])
     orch.run("list tables")
-    assert not any(isinstance(e, dict) and str(e.get("node_id", "")).startswith("intent:") for e in events)
+    assert any(isinstance(e, dict) and e.get("node_id") == "intent:decompose" for e in events)
+    assert not any(
+        isinstance(e, dict)
+        and str(e.get("node_id", "")).startswith("intent:i")
+        for e in events
+    )

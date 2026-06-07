@@ -14,7 +14,7 @@ if TYPE_CHECKING:
     from dbaide.joins import JoinCatalogStore
 from dbaide.assets.summarizer import ASSET_SCHEMA_VERSION, AssetSummarizer
 from dbaide.llm import LLMClient
-from dbaide.models import ConnectionConfig
+from dbaide.models import ConnectionConfig, TableInfo
 
 logger = logging.getLogger("dbaide.builder")
 
@@ -364,10 +364,10 @@ class AssetBuilder:
             tables = self.adapter.list_tables(database=database)
             for table in tables:
                 stats.tables += 1
-                columns = self.adapter.describe_table(table.name, database=database)
+                columns = self.adapter.describe_table(self._table_key(table), database=database)
                 stats.columns += len(columns)
-                heavy = self._is_heavy(table, options)
-                if options.collect_row_counts and not heavy:
+                scannable = self._is_heavy(table, options)
+                if options.collect_row_counts and scannable:
                     estimated += 1  # COUNT(*)
                 if options.sample:
                     estimated += 1  # sample_rows
@@ -494,7 +494,7 @@ class AssetBuilder:
                 td for td in self.store.table_docs(instance, database, connection=self.connection)
                 if str(td.get("name") or td.get("table") or "") not in only_tables
             ]
-            tables = [t for t in tables if t.name in only_tables]
+            tables = [t for t in tables if self._table_key(t) in only_tables or t.name in only_tables]
         total = len(tables)
         self._emit_db(database, f"{database} · {total} tables", status="running")
 
@@ -503,7 +503,7 @@ class AssetBuilder:
         futures = {}
         for table in tables:
             if self._is_expired(options.deadline):
-                self._record_error(stats, f"{instance}.{database}.{table.name}: skipped (time budget)")
+                self._record_error(stats, f"{instance}.{database}.{self._table_key(table)}: skipped (time budget)")
                 continue
             futures[executor.submit(self._build_table, instance, database, table,
                                     options=options, stats=stats)] = table
@@ -514,10 +514,10 @@ class AssetBuilder:
             try:
                 table_docs.append(future.result())
             except Exception as exc:
-                self._record_error(stats, f"{instance}.{database}.{table.name}: {type(exc).__name__}: {exc}")
+                self._record_error(stats, f"{instance}.{database}.{self._table_key(table)}: {type(exc).__name__}: {exc}")
             # The table node itself is emitted live from the worker; here we only
             # advance the database-level progress counter.
-            self._emit_db(database, f"{database} · {done}/{total} tables · {table.name}", status="running")
+            self._emit_db(database, f"{database} · {done}/{total} tables · {self._table_key(table)}", status="running")
         if preserved_table_docs:
             table_docs = table_docs + preserved_table_docs  # keep non-targeted tables in the rollup
         cols = sum(int(td.get("column_count") or 0) for td in table_docs)
@@ -546,7 +546,8 @@ class AssetBuilder:
         # and emit the table node live so the trace shows it the moment it starts.
         self._tls.bucket = []
         failed = False
-        self._emit_table(database, table.name, status="running", note="starting…")
+        table_key = self._table_key(table)
+        self._emit_table(database, table_key, status="running", note="starting…")
         try:
             return self._build_table_inner(instance, database, table, options=options,
                                            stats=stats)
@@ -554,30 +555,32 @@ class AssetBuilder:
             failed = True
             raise
         finally:
-            self._emit_table(database, table.name, status="failed" if failed else "completed")
+            self._emit_table(database, table_key, status="failed" if failed else "completed")
             captured = self._tls.bucket
             self._tls.bucket = None
             with self._table_sql_lock:
-                self._table_sql[f"{database}.{table.name}"] = captured or []
+                self._table_sql[f"{database}.{table_key}"] = captured or []
 
     def _build_table_inner(self, instance: str, database: str, table, *, options: BuildOptions,
                            stats: BuildStats) -> dict:
-        self._emit_table(database, table.name, status="running", note="describing…")
+        table_key = self._table_key(table)
+        doc_table = self._doc_table_info(table)
+        self._emit_table(database, table_key, status="running", note="describing…")
         self._bump(stats, tables=1)
-        columns = self.adapter.describe_table(table.name, database=database)
-        foreign_keys = self.adapter.foreign_keys(table.name, database=database)
+        columns = self.adapter.describe_table(table_key, database=database)
+        foreign_keys = self.adapter.foreign_keys(table_key, database=database)
         try:
-            indexes = self.adapter.indexes(table.name, database=database)
+            indexes = self.adapter.indexes(table_key, database=database)
         except Exception:
             indexes = []
         try:
-            ddl = self.adapter.get_table_ddl(table.name, database=database)
+            ddl = self.adapter.get_table_ddl(table_key, database=database)
         except Exception:
             ddl = ""
         if self.join_catalog is not None and foreign_keys:
             fk_rels = [
                 {
-                    "database": database, "table": fk.table or table.name, "column": fk.column,
+                    "database": database, "table": fk.table or table_key, "column": fk.column,
                     "ref_table": fk.ref_table, "ref_column": fk.ref_column,
                     "confidence": 0.97, "join_type": "many_to_one", "validated": True,
                     "reason": "declared foreign key",
@@ -598,7 +601,7 @@ class AssetBuilder:
             next_step = "counting rows…"
         else:
             next_step = "writing metadata…"
-        self._emit_table(database, table.name, status="running", note=next_step)
+        self._emit_table(database, table_key, status="running", note=next_step)
         row_count = (
             self._table_row_count(table, database=database, heavy=heavy)
             if options.collect_row_counts else None
@@ -607,24 +610,24 @@ class AssetBuilder:
         if options.sample:
             try:
                 sample_rows = self.adapter.sample_rows(
-                    table.name, database=database,
+                    table_key, database=database,
                     limit=min(options.sample_limit, max(20, options.top_k)),
                 ).rows
             except Exception as exc:
-                self._record_error(stats, f"{instance}.{database}.{table.name}.sample: {type(exc).__name__}: {exc}")
+                self._record_error(stats, f"{instance}.{database}.{table_key}.sample: {type(exc).__name__}: {exc}")
 
         # The table is the disclosure leaf: one structured document with the full
         # DDL-as-JSON, indexes, FKs, row-count and a truncated sample. No per-column
         # documents or profiling — the agent fetches column stats on demand.
         table_doc = self.summarizer.table_doc(
-            instance=instance, database=database, table=table,
+            instance=instance, database=database, table=doc_table,
             columns=columns, foreign_keys=foreign_keys, indexes=indexes, ddl=ddl,
             row_count=row_count, sample_rows=sample_rows,
         )
         table_doc["column_count"] = len(columns)
         table_doc.update(self.store.connection_metadata(self.connection))
         self._bump(stats, columns=len(columns))
-        self.store.write_json(self.store.table_dir(instance, database, table.name) / "table.json", table_doc)
+        self.store.write_json(self.store.table_dir(instance, database, table_key) / "table.json", table_doc)
         return table_doc
 
     def _table_row_count(self, table, *, database: str, heavy: bool) -> int | None:
@@ -635,7 +638,7 @@ class AssetBuilder:
             return table.estimated_rows
         try:
             from dbaide.adapters.base import quote_identifier
-            tq = quote_identifier(table.name, self.adapter.dialect)
+            tq = quote_identifier(self._table_key(table), self.adapter.dialect)
             result = self.adapter.execute_readonly(
                 f"SELECT COUNT(*) AS n FROM {tq}", database=database, limit=1,
             )
@@ -644,6 +647,29 @@ class AssetBuilder:
         except Exception:
             pass
         return table.estimated_rows
+
+    def _table_key(self, table: TableInfo) -> str:
+        """Storage/execution key for a listed table.
+
+        MySQL stores the selected database in ``TableInfo.schema``; passing
+        ``table.ref`` there would break adapter catalog caches. Postgres uses
+        ``schema`` as a namespace, so the schema must be part of the table key.
+        """
+        if self.adapter.dialect == "postgres" and getattr(table, "schema", ""):
+            return table.ref
+        return table.name
+
+    def _doc_table_info(self, table: TableInfo) -> TableInfo:
+        key = self._table_key(table)
+        if key == table.name:
+            return table
+        return TableInfo(
+            name=key,
+            schema=table.schema,
+            comment=table.comment,
+            estimated_rows=table.estimated_rows,
+            table_type=table.table_type,
+        )
 
     @staticmethod
     def _is_expired(deadline: float) -> bool:

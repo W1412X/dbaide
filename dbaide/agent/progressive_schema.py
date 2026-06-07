@@ -9,7 +9,7 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Callable
 
 from dbaide.assets import AssetStore
-from dbaide.i18n import answer_language_directive
+from dbaide.agent.schema_context import normalize_db_table
 from dbaide.llm import LLMClient, LLMMessage, NullLLMClient
 
 if TYPE_CHECKING:
@@ -134,7 +134,9 @@ class ProgressiveSchemaAgent:
             tbl = str(t.get("table") or t.get("name") or "").strip()
             if not tbl:
                 continue
-            db = str(t.get("database") or "").strip() or self._find_table_database(tbl)
+            db = str(t.get("database") or "").strip()
+            db, tbl = normalize_db_table(tbl, db)
+            db = db or self._find_table_database(tbl)
             if db:
                 target_dbs.add(db)
             norm_tables.append((db, tbl))
@@ -476,64 +478,6 @@ class ProgressiveSchemaAgent:
         result.hits.extend(column_hits)
         result.hits.sort(key=lambda h: (0 if h.kind == "table" else 1 if h.kind == "column" else 2, h.path))
         return result
-
-    def synthesize_answer(
-        self,
-        question: str,
-        discovery: DiscoveryResult,
-        *,
-        progress: ProgressFn | None = None,
-        parent: str = "",
-        object_notes: list[dict[str, str]] | None = None,
-    ) -> str:
-        if not discovery.hits:
-            return (
-                "没有在离线资产中找到与问题明显相关的 schema。\n\n"
-                "建议：\n"
-                "- 确认已 Build Assets\n"
-                "- 换更具体的业务词（如「产线」「production line」「line_id」）\n"
-                "- 或直接指定库/表名"
-            )
-        self._emit_progress(
-            progress,
-            parent,
-            "schema_synth",
-            f"Synthesizing answer from {len(discovery.hits)} hit(s)",
-        )
-        lines = ["Relevant schema (progressive LLM screening):", ""]
-        for hit in discovery.hits[:24]:
-            prefix = f"**{hit.path}**"
-            body = hit.summary or hit.reason or ""
-            lines.append(f"- {prefix}")
-            if body:
-                lines.append(f"  {body[:280]}")
-            # The user note travels with its object — show it right under the hit.
-            note = str(getattr(hit, "note", "") or "").strip()
-            if note:
-                lines.append(f"  📝 USER NOTE (authoritative): {note}")
-        notes = [n for n in (object_notes or []) if str(n.get("note") or "").strip()]
-        if notes:
-            lines += ["", "User notes (AUTHORITATIVE — override the summaries above):"]
-            for n in notes:
-                lines.append(f"- {n.get('scope')} {n.get('label')}: {str(n.get('note')).strip()}")
-        context = "\n".join(lines)
-        text = self.llm.complete_text(
-            [
-                LLMMessage(
-                    "system",
-                    "You are a database schema assistant. Answer using ONLY the relevant schema below. "
-                    "Be concise. Format as markdown with bullet groups by database. "
-                    "Do NOT list unrelated tables. "
-                    "User notes are AUTHORITATIVE and override the summaries: if a note says a table "
-                    "is deprecated/wrong or names a replacement, recommend the replacement and do NOT "
-                    "point the user at the deprecated table. "
-                    + answer_language_directive(),
-                ),
-                LLMMessage("user", f"Question:\n{question}\n\nSchema:\n{context}"),
-            ]
-        )
-        self._emit_progress(progress, parent, "schema_synth", "Answer synthesized", status="completed")
-        return text.strip()
 
     def _emit_progress(
         self,

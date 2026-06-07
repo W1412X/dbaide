@@ -121,6 +121,7 @@ class ConfigManager:
         if make_default or not self._data.get("default_connection"):
             self._data["default_connection"] = cfg.name
         self.save()
+        self._clear_policy_cache(cfg.name)
 
     def delete_connection(self, name: str) -> None:
         connections = self._data.setdefault("connections", {})
@@ -128,6 +129,7 @@ class ConfigManager:
         if self._data.get("default_connection") == name:
             self._data["default_connection"] = next(iter(connections), "")
         self.save()
+        self._clear_policy_cache(name)
 
     def model(self, name: str | None = None) -> ModelConfig:
         models_map = self.models()
@@ -195,8 +197,7 @@ class ConfigManager:
         clean = {k: v for k, v in (values or {}).items() if v is not None and v != ""}
         self._data["resource_defaults"] = clean
         self.save()
-        from dbaide.db import policy as _policy
-        _policy.clear_cache()
+        self._clear_policy_cache()
 
     # ── UI language ──────────────────────────────────────────────────────────
 
@@ -233,7 +234,7 @@ class ConfigManager:
 
     def debug_trace(self) -> bool:
         ui = self._data.get("ui") or {}
-        return bool(ui.get("debug_trace")) if isinstance(ui, dict) else False
+        return bool(ui.get("debug_trace", True)) if isinstance(ui, dict) else True
 
     def set_debug_trace(self, on: bool) -> None:
         ui = self._data.setdefault("ui", {})
@@ -307,3 +308,8 @@ class ConfigManager:
             inner = ", ".join(f"{k} = {self._format_value(v)}" for k, v in value.items())
             return "{ " + inner + " }"
         return _toml_quote(str(value))
+
+    @staticmethod
+    def _clear_policy_cache(instance: str | None = None) -> None:
+        from dbaide.db import policy as _policy
+        _policy.clear_cache(instance)

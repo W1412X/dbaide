@@ -19,6 +19,7 @@ from dbaide.config import ConfigManager
 from dbaide.connection_identity import connection_fingerprint
 from dbaide.core import ExecutionPolicy, WorkflowRequest
 from dbaide.core.workflow import WorkflowEngine
+from dbaide.agent.schema_context import normalize_db_table
 from dbaide.history.store import WorkflowHistoryStore
 from dbaide.history.session_store import ChatSessionStore, make_turn
 from dbaide.llm import LLMMessage, NullLLMClient, build_llm_client
@@ -60,6 +61,7 @@ def _conn_payload(conn: ConnectionConfig, *, has_assets: bool) -> dict[str, Any]
         "path": conn.path,
         "target": target,
         "load_profile": getattr(conn, "load_profile", "production"),
+        "session_timezone": getattr(conn, "session_timezone", "UTC"),
         "asset_status": "ready" if has_assets else "missing",
     }
 
@@ -211,6 +213,14 @@ class DesktopService:
         return {"ok": True, "message": f"Connection OK: {conn.name}"}
 
     def save_connection(self, payload: dict[str, Any]) -> dict[str, Any]:
+        payload = dict(payload or {})
+        name = str(payload.get("name") or "").strip()
+        existing = self.cfg.connections().get(name) if name else None
+        if existing is not None:
+            if not str(payload.get("password") or ""):
+                payload["password"] = existing.password
+            if not str(payload.get("password_env") or "").strip():
+                payload["password_env"] = existing.password_env
         conn = self._connection_from_payload(payload)
         self.cfg.upsert_connection(conn, make_default=bool(payload.get("make_default", False)))
         return {"connection": _conn_payload(conn, has_assets=bool(self.store.instance_doc(conn.name, connection=conn)))}
@@ -371,23 +381,45 @@ class DesktopService:
     def _project_table_doc(self, summarizer, adapter, instance: str, database: str, table_info) -> dict[str, Any]:
         """Build ONE table's base doc (catalog-only) in memory — no write, no LLM, no
         sampling. Used by refresh to compute the live snapshot and write base docs."""
-        cols = adapter.describe_table(table_info.name, database=database)
-        fks = adapter.foreign_keys(table_info.name, database=database)
+        table_key = self._table_key(adapter, table_info)
+        doc_table = self._doc_table_info(adapter, table_info)
+        cols = adapter.describe_table(table_key, database=database)
+        fks = adapter.foreign_keys(table_key, database=database)
         try:
-            idxs = adapter.indexes(table_info.name, database=database)
+            idxs = adapter.indexes(table_key, database=database)
         except Exception:  # noqa: BLE001 — indexes are best-effort
             idxs = []
         try:
-            ddl = adapter.get_table_ddl(table_info.name, database=database)
+            ddl = adapter.get_table_ddl(table_key, database=database)
         except Exception:  # noqa: BLE001
             ddl = ""
         doc = summarizer.table_doc(
-            instance=instance, database=database, table=table_info,
+            instance=instance, database=database, table=doc_table,
             columns=cols, foreign_keys=fks, indexes=idxs, ddl=ddl, sample_rows=[],
         )
         doc["column_count"] = len(cols)  # denormalized count the tree/rollup read
         doc.update(self.store.connection_metadata(adapter.config))
         return doc
+
+    @staticmethod
+    def _table_key(adapter, table_info) -> str:
+        if getattr(adapter, "dialect", "") == "postgres" and getattr(table_info, "schema", ""):
+            return table_info.ref
+        return table_info.name
+
+    @staticmethod
+    def _doc_table_info(adapter, table_info):
+        key = DesktopService._table_key(adapter, table_info)
+        if key == table_info.name:
+            return table_info
+        from dbaide.models import TableInfo
+        return TableInfo(
+            name=key,
+            schema=table_info.schema,
+            comment=table_info.comment,
+            estimated_rows=table_info.estimated_rows,
+            table_type=table_info.table_type,
+        )
 
     # Structural fields a refresh overwrites from the live catalog; everything else
     # in a table doc (description, sample_rows, profiles, …) is enrichment and kept.
@@ -494,7 +526,10 @@ class DesktopService:
                 continue
             new_snap[db] = {}
             if only_tables is not None:
-                tinfos = [ti for ti in tinfos if ti.name in only_tables]
+                tinfos = [
+                    ti for ti in tinfos
+                    if self._table_key(adapter, ti) in only_tables or ti.name in only_tables
+                ]
             work.extend((db, ti) for ti in tinfos)
         if work:
             from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -505,9 +540,9 @@ class DesktopService:
                 for fut in as_completed(futs):
                     db, ti = futs[fut]
                     try:
-                        new_snap[db][ti.name] = fut.result()
+                        new_snap[db][self._table_key(adapter, ti)] = fut.result()
                     except Exception:  # noqa: BLE001 — can't describe now: don't treat as dropped
-                        failed.add((db, ti.name))
+                        failed.add((db, self._table_key(adapter, ti)))
         return new_snap, failed
 
     def _apply_catalog_diff(self, instance: str, diff, new_snap: dict[str, dict[str, dict]]) -> None:
@@ -735,9 +770,14 @@ class DesktopService:
     def read_asset(self, payload: dict[str, Any]) -> Any:
         path = str(payload.get("path") or "")
         parts = [part for part in path.split(".") if part]
-        if not 1 <= len(parts) <= 4:
+        if not 1 <= len(parts):
             raise ValueError("Asset path must be instance, instance.database, instance.database.table, or instance.database.table.column")
-        conn = self.cfg.get_connection(parts[0]) if parts else None
+        try:
+            conn = self.cfg.get_connection(parts[0]) if parts else None
+        except KeyError as exc:
+            raise ValueError(
+                "Asset path must be instance, instance.database, instance.database.table, or instance.database.table.column"
+            ) from exc
         if len(parts) == 1:
             doc = self.store.instance_doc(parts[0], connection=conn)
             if doc is None:
@@ -747,14 +787,15 @@ class DesktopService:
             if not self.store.connection_matches(parts[0], connection=conn):
                 raise FileNotFoundError(f"Asset path not found: {path}")
             return self.store.read_json(self.store.database_dir(parts[0], parts[1]) / "database.json")
-        if len(parts) == 3:
-            doc = self.store.table_doc(parts[0], parts[1], parts[2], connection=conn)
+        if len(parts) >= 3:
+            table = ".".join(parts[2:])
+            doc = self.store.table_doc(parts[0], parts[1], table, connection=conn)
             if doc is None:
-                raise FileNotFoundError(f"Asset path not found: {path}")
-            return doc
-        if len(parts) == 4:
-            # No per-column docs — a column previews its parent table (the leaf).
-            doc = self.store.table_doc(parts[0], parts[1], parts[2], connection=conn)
+                # No per-column docs — a column previews its parent table (the leaf).
+                # For schema-qualified Postgres tables, the table itself may contain
+                # dots, so the column is only the final path part.
+                table = ".".join(parts[2:-1])
+                doc = self.store.table_doc(parts[0], parts[1], table, connection=conn)
             if doc is None:
                 raise FileNotFoundError(f"Asset path not found: {path}")
             return doc
@@ -797,13 +838,15 @@ class DesktopService:
                        policy: ExecutionPolicy, database: str) -> WorkflowRequest:
         """Assemble the WorkflowRequest from a GUI ask payload (defaults applied here so
         ask() reads as request → run → record)."""
+        conn = self.cfg.get_connection(connection_name)
+        resource_policy = self.cfg.policy_for(conn)
         return WorkflowRequest(
             question=str(payload.get("question") or ""),
             connection_name=connection_name,
             database_scope=[database] if database else [],
             execution_policy=policy,
-            limit=int(payload.get("limit") or 100),
-            timeout_seconds=int(payload.get("timeout_seconds") or 60),
+            limit=int(payload.get("limit") or resource_policy.default_row_limit),
+            timeout_seconds=int(payload.get("timeout_seconds") or resource_policy.statement_timeout_seconds),
             resume_state=payload.get("resume_state"),
             user_reply=str(payload.get("user_reply") or ""),
             schema_scope=payload.get("schema_scope") or {},
@@ -838,8 +881,9 @@ class DesktopService:
     def validate_sql(self, payload: dict[str, Any]) -> dict[str, Any]:
         conn = self.cfg.get_connection(str(payload.get("connection_name") or "") or None)
         sql = str(payload.get("sql") or "")
+        limit = int(payload.get("limit") or self.cfg.policy_for(conn).default_row_limit)
         tools = self._query_tools(conn)
-        validation = tools.validate_sql_report(sql, add_limit=True)
+        validation = tools.validate_sql_report(sql, add_limit=True, limit=limit)
         return {
             "ok": validation.ok,
             "normalized_sql": validation.normalized_sql,
@@ -854,9 +898,9 @@ class DesktopService:
         self._guard_busy(conn.name)
         database = str(payload.get("database") or "")
         sql = str(payload.get("sql") or "")
-        limit = int(payload.get("limit") or 100)
+        limit = int(payload.get("limit") or self.cfg.policy_for(conn).default_row_limit)
         tools = self._query_tools(conn)
-        report = tools.validate_sql_report(sql, add_limit=True)
+        report = tools.validate_sql_report(sql, add_limit=True, limit=limit)
         if not report.ok:
             raise ValueError("; ".join(report.issues))
         confirmed_sql = str(payload.get("confirmed_sql") or "")
@@ -1135,7 +1179,7 @@ class DesktopService:
         # Coerce known numeric keys; ignore unknowns.
         from dbaide.db.policy import ResourcePolicy
         from dataclasses import fields
-        numeric_keys = {f.name for f in fields(ResourcePolicy)} - {"build_profile_mode"}
+        numeric_keys = ({f.name for f in fields(ResourcePolicy)} - {"build_profile_mode"}) | {"max_concurrent_runs"}
         clean: dict[str, Any] = {}
         for key, val in (values or {}).items():
             if val in (None, ""):
@@ -1186,14 +1230,25 @@ class DesktopService:
 
     def list_joins(self, payload: dict[str, Any]) -> dict[str, Any]:
         conn = self.cfg.get_connection(str(payload.get("connection_name") or payload.get("name") or None))
+        database = str(payload.get("database") or "")
         tables = payload.get("tables")
-        table_list = [str(t) for t in tables] if isinstance(tables, list) else None
+        table_list = None
+        if isinstance(tables, list):
+            normalized = [normalize_db_table(str(t), database) for t in tables if str(t).strip()]
+            explicit_dbs = {db for db, _table in normalized if db}
+            if len(explicit_dbs) == 1:
+                database = next(iter(explicit_dbs))
+            table_list = [table for _db, table in normalized if table]
+        endpoint = None
+        if payload.get("table") and payload.get("column"):
+            ep_db, endpoint = self._join_endpoint(payload, default_database=database)
+            database = ep_db or database
         joins = self.join_catalog.list_records(
             conn.name,
-            database=str(payload.get("database") or ""),
+            database=database,
             tables=table_list,
             min_confidence=float(payload.get("min_confidence") or 0.0),
-            endpoint=payload if payload.get("table") and payload.get("column") else None,
+            endpoint=endpoint,
             fingerprint=connection_fingerprint(conn),
         )
         return {"joins": joins, "count": len(joins)}
@@ -1201,11 +1256,16 @@ class DesktopService:
     def add_join(self, payload: dict[str, Any]) -> dict[str, Any]:
         conn = self.cfg.get_connection(str(payload.get("connection_name") or payload.get("name") or None))
         source = str(payload.get("source") or "user")
+        database, endpoint = self._join_endpoint(
+            payload,
+            default_database=str(payload.get("database") or conn.database or ""),
+        )
+        rel = {**payload, **endpoint}
         record = self.join_catalog.add(
             conn.name,
-            payload,
+            rel,
             source=source,
-            database=str(payload.get("database") or conn.database or ""),
+            database=database,
             fingerprint=connection_fingerprint(conn),
         )
         return {"join": record}
@@ -1213,10 +1273,19 @@ class DesktopService:
     def update_join(self, payload: dict[str, Any]) -> dict[str, Any]:
         conn = self.cfg.get_connection(str(payload.get("connection_name") or payload.get("name") or None))
         join_id = str(payload.get("id") or payload.get("join_id") or "")
+        fields = dict(payload)
+        if payload.get("table") or payload.get("ref_table"):
+            database, endpoint = self._join_endpoint(
+                payload,
+                default_database=str(payload.get("database") or conn.database or ""),
+            )
+            fields.update({key: value for key, value in endpoint.items() if value})
+            if database:
+                fields["database"] = database
         updated = self.join_catalog.update(
             conn.name,
             join_id,
-            payload,
+            fields,
             fingerprint=connection_fingerprint(conn),
         )
         if updated is None:
@@ -1228,12 +1297,12 @@ class DesktopService:
         join_id = str(payload.get("id") or payload.get("join_id") or "")
         endpoint = None
         if payload.get("table") and payload.get("column") and payload.get("ref_table") and payload.get("ref_column"):
-            endpoint = {
-                "table": payload["table"],
-                "column": payload["column"],
-                "ref_table": payload["ref_table"],
-                "ref_column": payload["ref_column"],
-            }
+            database, endpoint = self._join_endpoint(
+                payload,
+                default_database=str(payload.get("database") or conn.database or ""),
+            )
+            if database:
+                endpoint["database"] = database
         ok = self.join_catalog.delete(
             conn.name,
             join_id=join_id,
@@ -1243,6 +1312,17 @@ class DesktopService:
         if not ok:
             raise ValueError("Join not found")
         return {"deleted": True}
+
+    def _join_endpoint(self, payload: dict[str, Any], *, default_database: str = "") -> tuple[str, dict[str, str]]:
+        left_db, table = normalize_db_table(str(payload.get("table") or payload.get("left_table") or ""), default_database)
+        right_db, ref_table = normalize_db_table(str(payload.get("ref_table") or payload.get("right_table") or ""), default_database)
+        database = left_db or right_db or default_database
+        return database, {
+            "table": table,
+            "column": str(payload.get("column") or payload.get("left_column") or "").strip(),
+            "ref_table": ref_table,
+            "ref_column": str(payload.get("ref_column") or payload.get("right_column") or "").strip(),
+        }
 
     # ── Object annotations (user notes on db/table/column) ──────────────────
 

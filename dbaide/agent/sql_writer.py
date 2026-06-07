@@ -124,8 +124,9 @@ class SQLWriter:
             "Use only disclosed tables and columns. Return one SELECT/WITH statement. "
             "Do not invent columns or tables. Prefer simple SQL. "
             "Reference tables by their BARE name (e.g. `orders`, never `mydb.orders`) — the "
-            "connection is already pointed at the correct database. Only qualify a table with a "
-            "database prefix when the query genuinely spans MORE THAN ONE database. "
+            "connection is already pointed at the correct database. Keep a disclosed schema qualifier "
+            "such as `public.orders` when the table label includes it, but do not add a database prefix "
+            "unless the query genuinely spans MORE THAN ONE database. "
             "Return confidence 0.0-1.0 based on how sure you are about the mapping. "
             "User notes are AUTHORITATIVE: they override DB comments and any inference — "
             "if a note says an object is deprecated/wrong, do NOT use it. "
@@ -201,7 +202,10 @@ class SQLWriter:
         if notes:
             blocks.append(notes)
         if len(distinct_dbs) == 1:
-            blocks.append(f"Active database: {next(iter(distinct_dbs))} (reference tables by bare name)")
+            blocks.append(
+                f"Active database: {next(iter(distinct_dbs))} "
+                "(do not add this database as a prefix; keep schema-qualified table labels if shown)"
+            )
         blocks.append("Disclosed schemas (use ONLY these tables and columns):")
         for database, table, columns in disclosed_schemas:
             table_label = self._format_table_label(table)
@@ -230,6 +234,9 @@ class SQLWriter:
         text = str(name or "").strip()
         if not text:
             return text
+        if "." in text:
+            from dbaide.adapters.base import quote_identifier
+            return quote_identifier(text, self.dialect)
         if text.replace("_", "").isalnum() and not text[0].isdigit():
             return text
         quote = "`" if self.dialect in {"mysql", "mariadb"} else '"'

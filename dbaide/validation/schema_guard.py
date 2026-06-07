@@ -15,6 +15,7 @@ class SchemaGuard:
     def validate(self, sql: str, context: DisclosureContext) -> ValidationResult:
         issues: list[ValidationIssue] = []
         known_tables = set(context.table_names()) | set(context.tables.keys())
+        known_tables |= {_bare_identifier(name) for name in list(known_tables)}
         if not known_tables:
             return ValidationResult(ok=True, normalized_sql=sql)
         cte_names = set(_cte_names(sql))

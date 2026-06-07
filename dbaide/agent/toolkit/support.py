@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 import logging
-from concurrent.futures import ThreadPoolExecutor
 from typing import TYPE_CHECKING, Any
 
 from dbaide.core.errors import DBAideError, ErrorCode
@@ -12,9 +11,6 @@ if TYPE_CHECKING:
     from dbaide.agent.orchestrator import AskOrchestrator
 
 logger = logging.getLogger("dbaide.agent.toolkit")
-
-
-_CATEGORICAL_TYPES = ("char", "text", "string", "enum", "varchar", "nchar", "nvarchar", "tinytext")
 
 
 def _relations_payload(relations: list[dict[str, Any]]) -> dict[str, Any]:
@@ -44,7 +40,7 @@ def _targets_from_relations(orchestrator: AskOrchestrator, relations: list[dict[
     for name in sorted(names):
         db = db_default
         for schema_key, schema_db in orchestrator.run_state.schema_db.items():
-            table_part = schema_key.split(".", 1)[1] if "." in schema_key else schema_key
+            table_part = _schema_table_part(schema_key, schema_db)
             if table_part == name or schema_key == name:
                 db = schema_db
                 break
@@ -57,6 +53,15 @@ def _schema_key(database: str, table: str) -> str:
     return f"{db}.{table}" if db else table
 
 
+def _schema_table_part(schema_key: str, database: str = "") -> str:
+    db = str(database or "").strip()
+    key = str(schema_key or "").strip()
+    prefix = f"{db}."
+    if db and key.startswith(prefix):
+        return key[len(prefix):]
+    return key
+
+
 def _note_working_db(orchestrator: AskOrchestrator, database: str) -> None:
     """Record the database the agent has narrowed into, so subsequent tools default
     to *where the tables were found* — not the connection's default database — when
@@ -65,75 +70,6 @@ def _note_working_db(orchestrator: AskOrchestrator, database: str) -> None:
     db = (database or "").strip()
     if db:
         orchestrator.run_state.table_database = db
-
-
-def _sample_observed_values(
-    orchestrator: AskOrchestrator,
-    disclosed: list[tuple[str, str, list[ColumnInfo]]],
-    *,
-    max_columns: int = 6,
-    sample_rows: int = 300,
-    max_distinct: int = 30,
-    max_candidates: int = 12,
-) -> dict[str, list[str]]:
-    """Best-effort: the real distinct values of low-cardinality text columns in the
-    resolved schema, so the clarifier asks about ACTUAL value encodings (e.g. which
-    `delivery_status` means "妥投") instead of guessing one. Bounded and never fatal:
-    reads a small sample (not a full DISTINCT scan), caps columns/rows, swallows
-    errors, and is skipped when execution isn't allowed.
-
-    The per-column sample reads run CONCURRENTLY (bounded) — they're independent
-    SELECT … LIMIT probes, so doing them sequentially just stacked latency before
-    every clarification."""
-    if not orchestrator.run_state.execute_allowed:
-        return {}
-    candidates: list[tuple[str, str, str]] = []  # (db, table, column)
-    for db, table, columns in disclosed:
-        for col in columns:
-            dtype = (getattr(col, "data_type", "") or "").lower()
-            name = getattr(col, "name", "")
-            if not name or not name.replace("_", "").isalnum():
-                continue  # only plain identifiers (no quoting headaches across dialects)
-            if not any(k in dtype for k in _CATEGORICAL_TYPES):
-                continue
-            candidates.append((db, table, name))
-            if len(candidates) >= max_candidates:
-                break
-        if len(candidates) >= max_candidates:
-            break
-    if not candidates:
-        return {}
-
-    def _probe(item: tuple[str, str, str]) -> tuple[str, list[str] | None]:
-        db, table, name = item
-        qualified = f"{db}.{table}" if db else table
-        try:
-            result = orchestrator.query.execute_sql(
-                f"SELECT {name} FROM {qualified} LIMIT {sample_rows}",
-                database=db, limit=sample_rows,
-            )
-        except Exception:  # noqa: BLE001 — grounding is optional
-            return f"{table}.{name}", None
-        seen: list[str] = []
-        for row in getattr(result, "rows", []) or []:
-            v = row.get(name) if isinstance(row, dict) else None
-            if v is None:
-                continue
-            s = str(v)
-            if s not in seen:
-                seen.append(s)
-            if len(seen) > max_distinct:
-                break
-        # Only useful when it's genuinely low-cardinality (an encoding, not free text).
-        return f"{table}.{name}", (seen if 0 < len(seen) <= max_distinct else None)
-
-    out: dict[str, list[str]] = {}
-    workers = min(4, len(candidates))  # modest — don't spray connections at the DB
-    with ThreadPoolExecutor(max_workers=workers) as pool:
-        for key, seen in pool.map(_probe, candidates):  # map preserves candidate order
-            if seen is not None and len(out) < max_columns:
-                out[key] = seen
-    return out
 
 
 def _remember_table_schema(orchestrator: AskOrchestrator, table: str, database: str, columns: list[ColumnInfo]) -> None:
@@ -148,10 +84,7 @@ def _remember_table_schema(orchestrator: AskOrchestrator, table: str, database: 
 def _disclosed_table_names(orchestrator: AskOrchestrator) -> list[str]:
     names: list[str] = []
     for key in orchestrator.run_state.schemas:
-        if "." in key:
-            names.append(key.split(".", 1)[1])
-        else:
-            names.append(key)
+        names.append(_schema_table_part(key, orchestrator.run_state.schema_db.get(key, "")))
     return names
 
 
@@ -159,35 +92,16 @@ def _find_schema_columns(orchestrator: AskOrchestrator, table: str, database: st
     key = _schema_key(database, table)
     if key in orchestrator.run_state.schemas:
         return orchestrator.run_state.schemas[key]
+    matches: list[list[ColumnInfo]] = []
     for schema_key, columns in orchestrator.run_state.schemas.items():
-        if schema_key == table or schema_key.endswith(f".{table}"):
-            return columns
+        schema_db = orchestrator.run_state.schema_db.get(schema_key, "")
+        table_part = _schema_table_part(schema_key, schema_db)
+        database_ok = not database or schema_db == database
+        if database_ok and (schema_key == table or table_part == table or table_part.endswith(f".{table}")):
+            matches.append(columns)
+    if len(matches) == 1:
+        return matches[0]
     return None
-
-
-def _expand_to_full_columns(
-    orchestrator: AskOrchestrator,
-    disclosed: list[tuple[str, str, list[ColumnInfo]]],
-) -> list[tuple[str, str, list[ColumnInfo]]]:
-    """Return the disclosed tables with their FULL column lists. The resolved schema
-    carries only the minimal-necessary columns; clarification needs to see every
-    column of the relevant tables so it grounds 'which column?' questions in the real
-    fields instead of guessing. Falls back to the given columns if a describe fails."""
-    full: list[tuple[str, str, list[ColumnInfo]]] = []
-    for db, table, columns in disclosed:
-        cols = _find_schema_columns(orchestrator, table, db)
-        if not cols:
-            try:
-                cols = orchestrator.schema.describe_table(table, database=db)
-                _remember_table_schema(orchestrator, table, db, cols)
-            except Exception:  # noqa: BLE001 — grounding is best-effort, never fatal
-                cols = None
-        # Prefer whichever list has more columns (the full one), never fewer.
-        if cols and len(cols) >= len(columns):
-            full.append((db, table, cols))
-        else:
-            full.append((db, table, columns))
-    return full
 
 
 def _collect_disclosed_schemas(
@@ -210,24 +124,30 @@ def _collect_disclosed_schemas(
             if columns is None:
                 columns = orchestrator.schema.describe_table(name, database=db)
                 _remember_table_schema(orchestrator, name, db, columns)
-            selected.append((db, name, columns))
+            if columns:
+                selected.append((db, name, columns))
         return selected
 
     if orchestrator.run_state.schemas:
         for key, columns in orchestrator.run_state.schemas.items():
             db = orchestrator.run_state.schema_db.get(key, database_default)
-            table = key.split(".", 1)[1] if "." in key else key
+            table = _schema_table_part(key, db)
             selected.append((db, table, columns))
         return selected
 
     table = str(args.get("table") or orchestrator.run_state.table or "").strip()
     if not table:
         return []
+    from dbaide.agent.schema_context import normalize_db_table
+
     db = str(args.get("database") or orchestrator.run_state.table_database or database_default)
+    db, table = normalize_db_table(table, db)
     columns = _find_schema_columns(orchestrator, table, db)
     if columns is None:
         columns = orchestrator.schema.describe_table(table, database=db)
         _remember_table_schema(orchestrator, table, db, columns)
+    if not columns:
+        return []
     return [(db, table, columns)]
 
 

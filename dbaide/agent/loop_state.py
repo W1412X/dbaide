@@ -88,6 +88,9 @@ def dump_loop_state(
             "_loop_sql_confidence": orchestrator.run_state.sql_confidence,
             "_loop_sql_feedback": orchestrator.run_state.sql_feedback,
             "_loop_answer": orchestrator.run_state.answer,
+            "_loop_pending_question": orchestrator.run_state.pending_question,
+            "_loop_pending_options": list(orchestrator.run_state.pending_options),
+            "_loop_pending_questions": list(orchestrator.run_state.pending_questions),
             "_loop_risk_confirmation": dict(orchestrator.run_state.risk_confirmation),
             "_loop_confirmed_risk_sqls": list(orchestrator.run_state.confirmed_risk_sqls),
             "_loop_clarifications": list(orchestrator.run_state.clarifications),
@@ -121,6 +124,9 @@ def restore_loop_state(orchestrator: Any, snapshot: dict[str, Any]) -> tuple[lis
     orchestrator.run_state.sql_confidence = None if _conf is None else float(_conf)
     orchestrator.run_state.sql_feedback = str(payload.get("_loop_sql_feedback") or "")
     orchestrator.run_state.answer = str(payload.get("_loop_answer") or "")
+    orchestrator.run_state.pending_question = str(payload.get("_loop_pending_question") or "")
+    orchestrator.run_state.pending_options = list(payload.get("_loop_pending_options") or [])
+    orchestrator.run_state.pending_questions = list(payload.get("_loop_pending_questions") or [])
     orchestrator.run_state.risk_confirmation = dict(payload.get("_loop_risk_confirmation") or {})
     orchestrator.run_state.confirmed_risk_sqls = list(payload.get("_loop_confirmed_risk_sqls") or [])
     orchestrator.run_state.clarifications = list(payload.get("_loop_clarifications") or [])
@@ -128,7 +134,4 @@ def restore_loop_state(orchestrator: Any, snapshot: dict[str, Any]) -> tuple[lis
     orchestrator.run_state.memory = AgentMemory.from_dict(payload.get("_loop_memory"))
     orchestrator.run_state.execute_allowed = execute_allowed
     orchestrator.run_state.query_result = None
-    orchestrator.run_state.pending_question = ""
-    orchestrator.run_state.pending_options = []
-    orchestrator.run_state.pending_questions = []
     return transcript, execute_allowed

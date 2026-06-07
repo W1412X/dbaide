@@ -34,6 +34,10 @@ _SQL_TOOLS = frozenset({"execute_sql", "execute_readonly_sql", "explain_sql",
                         "generate_sql", "validate_sql"})
 
 
+def _tool_call_key(tool_name: str, args: dict[str, Any]) -> str:
+    return f"{tool_name}:{json.dumps(args or {}, ensure_ascii=False, sort_keys=True, default=str)}"
+
+
 def _executed_sql(tool_name: str, orch, result) -> str:
     if tool_name not in _SQL_TOOLS:
         return ""
@@ -47,11 +51,22 @@ def _risk_reply_confirms(reply: str) -> bool:
     text = str(reply or "").strip().lower()
     if not text:
         return False
+    # Denials must win over broad allow tokens. Chinese replies such as "取消执行" or
+    # "不要执行" contain "执行"; treating substring presence as approval would run SQL
+    # the user explicitly cancelled.
+    if any(token in text for token in (
+        "cancel", "stop", "abort", "no", "do not", "don't", "deny",
+        "取消", "停止", "不要", "不执行", "别执行", "拒绝", "否",
+    )):
+        return False
     return any(token in text for token in (
         "execute", "proceed", "confirm", "approve", "yes", "run it",
         "继续", "确认", "执行", "运行", "同意",
     ))
-RESULT_PREVIEW_LIMIT = 3500
+RESULT_PREVIEW_LIMIT = 1400
+RAW_HISTORY_ITEMS = 5
+RAW_HISTORY_ITEM_LIMIT = 900
+MAX_REPEATED_CALL_BLOCKS = 3
 
 
 class LoopDecisionError(RuntimeError):
@@ -72,6 +87,7 @@ class LoopState:
     database: str
     execute_allowed: bool
     calls: list[ToolCallRecord] = field(default_factory=list)
+    repeated_blocks: dict[str, int] = field(default_factory=dict)
 
 
 class AskAgentLoop:
@@ -83,6 +99,7 @@ class AskAgentLoop:
         self.registry = build_tool_registry(orchestrator)
         self.allowed_tool_names = frozenset(s.name for s in loop_tool_specs(self.registry))
         self._trace_parent = ""
+        self._loop_node_id = ""
 
     def _ns_step(self, event: dict) -> dict:
         """Namespace a step event under the current intent's trace node (when this
@@ -90,7 +107,9 @@ class AskAgentLoop:
         nest under their intent."""
         if self._trace_parent and event.get("step"):
             event["node_id"] = f"{self._trace_parent}:step:{event['step']}"
-            event["parent_id"] = self._trace_parent
+            event["parent_id"] = self._loop_node_id or self._trace_parent
+        elif event.get("step") and self._loop_node_id:
+            event["parent_id"] = self._loop_node_id
         return event
 
     def run(
@@ -114,8 +133,10 @@ class AskAgentLoop:
         it and step ids don't collide across intents)."""
         orch = self.orchestrator
         self._trace_parent = trace_parent
+        self._loop_node_id = f"{trace_parent}:loop" if trace_parent else "loop"
         transcript: list[str] = []
         approved_risk_sql = ""
+        approved_risk_args: dict[str, Any] = {}
         sql_failures = 0
         max_sql_retries = max(0, int(getattr(orch.session, "agent_sql_retries", 0)))
 
@@ -124,22 +145,34 @@ class AskAgentLoop:
             reply = str(user_reply or question or "").strip()
             if reply:
                 transcript.append(f"User reply: {reply}")
-                # If the pause was a business-criteria (口径) clarification, fold the
-                # reply into the confirmed criteria so generate_sql honours it exactly.
-                if orch.run_state.clarify_questions:
+                pending_question = (
+                    orch.run_state.clarify_questions
+                    or orch.run_state.pending_question
+                    or "pending clarification"
+                )
+                # Every ask_user pause is a clarification chosen by the main brain.
+                # Preserve the answered question so later decisions and SQL generation
+                # know what the reply refers to.
+                if pending_question and not orch.run_state.risk_confirmation:
                     fact = (
-                        f"User confirmed the following criteria — {orch.run_state.clarify_questions}\n"
+                        f"User confirmed the following criteria — {pending_question}\n"
                         f"User's answer: {reply}"
                     )
                     orch.run_state.clarifications.append(fact)
                     orch.run_state.memory.confirmed_facts.append(fact)
-                    orch.run_state.memory.resolve_open_question(orch.run_state.clarify_questions)
+                    orch.run_state.memory.resolve_open_question(pending_question)
                     orch.run_state.clarify_questions = ""
+                    orch.run_state.pending_question = ""
+                    orch.run_state.pending_options = []
+                    orch.run_state.pending_questions = []
                 if orch.run_state.risk_confirmation:
                     risk = dict(orch.run_state.risk_confirmation)
                     if _risk_reply_confirms(reply):
                         sql_hash = str(risk.get("sql_hash") or "").strip()
                         approved_risk_sql = str(risk.get("sql") or orch.run_state.sql or "").strip()
+                        approved_risk_args = dict(risk.get("execute_args") or {})
+                        if approved_risk_sql:
+                            approved_risk_args["sql"] = approved_risk_sql
                         if sql_hash and sql_hash not in orch.run_state.confirmed_risk_sqls:
                             orch.run_state.confirmed_risk_sqls.append(sql_hash)
                         orch.run_state.risk_confirmation = {}
@@ -172,7 +205,15 @@ class AskAgentLoop:
                 execute_allowed=execute,
             )
             self.progress(
-                progress_event(stage="loop", title="Resuming agent loop", status="running", kind="agent"),
+                progress_event(
+                    stage="loop",
+                    title="Agent loop",
+                    status="running",
+                    kind="phase",
+                    node_id=self._loop_node_id,
+                    parent_id=self._trace_parent,
+                    detail="resuming",
+                ),
             )
             if orch.run_state.answer and not orch.run_state.query_result:
                 return self._build_response(orch, orch.run_state.answer, disclosures_before or [])
@@ -181,9 +222,22 @@ class AskAgentLoop:
             orch.schema.disclose_instance()
             state = LoopState(question=question, database=database, execute_allowed=execute)
             self.progress(
-                progress_event(stage="loop", title="Agent loop started", status="running", kind="agent"),
+                progress_event(
+                    stage="loop",
+                    title="Agent loop",
+                    status="running",
+                    kind="phase",
+                    node_id=self._loop_node_id,
+                    parent_id=self._trace_parent,
+                    detail="started",
+                ),
             )
         tool_ctx = ToolContext(
+            workflow_id=self._trace_parent or "ask",
+            connection=orch.session.connection,
+            adapter=orch.adapter,
+            asset_store=orch.asset_store,
+            session=orch.session,
             execution_policy=orch.execution_policy.value,
             trace_sink=self._trace_sink,
             cancel_check=orch.cancel_check,
@@ -208,7 +262,7 @@ class AskAgentLoop:
                     step=1,
                 )),
             )
-            result = runtime.call_tool("execute_sql", {"sql": approved_risk_sql}, tool_ctx)
+            result = runtime.call_tool("execute_sql", approved_risk_args or {"sql": approved_risk_sql}, tool_ctx)
             done_event = self._ns_step(progress_event(
                 stage="execute_sql",
                 title="execute_sql done",
@@ -240,7 +294,25 @@ class AskAgentLoop:
                 return self._build_failed_response(orch, f"decision_invalid: {exc}", disclosures_before or [])
 
             self._apply_decision_memory(decision)
+            tool_llm_start = recorder.snapshot_len() if recorder else 0
             action = str(decision.get("action") or "").strip().lower()
+            decision_calls = recorder.since(decide_start) if recorder is not None else []
+            ev = progress_event(
+                stage="decide",
+                title=str(decision.get("thought") or "Agent decision")[:200],
+                status="completed",
+                kind="llm",
+                detail=f"action={action or '?'}",
+                node_id=(
+                    f"{self._trace_parent}:decision:{step_no + 1}"
+                    if self._trace_parent else f"decision:{step_no + 1}"
+                ),
+                parent_id=self._loop_node_id,
+            )
+            ev["decision"] = decision
+            if decision_calls:
+                ev["llm_calls"] = decision_calls
+            self.progress(ev)
             if action == "finish":
                 answer = str(decision.get("answer") or "").strip()
                 if not answer or answer == "Query complete.":
@@ -255,7 +327,7 @@ class AskAgentLoop:
                 # The decide call that chose to finish runs outside any tool step;
                 # surface it (prompt+response) as its own debug-trace step.
                 if recorder is not None:
-                    finish_calls = recorder.since(decide_start)
+                    finish_calls = recorder.since(tool_llm_start)
                     if finish_calls:
                         ev = progress_event(stage="finish", title="Finish",
                                             status="completed", kind="tool", step=step_no + 1)
@@ -263,7 +335,15 @@ class AskAgentLoop:
                         ev["output"] = answer
                         self.progress(self._ns_step(ev))
                 self.progress(
-                    progress_event(stage="loop", title="Agent loop finished", status="completed", kind="agent"),
+                    progress_event(
+                        stage="loop",
+                        title="Agent loop",
+                        status="completed",
+                        kind="phase",
+                        node_id=self._loop_node_id,
+                        parent_id=self._trace_parent,
+                        detail="finished",
+                    ),
                 )
                 return self._build_response(orch, answer, disclosures_before or [])
 
@@ -286,12 +366,36 @@ class AskAgentLoop:
                 continue
 
             args = decision.get("args") if isinstance(decision.get("args"), dict) else {}
-            thought = str(decision.get("thought") or "").strip()
-            if thought:
-                self.progress(
-                    progress_event(stage="decision", title=thought[:200], status="completed", kind="decision"),
+            call_key = _tool_call_key(tool_name, args)
+            if (
+                tool_name not in _SQL_TOOLS
+                and any(_tool_call_key(call.tool, call.args) == call_key for call in state.calls)
+            ):
+                count = state.repeated_blocks.get(call_key, 0) + 1
+                state.repeated_blocks[call_key] = count
+                previous = next(
+                    (call.summary for call in reversed(state.calls)
+                     if _tool_call_key(call.tool, call.args) == call_key),
+                    "",
                 )
-
+                reason = (
+                    f"repeated {count} time(s); previous result: {_shorten(previous, 420)}. "
+                    "Use the completed result from memory, change arguments/tool, ask_user, execute SQL, or finish."
+                )
+                orch.run_state.memory.add_do_not_repeat(call_key, reason)
+                orch.run_state.memory.next_action_hint = (
+                    "The last requested tool call was an exact repeat and is blocked. "
+                    "Use the prior evidence in memory; choose a different action, ask_user, run SQL, or finish."
+                )
+                transcript.append(f"Repeated tool call blocked: {call_key}. {reason}")
+                runtime.consume_step()
+                if count >= MAX_REPEATED_CALL_BLOCKS:
+                    return self._build_failed_response(
+                        orch,
+                        f"repeated_tool_call_blocked: {call_key}",
+                        disclosures_before or [],
+                    )
+                continue
             step_no += 1
             self.progress(
                 self._ns_step(progress_event(
@@ -329,6 +433,7 @@ class AskAgentLoop:
                 ok=result.ok,
                 summary=summary,
                 artifacts=artifacts,
+                data=data_for_memory if isinstance(data_for_memory, dict) else None,
             )
             # Put the exact SQL on the execute/explain step itself, so clicking the
             # step in the trace surfaces the SQL the system ran (full auditability).
@@ -355,20 +460,19 @@ class AskAgentLoop:
             if summary and summary != done_detail:
                 done_event["output"] = summary
             # Full prompt+response of every model call this iteration made — the
-            # decide call plus the tool's own sub-agent calls (debug trace). Grouped
-            # on the tool step because a standalone "decision" event is collapsed to
-            # its thought by the trace model. Each call keeps its own `stage` tag.
+            # tool's own sub-agent calls (debug trace). The main decision call is a
+            # separate clickable `decide` node so thought and action are inspectable
+            # independently.
             if recorder is not None:
-                iter_calls = recorder.since(decide_start)
+                iter_calls = recorder.since(tool_llm_start)
                 if iter_calls:
                     done_event["llm_calls"] = iter_calls
-                # Full structured tool output (e.g. discovery hits, resolved schema,
-                # relations) — skip execute tools whose rows are large and already
-                # summarised via sql + row_count.
-                if isinstance(result.data, dict) and tool_name not in {
-                    "execute_sql", "execute_readonly_sql",
-                }:
-                    done_event["result_data"] = result.data
+            # Full structured tool output (e.g. discovery hits, resolved schema,
+            # relations, SQL result previews). This is always recorded so copied
+            # traces remain detailed even when full LLM prompt capture is disabled.
+            # execute_sql already caps rows in its ToolResult.
+            if isinstance(result.data, dict):
+                done_event["result_data"] = result.data
             if executed_sql:
                 done_event["sql"] = executed_sql
                 # Carry the SQL facts so the typed SQL step can show rows/db on click.
@@ -426,7 +530,7 @@ class AskAgentLoop:
         - execute_sql succeeded → the data result is the answer;
         - execute_sql was blocked by policy → present the SQL + the block reason;
         - validate_sql succeeded under a non-executing policy → present the SQL only;
-        - synthesize_schema_answer / profile_table succeeded → their output is the answer.
+        - profile_table succeeded → its output is the answer.
         """
         if tool_name in _EXECUTE_TOOLS and result.ok:
             return True
@@ -441,8 +545,6 @@ class AskAgentLoop:
                 sql = orch.run_state.sql or ""
                 orch.run_state.answer = f"SQL:\n```sql\n{sql}\n```\n\n_Generated (not executed)._"
                 return True
-        if tool_name == "synthesize_schema_answer" and result.ok:
-            return True
         if tool_name == "profile_table" and result.ok:
             return True
         return False
@@ -470,8 +572,15 @@ class AskAgentLoop:
         warnings for debugging. Marks the run failed in the trace."""
         self._fail(reason)
         self.progress(
-            progress_event(stage="loop", title="Agent loop stopped", status="failed",
-                           kind="agent", detail=reason),
+            progress_event(
+                stage="loop",
+                title="Agent loop",
+                status="failed",
+                kind="phase",
+                detail=reason,
+                node_id=self._loop_node_id or "",
+                parent_id=self._trace_parent,
+            ),
         )
         from dbaide.i18n import t
         answer = (orch.run_state.answer or "").strip()
@@ -518,9 +627,15 @@ class AskAgentLoop:
             "• SQL is an exploration tool as well as the final query. You may run multiple focused "
             "read-only SQL statements to inspect counts, samples, consistency, or compare hypotheses, "
             "then use their artifact ids and summaries in later reasoning.\n"
-            "• Ask the user whenever an unresolved business choice would change the result. This can "
-            "happen during schema exploration, after profiling values, after seeing SQL results, or "
-            "before final SQL. Prefer exact candidate table/column/value options.\n"
+            "• Ask the user only for irreducible business intent. Do NOT ask for information tools "
+            "can discover: table/column existence, field source, joins/FKs, indexes, row samples, "
+            "value distributions, SQL feasibility, or timezone/date conversion implied by schema or "
+            "authoritative user notes. First inspect with retrieve_schema_context, describe_table, "
+            "retrieve_join_context, column_stats, or focused read-only SQL. If uncertainty remains "
+            "after evidence is exhausted, ask with exact candidate table/column/value options and cite "
+            "what you already verified. Before every ask_user call, explicitly reason in `thought`: "
+            "what has been checked, why the remaining uncertainty cannot be resolved by tools, and why "
+            "the user's answer is necessary for the business result.\n"
             "• Do not invent tables, columns, SQL features, status meanings, units, or timezones. The "
             f"current connection session timezone is configured in the connection; SQL writer also sees it.\n\n"
             f"Execution policy: {policy} (execute_sql is {execute_note})\n\n"
@@ -531,14 +646,15 @@ class AskAgentLoop:
             '"memory_updates":{"findings":[],"excluded_paths":[],"open_questions":[]},"next_action_hint":"..."}\n'
             '  {"action":"finish","answer":"markdown answer for the user","memory_updates":{"findings":[]}}\n\n'
             "Tool guidance:\n"
-            "- Schema / where-is questions: discover_schema or retrieve_schema_context → synthesize_schema_answer or finish\n"
+            "- Schema / where-is questions: discover_schema or retrieve_schema_context → finish\n"
             "- Data queries: retrieve_schema_context, inspect/profile/run exploratory SQL as needed, call retrieve_join_context if joins are needed, ask_user if necessary, then generate_sql → validate_sql"
             + (" → execute_sql → finish" if state.execute_allowed and policy not in ("sql_only", "inspect_only") else " → finish")
             + "\n"
             "- generate_sql uses all currently disclosed schemas unless you pass tables. If retrieve_schema_context returned many candidates, pass only the table names you intentionally chose; otherwise inspect or ask first.\n"
             "- retrieve_join_context does not run semantic inference or sample validation unless you ask for those flags. Call validate_joins only when the user explicitly asks to re-check already loaded joins.\n"
             "- Use list_joins only when the user asks to inspect saved joins.\n"
-            "- If schema is ambiguous or multiple valid interpretations exist at any point, ask before guessing. Ground options in actual candidate table names, column names, or observed values; never ask an open 'which field?' question when the candidates are known.\n"
+            "- If schema is ambiguous or multiple valid interpretations exist at any point, inspect more evidence before asking. Ask only when the remaining ambiguity is a business choice the database cannot answer. Ground options in actual candidate table names, column names, or observed values; never ask an open 'which field?' question when the candidates are known.\n"
+            "- Anti-premature-clarification check: when you feel like asking, first ask yourself whether another schema/profile/join/SQL tool call could answer it. If yes, call that tool instead of ask_user.\n"
             "- ask_user pauses the run until the user replies; the next user message resumes the same workflow.\n"
             "- If validate_sql reports unknown tables/columns, describe_table then retry generate_sql.\n"
             "- describe_table returns the table's full structure (columns, types, indexes, FKs) plus a small sample — the table is the lowest pre-built level; there are no per-column docs.\n"
@@ -548,7 +664,7 @@ class AskAgentLoop:
             "- SQL explain: validate_sql or explain_sql as needed → finish\n"
             "- Do not invent tables or columns. Prefer precision over listing everything.\n"
             "- When you have enough to answer, use action=finish.\n"
-            "- Remember durable facts: when the user states (or confirms via clarify_semantics) a "
+            "- Remember durable facts: when the user states or confirms a "
             "lasting fact about an object — a column's timezone/encoding, what a status value means, "
             "that a table is deprecated and which replaces it — call annotate_object to save it so "
             "future questions benefit. Only save what the user actually stated; never invent a note.\n"
@@ -559,7 +675,7 @@ class AskAgentLoop:
         """Per-step user prompt: question, scope, authoritative notes, confirmed
         criteria, pinned schema, and recent tool history."""
 
-        history = "\n\n".join(transcript[-12:]) if transcript else "(no recent raw tool calls)"
+        history = _compact_history(transcript) if transcript else "(no recent raw tool calls)"
         # Surface the user's pinned schema (composer attachments) so the model knows
         # which tables were explicitly attached and can retrieve schema evidence on them directly
         # instead of re-discovering the whole database.
@@ -653,6 +769,12 @@ class AskAgentLoop:
                 # error back and let the model re-emit valid JSON on the next attempt.
                 last_error = f"response was not valid JSON ({exc}); return ONLY a JSON object"
                 logger.warning("loop_decide_parse_failed: %s", exc)
+                continue
+            except Exception as exc:
+                if _looks_cancelled(exc):
+                    raise
+                last_error = f"LLM call failed ({type(exc).__name__}: {exc}); retry the decision"
+                logger.warning("loop_decide_call_failed: %s", exc)
                 continue
             if not isinstance(payload, dict) or not payload.get("action"):
                 last_error = "missing action field"
@@ -782,9 +904,25 @@ def _summarize_tool_result(tool: str, result: ToolResult) -> str:
     return text
 
 
+def _compact_history(transcript: list[str]) -> str:
+    items = [_shorten(item, RAW_HISTORY_ITEM_LIMIT) for item in transcript[-RAW_HISTORY_ITEMS:]]
+    return "\n\n".join(items)
+
+
+def _shorten(text: str, limit: int) -> str:
+    text = " ".join(str(text or "").split())
+    return text if len(text) <= limit else text[:limit] + "…[truncated]"
+
+
 def _tool_prompt_line(spec) -> str:
     schema = getattr(spec, "input_schema", None) or {}
     if schema:
         args = ", ".join(f"{key}: {value}" for key, value in schema.items())
         return f"- {spec.name}(args: {{{args}}}): {spec.description}"
     return f"- {spec.name}(args: {{}}): {spec.description}"
+
+
+def _looks_cancelled(exc: Exception) -> bool:
+    name = type(exc).__name__.lower()
+    text = str(exc).lower()
+    return "cancel" in name or "cancelled" in text or "canceled" in text

@@ -9,7 +9,6 @@ from dbaide.core.events import TraceEvent
 TOOL_TRACE_STAGES = frozenset({
     "discover_schema",
     "retrieve_schema_context",
-    "clarify_semantics",
     "describe_table",
     "retrieve_join_context",
     "generate_sql",
@@ -23,7 +22,6 @@ TOOL_TRACE_STAGES = frozenset({
     "ask_user",
     "profile_table",
     "column_stats",
-    "synthesize_schema_answer",
     "explain_sql",
     "list_databases",
     "list_tables",
@@ -33,7 +31,6 @@ TOOL_TRACE_STAGES = frozenset({
 PHASE_LABELS: dict[str, str] = {
     "discover_schema": "Exploring schema",
     "retrieve_schema_context": "Reading schema evidence",
-    "clarify_semantics": "Confirming criteria",
     "list_databases": "Exploring schema",
     "list_tables": "Exploring schema",
     "describe_table": "Reading tables",
@@ -49,7 +46,6 @@ PHASE_LABELS: dict[str, str] = {
     "execute_sql": "Running query",
     "profile_table": "Profiling data",
     "column_stats": "Profiling data",
-    "synthesize_schema_answer": "Answering",
     "ask_user": "Waiting for you",
     "build_assets": "Building assets",
 }
@@ -272,8 +268,6 @@ def brief_tool_summary(tool: str, result: Any) -> str:
         return f"{data.get('row_count', '?')} rows"
     if tool == "ask_user":
         return str(data.get("question") or "waiting for user")[:160]
-    if tool == "synthesize_schema_answer":
-        return "schema answer ready"
     if tool == "profile_table":
         return f"{data.get('column_count', '?')} column profile(s)"
     if tool == "column_stats":

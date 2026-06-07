@@ -8,6 +8,7 @@ import pytest
 
 from dbaide.assets import AssetStore
 from dbaide.config import ConfigManager
+from dbaide.core import ExecutionPolicy
 from dbaide.desktop.service import DesktopService
 from dbaide.models import ConnectionConfig
 
@@ -54,11 +55,13 @@ def test_dry_run_does_not_hit_table_data(tmp_path):
 
 def test_conn_payload_includes_load_profile(tmp_path):
     cfg = ConfigManager(path=tmp_path / "config.toml")
-    cfg.upsert_connection(ConnectionConfig(name="p", type="sqlite", path="/tmp/x.db", load_profile="dev"))
+    cfg.upsert_connection(ConnectionConfig(name="p", type="sqlite", path="/tmp/x.db", load_profile="dev", session_timezone="+08:00"))
     svc = DesktopService(cfg, AssetStore(tmp_path / "assets"))
     boot = svc.bootstrap()
     prof = {c["name"]: c["load_profile"] for c in boot["connections"]}
+    tz = {c["name"]: c["session_timezone"] for c in boot["connections"]}
     assert prof["p"] == "dev"
+    assert tz["p"] == "+08:00"
 
 
 def test_build_in_progress_blocks_queries(tmp_path):
@@ -72,3 +75,42 @@ def test_build_in_progress_blocks_queries(tmp_path):
     # Once cleared, queries work again.
     out = svc.execute_sql({"connection_name": "local", "sql": "SELECT 1"})
     assert out["row_count"] == 1
+
+
+def test_service_execute_sql_honors_payload_limit(tmp_path):
+    svc = _service(tmp_path)
+
+    out = svc.execute_sql({"connection_name": "local", "sql": "SELECT id FROM t ORDER BY id", "limit": 1})
+
+    assert out["row_count"] == 1
+    assert out["sql"].endswith("LIMIT 1")
+
+
+def test_service_ask_request_defaults_use_resource_policy(tmp_path):
+    svc = _service(tmp_path)
+    svc.cfg.set_resource_defaults({"default_row_limit": 17, "statement_timeout_seconds": 23})
+
+    request = svc._build_request(
+        {"question": "q"},
+        connection_name="local",
+        policy=ExecutionPolicy.SAFE_AUTO,
+        database="",
+    )
+
+    assert request.limit == 17
+    assert request.timeout_seconds == 23
+
+
+def test_service_join_endpoint_delete_is_scoped_by_database(tmp_path):
+    svc = _service(tmp_path)
+    rel = {"table": "orders", "column": "user_id", "ref_table": "users", "ref_column": "id"}
+    svc.add_join({"connection_name": "local", "database": "sales", **rel})
+    svc.add_join({"connection_name": "local", "database": "analytics", **rel})
+
+    assert svc.list_joins({"connection_name": "local"})["count"] == 2
+
+    svc.delete_join({"connection_name": "local", "database": "sales", **rel})
+
+    remaining = svc.list_joins({"connection_name": "local"})["joins"]
+    assert len(remaining) == 1
+    assert remaining[0]["database"] == "analytics"

@@ -6,13 +6,14 @@ from typing import Any
 
 from dbaide.tools.registry import ToolContext, ToolRegistry, ToolResult
 from dbaide.tools.specs import (
-    DISCOVER_SCHEMA, RETRIEVE_SCHEMA_CONTEXT, SYNTHESIZE_SCHEMA_ANSWER,
+    DISCOVER_SCHEMA, RETRIEVE_SCHEMA_CONTEXT,
     LIST_DATABASES, LIST_TABLES, DESCRIBE_TABLE,
 )
-from dbaide.agent.schema_context import normalize_db_table, object_notes_for_tables
+from dbaide.agent.schema_context import normalize_db_table
 from dbaide.agent.toolkit.support import (
     _err, _note_working_db, _remember_table_schema, _disclosed_table_names,
 )
+from dbaide.models import ColumnInfo
 
 logger = logging.getLogger("dbaide.agent.toolkit")
 
@@ -60,36 +61,6 @@ def register(registry: ToolRegistry, orchestrator) -> None:
             return ToolResult(ok=False, error=_err("retrieve_schema_context", str(exc), retryable=True))
         return ToolResult(ok=True, data=report.to_tool_data())
 
-    def _synthesize_schema_answer(args: dict[str, Any], _ctx: ToolContext) -> ToolResult:
-        from dbaide.agent.progressive_schema import ProgressiveSchemaAgent
-
-        question = str(args.get("question") or orchestrator.run_state.question or "").strip()
-        if not question:
-            return ToolResult(ok=False, error=_err("synthesize_schema_answer", "question is required"))
-        try:
-            discovery = orchestrator.run_state.discovery or orchestrator._discover(question, parent=orchestrator.run_state.trace_node)
-            agent = ProgressiveSchemaAgent(
-                orchestrator.llm,
-                orchestrator.asset_store,
-                orchestrator.instance,
-                fingerprint=getattr(orchestrator, "connection_fingerprint", ""),
-            )
-            pairs = list({
-                (str(getattr(h, "database", "") or ""), str(getattr(h, "table", "") or ""))
-                for h in discovery.hits if getattr(h, "table", "")
-            })
-            answer = agent.synthesize_answer(
-                question,
-                discovery,
-                progress=orchestrator.progress,
-                parent=orchestrator.run_state.trace_node,
-                object_notes=object_notes_for_tables(orchestrator, pairs),
-            )
-            orchestrator.run_state.answer = answer
-            return ToolResult(ok=True, data={"answer": answer})
-        except Exception as exc:
-            return ToolResult(ok=False, error=_err("synthesize_schema_answer", str(exc), retryable=True))
-
     def _list_databases(_args: dict[str, Any], _ctx: ToolContext) -> ToolResult:
         dbs = orchestrator.schema.list_databases()
         return ToolResult(ok=True, data={"databases": dbs})
@@ -111,7 +82,37 @@ def register(registry: ToolRegistry, orchestrator) -> None:
         # split it so the catalog lookup finds the real table instead of returning
         # empty columns and sending the model into a re-describe loop.
         database, table = normalize_db_table(table, database)
+        tdoc = orchestrator.asset_store.table_doc(
+            orchestrator.instance,
+            database,
+            table,
+            fingerprint=getattr(orchestrator, "connection_fingerprint", ""),
+        )
         columns = orchestrator.schema.describe_table(table, database=database)
+        if not columns and tdoc and tdoc.get("columns"):
+            columns = [
+                ColumnInfo(
+                    name=str(col.get("name") or ""),
+                    data_type=str(col.get("data_type") or ""),
+                    nullable=col.get("nullable"),
+                    default=col.get("default"),
+                    comment=str(col.get("comment") or ""),
+                    primary_key=bool(col.get("primary_key")),
+                    indexed=bool(col.get("indexed")),
+                )
+                for col in tdoc.get("columns") or []
+                if col.get("name")
+            ]
+        if not columns:
+            target = f"{database}.{table}" if database else table
+            return ToolResult(
+                ok=False,
+                error=_err(
+                    "describe_table",
+                    f"table not found or has no readable columns: {target}",
+                ),
+                data={"table": table, "database": database, "columns": []},
+            )
         _remember_table_schema(orchestrator, table, database, columns)
         payload = [
             {
@@ -133,12 +134,6 @@ def register(registry: ToolRegistry, orchestrator) -> None:
         # Full table description includes intrinsic table metadata. This is not an
         # automatic relation workflow: it is the expected payload for a direct
         # describe_table request.
-        tdoc = orchestrator.asset_store.table_doc(
-            orchestrator.instance,
-            database,
-            table,
-            fingerprint=getattr(orchestrator, "connection_fingerprint", ""),
-        )
         if tdoc:
             if tdoc.get("indexes"):
                 data["indexes"] = tdoc["indexes"]
@@ -174,7 +169,6 @@ def register(registry: ToolRegistry, orchestrator) -> None:
 
     registry.register(DISCOVER_SCHEMA, _discover_schema)
     registry.register(RETRIEVE_SCHEMA_CONTEXT, _retrieve_schema_context)
-    registry.register(SYNTHESIZE_SCHEMA_ANSWER, _synthesize_schema_answer)
     registry.register(LIST_DATABASES, _list_databases)
     registry.register(LIST_TABLES, _list_tables)
     registry.register(DESCRIBE_TABLE, _describe_table)

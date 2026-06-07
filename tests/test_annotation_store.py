@@ -172,7 +172,7 @@ def test_schema_linker_sees_table_note(tmp_path):
 
     orch, store = _orch(tmp_path)
     store.add("local", scope="table", note="deprecated; use orders_v2 instead", table="orders")
-    orch._discover = lambda q, *, parent="", column_detail=True: DiscoveryResult(
+    orch._discover = lambda q, *, parent="", column_detail=True, scope=None: DiscoveryResult(
         question=q,
         hits=[SchemaHit(kind="table", path="local.orders", name="orders", table="orders", summary="orders")],
     )
@@ -188,7 +188,7 @@ def test_schema_linker_shows_column_notes(tmp_path):
 
     orch, store = _orch(tmp_path)
     store.add("local", scope="column", note="UTC; +8 on display", table="orders", column="paid_at")
-    orch._discover = lambda q, *, parent="", column_detail=True: DiscoveryResult(
+    orch._discover = lambda q, *, parent="", column_detail=True, scope=None: DiscoveryResult(
         question=q,
         hits=[SchemaHit(kind="table", path="local.orders", name="orders", table="orders", summary="orders")],
     )
@@ -215,39 +215,6 @@ def test_attach_notes_to_hits(tmp_path):
     assert discovery.hits[0].note == "prod db"
     assert discovery.hits[1].note == "deprecated"
     assert discovery.hits[2].note == "UTC"
-
-
-def test_synthesize_answer_sees_notes(tmp_path):
-    # The schema answer path must also see
-    # notes or it will point the user at the deprecated table.
-    from dbaide.agent.progressive_schema import ProgressiveSchemaAgent, DiscoveryResult, SchemaHit
-
-    llm = _CapturingLLM()
-    agent = ProgressiveSchemaAgent(llm, None, "demo")
-    discovery = DiscoveryResult(question="q", hits=[
-        SchemaHit(kind="table", path="demo.data_analysis.product_attributes",
-                  name="product_attributes", database="data_analysis",
-                  table="product_attributes", summary="product attribute details"),
-    ])
-    notes = [{"scope": "table", "label": "data_analysis.product_attributes",
-              "note": "deprecated; use product_data.product_attributes"}]
-    agent.synthesize_answer("产品属性在哪个表？", discovery, object_notes=notes)
-    assert "AUTHORITATIVE" in llm.last_prompt
-    assert "deprecated; use product_data.product_attributes" in llm.last_prompt
-
-
-def test_clarifier_sees_object_notes(tmp_path):
-    from dbaide.agent.clarify import SemanticClarifier
-
-    llm = _CapturingLLM({"questions": [], "assumptions": []})
-    clarifier = SemanticClarifier(llm)
-    disclosed = [("data_analysis", "product_attributes",
-                  [ColumnInfo(name="design", data_type="varchar")])]
-    object_notes = [{"scope": "table", "label": "data_analysis.product_attributes",
-                     "note": "deprecated; use product_data.product_attributes"}]
-    clarifier.analyze("产品的属性在哪个表能找到？", disclosed, object_notes=object_notes)
-    assert "AUTHORITATIVE" in llm.last_user
-    assert "deprecated; use product_data.product_attributes" in llm.last_user
 
 
 def test_annotate_object_tool(tmp_path):

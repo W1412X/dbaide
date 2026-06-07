@@ -163,7 +163,8 @@ class JoinEvidenceRetriever:
             return targets
         for key in self.orch.run_state.schemas:
             db = self.orch.run_state.schema_db.get(key, db_default)
-            table = key.split(".", 1)[1] if "." in key else key
+            prefix = f"{db}."
+            table = key[len(prefix):] if db and key.startswith(prefix) else key
             pair = (db, table)
             if pair not in seen:
                 seen.add(pair)

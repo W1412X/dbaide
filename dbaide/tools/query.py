@@ -31,6 +31,15 @@ class QueryTools:
         self.timeout_seconds = timeout_seconds
         self.explain_max_rows = policy.explain_max_rows if policy else 0
 
+    def _guard_for_limit(self, limit: int | None) -> SQLGuard:
+        if limit is None:
+            return self.sql_guard
+        return SQLGuard(
+            default_limit=max(1, int(limit)),
+            max_row_limit=self.sql_guard.max_row_limit,
+            dialect=self.sql_guard.dialect,
+        )
+
     def estimate_rows(self, sql: str, *, database: str = "") -> int | None:
         """Best-effort EXPLAIN row estimate for cost gating (None if unavailable)."""
         try:
@@ -38,8 +47,8 @@ class QueryTools:
         except Exception:
             return None
 
-    def validate_sql(self, sql: str, *, add_limit: bool = True) -> ValidationResult:
-        first = self.sql_guard.validate(sql, add_limit=add_limit)
+    def validate_sql(self, sql: str, *, add_limit: bool = True, limit: int | None = None) -> ValidationResult:
+        first = self._guard_for_limit(limit).validate(sql, add_limit=add_limit)
         if not first.ok:
             return first
         second = self.schema_guard.validate(first.normalized_sql, self.context)
@@ -47,8 +56,8 @@ class QueryTools:
             return second
         return first
 
-    def validate_sql_report(self, sql: str, *, add_limit: bool = True) -> ValidationReport:
-        report = self.sql_guard.validate_with_report(sql, add_limit=add_limit)
+    def validate_sql_report(self, sql: str, *, add_limit: bool = True, limit: int | None = None) -> ValidationReport:
+        report = self._guard_for_limit(limit).validate_with_report(sql, add_limit=add_limit)
         if not report.ok:
             return report
         schema_result = self.schema_guard.validate(report.normalized_sql, self.context)
@@ -78,10 +87,11 @@ class QueryTools:
         *,
         database: str = "",
         limit: int = 100,
+        timeout_seconds: int | None = None,
         preflight_explain: bool = False,
         confirmed: bool = False,
     ) -> QueryResult:
-        report = self.validate_sql_report(sql, add_limit=True)
+        report = self.validate_sql_report(sql, add_limit=True, limit=limit)
         if not report.ok:
             raise ValueError("; ".join(report.issues))
         if report.requires_confirmation and not confirmed:
@@ -91,13 +101,13 @@ class QueryTools:
             explain_target = _strip_leading_explain(normalized)
             try:
                 explain_result = self.adapter.explain(
-                    explain_target, database=database, timeout_seconds=self.timeout_seconds,
+                    explain_target, database=database, timeout_seconds=timeout_seconds or self.timeout_seconds,
                 )
                 self.context.record_execution(explain_result.sql, instance=self.instance, database=database)
             except (ValueError, RuntimeError, OSError):
                 pass
         result = self.adapter.execute_readonly(
-            normalized, database=database, limit=limit, timeout_seconds=self.timeout_seconds,
+            normalized, database=database, limit=limit, timeout_seconds=timeout_seconds or self.timeout_seconds,
         )
         self.context.record_execution(result.sql, instance=self.instance, database=database)
         return result

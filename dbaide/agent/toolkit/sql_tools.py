@@ -8,9 +8,10 @@ from typing import Any
 
 from dbaide.agent.memory import SQLArtifact
 from dbaide.core.result import ExecutionPolicy
+from dbaide.i18n import t
 from dbaide.tools.registry import ToolContext, ToolRegistry, ToolResult
 from dbaide.tools.specs import (
-    CLARIFY_SEMANTICS, GENERATE_SQL, VALIDATE_SQL,
+    GENERATE_SQL, VALIDATE_SQL,
     EXECUTE_SQL, EXECUTE_READONLY_SQL, EXPLAIN_SQL,
 )
 from dbaide.agent.progress_events import subagent_event
@@ -19,7 +20,7 @@ from dbaide.agent.schema_context import (
     merge_sql_context, object_notes_for_tables, validation_feedback,
 )
 from dbaide.agent.toolkit.support import (
-    _collect_disclosed_schemas, _err, _expand_to_full_columns,
+    _collect_disclosed_schemas, _err,
     _note_working_db, _tables_in_sql,
 )
 
@@ -27,56 +28,6 @@ logger = logging.getLogger("dbaide.agent.toolkit")
 
 
 def register(registry: ToolRegistry, orchestrator) -> None:
-    def _clarify_semantics(args: dict[str, Any], _ctx: ToolContext) -> ToolResult:
-        from dbaide.agent.clarify import SemanticClarifier
-
-        question = str(args.get("question") or orchestrator.run_state.question or "").strip()
-        disclosed = _collect_disclosed_schemas(orchestrator, {})
-        if not disclosed:
-            # Nothing resolved yet — resolve the schema first; don't block.
-            return ToolResult(ok=True, data={"clear": True, "note": "no schema resolved yet"})
-        # Clarification must see the COMPLETE column list of the relevant tables. The
-        # resolved schema keeps only the minimal-necessary columns, which would force
-        # the model to ask about a "which column?" candidate it can't actually see —
-        # the cause of fabricated field names. Expand each table to its full columns.
-        disclosed = _expand_to_full_columns(orchestrator, disclosed)
-        apply_column_notes(orchestrator, disclosed)  # user column notes visible to clarifier
-        # Do not perform live value sampling inside clarification. If the main LLM
-        # needs actual values, it must explicitly call column_stats/top_values first.
-        observed: dict[str, list[str]] = {}
-        object_notes = object_notes_for_tables(
-            orchestrator, [(db, tbl) for db, tbl, _ in disclosed]
-        )
-        try:
-            plan = SemanticClarifier(orchestrator.llm).analyze(
-                question, disclosed, observed,
-                already_confirmed=list(orchestrator.run_state.clarifications),
-                object_notes=object_notes,
-            )
-        except Exception as exc:  # noqa: BLE001 — surface the failure, do NOT fake "clear"
-            logger.debug("clarify_semantics failed: %s", exc, exc_info=True)
-            # Returning clear=True here would turn "never guess" into "skip clarification
-            # and generate SQL anyway". Report the failure so the loop can retry/decide.
-            return ToolResult(ok=False, error=_err("clarify_semantics", f"clarification failed: {exc}", retryable=True))
-        # Assumptions are applied whether or not we ask, so SQL generation honours them.
-        if plan.assumptions:
-            orchestrator.run_state.clarifications.extend(plan.assumptions)
-        if plan.is_empty():
-            return ToolResult(ok=True, data={"clear": True, "assumptions": plan.assumptions})
-        # Material ambiguity → pause and confirm the exact criteria with the user.
-        rendered = plan.render_question()
-        orchestrator.run_state.clarify_questions = rendered
-        orchestrator.run_state.pending_question = rendered
-        orchestrator.run_state.pending_options = plan.first_options()
-        # Structured per-question list so the UI can step through them one at a time.
-        orchestrator.run_state.pending_questions = [
-            {"ask": str(q.get("ask") or ""), "options": list(q.get("options") or [])}
-            for q in plan.questions
-        ]
-        return ToolResult(ok=True, data={
-            "pending": True, "question": rendered, "options": plan.first_options(),
-        })
-
     def _generate_sql(args: dict[str, Any], _ctx: ToolContext) -> ToolResult:
         question = str(args.get("question") or orchestrator.run_state.question or "").strip()
         # Generate from the schemas the main brain has explicitly disclosed or named.
@@ -95,7 +46,7 @@ def register(registry: ToolRegistry, orchestrator) -> None:
             ctx = merge_sql_context(orchestrator.session.disclosure.summary(), relations)
             if orchestrator.run_state.clarifications:
                 ctx["criteria"] = list(orchestrator.run_state.clarifications)  # confirmed 口径
-            object_notes = object_notes_for_tables(orchestrator, targets)
+            object_notes = object_notes_for_tables(orchestrator, _sql_note_targets(orchestrator, targets))
             if object_notes:
                 ctx["object_notes"] = object_notes  # authoritative db/table user notes
             feedback = orchestrator.run_state.sql_feedback
@@ -179,6 +130,8 @@ def register(registry: ToolRegistry, orchestrator) -> None:
         database = str(args.get("database") or orchestrator.run_state.table_database or orchestrator.run_state.database or "")
         purpose = str(args.get("purpose") or "").strip()
         save_as = str(args.get("save_as") or "").strip()
+        limit = _positive_int(args.get("limit"), orchestrator.session.default_limit)
+        timeout_seconds = _positive_int(args.get("timeout_seconds"), None)
         if not sql:
             return ToolResult(ok=False, error=_err("execute_sql", "sql is required"))
 
@@ -191,12 +144,16 @@ def register(registry: ToolRegistry, orchestrator) -> None:
         if not orchestrator.run_state.execute_allowed:
             return ToolResult(ok=False, data={"blocked": True, "reason": "Execution disabled for this request"})
 
-        validation = orchestrator.query.validate_sql(sql, add_limit=True)
+        validation = orchestrator.query.validate_sql(sql, add_limit=True, limit=limit)
         if not validation.ok:
             issues = "; ".join(i.message for i in validation.issues)
             return ToolResult(ok=False, error=_err("execute_sql", f"SQL invalid: {issues}"))
 
-        validation_report = orchestrator.query.validate_sql_report(validation.normalized_sql, add_limit=False)
+        validation_report = orchestrator.query.validate_sql_report(
+            validation.normalized_sql,
+            add_limit=False,
+            limit=limit,
+        )
         # Do NOT coerce a genuine 0.0 ("no confidence") up to 0.7 — `or 0.7` would mask
         # exactly the low-confidence plans the risk gate must catch. Only a missing
         # (None) confidence falls back to the neutral default.
@@ -245,19 +202,31 @@ def register(registry: ToolRegistry, orchestrator) -> None:
         if risk.action != "auto_execute":
             sql_hash = _sql_hash(validation.normalized_sql)
             if sql_hash not in orchestrator.run_state.confirmed_risk_sqls:
+                execute_args = {
+                    "sql": validation.normalized_sql,
+                    "database": database,
+                    "limit": limit,
+                }
+                if purpose:
+                    execute_args["purpose"] = purpose
+                if save_as:
+                    execute_args["save_as"] = save_as
+                if timeout_seconds is not None:
+                    execute_args["timeout_seconds"] = timeout_seconds
                 question = _risk_confirmation_question(
                     sql=validation.normalized_sql,
                     reason=risk.reason,
                     warnings=validation_report.warnings,
                     estimated_rows=estimated_rows,
                 )
-                options = ["Execute anyway", "Cancel"]
+                options = [t("risk.execute_anyway"), t("risk.cancel")]
                 orchestrator.run_state.pending_question = question
                 orchestrator.run_state.pending_options = options
                 orchestrator.run_state.pending_questions = [{"ask": question, "options": options}]
                 orchestrator.run_state.risk_confirmation = {
                     "sql": validation.normalized_sql,
                     "sql_hash": sql_hash,
+                    "execute_args": execute_args,
                     "reason": risk.reason,
                     "risk_action": risk.action,
                     "risk_level": risk.risk_level,
@@ -274,6 +243,7 @@ def register(registry: ToolRegistry, orchestrator) -> None:
                         "risk_action": risk.action,
                         "risk_level": risk.risk_level,
                         "sql": validation.normalized_sql,
+                        "execute_args": execute_args,
                         "warnings": validation_report.warnings,
                     },
                 )
@@ -281,8 +251,10 @@ def register(registry: ToolRegistry, orchestrator) -> None:
         try:
             execute_kwargs = {
                 "database": database,
-                "limit": orchestrator.session.default_limit,
+                "limit": limit,
             }
+            if timeout_seconds is not None:
+                execute_kwargs["timeout_seconds"] = timeout_seconds
             if "confirmed" in inspect.signature(orchestrator.query.execute_sql).parameters:
                 execute_kwargs["confirmed"] = True
             result = orchestrator.query.execute_sql(validation.normalized_sql, **execute_kwargs)
@@ -323,6 +295,7 @@ def register(registry: ToolRegistry, orchestrator) -> None:
                     "purpose": purpose,
                     "result_summary": result_summary,
                     "sql": validation.normalized_sql,
+                    "database": database,
                 },
             )
         except Exception as exc:
@@ -331,7 +304,7 @@ def register(registry: ToolRegistry, orchestrator) -> None:
 
     def _explain_sql(args: dict[str, Any], _ctx: ToolContext) -> ToolResult:
         sql = str(args.get("sql") or orchestrator.run_state.sql or "").strip()
-        database = str(args.get("database") or orchestrator.run_state.database or "")
+        database = str(args.get("database") or orchestrator.run_state.table_database or orchestrator.run_state.database or "")
         if not sql:
             return ToolResult(ok=False, error=_err("explain_sql", "sql is required"))
         report = orchestrator.diagnose.diagnose_sql(sql, database=database)
@@ -344,12 +317,40 @@ def register(registry: ToolRegistry, orchestrator) -> None:
             orchestrator.run_state.answer = "\n".join(lines)
         return ToolResult(ok=bool(report.get("ok")), data=report)
 
-    registry.register(CLARIFY_SEMANTICS, _clarify_semantics)
     registry.register(GENERATE_SQL, _generate_sql)
     registry.register(VALIDATE_SQL, _validate_sql)
     registry.register(EXECUTE_READONLY_SQL, _execute_sql)
     registry.register(EXECUTE_SQL, _execute_sql)
     registry.register(EXPLAIN_SQL, _explain_sql)
+
+
+def _sql_note_targets(orchestrator, selected: list[tuple[str, str]]) -> list[tuple[str, str]]:
+    """Tables whose object notes must reach SQL generation.
+
+    The selected SQL tables are not enough: schema retrieval may have found a
+    deprecated/wrong candidate and deliberately kept it out of run_state.schemas.
+    Its note is still authoritative context for SQL writing, otherwise the model
+    can unknowingly use a replacement/nearby table while losing the warning.
+    """
+    out: list[tuple[str, str]] = []
+    seen: set[tuple[str, str]] = set()
+
+    def add(database: str, table: str) -> None:
+        key = (str(database or "").strip(), str(table or "").strip())
+        if key[1] and key not in seen:
+            seen.add(key)
+            out.append(key)
+
+    for db, table in selected:
+        add(db, table)
+
+    reports = getattr(getattr(orchestrator, "run_state", None), "memory", None)
+    for report in list(getattr(reports, "schema_reports", []) or [])[-3:]:
+        for candidate in getattr(report, "candidates", []) or []:
+            notes = getattr(candidate, "notes", {}) or {}
+            if getattr(candidate, "status", "active") != "active" or notes.get("table"):
+                add(getattr(candidate, "database", ""), getattr(candidate, "table", ""))
+    return out
 
 
 def _sql_hash(sql: str) -> str:
@@ -369,6 +370,16 @@ def _result_summary(result: Any) -> str:
     return f"Previewed {min(len(rows), 10)} row(s) with columns: {', '.join(columns[:8])}."
 
 
+def _positive_int(value: Any, default: int | None) -> int | None:
+    if value is None or value == "":
+        return default
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError):
+        return default
+    return parsed if parsed > 0 else default
+
+
 def _risk_confirmation_question(
     *,
     sql: str,
@@ -377,15 +388,15 @@ def _risk_confirmation_question(
     estimated_rows: int | None,
 ) -> str:
     lines = [
-        "This query may be expensive or risky. Confirm before executing.",
+        t("risk.confirm_title"),
         "",
-        f"Reason: {reason}",
+        t("risk.reason", reason=reason),
     ]
     if estimated_rows is not None:
-        lines.append(f"Estimated rows from EXPLAIN: ~{estimated_rows:,}")
+        lines.append(t("risk.estimated_rows", rows=f"{estimated_rows:,}"))
     if warnings:
         lines.append("")
-        lines.append("Warnings:")
+        lines.append(t("risk.warnings"))
         lines.extend(f"- {w}" for w in warnings[:5])
-    lines += ["", "SQL:", "```sql", sql, "```"]
+    lines += ["", t("risk.sql"), "```sql", sql, "```"]
     return "\n".join(lines)

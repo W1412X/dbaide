@@ -6,6 +6,7 @@ import os
 import re
 import shutil
 import tempfile
+import hashlib
 from pathlib import Path
 from typing import Any
 
@@ -53,7 +54,7 @@ class AssetStore:
         return self.instance_dir(instance) / "databases" / safe_name(database)
 
     def table_dir(self, instance: str, database: str, table: str) -> Path:
-        return self.database_dir(instance, database) / "tables" / safe_name(table)
+        return self.database_dir(instance, database) / "tables" / object_component(table)
 
     def column_dir(self, instance: str, database: str, table: str) -> Path:
         return self.table_dir(instance, database, table) / "columns"
@@ -62,7 +63,7 @@ class AssetStore:
         """Per-column doc file. The column name is sanitized like every other path
         component — a quoted identifier could legitimately contain '/' or '..', which
         must not escape the table's columns dir."""
-        return self.column_dir(instance, database, table) / f"{safe_name(column)}.json"
+        return self.column_dir(instance, database, table) / f"{object_component(column)}.json"
 
     def write_json(self, path: Path, data: dict[str, Any] | list[Any]) -> None:
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -203,3 +204,20 @@ def safe_name(value: str) -> str:
     if not text or text == "." or text == "..":
         return "default"
     return text
+
+
+def object_component(value: str) -> str:
+    """Filesystem component for DB objects.
+
+    ``safe_name`` intentionally maps many strings to the same value (for pretty
+    directories), which is fine for connection/database names but unsafe for tables:
+    Postgres ``public.users`` and a real ``public_users`` table would collide.
+    Keep ordinary names stable; add a short hash only when sanitizing changed the
+    original value.
+    """
+    raw = str(value or "default").strip()
+    safe = safe_name(raw)
+    if raw == safe:
+        return safe
+    digest = hashlib.sha1(raw.encode("utf-8")).hexdigest()[:10]
+    return f"{safe}__{digest}"

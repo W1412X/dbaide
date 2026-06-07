@@ -71,6 +71,7 @@ class MainWindow(QMainWindow):
         self.tasks = TaskManager(service, self)
         self.run_state = ConversationRunState(max_runs=self.service.cfg.max_concurrent_runs())
         self.oneoff_state = OneOffRunState()
+        self._status_owner = ""
         self.bootstrap: dict[str, Any] = {}
         self.schema_rows: list[dict[str, Any]] = []
         self._last_question = ""
@@ -375,7 +376,7 @@ class MainWindow(QMainWindow):
 
     def refresh_all(self) -> None:
         self._ensure_ui_state().statusbar_message("Loading…")
-        self._run_background("bootstrap", {}, self._on_bootstrap_loaded)
+        self._run_background("bootstrap", {}, self._on_bootstrap_loaded, on_error=self._on_bootstrap_failed)
 
     def _on_bootstrap_loaded(self, bootstrap: dict[str, Any]) -> None:
         try:
@@ -384,6 +385,11 @@ class MainWindow(QMainWindow):
             self._ensure_ui_state().statusbar_message("Ready")
         except Exception as exc:
             self.fail(exc)
+
+    def _on_bootstrap_failed(self, exc: object) -> None:
+        self._restore_status_badge()
+        self._ensure_ui_state().statusbar_message(f"Load failed: {exc}")
+        self.toast(str(exc))
 
     def _apply_bootstrap_ui(self) -> None:
         conns = self.bootstrap.get("connections") or []
@@ -868,10 +874,10 @@ class MainWindow(QMainWindow):
             initial_page=page,
         )
         dialog.connection_saved.connect(lambda payload: self._settings_save_connection(dialog, payload))
-        dialog.connection_deleted.connect(self._settings_delete_connection)
+        dialog.connection_deleted.connect(lambda name: self._settings_delete_connection(dialog, name))
         dialog.connection_test.connect(lambda payload: self._settings_test_connection(dialog, payload))
         dialog.model_saved.connect(lambda payload: self._settings_save_model(dialog, payload))
-        dialog.model_deleted.connect(self._settings_delete_model)
+        dialog.model_deleted.connect(lambda name: self._settings_delete_model(dialog, name))
         dialog.model_test.connect(lambda payload: self._settings_test_model(dialog, payload))
         dialog.resource_saved.connect(self._settings_save_resources)
         dialog.language_changed.connect(self._change_language)
@@ -990,21 +996,25 @@ class MainWindow(QMainWindow):
         self.toast(_i18n_t("toast.syncing"))
         # Persistent badge for the whole (possibly slow, remote) sync — a transient
         # toast alone leaves no indication once it fades while work continues.
+        owner = f"sync:{conn}"
+        self._status_owner = owner
         self._ensure_ui_state().global_status(_i18n_t("status.syncing"), "building")
 
         def done(result: object) -> None:
             if conn != self.current_connection():
+                self._restore_status_badge(owner=owner)
                 return
             summary = (result or {}).get("summary", "") if isinstance(result, dict) else ""
             self.toast(_i18n_t("toast.synced", summary=summary))
-            self._restore_status_badge()
+            self._restore_status_badge(owner=owner)
             self.bus.emit(ASSETS_CHANGED, {"instance": conn})
 
         def fail(exc: object) -> None:
             if conn != self.current_connection():
+                self._restore_status_badge(owner=owner)
                 return
             self.toast(_i18n_t("toast.sync_failed", error=str(exc)))
-            self._restore_status_badge()
+            self._restore_status_badge(owner=owner)
 
         self._run_background("refresh_instance", {"name": conn}, done, on_error=fail)
 
@@ -1016,13 +1026,13 @@ class MainWindow(QMainWindow):
         kind = str(node.get("kind") or "")
         if kind not in ("database", "table"):
             return
-        parts = str(node.get("path") or "").split(".")
-        database = parts[1] if len(parts) > 1 else ""
-        table = parts[2] if kind == "table" and len(parts) > 2 else ""
+        _instance, database, table, _column = self._schema_path_parts(node)
         if not database:
             return
         target = ".".join(p for p in (database, table) if p)
         self.toast(_i18n_t("toast.syncing"))
+        owner = f"refresh:{conn}:{target}"
+        self._status_owner = owner
         self._ensure_ui_state().global_status(_i18n_t("status.syncing"), "building")
         payload: dict[str, Any] = {"name": conn, "database": database}
         if table:
@@ -1032,11 +1042,12 @@ class MainWindow(QMainWindow):
         def done(result: object) -> None:
             if conn != self.current_connection():
                 self._ensure_ui_state().set_node_refreshing(node, False)
+                self._restore_status_badge(owner=owner)
                 return
             summary = (result or {}).get("summary", "") if isinstance(result, dict) else ""
             self._ensure_ui_state().set_node_refreshing(node, False)
             self.toast(_i18n_t("toast.synced", summary=summary or target))
-            self._restore_status_badge()
+            self._restore_status_badge(owner=owner)
             self.bus.emit(ASSETS_CHANGED, {"instance": conn})
             doc_path = f"{conn}.{database}.{table}" if table else f"{conn}.{database}"
             self._refresh_doc_if_open(doc_path)
@@ -1044,10 +1055,11 @@ class MainWindow(QMainWindow):
         def fail(exc: object) -> None:
             if conn != self.current_connection():
                 self._ensure_ui_state().set_node_refreshing(node, False)
+                self._restore_status_badge(owner=owner)
                 return
             self._ensure_ui_state().set_node_refreshing(node, False)
             self.toast(_i18n_t("toast.sync_failed", error=str(exc)))
-            self._restore_status_badge()
+            self._restore_status_badge(owner=owner)
 
         self._run_background("refresh_instance", payload, done, on_error=fail)
 
@@ -1061,11 +1073,10 @@ class MainWindow(QMainWindow):
             self.toast(_i18n_t("toast.select_connection"))
             return
         kind = str(node.get("kind") or "")
-        parts = str(node.get("path") or "").split(".")
-        database = parts[1] if len(parts) > 1 else ""
-        if kind == "table" and len(parts) > 2:
-            target = f"{database}.{parts[2]}"
-            action, payload = "enrich_table", {"connection_name": conn, "database": database, "table": parts[2]}
+        _instance, database, table, _column = self._schema_path_parts(node)
+        if kind == "table" and database and table:
+            target = f"{database}.{table}"
+            action, payload = "enrich_table", {"connection_name": conn, "database": database, "table": table}
         elif kind == "database" and database:
             target = database
             action, payload = "build_assets", {"connection_name": conn, "databases": [database]}
@@ -1074,26 +1085,32 @@ class MainWindow(QMainWindow):
         self.toast(_i18n_t("toast.enriching", target=target))
         # Enrichment runs the LLM + sampling + profiling — slow enough that the start
         # toast fades long before it finishes; keep a persistent badge meanwhile.
+        owner = f"enrich:{conn}:{target}"
+        self._status_owner = owner
         self._ensure_ui_state().global_status(_i18n_t("status.enriching"), "building")
 
         def done(_r: object) -> None:
             if conn != self.current_connection():
+                self._restore_status_badge(owner=owner)
                 return
             self.toast(_i18n_t("toast.enriched", target=target))
-            self._restore_status_badge()
+            self._restore_status_badge(owner=owner)
             self.bus.emit(ASSETS_CHANGED, {"instance": conn})
 
         def fail(exc: object) -> None:
             if conn != self.current_connection():
+                self._restore_status_badge(owner=owner)
                 return
             self.toast(_i18n_t("toast.enrich_failed", error=str(exc)))
-            self._restore_status_badge()
+            self._restore_status_badge(owner=owner)
 
         self._run_background(action, payload, done, on_error=fail)
 
-    def _settings_delete_connection(self, name: str) -> None:
+    def _settings_delete_connection(self, dialog: SettingsDialog, name: str) -> None:
         try:
             self.service.dispatch("delete_connection", {"name": name})
+            if not sip.isdeleted(dialog):
+                dialog.remove_connection_entry(name)
             self.bus.emit(CONNECTIONS_CHANGED, {"instance": name})
             self.toast(_i18n_t("toast.conn_removed"))
         except Exception as exc:
@@ -1130,9 +1147,11 @@ class MainWindow(QMainWindow):
 
         self._run_background("save_model", payload, on_done, on_error=on_fail)
 
-    def _settings_delete_model(self, name: str) -> None:
+    def _settings_delete_model(self, dialog: SettingsDialog, name: str) -> None:
         try:
             self.service.dispatch("delete_model", {"name": name})
+            if not sip.isdeleted(dialog):
+                dialog.remove_model_entry(name)
             self.bus.emit(MODELS_CHANGED, {"model": name})
             self.toast(_i18n_t("toast.model_removed"))
         except Exception as exc:
@@ -1304,10 +1323,7 @@ class MainWindow(QMainWindow):
         kind = str(node.get("kind") or "")
         if kind not in ("database", "table", "column"):
             return
-        parts = str(node.get("path") or "").split(".")
-        database = parts[1] if len(parts) > 1 else ""
-        table = parts[2] if (kind in ("table", "column") and len(parts) > 2) else ""
-        column = parts[3] if (kind == "column" and len(parts) > 3) else ""
+        _instance, database, table, column = self._schema_path_parts(node)
         body = {"connection_name": conn, "scope": kind,
                 "database": database, "table": table, "column": column}
         try:
@@ -1350,10 +1366,9 @@ class MainWindow(QMainWindow):
         # (databases, columns) fall back to the asset preview in a Workbench DocTab.
         path = str(data.get("path") or "")
         if str(data.get("kind") or "") == "table":
-            parts = path.split(".") if path else []
-            if len(parts) >= 3:
+            _instance, database, table, _column = self._schema_path_parts(data)
+            if database and table:
                 conn = self.current_connection()
-                _, database, table = parts[0], parts[1], parts[2]
                 # Opens (or focuses) a table document with Data + Structure sub-tabs.
                 # Structure is built from the columns and FK data already in the node
                 # — instant, no query; Data is the default view and loads its page 1.
@@ -1425,14 +1440,12 @@ class MainWindow(QMainWindow):
             return
         if kind == "table":
             # Cascade: ensure the parent database is attached first (no duplicate).
-            parts = path.split(".")
-            if len(parts) >= 2:
-                db_path = ".".join(parts[:2])  # conn.database
-                db_name = parts[1]
+            _instance, db_name, _table, _column = self._schema_path_parts(node)
+            if db_name:
+                db_path = ".".join(path.split(".")[:2])  # conn.database
                 self.composer.add_attachment(
                     kind="database", path=db_path, name=db_name, database=db_name,
                 )
-            db_name = parts[1] if len(parts) >= 2 else ""
             self.composer.add_attachment(kind="table", path=path, name=name, database=db_name)
         elif kind == "database":
             self.composer.add_attachment(kind="database", path=path, name=name, database=name)
@@ -1450,7 +1463,7 @@ class MainWindow(QMainWindow):
                 if parts[1] not in databases:
                     databases.append(parts[1])
             elif kind == "table" and len(parts) >= 3:
-                entry = {"database": parts[1], "table": parts[2]}
+                entry = {"database": parts[1], "table": ".".join(parts[2:])}
                 if entry not in tables:
                     tables.append(entry)
         return {"databases": databases, "tables": tables}
@@ -1465,19 +1478,57 @@ class MainWindow(QMainWindow):
         self.tabbar.setCurrentIndex(1)
         self.workbench.open_sql(sql)
 
-    def _find_table_node(self, table: str) -> dict[str, Any] | None:
+    def _schema_path_parts(self, node: dict[str, Any]) -> tuple[str, str, str, str]:
+        """Parse schema tree paths while allowing table names to contain dots.
+
+        Paths are rendered as instance.database.table[.column]. For Postgres the
+        table portion can itself be schema-qualified (e.g. public.users), so callers
+        must not assume parts[2] is the whole table name.
+        """
+        kind = str(node.get("kind") or "")
+        parts = [p for p in str(node.get("path") or "").split(".") if p]
+        instance = parts[0] if len(parts) > 0 else ""
+        database = parts[1] if len(parts) > 1 else ""
+        if kind == "column":
+            table = ".".join(parts[2:-1]) if len(parts) > 3 else (parts[2] if len(parts) > 2 else "")
+            column = parts[-1] if len(parts) > 3 else ""
+        elif kind == "table":
+            table = ".".join(parts[2:]) if len(parts) > 2 else ""
+            column = ""
+        else:
+            table = ""
+            column = ""
+        return instance, database, table, column
+
+    def _find_table_node(self, table: str, database: str = "") -> dict[str, Any] | None:
+        target = str(table or "").strip()
+        target_db = str(database or "").strip()
+        if "." in target and not target_db:
+            prefix, rest = target.split(".", 1)
+            # If the prefix matches a loaded database, treat it as db.table.
+            if any(str(db.get("name") or "") == prefix for db in self.schema_rows):
+                target_db, target = prefix, rest
         for db in self.schema_rows:
+            db_name = str(db.get("name") or "")
+            if target_db and db_name != target_db:
+                continue
             for node in db.get("children") or []:
-                if node.get("kind") == "table" and node.get("name") == table:
+                if node.get("kind") != "table":
+                    continue
+                _instance, node_db, node_table, _column = self._schema_path_parts(node)
+                if (node.get("name") == target or node_table == target) and (not target_db or node_db == target_db):
                     return node
         return None
 
-    def _open_table_by_name(self, table: str) -> None:
+    def _open_table_by_name(self, table: str, database: str = "") -> None:
         """Open a table by name (used by Structure-panel FK links). Searches the
         loaded schema for the matching node so we carry its columns + relations."""
         if not table:
             return
-        node = self._find_table_node(table)
+        if not database:
+            current = self.workbench.tabs.currentWidget()
+            database = str(getattr(current, "database", "") or "")
+        node = self._find_table_node(table, database=database)
         if node is not None:
             self.open_schema_asset(node)
         else:
@@ -1488,7 +1539,9 @@ class MainWindow(QMainWindow):
         'Open referenced row')."""
         from dbaide.adapters.base import quote_identifier
         from dbaide.rendering.table import _sql_literal
-        node = self._find_table_node(ref_table)
+        current = self.workbench.tabs.currentWidget()
+        current_db = str(getattr(current, "database", "") or "")
+        node = self._find_table_node(ref_table, database=current_db)
         if node is None:
             self.toast(_i18n_t("toast.table_not_found", table=ref_table))
             return
@@ -1693,11 +1746,13 @@ class MainWindow(QMainWindow):
         if action == "execute_sql":
             if isinstance(result, dict) and result.get("pending_confirmation"):
                 warnings = "\n".join(str(w) for w in (result.get("warnings") or []))
+                confirmed_sql = str(result.get("normalized_sql") or sql_text)
+                sql_preview = confirmed_sql if len(confirmed_sql) <= 2000 else confirmed_sql[:2000] + "\n..."
                 message = "This SQL may be expensive or risky. Execute anyway?"
                 if warnings:
                     message += f"\n\n{warnings}"
+                message += f"\n\nSQL:\n{sql_preview}"
                 if QMessageBox.question(self, "Confirm SQL execution", message) == QMessageBox.StandardButton.Yes:
-                    confirmed_sql = str(result.get("normalized_sql") or sql_text)
                     self.run_action("execute_sql", {
                         "connection_name": run_connection,
                         "database": run_database,
@@ -1784,7 +1839,7 @@ class MainWindow(QMainWindow):
     def _active_or_new_key(self) -> str:
         """The active slot key, minting (and activating) a fresh one if there is none."""
         if not self._active_key:
-            self.run_state.active_or_new_key()
+            self._active_key = self.run_state.active_or_new_key()
             self.current_session_id = ""
             self.ask_tab.set_active(self._active_key)
         return self._active_key
@@ -1991,7 +2046,10 @@ class MainWindow(QMainWindow):
         key = "composer.placeholder.ready" if asset_status == "ready" else "composer.placeholder.build"
         return _i18n_t(key)
 
-    def _restore_status_badge(self) -> None:
+    def _restore_status_badge(self, *, owner: str = "") -> None:
+        if owner and getattr(self, "_status_owner", "") != owner:
+            return
+        self._status_owner = ""
         self._ensure_ui_state().restore_connection_status(
             self.current_connection(),
             self.bootstrap.get("connections") or [],

@@ -24,7 +24,7 @@ from PyQt6.QtWidgets import (
 from PyQt6.QtCore import QSize
 
 from dbaide.agent.progress_events import conversation_trace_step, phase_for
-from dbaide.desktop.components.base import AgentButton, compact_button
+from dbaide.desktop.components.base import compact_button
 from dbaide.desktop.conversation_state import ThinkingUiState, TurnTraceState
 from dbaide.desktop.components.icons import svg_icon
 from dbaide.desktop.components.inputs import configure_readonly_text_view, configure_wrapped_label
@@ -294,12 +294,56 @@ class _MarkdownBlock(QFrame):
         self._body.setFixedHeight(max(height, 24))
 
 
+class _ClarificationOption(QFrame):
+    clicked = pyqtSignal(str)
+
+    def __init__(self, text: str, parent=None) -> None:
+        super().__init__(parent)
+        self._value = text
+        self.setObjectName("clarificationOption")
+        self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
+        self.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.setToolTip(text)
+        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
+        self.setMinimumHeight(34)
+        self.setStyleSheet(
+            f"""
+            QFrame#clarificationOption {{
+                background: {Theme.PANEL_2};
+                border: 1px solid {Theme.BORDER_SOFT};
+                border-radius: 7px;
+            }}
+            QFrame#clarificationOption:hover {{
+                background: {Theme.PANEL_3};
+                border-color: {Theme.BORDER};
+            }}
+            QFrame#clarificationOption QLabel {{
+                background: transparent;
+                border: none;
+            }}
+            """
+        )
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(10, 7, 10, 7)
+        layout.setSpacing(0)
+        self.label = QLabel(text)
+        self.label.setTextFormat(Qt.TextFormat.PlainText)
+        self.label.setWordWrap(True)
+        self.label.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
+        self.label.setStyleSheet(f"color: {Theme.TEXT}; font-size: 13px;")
+        configure_wrapped_label(self.label)
+        layout.addWidget(self.label, 1)
+
+    def mouseReleaseEvent(self, event) -> None:  # noqa: N802
+        if event.button() == Qt.MouseButton.LeftButton and self.rect().contains(event.pos()):
+            self.clicked.emit(self._value)
+        super().mouseReleaseEvent(event)
+
+
 class _ClarificationBar(QFrame):
-    """Reply controls for a clarification: full-text option chips (they wrap, never
-    truncate) plus an inline free-text input + Send. When there are several
-    questions a chip only answers one, so it fills the input (the user completes the
-    rest and sends) instead of submitting immediately — which would discard the
-    other answers."""
+    """Reply controls for a clarification: full-width wrapped option rows plus an
+    inline free-text input + Send. When there are several questions an option only
+    answers one, so it fills the input instead of submitting immediately."""
 
     submitted = pyqtSignal(str)
 
@@ -319,21 +363,20 @@ class _ClarificationBar(QFrame):
         outer = QVBoxLayout(self)
         outer.setContentsMargins(10, 8, 10, 10)
         outer.setSpacing(8)
+        self._option_rows: list[_ClarificationOption] = []
 
         if options:
-            from dbaide.desktop.components.flow_layout import FlowLayout
-            chips_host = QWidget()
-            chips_host.setStyleSheet("background: transparent;")
-            chips = FlowLayout(chips_host, spacing=6)
+            options_host = QWidget()
+            options_host.setStyleSheet("background: transparent;")
+            options_layout = QVBoxLayout(options_host)
+            options_layout.setContentsMargins(0, 0, 0, 0)
+            options_layout.setSpacing(6)
             for option in options:
-                btn = AgentButton(option)            # sizes to its full text — no truncation
-                btn.setFixedHeight(26)
-                btn.setMaximumWidth(360)             # very long → clips with a tooltip (full text)
-                btn.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Fixed)
-                btn.setToolTip(option)
-                btn.clicked.connect(lambda _c=False, v=option: self._on_chip(v))
-                chips.addWidget(btn)
-            outer.addWidget(chips_host)
+                row_widget = _ClarificationOption(option)
+                row_widget.clicked.connect(self._on_chip)
+                self._option_rows.append(row_widget)
+                options_layout.addWidget(row_widget)
+            outer.addWidget(options_host)
 
         row = QHBoxLayout()
         row.setContentsMargins(0, 0, 0, 0)
@@ -371,7 +414,7 @@ class _ClarificationBar(QFrame):
 
 class _ClarificationStepper(QFrame):
     """Multi-question clarification answered ONE question at a time. Each step shows
-    a single question, its option chips, and a free-text input; picking an option
+    a single question, its option rows, and a free-text input; picking an option
     (or typing + Next) records the answer and advances. After the last question the
     answers are assembled into a single numbered reply and submitted — so the agent
     still asks several things at once, but the user answers them sequentially."""
@@ -402,11 +445,13 @@ class _ClarificationStepper(QFrame):
         self._ask.setStyleSheet(f"color: {Theme.TEXT}; font-size: 13px;")
         self._outer.addWidget(self._ask)
 
-        from dbaide.desktop.components.flow_layout import FlowLayout
-        self._chips_host = QWidget()
-        self._chips_host.setStyleSheet("background: transparent;")
-        self._chips = FlowLayout(self._chips_host, spacing=6)
-        self._outer.addWidget(self._chips_host)
+        self._options_host = QWidget()
+        self._options_host.setStyleSheet("background: transparent;")
+        self._options = QVBoxLayout(self._options_host)
+        self._options.setContentsMargins(0, 0, 0, 0)
+        self._options.setSpacing(6)
+        self._option_rows: list[_ClarificationOption] = []
+        self._outer.addWidget(self._options_host)
 
         row = QHBoxLayout()
         row.setContentsMargins(0, 0, 0, 0)
@@ -430,23 +475,21 @@ class _ClarificationStepper(QFrame):
         total = len(self._questions)
         self._progress.setText(self._t("clarify.progress", current=self._idx + 1, total=total))
         self._ask.setText(str(q.get("ask") or ""))
-        # rebuild chips for this question's options
-        while self._chips.count():
-            item = self._chips.takeAt(0)
+        # rebuild option rows for this question's options
+        while self._options.count():
+            item = self._options.takeAt(0)
             w = item.widget()
             if w is not None:
                 w.setParent(None)
                 w.deleteLater()
         opts = [str(o) for o in (q.get("options") or []) if str(o).strip()]
-        self._chips_host.setVisible(bool(opts))
+        self._option_rows = []
+        self._options_host.setVisible(bool(opts))
         for opt in opts:
-            btn = AgentButton(opt)
-            btn.setFixedHeight(26)
-            btn.setMaximumWidth(360)
-            btn.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Fixed)
-            btn.setToolTip(opt)
-            btn.clicked.connect(lambda _c=False, v=opt: self._answer(v))
-            self._chips.addWidget(btn)
+            row_widget = _ClarificationOption(opt)
+            row_widget.clicked.connect(self._answer)
+            self._option_rows.append(row_widget)
+            self._options.addWidget(row_widget)
         # restore any previously-entered answer for this step
         self._input.setText(self._answers[self._idx] if self._idx < len(self._answers) else "")
         self._input.setPlaceholderText(self._t("clarify.type_answer"))
@@ -462,7 +505,7 @@ class _ClarificationStepper(QFrame):
             self._answers.append(value)
 
     def _answer(self, value: str) -> None:
-        # An option chip both fills and advances.
+        # An option row both fills and advances.
         self._record_current(value)
         self._advance()
 

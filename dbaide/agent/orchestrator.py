@@ -146,8 +146,14 @@ class AskOrchestrator:
         # Resuming a paused run continues that single in-flight intent — never re-decompose.
         if resume_state or user_reply:
             multi = resume_state.get("multi") if isinstance(resume_state, dict) else None
+            trace_parent = ""
+            if isinstance(multi, dict) and isinstance(multi.get("paused"), dict):
+                paused_id = str(multi["paused"].get("id") or "").strip()
+                if paused_id:
+                    trace_parent = f"intent:{paused_id}"
             resp = self._run_single(question, database=database, execute=execute,
-                                    resume_state=resume_state, user_reply=user_reply)
+                                    resume_state=resume_state, user_reply=user_reply,
+                                    trace_parent=trace_parent)
             # If the pause happened inside a multi-intent plan, resume the WHOLE plan
             # (the paused intent + any not-yet-run ones) rather than dropping the rest.
             if multi is not None:
@@ -164,15 +170,27 @@ class AskOrchestrator:
         except Exception as exc:
             logger.warning("intent_decompose_failed: %s", exc)
             intents = []
-        # Intent decomposition runs before the tool loop, so its LLM call isn't in any
-        # tool step's capture window — surface it as its own debug-trace step.
-        if rec is not None:
-            intent_calls = rec.since(intent_start)
-            if intent_calls:
-                ev = progress_event(stage="intent", title="Decompose intent",
-                                    status="completed", kind="tool", step=0)
-                ev["llm_calls"] = intent_calls
-                self.progress(ev)
+        # Intent decomposition runs before the tool loop, so surface it as a real
+        # trace action even when full LLM prompt capture is disabled. When prompt
+        # capture is enabled, attach the exact LLM input/output as well.
+        intent_calls = rec.since(intent_start) if rec is not None else []
+        ev = progress_event(
+            stage="intent",
+            title="Decompose intent",
+            status="completed",
+            kind="llm",
+            node_id="intent:decompose",
+            detail=question,
+        )
+        ev["result_data"] = {
+            "intents": [
+                {"id": it.id, "type": it.type, "text": it.text, "label": it.label}
+                for it in intents
+            ],
+        }
+        if intent_calls:
+            ev["llm_calls"] = intent_calls
+        self.progress(ev)
         if len(intents) > 1:
             return self._run_multi(question, intents, database=database, execute=execute)
         return self._run_single(question, database=database, execute=execute)
@@ -222,6 +240,7 @@ class AskOrchestrator:
         the trace so the user sees every sub-intent's execution."""
         from dbaide.agent.progress_events import progress_event
 
+        disclosures_before = list(self.session.disclosure.events)
         self.progress(progress_event(
             stage="decompose", title=f"Decomposed into {len(intents)} sub-intents",
             status="completed", kind="phase", node_id="intent:plan",
@@ -244,23 +263,31 @@ class AskOrchestrator:
             # set instead of silently dropping the rest.
             if getattr(resp, "status", "completed") == "wait_user":
                 resp.resume_state = self._attach_multi(
-                    resp.resume_state, question, results, intent, intents[idx:]
+                    resp.resume_state, question, results, intent, intents[idx:],
+                    disclosures_before=disclosures_before,
                 )
                 return resp
             results.append((intent, resp))
-        return self._aggregate(question, results)
+        return self._aggregate(question, results, disclosures_before=disclosures_before)
 
     @staticmethod
     def _ser_intent(intent) -> dict[str, Any]:
         return {"id": intent.id, "type": intent.type, "text": intent.text}
 
-    def _attach_multi(self, resume_state, question, done_results, paused_intent, remaining) -> dict[str, Any]:
+    def _attach_multi(self, resume_state, question, done_results, paused_intent, remaining,
+                      *, disclosures_before: list[str] | None = None) -> dict[str, Any]:
         """Fold the multi-intent plan into the paused intent's resume snapshot."""
         state = dict(resume_state or {})
         state["multi"] = {
             "question": question,
+            "disclosures_before": list(disclosures_before or []),
             "done": [
-                {"intent": self._ser_intent(it), "answer": rp.answer, "sql": rp.sql}
+                {
+                    "intent": self._ser_intent(it),
+                    "answer": rp.answer,
+                    "sql": rp.sql,
+                    "disclosures": list(rp.disclosures or []),
+                }
                 for it, rp in done_results
             ],
             "paused": self._ser_intent(paused_intent),
@@ -275,7 +302,14 @@ class AskOrchestrator:
 
         question = str(multi.get("question") or "")
         done: list[tuple[Any, AssistantResponse]] = [
-            (SubIntent(**d["intent"]), AssistantResponse(answer=d.get("answer") or "", sql=d.get("sql") or ""))
+            (
+                SubIntent(**d["intent"]),
+                AssistantResponse(
+                    answer=d.get("answer") or "",
+                    sql=d.get("sql") or "",
+                    disclosures=list(d.get("disclosures") or []),
+                ),
+            )
             for d in (multi.get("done") or [])
         ]
         paused_intent = SubIntent(**multi["paused"])
@@ -285,6 +319,7 @@ class AskOrchestrator:
             paused_resp.resume_state = self._attach_multi(
                 paused_resp.resume_state, question, done, paused_intent,
                 [SubIntent(**r) for r in (multi.get("remaining") or [])],
+                disclosures_before=list(multi.get("disclosures_before") or []),
             )
             return paused_resp
 
@@ -295,33 +330,55 @@ class AskOrchestrator:
                                     trace_parent=f"intent:{intent.id}")
             if getattr(resp, "status", "completed") == "wait_user":
                 resp.resume_state = self._attach_multi(
-                    resp.resume_state, question, results, intent, remaining[i + 1:]
+                    resp.resume_state, question, results, intent, remaining[i + 1:],
+                    disclosures_before=list(multi.get("disclosures_before") or []),
                 )
                 return resp
             results.append((intent, resp))
-        return self._aggregate(question, results)
+        return self._aggregate(
+            question,
+            results,
+            disclosures_before=list(multi.get("disclosures_before") or []),
+        )
 
-    def _aggregate(self, question: str, results: list[tuple[Any, AssistantResponse]]) -> AssistantResponse:
+    def _aggregate(
+        self,
+        question: str,
+        results: list[tuple[Any, AssistantResponse]],
+        *,
+        disclosures_before: list[str] | None = None,
+    ) -> AssistantResponse:
         sections: list[str] = []
         warnings: list[str] = []
+        disclosures: list[str] = []
         primary: AssistantResponse | None = None
         for idx, (intent, resp) in enumerate(results, start=1):
             sections.append(f"## {idx}. {intent.label} — {intent.text}\n\n{resp.answer or '(no answer)'}")
             warnings.extend(resp.warnings or [])
+            disclosures.extend(resp.disclosures or [])
             if primary is None and resp.result is not None:
                 primary = resp  # keep the first concrete result for the SQL tab
+        if not disclosures and disclosures_before is not None:
+            disclosures = self._new_disclosures(disclosures_before)
         answer = "\n\n".join(sections)
         return AssistantResponse(
             answer=answer,
             sql=(primary.sql if primary else ""),
             result=(primary.result if primary else None),
-            disclosures=self._new_disclosures(list(self.session.disclosure.events)),
+            disclosures=disclosures,
             warnings=warnings,
         )
 
     # ─── Schema ─────────────────────────────────────────────────────────────
 
-    def _discover(self, question: str, *, parent: str = "", column_detail: bool = True):
+    def _discover(
+        self,
+        question: str,
+        *,
+        parent: str = "",
+        column_detail: bool = True,
+        scope: dict[str, Any] | None = None,
+    ):
         agent = ProgressiveSchemaAgent(
             self.llm,
             self.asset_store,
@@ -332,8 +389,10 @@ class AskOrchestrator:
         # Prioritise the user's pinned scope on the first discovery; broaden afterwards
         # so the agent can recover if the pinned tables don't actually answer the
         # question (a permanently-scoped run would otherwise never see the right table).
-        scope = self.schema_scope if (self.schema_scope and not self.run_state.scope_used) else {}
-        if scope:
+        effective_scope = scope if scope is not None else (
+            self.schema_scope if (self.schema_scope and not self.run_state.scope_used) else {}
+        )
+        if effective_scope and scope is None:
             self.run_state.scope_used = True
         discovery = agent.discover(
             question,
@@ -341,7 +400,7 @@ class AskOrchestrator:
             progress=progress_cb,
             parent=parent,
             column_detail=column_detail,
-            scope=scope,
+            scope=effective_scope,
         )
         # Fold the matching user note onto each hit (db/table/column) so the note
         # travels with its object through every downstream consumer.

@@ -2,11 +2,16 @@ import sqlite3
 
 from dbaide.adapters import build_adapter
 from dbaide.agent.orchestrator import AskOrchestrator
+from dbaide.agent.loop import _tool_call_key
 from dbaide.agent.sql_writer import SQLWriter
 from dbaide.agent.toolkit import build_tool_registry
+from dbaide.assets import AssetStore
+from dbaide.context.disclosure import DisclosureContext
 from dbaide.llm import LLMClient, LLMMessage
 from dbaide.models import ColumnInfo, ConnectionConfig
 from dbaide.session import Session
+from dbaide.tools.profile import ProfileTools
+from dbaide.tools.schema import SchemaTools
 from dbaide.tools.registry import ToolContext
 
 
@@ -87,6 +92,141 @@ def test_describe_table_returns_table_metadata(tmp_path):
     assert result.data["indexes"]
     assert result.data["foreign_keys"]
     assert result.data["foreign_keys"][0]["ref_table"] == "users"
+
+
+def test_describe_table_splits_qualified_table_when_database_is_explicit(tmp_path):
+    db = tmp_path / "app.db"
+    make_multi_db(db)
+    cfg = ConnectionConfig(name="local", type="sqlite", path=str(db))
+    orch = AskOrchestrator(build_adapter(cfg), Session(connection=cfg), PromptCaptureLLM())
+    registry = build_tool_registry(orch)
+    orch._reset_loop_state("describe orders", "main", True)
+
+    result = registry.invoke("describe_table", {"table": "main.orders", "database": "main"}, ToolContext())
+
+    assert result.ok
+    assert result.data["database"] == "main"
+    assert result.data["table"] == "orders"
+    assert [c["name"] for c in result.data["columns"]]
+
+
+def test_schema_tools_splits_qualified_table_before_asset_lookup(tmp_path):
+    db = tmp_path / "app.db"
+    make_multi_db(db)
+    cfg = ConnectionConfig(name="local", type="sqlite", path=str(db))
+    schema = SchemaTools(
+        build_adapter(cfg),
+        DisclosureContext(),
+        instance="local",
+        assets=AssetStore(tmp_path / "assets"),
+    )
+
+    columns = schema.describe_table("main.orders", database="main")
+
+    assert "total_amount" in {c.name for c in columns}
+
+
+def test_describe_table_missing_table_is_not_success(tmp_path):
+    db = tmp_path / "app.db"
+    make_multi_db(db)
+    cfg = ConnectionConfig(name="local", type="sqlite", path=str(db))
+    orch = AskOrchestrator(build_adapter(cfg), Session(connection=cfg), PromptCaptureLLM())
+    registry = build_tool_registry(orch)
+    orch._reset_loop_state("describe missing", "main", True)
+
+    result = registry.invoke("describe_table", {"table": "missing", "database": "main"}, ToolContext())
+
+    assert not result.ok
+    assert result.data == {"table": "missing", "database": "main", "columns": []}
+
+
+def test_column_stats_splits_qualified_table_when_database_is_explicit(tmp_path):
+    db = tmp_path / "app.db"
+    make_multi_db(db)
+    cfg = ConnectionConfig(name="local", type="sqlite", path=str(db))
+    orch = AskOrchestrator(build_adapter(cfg), Session(connection=cfg), PromptCaptureLLM())
+    registry = build_tool_registry(orch)
+    orch._reset_loop_state("stats orders", "main", True)
+
+    result = registry.invoke(
+        "column_stats",
+        {"table": "main.orders", "database": "main", "columns": ["total_amount"], "metrics": ["min", "max"]},
+        ToolContext(),
+    )
+
+    assert result.ok
+    assert result.data["table"] == "orders"
+    assert result.data["columns"][0]["column"] == "total_amount"
+
+
+def test_profile_tools_split_qualified_table_before_live_stats(tmp_path):
+    db = tmp_path / "app.db"
+    make_multi_db(db)
+    cfg = ConnectionConfig(name="local", type="sqlite", path=str(db))
+    profile = ProfileTools(
+        build_adapter(cfg),
+        DisclosureContext(),
+        instance="local",
+        assets=AssetStore(tmp_path / "assets"),
+    )
+
+    stats = profile.column_stats("main.orders", database="main", columns=["total_amount"], metrics=["min", "max"])
+
+    assert stats[0]["column"] == "total_amount"
+    assert stats[0]["stats"]["min"] == 10.5
+
+
+def test_execute_readonly_sql_honors_tool_limit(tmp_path):
+    db = tmp_path / "app.db"
+    make_multi_db(db)
+    conn = sqlite3.connect(db)
+    conn.executemany(
+        "INSERT INTO orders VALUES (?, ?, ?, ?)",
+        [(2, 1, 20.0, "2024-01-02"), (3, 1, 30.0, "2024-01-03")],
+    )
+    conn.commit()
+    conn.close()
+    cfg = ConnectionConfig(name="local", type="sqlite", path=str(db))
+    orch = AskOrchestrator(build_adapter(cfg), Session(connection=cfg), PromptCaptureLLM())
+    registry = build_tool_registry(orch)
+    orch._reset_loop_state("sample orders", "main", True)
+
+    result = registry.invoke(
+        "execute_readonly_sql",
+        {"sql": "SELECT id FROM orders ORDER BY id", "database": "main", "limit": 2},
+        ToolContext(execution_policy="safe_auto"),
+    )
+
+    assert result.ok
+    assert result.data["row_count"] == 2
+    assert result.data["sql"].endswith("LIMIT 2")
+
+
+def test_tool_call_key_is_stable_for_duplicate_detection():
+    left = _tool_call_key("describe_table", {"database": "main", "table": "orders"})
+    right = _tool_call_key("describe_table", {"table": "orders", "database": "main"})
+
+    assert left == right
+
+
+def test_generate_sql_splits_direct_qualified_table_arg(tmp_path):
+    db = tmp_path / "app.db"
+    make_multi_db(db)
+    cfg = ConnectionConfig(name="local", type="sqlite", path=str(db))
+    llm = PromptCaptureLLM()
+    orch = AskOrchestrator(build_adapter(cfg), Session(connection=cfg), llm)
+    registry = build_tool_registry(orch)
+    orch._reset_loop_state("订单数量", "main", True)
+
+    result = registry.invoke(
+        "generate_sql",
+        {"question": "订单数量", "table": "main.orders", "database": "main"},
+        ToolContext(),
+    )
+
+    assert result.ok
+    assert result.data["tables"] == ["orders"]
+    assert "Table: orders" in llm.last_user
 
 
 def test_generate_sql_uses_all_disclosed_schemas(tmp_path):

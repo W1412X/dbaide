@@ -11,8 +11,6 @@ from pathlib import Path
 from dbaide.adapters import build_adapter
 from dbaide.agent import DataAssistant, InstanceTarget, MultiInstanceAssistant
 from dbaide.assets import AssetBuilder, AssetSearch, AssetStore
-from dbaide.assets.profiler import ColumnProfiler
-from dbaide.assets.summarizer import AssetSummarizer
 from dbaide.config import ConfigManager
 from dbaide.core.result import ExecutionPolicy, WorkflowRequest, WorkflowResult, WorkflowStatus
 from dbaide.core.workflow import WorkflowEngine
@@ -568,11 +566,12 @@ def dispatch_assets(args: argparse.Namespace, cfg: ConfigManager) -> int:
         elif len(parts) == 2:
             db_path = store.database_dir(parts[0], parts[1]) / "database.json"
             doc = store._read_optional(db_path)
-        elif len(parts) == 3:
-            doc = store.table_doc(parts[0], parts[1], parts[2])
-        elif len(parts) == 4:
-            col_path = store.column_path(parts[0], parts[1], parts[2], parts[3])
-            doc = store._read_optional(col_path)
+        elif len(parts) >= 3:
+            table = ".".join(parts[2:])
+            doc = store.table_doc(parts[0], parts[1], table)
+            if doc is None:
+                table = ".".join(parts[2:-1])
+                doc = store.table_doc(parts[0], parts[1], table)
         else:
             raise ValueError("asset path must be instance, instance.database, instance.database.table, or instance.database.table.column")
         if doc is None:
@@ -666,38 +665,17 @@ def enrich_assets(
     except Exception:
         llm = NullLLMClient()
     store = AssetStore()
-    summarizer = AssetSummarizer(llm)
-    profiler = ColumnProfiler(adapter)
-    table_info = next((t for t in adapter.list_tables(database=database) if t.name == table), None)
-    if table_info is None:
-        raise ValueError(f"table not found: {database}.{table}")
-    column_infos = adapter.describe_table(table, database=database)
-    available = {col.name for col in column_infos}
-    selected = set(columns) if columns else available
+    stats = AssetBuilder(connection=conn, adapter=adapter, store=store, llm=llm).build(
+        databases=[database],
+        tables=[table],
+        sample=True,
+        profile_mode="none",
+        top_k=top_k,
+        sample_limit=sample_limit,
+    )
     if columns:
-        missing = selected - available
-        if missing:
-            print(f"[assets-warning] columns not found in {database}.{table}: {', '.join(sorted(missing))}", file=sys.stderr)
-            selected &= available
-    updated = 0
-    for column in column_infos:
-        if column.name not in selected:
-            continue
-        profile = profiler.profile(table, column, database=database, top_k=top_k, sample_limit=sample_limit)
-        doc = summarizer.column_doc(instance=conn.name, database=database, table=table, column=column, profile=profile)
-        store.write_json(store.column_path(conn.name, database, table, column.name), doc)
-        updated += 1
-    column_docs = store.column_docs(conn.name, database, table)
-    fks = adapter.foreign_keys(table, database=database)
-    table_doc = summarizer.table_doc(instance=conn.name, database=database, table=table_info, columns=column_docs, foreign_keys=fks)
-    try:
-        table_doc["sample_rows"] = adapter.sample_rows(table, database=database, limit=min(sample_limit, 50)).rows
-    except Exception:
-        table_doc["sample_rows"] = []
-    table_doc["column_count"] = len(column_docs)
-    store.write_json(store.table_dir(conn.name, database, table) / "table.json", table_doc)
-    store.write_json(store.table_dir(conn.name, database, table) / "columns.json", {"instance": conn.name, "database": database, "table": table, "columns": column_docs})
-    print(f"enriched {updated} column(s): {conn.name}.{database}.{table}")
+        print("[assets-warning] column-specific enrich is no longer stored offline; use column_stats on demand.", file=sys.stderr)
+    print(f"enriched table asset: {conn.name}.{database}.{table} ({stats.columns} column(s))")
 
 
 def dispatch_find(args: argparse.Namespace, cfg: ConfigManager) -> int:

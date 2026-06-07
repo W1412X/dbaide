@@ -210,7 +210,7 @@ class JoinCatalogStore:
             )
             if fingerprint and str(existing.get("connection_fingerprint") or "") != fingerprint:
                 continue
-            if existing_key == key:
+            if existing_key == key and str(existing.get("database") or "") == str(record.get("database") or ""):
                 record["id"] = existing.get("id") or record["id"]
                 record["created_at"] = existing.get("created_at") or record["created_at"]
                 if source == "user":
@@ -264,6 +264,7 @@ class JoinCatalogStore:
             self._save(instance, new_records)
             return True
         if endpoint:
+            endpoint_db = str(endpoint.get("database") or "").strip()
             key = relation_endpoint_key(
                 endpoint.get("table", endpoint.get("left_table", "")),
                 endpoint.get("column", endpoint.get("left_column", "")),
@@ -281,6 +282,7 @@ class JoinCatalogStore:
                         str(r.get("ref_column") or ""),
                     )
                     == key
+                    and (not endpoint_db or str(r.get("database") or "") == endpoint_db)
                     and (not fingerprint or str(r.get("connection_fingerprint") or "") == fingerprint)
                 )
             ]

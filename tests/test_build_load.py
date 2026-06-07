@@ -74,6 +74,28 @@ def test_big_table_drops_to_light(tmp_path, monkeypatch):
     assert "count(distinct" not in sqls
 
 
+def test_dry_run_does_not_estimate_count_for_big_tables(tmp_path, monkeypatch):
+    db = tmp_path / "dry_big.db"
+    _make_db(db)
+    conn = ConnectionConfig(name="dryBig", type="sqlite", path=str(db))
+    adapter = build_adapter(conn)
+
+    from dbaide.models import TableInfo
+
+    def fake_list(database=""):
+        return [TableInfo(name="users", estimated_rows=10_000_000, table_type="table")]
+
+    monkeypatch.setattr(adapter, "list_tables", fake_list)
+
+    stats = AssetBuilder(
+        connection=conn,
+        adapter=adapter,
+        store=AssetStore(tmp_path / "assets"),
+    ).build(dry_run=True, sample=True, collect_row_counts=True)
+
+    assert stats.estimated_queries == 1  # sample only; no COUNT(*) for the big table
+
+
 def test_build_emits_structured_trace_events(tmp_path):
     """Build progress is a tree: a 'build:root' tool node + a per-database node."""
     db = tmp_path / "shop.db"

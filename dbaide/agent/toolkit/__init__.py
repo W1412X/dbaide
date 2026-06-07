@@ -9,17 +9,17 @@ from dbaide.tools.registry import ToolRegistry
 from dbaide.agent.toolkit import (
     schema_tools, catalog_tools, sql_tools, profile_tools, interaction_tools,
 )
-# Re-exported for tests/tools that import these helpers from `dbaide.agent.toolkit`.
+# Re-exported for tests/tools that import this helper from `dbaide.agent.toolkit`.
 from dbaide.agent.toolkit.support import (  # noqa: F401
-    _expand_to_full_columns, _sample_observed_values, _remember_table_schema,
+    _remember_table_schema,
 )
 
 # Tools exposed to the Ask loop LLM (catalog CRUD stays on GUI/service only).
 LOOP_DECISION_TOOL_NAMES = frozenset({
-    "discover_schema", "retrieve_schema_context", "synthesize_schema_answer",
+    "discover_schema", "retrieve_schema_context",
     "list_databases", "list_tables", "describe_table", "retrieve_join_context",
     "list_joins", "validate_joins",
-    "clarify_semantics", "generate_sql", "validate_sql", "execute_sql",
+    "generate_sql", "validate_sql", "execute_sql",
     "execute_readonly_sql", "explain_sql", "profile_table", "column_stats",
     "ask_user", "annotate_object",
 })

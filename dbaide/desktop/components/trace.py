@@ -20,17 +20,19 @@ from PyQt6.QtWidgets import (
     QVBoxLayout,
 )
 
-from dbaide.agent.progress_events import STEP_TYPE_LABELS
-from dbaide.agent.trace_model import TraceModel, TraceNode
+from dbaide.agent.trace_model import (
+    TraceModel,
+    TraceNode,
+    localized_node_head,
+    localized_phase,
+    localized_status,
+    localized_summary_line,
+)
 from dbaide.desktop.components.icons import svg_icon
 from dbaide.desktop.components.inputs import configure_readonly_text_view
 from dbaide.desktop.components.spinner import BusyAnimator, spinner_icon
 from dbaide.desktop.trace_state import InlineTraceState
 from dbaide.desktop.theme import Theme
-
-# Types that get a leading category chip in the tree (plain tool/substep don't —
-# their phase label already says what they are).
-_CHIP_TYPES = frozenset({"sql", "phase", "llm", "decision", "io"})
 
 # Status glyphs so state is readable at a glance.
 _GLYPH = {
@@ -175,10 +177,10 @@ class InlineTrace(QFrame):
             self._busy.stop()
             return
 
-        summary = QTreeWidgetItem(["", model.summary_line(), ""])
+        summary = QTreeWidgetItem(["", localized_summary_line(model), ""])
         summary.setFont(1, _semibold())
         summary.setForeground(1, _overall_color(model.overall))
-        summary.setData(0, _NODE_ROLE, {"__summary__": True, "title": model.summary_line(),
+        summary.setData(0, _NODE_ROLE, {"__summary__": True, "title": localized_summary_line(model),
                                         "status": model.overall})
         self._tree.addTopLevelItem(summary)
 
@@ -212,7 +214,7 @@ class InlineTrace(QFrame):
         if node.duration_ms > 0 and node.status in ("completed", "failed"):
             status_text = _fmt_ms(node.duration_ms)
         elif node.status in ("running", "waiting"):
-            status_text = node.status
+            status_text = localized_status(node.status)
         else:
             status_text = ""
         item = QTreeWidgetItem([indicator, head, status_text])
@@ -351,10 +353,11 @@ def _detail_html(data: dict) -> str:
     available via the Copy raw button."""
     if data.get("__summary__"):
         return f"<div style='color:{Theme.TEXT}; font-size:12px;'>{_esc(data.get('title') or '')}</div>"
+    from dbaide.i18n import t
     node_type = str(data.get("node_type") or "info")
     raw = data.get("raw") if isinstance(data.get("raw"), dict) else {}
     parts: list[str] = []
-    title = str(data.get("title") or data.get("phase") or data.get("stage") or "step")
+    title = _detail_title(data)
     parts.append(f"<div style='color:{Theme.TEXT}; font-size:13px; font-weight:600;'>{_esc(title)}</div>")
 
     # Keep the chip row lean: skip phase/stage/agent values that just echo the
@@ -364,14 +367,21 @@ def _detail_html(data: dict) -> str:
     seen_vals = {title_l}
     for key in ("agent", "phase", "stage"):
         val = str(data.get(key) or "").strip()
+        if key == "phase":
+            val = localized_phase(str(data.get("stage") or ""), val)
         if val and val.lower() not in seen_vals:
-            chips.append((key, val))
+            label = {
+                "agent": t("trace.field.agent"),
+                "phase": t("trace.field.stage"),
+                "stage": t("trace.field.stage"),
+            }.get(key, key)
+            chips.append((label, val))
             seen_vals.add(val.lower())
     if data.get("step"):
-        chips.append(("step", str(data["step"])))
-    chips.append(("status", str(data.get("status") or "?")))
+        chips.append(("", t("trace.step", n=data["step"])))
+    chips.append((t("trace.field.status"), localized_status(str(data.get("status") or "?"))))
     if data.get("duration_ms"):
-        chips.append(("", f"{float(data['duration_ms']):.0f} ms"))
+        chips.append((t("trace.field.duration"), f"{float(data['duration_ms']):.0f} ms"))
     sep = f"<span style='color:{Theme.MUTED_2};'> · </span>"
     chip_html = sep.join(
         f"<span style='color:{Theme.MUTED};'>{(_esc(k) + ' ') if k else ''}"
@@ -380,33 +390,117 @@ def _detail_html(data: dict) -> str:
     )
     parts.append(f"<div style='font-size:11px; margin:4px 0 8px;'>{chip_html}</div>")
 
+    if data.get("thought"):
+        parts.append(_section(t("trace.field.thought"), str(data["thought"])))
+
+    if raw.get("args"):
+        parts.append(_section(t("trace.field.input"), _json_text(raw.get("args")), code=True))
+
+    if raw.get("decision") not in (None, "", {}, []):
+        parts.append(_section(t("trace.field.decision"), _json_text(raw.get("decision")), code=True))
+
     if node_type == "sql":
         facts = []
         if raw.get("row_count") not in (None, ""):
-            facts.append(f"{_esc(raw['row_count'])} rows")
+            facts.append(t("trace.field.rows", n=raw["row_count"]))
         if raw.get("database"):
-            facts.append(f"db={_esc(raw['database'])}")
+            facts.append(f"{t('trace.field.database')}={raw['database']}")
         if facts:
             parts.append(f"<div style='color:{Theme.TEXT_2}; font-size:11px; margin-bottom:6px;'>"
-                         f"{' · '.join(facts)}</div>")
+                         f"{_esc(' · '.join(str(x) for x in facts))}</div>")
         sql = str(raw.get("sql") or data.get("detail") or "").strip()
         if sql:
-            parts.append(_code_block(sql))
+            parts.append(_section(t("trace.field.sql"), sql, code=True))
     else:
-        if data.get("thought"):
-            parts.append(f"<div style='color:{Theme.TEXT_2}; font-style:italic; margin-bottom:6px;'>"
-                         f"💭 {_esc(data['thought'])}</div>")
         detail = str(data.get("detail") or "").strip()
         if detail:
             # Render a SQL-ish or multi-line detail as a code block, else as text.
             if "\n" in detail or detail.upper().startswith(("SELECT", "WITH", "INSERT", "UPDATE")):
-                parts.append(_code_block(detail))
+                parts.append(_section(t("trace.field.output"), detail, code=True))
             else:
-                parts.append(f"<div style='color:{Theme.TEXT}; font-size:12px;'>{_esc(detail)}</div>")
-        args = raw.get("args")
-        if args:
-            parts.append(f"<div style='color:{Theme.MUTED}; font-size:11px; margin-top:6px;'>args</div>")
-            parts.append(_code_block(_esc(args), escaped=True))
+                parts.append(_section(t("trace.field.output"), detail))
+
+    for key, label_key in (
+        ("output", "trace.field.output"),
+        ("result_data", "trace.field.result_data"),
+    ):
+        value = raw.get(key)
+        if value not in (None, "", {}, []):
+            parts.append(_section(t(label_key), _json_text(value), code=True))
+
+    question = str(raw.get("question") or "").strip()
+    if question:
+        parts.append(_section(t("trace.field.question"), question))
+    options = raw.get("options")
+    if isinstance(options, list) and options:
+        parts.append(_section(t("trace.field.options"), "\n".join(f"- {x}" for x in options)))
+    questions = raw.get("questions")
+    if isinstance(questions, list) and questions:
+        parts.append(_section(t("trace.field.question"), _json_text(questions), code=True))
+
+    llm_call = raw.get("llm_call") if isinstance(raw.get("llm_call"), dict) else None
+    llm_calls = [llm_call] if llm_call else raw.get("llm_calls")
+    if isinstance(llm_calls, list) and llm_calls:
+        parts.append(_llm_calls_html(llm_calls))
+    if raw:
+        parts.append(_section(t("trace.field.raw_event"), _json_text(raw), code=True))
+    return "".join(parts)
+
+
+def _detail_title(data: dict) -> str:
+    raw = data.get("raw") if isinstance(data.get("raw"), dict) else {}
+    node = TraceNode(
+        id=str(data.get("node_id") or "detail"),
+        parent_id="",
+        stage=str(data.get("stage") or ""),
+        phase=str(data.get("phase") or ""),
+        agent=str(raw.get("agent") or data.get("agent") or ""),
+        kind=str(raw.get("kind") or ""),
+        node_type=str(data.get("node_type") or "info"),
+        status=str(data.get("status") or ""),
+        title=str(data.get("title") or ""),
+        detail=str(data.get("detail") or ""),
+        duration_ms=float(data.get("duration_ms") or 0.0),
+        step=int(data.get("step") or 0),
+        thought=str(data.get("thought") or ""),
+        raw=dict(raw),
+    )
+    return localized_node_head(node)
+
+
+def _json_text(value: object) -> str:
+    if isinstance(value, str):
+        return value
+    try:
+        return json.dumps(value, ensure_ascii=False, indent=2, default=str)
+    except (TypeError, ValueError):
+        return str(value)
+
+
+def _section(title: str, body: str, *, code: bool = False) -> str:
+    if not str(body or "").strip():
+        return ""
+    head = f"<div style='color:{Theme.MUTED}; font-size:11px; font-weight:600; margin-top:9px;'>{_esc(title)}</div>"
+    if code:
+        return head + _code_block(body)
+    return head + f"<div style='color:{Theme.TEXT}; font-size:12px; white-space:pre-wrap;'>{_esc(body)}</div>"
+
+
+def _llm_calls_html(calls: list[dict]) -> str:
+    from dbaide.i18n import t
+    parts = [f"<div style='color:{Theme.MUTED}; font-size:11px; font-weight:600; margin-top:9px;'>"
+             f"{_esc(t('trace.field.llm_calls'))} ({len(calls)})</div>"]
+    for idx, call in enumerate(calls, 1):
+        if not isinstance(call, dict):
+            continue
+        meta = " · ".join(str(x) for x in (call.get("stage"), call.get("method"), f"{call.get('ms')}ms" if call.get("ms") else "") if x)
+        parts.append(f"<div style='color:{Theme.TEXT_2}; font-size:11px; margin-top:7px;'>#{idx} {_esc(meta)}</div>")
+        for msg in call.get("messages") or []:
+            if not isinstance(msg, dict):
+                continue
+            role = str(msg.get("role") or "message")
+            parts.append(_section(f"{t('trace.field.prompt')} · {role}", str(msg.get("content") or ""), code=True))
+        parts.append(_section(t("trace.field.response"), str(call.get("response") or ""), code=True))
     return "".join(parts)
 
 
@@ -422,18 +516,7 @@ def _code_block(text: str, *, escaped: bool = False) -> str:
 def _node_head(node: TraceNode) -> str:
     """Row label, used at any depth. Sub-agent nodes read 'agent · title'; others
     show a category chip in front of their phase/stage."""
-    if node.agent_name:
-        title = node.title or node.phase or node.stage or "step"
-        # Avoid "Agent · Agent …" when the title already starts with the agent label.
-        if title.lower().startswith(node.agent_name.lower()):
-            return title
-        return f"{node.agent_name} · {title}"
-    chip = STEP_TYPE_LABELS.get(node.node_type, "")
-    if chip and node.node_type in _CHIP_TYPES:
-        base = node.phase or node.stage or node.title or "step"
-        return f"{chip} · {base}"
-    # Sub-steps (no agent, not a typed chip): the title is the most informative.
-    return node.title or node.phase or node.stage or "step"
+    return localized_node_head(node)
 
 
 def _depth_color(depth: int) -> QColor:

@@ -139,6 +139,62 @@ def test_settings_new_connection_and_model_are_explicit_drafts(qapp):
     assert dlg.model_more.isEnabled() is False
 
 
+def test_settings_delete_and_default_wait_for_controller_success(qapp, monkeypatch):
+    from PyQt6.QtWidgets import QMessageBox
+
+    from dbaide.i18n import set_language
+    from dbaide.desktop.dialogs.settings import SettingsDialog
+
+    set_language("en")
+    dlg = SettingsDialog(
+        connections=[
+            {"name": "local", "type": "sqlite", "path": "a.db"},
+            {"name": "remote", "type": "sqlite", "path": "b.db"},
+        ],
+        models=[
+            {"name": "default", "provider": "none", "model": ""},
+            {"name": "alt", "provider": "none", "model": ""},
+        ],
+        default_connection="local",
+        default_model="default",
+    )
+    monkeypatch.setattr(QMessageBox, "question", lambda *a, **k: QMessageBox.StandardButton.Yes)
+    deleted_connections: list[str] = []
+    deleted_models: list[str] = []
+    saved_connections: list[dict] = []
+    saved_models: list[dict] = []
+    dlg.connection_deleted.connect(deleted_connections.append)
+    dlg.model_deleted.connect(deleted_models.append)
+    dlg.connection_saved.connect(saved_connections.append)
+    dlg.model_saved.connect(saved_models.append)
+
+    dlg.conn_form.load(dlg._connections["remote"])
+    dlg._remove_connection()
+    assert deleted_connections == ["remote"]
+    assert "remote" in dlg._connections
+    dlg.remove_connection_entry("remote")
+    assert "remote" not in dlg._connections
+
+    dlg.model_form.load(dlg._models["alt"])
+    dlg._remove_model()
+    assert deleted_models == ["alt"]
+    assert "alt" in dlg._models
+    dlg.remove_model_entry("alt")
+    assert "alt" not in dlg._models
+
+    dlg.conn_form.load(dlg._connections["local"])
+    dlg._default_connection = "other"
+    dlg._set_default_connection()
+    assert saved_connections[-1]["make_default"] is True
+    assert dlg._default_connection == "other"
+
+    dlg.model_form.load(dlg._models["default"])
+    dlg._default_model = "other"
+    dlg._set_default_model()
+    assert saved_models[-1]["make_default"] is True
+    assert dlg._default_model == "other"
+
+
 def test_connection_form_includes_load_profile(qapp):
     from dbaide.desktop.dialogs.connection import ConnectionForm
 

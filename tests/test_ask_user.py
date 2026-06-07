@@ -57,6 +57,57 @@ def test_ask_user_tool_sets_pending(tmp_path):
     assert orch.run_state.pending_options == ["A", "B"]
 
 
+def test_ask_user_has_no_keyword_gate(tmp_path):
+    db = tmp_path / "app.db"
+    sqlite3.connect(db).execute("CREATE TABLE orders (id INTEGER PRIMARY KEY, shipping_country TEXT)")
+    conn = ConnectionConfig(name="local", type="sqlite", path=str(db))
+    orch = AskOrchestrator(build_adapter(conn), Session(connection=conn), ClarifyMockLLM())
+    registry = build_tool_registry(orch)
+    orch._reset_loop_state("compare refunds", "", True)
+
+    result = registry.invoke(
+        "ask_user",
+        {
+            "question": (
+                "为了准确比对受投退款统计表和订单源数据，我需要确认以下关键点：\n"
+                "1. 国家字段来源：统计表包含 country 字段，但订单明细表没有直接的国家字段，"
+                "订单主表是否包含 shipping_country 或类似字段？\n"
+                "2. 受投日期定义：统计表使用北京日（UTC+8），而订单明细中的 delivered_at 是 UTC 时间戳，"
+                "是否应将 delivered_at 转换为北京日期来匹配 delivered_date？"
+            ),
+            "options": ["是", "否"],
+        },
+        ToolContext(),
+    )
+
+    assert result.ok
+    assert result.data["pending"] is True
+    assert "shipping_country" in orch.run_state.pending_question
+    assert orch.run_state.pending_options == ["是", "否"]
+
+
+def test_ask_user_allows_irreducible_business_choice(tmp_path):
+    db = tmp_path / "app.db"
+    sqlite3.connect(db).execute("CREATE TABLE orders (id INTEGER PRIMARY KEY, created_at TEXT)")
+    conn = ConnectionConfig(name="local", type="sqlite", path=str(db))
+    orch = AskOrchestrator(build_adapter(conn), Session(connection=conn), ClarifyMockLLM())
+    registry = build_tool_registry(orch)
+    orch._reset_loop_state("order stats", "", True)
+
+    result = registry.invoke(
+        "ask_user",
+        {
+            "question": "结果需要按日展示还是按月展示？",
+            "options": ["按日", "按月"],
+        },
+        ToolContext(),
+    )
+
+    assert result.ok
+    assert orch.run_state.pending_question == "结果需要按日展示还是按月展示？"
+    assert orch.run_state.pending_options == ["按日", "按月"]
+
+
 def test_loop_pauses_on_ask_user_and_resumes(tmp_path):
     db = tmp_path / "app.db"
     sqlite3.connect(db).execute("CREATE TABLE orders (id INTEGER PRIMARY KEY, created_at TEXT)")

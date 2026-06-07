@@ -4,6 +4,7 @@ from typing import Any
 
 from dbaide.adapters.base import DatabaseAdapter, quote_identifier
 from dbaide.assets import AssetStore
+from dbaide.agent.schema_context import normalize_db_table
 from dbaide.assets.profiler import kind_from_type
 from dbaide.assets.summarizer import truncate_cell
 from dbaide.connection_identity import connection_fingerprint
@@ -48,11 +49,13 @@ class ProfileTools:
         self.fingerprint = connection_fingerprint(adapter.config)
 
     def sample_rows(self, table: str, *, database: str = "", limit: int = 20) -> QueryResult:
+        database, table = normalize_db_table(table, database)
         result = self.adapter.sample_rows(table, database=database, limit=limit)
         self.context.record_samples(table, result.rows, instance=self.instance, database=database)
         return result
 
     def profile_column(self, table: str, column: str, *, database: str = "", top_k: int = 10) -> ColumnProfile:
+        database, table = normalize_db_table(table, database)
         database = database or self._asset_database_for_table(table) or self._default_asset_database()
         for doc in self.assets.column_docs(self.instance, database, table, fingerprint=self.fingerprint) if database else []:
             if doc.get("name") == column or doc.get("column") == column:
@@ -103,6 +106,7 @@ class ProfileTools:
         per-column fallback if that batched query fails. top_values (a GROUP BY) stays
         per-column and only runs when chosen. The caller (LLM) picks metrics, else type
         defaults apply. Values truncated."""
+        database, table = normalize_db_table(table, database)
         database = database or self._asset_database_for_table(table) or self._default_asset_database()
         all_cols = {c.name: c for c in self.adapter.describe_table(table, database=database)}
         wanted = [all_cols[c] for c in (columns or list(all_cols)) if c in all_cols]
@@ -212,6 +216,7 @@ class ProfileTools:
         return stats
 
     def profile_table(self, table: str, columns: list[str] | None = None, *, database: str = "", top_k: int = 10) -> list[ColumnProfile]:
+        database, table = normalize_db_table(table, database)
         if columns is None:
             columns = [c.name for c in self.adapter.describe_table(table, database=database)]
         profiles: list[ColumnProfile] = []
@@ -229,8 +234,9 @@ class ProfileTools:
         return ""
 
     def _asset_database_for_table(self, table: str) -> str:
+        matches: list[str] = []
         for db_doc in self.assets.database_docs(self.instance, fingerprint=self.fingerprint):
             db_name = str(db_doc.get("name") or "")
             if any((doc.get("name") == table or doc.get("table") == table) for doc in self.assets.table_docs(self.instance, db_name, fingerprint=self.fingerprint)):
-                return db_name
-        return ""
+                matches.append(db_name)
+        return matches[0] if len(matches) == 1 else ""

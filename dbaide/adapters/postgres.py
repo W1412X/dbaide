@@ -111,8 +111,11 @@ class PostgresAdapter(DatabaseAdapter):
     def foreign_keys(self, table: str, database: str = "") -> list[ForeignKeyInfo]:
         schema, table_name = _split_schema(table)
         sql = """
-        SELECT kcu.table_name AS table, kcu.column_name AS column,
-               ccu.table_name AS ref_table, ccu.column_name AS ref_column
+        SELECT
+               CASE WHEN kcu.table_schema <> '' THEN kcu.table_schema || '.' || kcu.table_name ELSE kcu.table_name END AS table,
+               kcu.column_name AS column,
+               CASE WHEN ccu.table_schema <> '' THEN ccu.table_schema || '.' || ccu.table_name ELSE ccu.table_name END AS ref_table,
+               ccu.column_name AS ref_column
         FROM information_schema.table_constraints tc
         JOIN information_schema.key_column_usage kcu
           ON tc.constraint_name = kcu.constraint_name AND tc.table_schema = kcu.table_schema

@@ -85,9 +85,7 @@ class _StressMock(LLMClient):
         execute_allowed = "execute_sql is allowed" in system
         if any(k in q for k in ("有哪些表", "字段", "在哪里", "结构")):
             if prior == 0:
-                return {"action": "call_tool", "tool": "discover_schema", "args": {"question": q}}
-            if prior == 1:
-                return {"action": "call_tool", "tool": "synthesize_schema_answer", "args": {"question": q}}
+                return {"action": "call_tool", "tool": "retrieve_schema_context", "args": {"request": q}}
             return {"action": "finish", "answer": "Schema answer."}
         rs = self.orch.run_state
         active_tables = self._active_candidate_tables()

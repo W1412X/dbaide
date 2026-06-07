@@ -49,7 +49,7 @@ class TraceNode:
 
     @property
     def agent_name(self) -> str:
-        return agent_label(self.agent) if self.agent else ""
+        return localized_agent_label(self.agent) if self.agent else ""
 
     # Backwards-compatible alias: a tool node's children are its sub-agent steps.
     @property
@@ -126,7 +126,7 @@ class TraceModel:
         if stage == "workflow_completed":
             self.overall = "failed" if status == "failed" else "done"
             return
-        if stage == "loop":
+        if stage == "loop" and not event.get("node_id"):
             self.overall = ("failed" if status == "failed" else "done") if status in _TERMINAL else "running"
             return
 
@@ -180,6 +180,55 @@ class TraceModel:
             if new_type == "sql" or node.node_type in ("info", "tool"):
                 node.node_type = new_type
             node.raw = dict(event)
+        self._expand_llm_calls(node)
+
+    def _expand_llm_calls(self, node: TraceNode) -> None:
+        """Make every recorded LLM call a real child node.
+
+        The parent action still carries the aggregate raw event; child nodes make
+        each prompt/response independently visible and clickable in the UI tree.
+        """
+        raw = node.raw if isinstance(node.raw, dict) else {}
+        calls = raw.get("llm_calls")
+        if not isinstance(calls, list):
+            return
+        for idx, call in enumerate(calls, 1):
+            if not isinstance(call, dict):
+                continue
+            child_id = f"{node.id}/llm:{idx}"
+            title = str(call.get("stage") or node.stage or "llm").strip()
+            child_raw = {
+                "stage": str(call.get("stage") or "llm"),
+                "title": title,
+                "status": "completed",
+                "kind": "llm",
+                "llm_call": dict(call),
+            }
+            child = self._index.get(child_id)
+            if child is None:
+                child = TraceNode(
+                    id=child_id,
+                    parent_id=node.id,
+                    stage=child_raw["stage"],
+                    phase=child_raw["stage"],
+                    kind="llm",
+                    node_type="llm",
+                    status="completed",
+                    title=title,
+                    detail=str(call.get("method") or ""),
+                    duration_ms=float(call.get("ms") or 0.0),
+                    started_at=self._last_ts,
+                    raw=child_raw,
+                )
+                node.children.append(child)
+                self._index[child_id] = child
+            else:
+                child.stage = child_raw["stage"]
+                child.phase = child_raw["stage"]
+                child.title = title
+                child.detail = str(call.get("method") or "")
+                child.duration_ms = float(call.get("ms") or 0.0)
+                child.raw = child_raw
 
     def _identify(self, event: dict, stage: str, kind: str, status: str, title: str) -> tuple[str, str, bool]:
         explicit_id = str(event.get("node_id") or "").strip()
@@ -264,18 +313,92 @@ class TraceModel:
 
 # ── Plain-text export (shared by the trace panel and conversation copy) ───────
 
-from dbaide.agent.progress_events import STEP_TYPE_LABELS  # noqa: E402
-
 _CHIP_TYPES = {"sql", "phase", "llm", "decision", "io"}
 _GLYPHS = {"completed": "✓", "failed": "✗", "running": "▶", "waiting": "⏸"}
 
 
+def _t(key: str, **kwargs) -> str:
+    try:
+        from dbaide.i18n import t
+        return t(key, **kwargs)
+    except Exception:
+        if kwargs:
+            try:
+                return key.format(**kwargs)
+            except Exception:
+                return key
+        return key
+
+
+def localized_agent_label(agent: str) -> str:
+    name = str(agent or "").strip()
+    if not name:
+        return ""
+    label = _t(f"trace.agent.{name}")
+    if label != f"trace.agent.{name}":
+        return label
+    return agent_label(name)
+
+
+def localized_status(status: str) -> str:
+    status = str(status or "").strip()
+    mapping = {
+        "completed": _t("trace.done"),
+        "done": _t("trace.done"),
+        "failed": _t("trace.failed"),
+        "running": _t("trace.running"),
+        "waiting": _t("trace.waiting"),
+        "idle": _t("trace.idle"),
+        "info": "",
+    }
+    return mapping.get(status, status)
+
+
+def localized_type(node_type: str) -> str:
+    key = f"trace.type.{str(node_type or '').strip()}"
+    value = _t(key)
+    return "" if value == key else value
+
+
+def localized_phase(stage: str, phase: str = "") -> str:
+    stage = str(stage or "").strip()
+    phase = str(phase or "").strip()
+    for key in (f"trace.phase.{stage}", f"trace.phase.{phase}"):
+        if key.endswith("."):
+            continue
+        value = _t(key)
+        if value != key:
+            return value
+    return phase or stage
+
+
+def localized_node_head(node: "TraceNode") -> str:
+    raw_title = node.title or node.phase or node.stage or "step"
+    stage = str(node.stage or "").strip()
+    title = str(raw_title or "").strip()
+    raw = node.raw if isinstance(node.raw, dict) else {}
+    if raw.get("llm_call"):
+        call = raw.get("llm_call") if isinstance(raw.get("llm_call"), dict) else {}
+        return _t("trace.llm_call", stage=str(call.get("stage") or node.stage or "llm"))
+    if stage == "intent" and (node.id == "intent:decompose" or raw.get("llm_calls") or title == "Decompose intent"):
+        return _t("trace.intent")
+    if stage == "decide" or node.node_type == "llm":
+        return _t("trace.thinking")
+    if node.agent:
+        agent = localized_agent_label(node.agent)
+        return _t("trace.subagent", agent=agent, title=title or localized_phase(stage, node.phase))
+    if title.startswith("Calling "):
+        return _t("trace.call_tool", tool=stage or title.removeprefix("Calling ").strip())
+    if title.endswith(" done"):
+        tool = stage or title.removesuffix(" done").strip()
+        return _t("trace.tool_done", tool=tool)
+    chip = localized_type(node.node_type)
+    base = localized_phase(stage, node.phase) or title
+    return f"{chip} · {base}" if chip and node.node_type in _CHIP_TYPES else (base or title)
+
+
 def _node_head(node: "TraceNode") -> str:
-    if node.agent_name:
-        return f"{node.agent_name} · {node.title or node.phase or node.stage or 'step'}"
-    base = node.phase or node.stage or node.title or "step"
-    chip = STEP_TYPE_LABELS.get(node.node_type, "")
-    return f"{chip} · {base}" if chip and node.node_type in _CHIP_TYPES else base
+    return localized_node_head(node)
 
 
 def _fmt_ms(ms: float) -> str:
@@ -299,7 +422,7 @@ def render_trace_text(model: "TraceModel") -> str:
     Qt) so it's reusable for single-run copy and whole-conversation copy."""
     if model is None or not model.steps:
         return ""
-    lines: list[str] = [model.summary_line(), ""]
+    lines: list[str] = [localized_summary_line(model), ""]
 
     def kv(indent: str, label: str, value: object) -> None:
         text = _as_text(value).strip()
@@ -322,10 +445,10 @@ def render_trace_text(model: "TraceModel") -> str:
         raw = node.raw if isinstance(node.raw, dict) else {}
 
         if node.thought:
-            kv(indent, "thought", node.thought)
+            kv(indent, _t("trace.field.thought"), node.thought)
         # Tool INPUT.
         if raw.get("args"):
-            kv(indent, "args", raw.get("args"))
+            kv(indent, _t("trace.field.input"), raw.get("args"))
 
         # Clarification: the question being asked + the candidate options, and the
         # full structured per-question list when present (this is the bit that was
@@ -335,10 +458,10 @@ def render_trace_text(model: "TraceModel") -> str:
         if not question and is_ask:
             question = (node.detail or "").strip()
         if question and is_ask:
-            kv(indent, "question", question)
+            kv(indent, _t("trace.field.question"), question)
         questions = raw.get("questions")
         if isinstance(questions, list) and questions:
-            lines.append(f"{indent}    questions:")
+            lines.append(f"{indent}    {_t('trace.field.question')}:")
             for i, q in enumerate(questions, 1):
                 if isinstance(q, dict):
                     ask = str(q.get("ask") or "").strip()
@@ -347,7 +470,7 @@ def render_trace_text(model: "TraceModel") -> str:
                     lines.append(f"{indent}      {i}. {ask}{suffix}")
         options = raw.get("options")
         if isinstance(options, list) and options:
-            lines.append(f"{indent}    options:")
+            lines.append(f"{indent}    {_t('trace.field.options')}:")
             for opt in options:
                 lines.append(f"{indent}      - {opt}")
 
@@ -356,39 +479,46 @@ def render_trace_text(model: "TraceModel") -> str:
         if sql:
             facts = []
             if raw.get("row_count") not in (None, ""):
-                facts.append(f"{raw.get('row_count')} rows")
+                facts.append(_t("trace.field.rows", n=raw.get("row_count")))
             if raw.get("database"):
-                facts.append(f"db={raw.get('database')}")
+                facts.append(f"{_t('trace.field.database')}={raw.get('database')}")
             if facts:
-                kv(indent, "result", " · ".join(facts))
-            kv(indent, "sql", sql)
+                kv(indent, _t("trace.field.output"), " · ".join(facts))
+            kv(indent, _t("trace.field.sql"), sql)
         elif not is_ask:  # clarification nodes already printed their question/options
             output = str(raw.get("output") or "").strip()
             detail = (node.detail or "").strip()
             shown = output or detail
             if shown and shown not in head and shown != question:
-                kv(indent, "output" if output else "detail", shown)
+                kv(indent, _t("trace.field.output"), shown)
+        if raw.get("decision") not in (None, "", {}, []):
+            kv(indent, _t("trace.field.decision"), raw.get("decision"))
 
         # Debug trace: the full structured tool result (discovery hits, resolved
         # schema, relations, …) — the intermediate output passed between stages.
         if raw.get("result_data") not in (None, "", {}, []):
-            kv(indent, "result_data", raw.get("result_data"))
+            kv(indent, _t("trace.field.result_data"), raw.get("result_data"))
 
         # Debug trace: the full prompt+response of every model call this step made.
-        llm_calls = raw.get("llm_calls")
-        if isinstance(llm_calls, list) and llm_calls:
-            lines.append(f"{indent}    llm calls: {len(llm_calls)}")
+        single_call = raw.get("llm_call") if isinstance(raw.get("llm_call"), dict) else None
+        llm_calls = [single_call] if single_call else raw.get("llm_calls")
+        child_llm_nodes = any(isinstance(child.raw, dict) and child.raw.get("llm_call") for child in node.children)
+        if isinstance(llm_calls, list) and llm_calls and not (raw.get("llm_calls") and child_llm_nodes):
+            lines.append(f"{indent}    {_t('trace.field.llm_calls')}: {len(llm_calls)}")
             for i, call in enumerate(llm_calls, 1):
                 if not isinstance(call, dict):
                     continue
                 ms = call.get("ms")
                 head_bits = [b for b in (call.get("stage"), call.get("method"),
                                          f"{ms}ms" if ms else "") if b]
-                lines.append(f"{indent}    ── call {i} [{' · '.join(head_bits)}]")
+                lines.append(f"{indent}    ── {_t('trace.field.llm_calls')} {i} [{' · '.join(head_bits)}]")
                 for msg in call.get("messages") or []:
                     if isinstance(msg, dict):
                         kv(indent + "  ", str(msg.get("role") or "msg"), msg.get("content"))
-                kv(indent + "  ", "response", call.get("response"))
+                kv(indent + "  ", _t("trace.field.response"), call.get("response"))
+
+        if raw:
+            kv(indent, _t("trace.field.raw_event"), raw)
 
         for child in node.children:
             walk(child, depth + 1)
@@ -396,6 +526,24 @@ def render_trace_text(model: "TraceModel") -> str:
     for node in model.steps:
         walk(node, 0)
     return "\n".join(lines)
+
+
+def localized_summary_line(model: "TraceModel") -> str:
+    if not model.steps and model.overall == "idle":
+        return _t("trace.idle")
+    elapsed = model.elapsed_ms() / 1000.0
+    steps = _t("trace.steps", n=len(model.steps))
+    if model.overall == "done":
+        return f"{_t('trace.done')} · {steps} · {elapsed:.1f}s"
+    if model.overall == "failed":
+        return f"{_t('trace.failed')} · {steps} · {elapsed:.1f}s"
+    phase = localized_phase(model._current_tool().stage, model.current_phase) if model._current_tool() else _t("trace.running")
+    current = _t("trace.step", n=model.current_step) if model.current_step else _t("trace.running")
+    agents = model.active_agents
+    parts = [current, phase]
+    if agents:
+        parts.append(", ".join(agents))
+    return " · ".join(p for p in parts if p) + f" · {elapsed:.1f}s"
 
 
 def render_events_text(events: list[dict]) -> str:

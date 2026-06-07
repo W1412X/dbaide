@@ -148,6 +148,33 @@ def test_save_model_reports_missing_fields(tmp_path):
         assert "Model ID" in str(exc)
 
 
+def test_save_connection_preserves_secret_fields_when_form_left_blank(tmp_path):
+    cfg = ConfigManager(tmp_path / "config.toml")
+    cfg.upsert_connection(ConnectionConfig(
+        name="remote",
+        type="mysql",
+        host="localhost",
+        user="u",
+        password="secret",
+        password_env="DB_PASS",
+    ))
+    service = DesktopService(cfg, AssetStore(tmp_path / "assets"))
+
+    service.save_connection({
+        "name": "remote",
+        "type": "mysql",
+        "host": "127.0.0.1",
+        "user": "u2",
+        "password": "",
+    })
+
+    saved = cfg.connections()["remote"]
+    assert saved.host == "127.0.0.1"
+    assert saved.user == "u2"
+    assert saved.password == "secret"
+    assert saved.password_env == "DB_PASS"
+
+
 def test_delete_history_removes_workflow(tmp_path):
     from dbaide.core.result import WorkflowResult, WorkflowStatus
     from dbaide.history.store import WorkflowHistoryStore

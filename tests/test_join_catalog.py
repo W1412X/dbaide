@@ -62,6 +62,23 @@ def test_join_catalog_fingerprint_blocks_stale_relations(tmp_path):
     assert store.relations_for_tables("local", [("", "orders"), ("", "users")], fingerprint=fp2) == []
 
 
+def test_join_catalog_is_scoped_by_database_for_same_endpoint(tmp_path):
+    store = JoinCatalogStore(tmp_path / "joins")
+    rel = {"table": "orders", "column": "user_id", "ref_table": "users", "ref_column": "id"}
+    store.add("local", rel, source="user", database="sales")
+    store.add("local", {**rel, "reason": "analytics"}, source="user", database="analytics")
+
+    assert len(store.list_records("local")) == 2
+    assert len(store.relations_for_tables("local", [("sales", "orders"), ("sales", "users")], database="sales")) == 1
+    assert len(store.relations_for_tables("local", [("analytics", "orders"), ("analytics", "users")], database="analytics")) == 1
+
+    assert store.delete("local", endpoint={**rel, "database": "sales"})
+
+    remaining = store.list_records("local")
+    assert len(remaining) == 1
+    assert remaining[0]["database"] == "analytics"
+
+
 def test_collect_relations_prefers_user_catalog(tmp_path):
     db = tmp_path / "app.db"
     conn = sqlite3.connect(db)

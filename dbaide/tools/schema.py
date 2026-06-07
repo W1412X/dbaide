@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dbaide.adapters.base import DatabaseAdapter
 from dbaide.assets import AssetStore
+from dbaide.agent.schema_context import normalize_db_table
 from dbaide.connection_identity import connection_fingerprint
 from dbaide.context.disclosure import DisclosureContext
 from dbaide.models import ColumnInfo, ForeignKeyInfo, TableInfo
@@ -55,6 +56,7 @@ class SchemaTools:
         return tables
 
     def describe_table(self, table: str, database: str = "") -> list[ColumnInfo]:
+        database, table = normalize_db_table(table, database)
         database = database or self._asset_database_for_table(table) or self._default_asset_database()
         docs = self.assets.column_docs(self.instance, database, table, fingerprint=self.fingerprint) if database else []
         if docs:
@@ -67,9 +69,11 @@ class SchemaTools:
         return columns
 
     def foreign_keys(self, table: str, database: str = "") -> list[ForeignKeyInfo]:
+        database, table = normalize_db_table(table, database)
         return self.adapter.foreign_keys(table, database=database)
 
     def inspect_table(self, table: str, database: str = "") -> dict:
+        database, table = normalize_db_table(table, database)
         columns = self.describe_table(table, database=database)
         fks = self.foreign_keys(table, database=database)
         return {
@@ -85,12 +89,14 @@ class SchemaTools:
         return ""
 
     def _asset_database_for_table(self, table: str) -> str:
+        matches: list[str] = []
         for db_doc in self.assets.database_docs(self.instance, fingerprint=self.fingerprint):
             db_name = str(db_doc.get("name") or "")
             for table_doc in self.assets.table_docs(self.instance, db_name, fingerprint=self.fingerprint):
                 if table_doc.get("name") == table or table_doc.get("table") == table:
-                    return db_name
-        return ""
+                    matches.append(db_name)
+                    break
+        return matches[0] if len(matches) == 1 else ""
 
     def _ensure_asset_disclosure_path(self, database: str, table: str) -> None:
         """Asset-backed describe_table can jump straight to columns; record the

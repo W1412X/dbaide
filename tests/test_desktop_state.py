@@ -1,6 +1,7 @@
 from dbaide.desktop.conversation_state import ThinkingUiState, TurnTraceState
 from dbaide.desktop.trace_state import InlineTraceState
 from dbaide.desktop.ui_state import ConversationRunState
+from dbaide.desktop.ui_state import UiStateBinder
 
 
 def test_conversation_run_state_tracks_queue_and_remaps_slots():
@@ -77,3 +78,41 @@ def test_inline_trace_state_live_and_final_model_lifecycle():
     state.clear()
     assert state.model is None
     assert state.is_empty() is True
+
+
+def test_ui_state_binder_routes_busy_and_refresh_controls(monkeypatch):
+    import dbaide.desktop.ui_state as ui_state
+
+    monkeypatch.setattr(ui_state.sip, "isdeleted", lambda _obj: False)
+
+    calls: list[tuple] = []
+
+    class Dialog:
+        def set_save_busy(self, busy, *, target):
+            calls.append(("save", busy, target))
+
+        def set_test_busy(self, busy, *, target):
+            calls.append(("test", busy, target))
+
+    class Sidebar:
+        def set_node_refreshing(self, node, refreshing):
+            calls.append(("node", node, refreshing))
+
+    class Topbar:
+        def set_global_status(self, text, state):
+            calls.append(("status", text, state))
+
+    window = type("Window", (), {"sidebar": Sidebar(), "topbar": Topbar()})()
+    binder = UiStateBinder(window)
+
+    binder.set_settings_busy(Dialog(), "save", True, target="connection")
+    binder.set_settings_busy(Dialog(), "test", False, target="model")
+    binder.set_node_refreshing({"path": "conn.db"}, True)
+    binder.global_status("Syncing", "building")
+
+    assert calls == [
+        ("save", True, "connection"),
+        ("test", False, "model"),
+        ("node", {"path": "conn.db"}, True),
+        ("status", "Syncing", "building"),
+    ]

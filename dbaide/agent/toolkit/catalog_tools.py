@@ -8,20 +8,35 @@ from dbaide.tools.specs import (
     RETRIEVE_JOIN_CONTEXT, VALIDATE_JOINS, LIST_JOINS,
     ADD_JOIN, UPDATE_JOIN, DELETE_JOIN, ANNOTATE_OBJECT,
 )
-from dbaide.agent.schema_context import disclosed_schemas_for_tables
+from dbaide.agent.schema_context import disclosed_schemas_for_tables, normalize_db_table
 from dbaide.agent.join_validation import validate_join_relations
 from dbaide.joins import USER_JOIN_CONFIDENCE, catalog_record_to_relation
 from dbaide.agent.toolkit.support import _err, _relations_payload, _targets_from_relations
 
 
 def register(registry: ToolRegistry, orchestrator) -> None:
+    def _db_default(args: dict[str, Any]) -> str:
+        return str(args.get("database") or orchestrator.run_state.table_database or orchestrator.run_state.database or "")
+
+    def _normalize_endpoint(args: dict[str, Any]) -> tuple[str, dict[str, str]]:
+        db_default = _db_default(args)
+        left_db, table = normalize_db_table(str(args.get("table") or args.get("left_table") or ""), db_default)
+        right_db, ref_table = normalize_db_table(str(args.get("ref_table") or args.get("right_table") or ""), db_default)
+        database = left_db or right_db or db_default
+        return database, {
+            "table": table,
+            "column": str(args.get("column") or args.get("left_column") or "").strip(),
+            "ref_table": ref_table,
+            "ref_column": str(args.get("ref_column") or args.get("right_column") or "").strip(),
+        }
+
     def _retrieve_join_context(args: dict[str, Any], _ctx: ToolContext) -> ToolResult:
         from dbaide.agent.join_evidence import JoinEvidenceRetriever
 
         request = str(args.get("request") or orchestrator.run_state.question or "").strip()
         tables_arg = args.get("tables")
         tables = [str(t).strip() for t in tables_arg if str(t).strip()] if isinstance(tables_arg, list) else []
-        database = str(args.get("database") or orchestrator.run_state.table_database or orchestrator.run_state.database or "")
+        database = _db_default(args)
         # Default to catalog/FK evidence only. Semantic inference and sample validation
         # are extra work and must be explicitly requested by the main LLM.
         infer_semantic = bool(args.get("infer_semantic", False))
@@ -60,13 +75,20 @@ def register(registry: ToolRegistry, orchestrator) -> None:
         return ToolResult(ok=True, data=_relations_payload(validated))
 
     def _list_joins(args: dict[str, Any], _ctx: ToolContext) -> ToolResult:
-        database = str(args.get("database") or orchestrator.run_state.database or "")
+        database = _db_default(args)
         tables_arg = args.get("tables")
         tables: list[str] | None = None
         if isinstance(tables_arg, list):
-            tables = [str(t).strip() for t in tables_arg if str(t).strip()]
+            normalized: list[tuple[str, str]] = [normalize_db_table(str(t), database) for t in tables_arg if str(t).strip()]
+            explicit_dbs = {db for db, _table in normalized if db}
+            if len(explicit_dbs) == 1:
+                database = next(iter(explicit_dbs))
+            tables = [table for _db, table in normalized if table]
         min_conf = float(args.get("min_confidence") or 0.0)
-        endpoint = args if args.get("table") and args.get("column") else None
+        endpoint = None
+        if args.get("table") and args.get("column"):
+            ep_db, endpoint = _normalize_endpoint(args)
+            database = ep_db or database
         records = orchestrator.join_catalog.list_records(
             orchestrator.instance,
             database=database,
@@ -82,15 +104,15 @@ def register(registry: ToolRegistry, orchestrator) -> None:
         missing = [k for k in required if not str(args.get(k) or "").strip()]
         if missing:
             return ToolResult(ok=False, error=_err("add_join", f"missing: {', '.join(missing)}"))
-        database = str(args.get("database") or orchestrator.run_state.database or "")
+        database, endpoint = _normalize_endpoint(args)
         source = str(args.get("source") or "user").strip().lower()
         if source not in {"user", "agent"}:
             source = "user"
         rel = {
-            "table": str(args["table"]).strip(),
-            "column": str(args["column"]).strip(),
-            "ref_table": str(args["ref_table"]).strip(),
-            "ref_column": str(args["ref_column"]).strip(),
+            "table": endpoint["table"],
+            "column": endpoint["column"],
+            "ref_table": endpoint["ref_table"],
+            "ref_column": endpoint["ref_column"],
             "join_type": str(args.get("join_type") or ""),
             "reason": str(args.get("reason") or ""),
             "confidence": USER_JOIN_CONFIDENCE if source == "user" else float(args.get("confidence") or 0.7),
@@ -108,10 +130,21 @@ def register(registry: ToolRegistry, orchestrator) -> None:
         join_id = str(args.get("id") or args.get("join_id") or "").strip()
         if not join_id:
             return ToolResult(ok=False, error=_err("update_join", "id is required"))
+        endpoint_keys = {"database", "table", "column", "ref_table", "ref_column"}
+        fields = {
+            key: value
+            for key, value in args.items()
+            if key not in endpoint_keys or str(value or "").strip()
+        }
+        if args.get("table") or args.get("ref_table"):
+            ep_db, endpoint = _normalize_endpoint(args)
+            if ep_db:
+                fields["database"] = ep_db
+            fields.update({key: value for key, value in endpoint.items() if value})
         updated = orchestrator.join_catalog.update(
             orchestrator.instance,
             join_id,
-            args,
+            fields,
             fingerprint=getattr(orchestrator, "connection_fingerprint", ""),
         )
         if updated is None:
@@ -122,12 +155,9 @@ def register(registry: ToolRegistry, orchestrator) -> None:
         join_id = str(args.get("id") or args.get("join_id") or "").strip()
         endpoint = None
         if args.get("table") and args.get("column") and args.get("ref_table") and args.get("ref_column"):
-            endpoint = {
-                "table": args["table"],
-                "column": args["column"],
-                "ref_table": args["ref_table"],
-                "ref_column": args["ref_column"],
-            }
+            db, endpoint = _normalize_endpoint(args)
+            if db:
+                endpoint["database"] = db
         if not join_id and not endpoint:
             return ToolResult(ok=False, error=_err("delete_join", "id or full endpoint required"))
         ok = orchestrator.join_catalog.delete(
@@ -144,12 +174,12 @@ def register(registry: ToolRegistry, orchestrator) -> None:
         note = str(args.get("note") or "").strip()
         if not note:
             return ToolResult(ok=False, error=_err("annotate_object", "note is required"))
-        table = str(args.get("table") or "").strip()
+        database = _db_default(args)
+        database, table = normalize_db_table(str(args.get("table") or "").strip(), database)
         column = str(args.get("column") or "").strip()
         scope = str(args.get("scope") or "").strip().lower()
         if scope not in {"database", "table", "column"}:
             scope = "column" if column else ("table" if table else "database")
-        database = str(args.get("database") or orchestrator.run_state.database or "")
         store = getattr(orchestrator, "annotations", None)
         if store is None:
             return ToolResult(ok=False, error=_err("annotate_object", "annotation store unavailable"))

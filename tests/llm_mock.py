@@ -25,10 +25,6 @@ class AgentMockLLM(LLMClient):
         return {}
 
     def complete_text(self, messages: list[LLMMessage]) -> str:
-        system = messages[0].content if messages else ""
-        user = messages[-1].content
-        if "database schema assistant" in system:
-            return self._synthesize(user)
         return "OK"
 
     def _route(self, user: str) -> dict[str, Any]:
@@ -93,16 +89,9 @@ class AgentMockLLM(LLMClient):
             if prior == 0:
                 return {
                     "action": "call_tool",
-                    "tool": "discover_schema",
-                    "args": {"question": question},
-                    "thought": "Discover relevant schema",
-                }
-            if prior == 1:
-                return {
-                    "action": "call_tool",
-                    "tool": "synthesize_schema_answer",
-                    "args": {"question": question},
-                    "thought": "Synthesize schema answer",
+                    "tool": "retrieve_schema_context",
+                    "args": {"request": question},
+                    "thought": "Retrieve relevant schema evidence",
                 }
             return {"action": "finish", "answer": self._synthesize(user)}
 

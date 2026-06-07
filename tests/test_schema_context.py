@@ -10,10 +10,12 @@ from dbaide.agent.schema_context import (
     table_targets_from_hits,
     validation_feedback,
 )
+from dbaide.agent.join_validation import JoinSampleValidator
 from dbaide.agent.sql_writer import SQLWriter
 from dbaide.agent.toolkit import build_tool_registry
+from dbaide.joins import JoinCatalogStore
 from dbaide.llm import LLMClient, LLMMessage
-from dbaide.models import ColumnInfo, ConnectionConfig
+from dbaide.models import ColumnInfo, ConnectionConfig, QueryResult
 from dbaide.session import Session
 from dbaide.tools.registry import ToolContext
 
@@ -103,6 +105,70 @@ def test_retrieve_join_context_tool(tmp_path):
     assert result.ok
     assert len(result.data["relations"]) == 1
     assert orch.run_state.relations[0]["ref_table"] == "users"
+
+
+def test_join_sample_validation_uses_working_database(tmp_path, monkeypatch):
+    db = tmp_path / "fk.db"
+    make_fk_db(db)
+    conn = ConnectionConfig(name="local", type="sqlite", path=str(db))
+    orch = AskOrchestrator(build_adapter(conn), Session(connection=conn), PromptCaptureLLM())
+    orch._reset_loop_state("join", "other", True)
+    orch.run_state.table_database = "main"
+    seen_databases: list[str] = []
+
+    def fake_execute(sql, *, database="", limit=10):
+        seen_databases.append(database)
+        if "matched" in sql:
+            return QueryResult(["sampled", "matched"], [{"sampled": 1, "matched": 1}], 1)
+        return QueryResult(["max_cnt"], [{"max_cnt": 1}], 1)
+
+    monkeypatch.setattr(orch.query, "execute_sql", fake_execute)
+
+    validator = JoinSampleValidator(orch, sample_size=20)
+    relation = validator.validate_one(
+        {"table": "orders", "column": "user_id", "ref_table": "users", "ref_column": "id", "source": "semantic"},
+        col_types={("orders", "user_id"): "INTEGER", ("users", "id"): "INTEGER"},
+        table_db={},
+    )
+
+    assert relation["validated"]
+    assert seen_databases and set(seen_databases) == {"main"}
+
+
+def test_join_catalog_tools_normalize_qualified_endpoints(tmp_path):
+    db = tmp_path / "fk.db"
+    make_fk_db(db)
+    conn = ConnectionConfig(name="local", type="sqlite", path=str(db))
+    orch = AskOrchestrator(
+        build_adapter(conn),
+        Session(connection=conn),
+        PromptCaptureLLM(),
+        join_catalog=JoinCatalogStore(base_dir=tmp_path / "joins"),
+    )
+    registry = build_tool_registry(orch)
+    ctx = ToolContext()
+    orch._reset_loop_state("join", "main", True)
+
+    add = registry.invoke(
+        "add_join",
+        {
+            "database": "main",
+            "table": "main.orders",
+            "column": "user_id",
+            "ref_table": "main.users",
+            "ref_column": "id",
+        },
+        ctx,
+    )
+    listed = registry.invoke("list_joins", {"tables": ["main.orders"], "database": "main"}, ctx)
+
+    assert add.ok
+    assert add.data["join"]["database"] == "main"
+    assert add.data["join"]["table"] == "orders"
+    assert add.data["join"]["ref_table"] == "users"
+    assert listed.ok
+    assert listed.data["count"] == 1
+    assert listed.data["joins"][0]["table"] == "orders"
 
 
 def test_generate_sql_prompt_includes_foreign_keys(tmp_path):

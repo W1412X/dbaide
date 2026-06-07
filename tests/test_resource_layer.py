@@ -162,3 +162,17 @@ class TestConfigIntegration:
         # staging preset, but max_row_limit overridden
         assert policy.build_profile_mode == "auto"
         assert policy.max_row_limit == 250
+
+    def test_connection_save_clears_per_instance_policy_cache(self, tmp_path):
+        from dbaide.db import policy as policy_mod
+        policy_mod.clear_cache()
+        path = tmp_path / "config.toml"
+        cfg = ConfigManager(path=path)
+        cfg.upsert_connection(ConnectionConfig(name="local", type="sqlite", path="/tmp/a.db", load_profile="production"))
+        first = cfg.policy_for(cfg.connections()["local"])
+        assert first.build_max_workers == 1
+
+        cfg.upsert_connection(ConnectionConfig(name="local", type="sqlite", path="/tmp/a.db", load_profile="dev"))
+        second = cfg.policy_for(cfg.connections()["local"])
+
+        assert second.build_max_workers == 4

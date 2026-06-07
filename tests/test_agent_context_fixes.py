@@ -107,6 +107,23 @@ def test_loop_allowed_tools_match_advertised_specs(tmp_path):
     assert "delete_join" not in advertised
 
 
+def test_decision_prompt_requires_tool_evidence_before_clarification(tmp_path):
+    from dbaide.agent.loop import AskAgentLoop, LoopState
+
+    orch = _orch(tmp_path)
+    loop = AskAgentLoop(orch)
+    prompt = loop._decision_system_prompt(
+        LoopState(question="q", database="", execute_allowed=True),
+        "ask_user: spec",
+        "safe_auto",
+        "allowed",
+    )
+
+    assert "Ask the user only for irreducible business intent" in prompt
+    assert "table/column existence" in prompt
+    assert "retrieve_schema_context" in prompt and "describe_table" in prompt
+
+
 def test_workflow_request_limit_and_timeout_override_session(tmp_path):
     from dbaide.core.result import WorkflowRequest
     from dbaide.core.workflow import WorkflowEngine
@@ -122,6 +139,21 @@ def test_workflow_request_limit_and_timeout_override_session(tmp_path):
     assert assistant.session.timeout_seconds == 17
     assert assistant._orchestrator.query.sql_guard.default_limit == 321
     assert assistant._orchestrator.query.timeout_seconds == 17
+
+
+def test_workflow_validation_and_plan_use_request_limit(tmp_path):
+    from dbaide.core.workflow import WorkflowEngine
+
+    db = tmp_path / "limits.db"
+    sqlite3.connect(db).close()
+    conn = ConnectionConfig(name="local", type="sqlite", path=str(db))
+    engine = WorkflowEngine(conn, _MockLLM())
+
+    report = engine._validate_sql("SELECT 1", limit=7)
+    plan = engine._build_query_plan("q", "SELECT 1", limit=7)
+
+    assert report.normalized_sql.endswith("LIMIT 7")
+    assert plan.limit == 7
 
 
 def test_loop_prompt_advertises_tool_input_schema(tmp_path):
@@ -149,6 +181,120 @@ def test_loop_prompt_advertises_tool_input_schema(tmp_path):
     assert "column_stats(args:" in llm.system
     assert "metrics: list[string]" in llm.system
     assert "execute_sql(args:" in llm.system
+
+
+def test_decision_retries_transient_llm_call_failure(tmp_path):
+    from dbaide.agent.loop import AskAgentLoop, LoopState
+
+    class FlakyLLM(LLMClient):
+        def __init__(self):
+            self.calls = 0
+
+        def complete_json(self, messages, *, schema_hint=""):
+            self.calls += 1
+            if self.calls == 1:
+                raise RuntimeError("temporary outage")
+            return {"action": "finish", "answer": "done"}
+
+        def complete_text(self, messages):
+            return "done"
+
+    orch = _orch(tmp_path)
+    orch.llm = FlakyLLM()
+    loop = AskAgentLoop(orch)
+
+    decision = loop._decide(LoopState(question="q", database="", execute_allowed=True), [])
+
+    assert decision == {"action": "finish", "answer": "done"}
+    assert orch.llm.calls == 2
+
+
+def test_decision_does_not_retry_cancelled_llm_call(tmp_path):
+    from dbaide.agent.loop import AskAgentLoop, LoopState
+
+    class CancelledError(Exception):
+        pass
+
+    class CancelLLM(LLMClient):
+        def complete_json(self, messages, *, schema_hint=""):
+            raise CancelledError("Task cancelled by user")
+
+        def complete_text(self, messages):
+            return ""
+
+    orch = _orch(tmp_path)
+    orch.llm = CancelLLM()
+    loop = AskAgentLoop(orch)
+
+    with pytest.raises(CancelledError):
+        loop._decide(LoopState(question="q", database="", execute_allowed=True), [])
+
+
+def test_memory_compresses_tool_result_and_resolves_open_question():
+    from dbaide.agent.memory import AgentMemory
+
+    mem = AgentMemory()
+    mem.add_open_question("order_data.fulfillment 表是否包含妥投时间字段？")
+
+    mem.record_work(
+        action="describe_table",
+        args={"database": "order_data", "table": "fulfillment"},
+        ok=True,
+        summary="fulfillment structure",
+        data={
+            "database": "order_data",
+            "table": "fulfillment",
+            "columns": [
+                {"name": "id"},
+                {"name": "order_id"},
+                {"name": "delivered_at"},
+                {"name": "delivery_status"},
+            ],
+            "indexes": [{"name": "idx_delivered_at"}],
+            "foreign_keys": [],
+        },
+    )
+
+    prompt = mem.prompt_block()
+    assert "order_data.fulfillment 表是否包含妥投时间字段" not in "\n".join(mem.open_questions)
+    assert any("delivered_at" in item for item in mem.resolved_questions)
+    assert "Described order_data.fulfillment" in prompt
+    assert "Resolved Questions" in prompt
+    assert "describe_table" in prompt and "Do Not Repeat Exactly" in prompt
+
+
+def test_loop_blocks_repeated_tool_call_as_memory_not_raw_spam(tmp_path):
+    from dbaide.agent.loop import AskAgentLoop
+
+    class RepeatLLM(LLMClient):
+        def complete_json(self, messages, *, schema_hint=""):
+            return {
+                "action": "call_tool",
+                "tool": "describe_table",
+                "args": {"table": "orders", "database": "main"},
+                "thought": "repeat",
+            }
+
+        def complete_text(self, messages):
+            return ""
+
+    db = tmp_path / "repeat.db"
+    conn = sqlite3.connect(db)
+    conn.execute("CREATE TABLE orders(id INTEGER PRIMARY KEY, amount REAL)")
+    conn.commit()
+    conn.close()
+    cfg = ConnectionConfig(name="local", type="sqlite", path=str(db))
+    session = Session(connection=cfg)
+    session.agent_max_steps = 8
+    orch = AskOrchestrator(build_adapter(cfg), session, RepeatLLM())
+
+    resp = AskAgentLoop(orch).run("describe orders", database="main", execute=True)
+
+    assert resp.warnings
+    assert "repeated_tool_call_blocked" in resp.warnings[0]
+    assert any("describe_table" in item for item in orch.run_state.memory.do_not_repeat)
+    # One real describe_table call plus blocked repeats; it must not burn the whole budget.
+    assert len(orch.run_state.memory.work_log) == 1
 
 
 def test_sql_retry_budget_stops_bad_sql_loop(tmp_path):
@@ -185,6 +331,32 @@ def test_sql_retry_budget_stops_bad_sql_loop(tmp_path):
     assert orch.run_state.fail_reason.startswith("sql_repair_budget_exhausted")
     assert any("sql_repair_budget_exhausted" in warning for warning in response.warnings)
     assert orch.llm.decisions == 2
+
+
+def test_execute_sql_tool_returns_actual_database(tmp_path):
+    from dbaide.agent.toolkit import build_tool_registry
+    from dbaide.tools.registry import ToolContext
+
+    db = tmp_path / "exec.db"
+    conn = sqlite3.connect(db)
+    conn.executescript("CREATE TABLE t(id INTEGER PRIMARY KEY); INSERT INTO t VALUES (1);")
+    conn.commit()
+    conn.close()
+    cfg = ConnectionConfig(name="local", type="sqlite", path=str(db))
+    session = Session(connection=cfg)
+    orch = AskOrchestrator(build_adapter(cfg), session, _MockLLM())
+    orch._reset_loop_state("q", "main", True)
+    orch.run_state.table_database = "main"
+    registry = build_tool_registry(orch)
+
+    result = registry.invoke(
+        "execute_sql",
+        {"sql": "SELECT id FROM t", "limit": 10},
+        ToolContext(execution_policy="safe_auto"),
+    )
+
+    assert result.ok
+    assert result.data["database"] == "main"
 
 
 def test_tool_registry_checks_cancel_before_handler():

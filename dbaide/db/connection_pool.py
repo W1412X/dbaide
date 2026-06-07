@@ -143,7 +143,7 @@ def for_key(
     factory: ConnectionFactory,
     validator: ConnectionValidator | None = None,
 ) -> ConnectionPool:
-    registry_key = (key.instance or "<default>", key.kind, key.database)
+    registry_key = (key.instance or "<default>", key.kind, key.database, key.session_timezone)
     with _registry_lock:
         pool = _registry.get(registry_key)
         if pool is None or pool.max_size != max(1, int(max_size)):

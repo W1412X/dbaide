@@ -12,7 +12,7 @@ from typing import TYPE_CHECKING, Any
 
 from dbaide.agent.memory import SchemaCandidate, SchemaEvidenceReport
 from dbaide.agent.progress_events import child_node, subagent_event
-from dbaide.agent.schema_context import sanitize_note
+from dbaide.agent.schema_context import normalize_db_table, sanitize_note
 from dbaide.agent.toolkit.support import _remember_table_schema
 from dbaide.models import ColumnInfo
 
@@ -92,22 +92,35 @@ class SchemaEvidenceRetriever:
             detail=search_text[:160],
         ))
         try:
-            discovery = self.orch._discover(search_text, parent=discover_node, column_detail=False)
+            discovery = self.orch._discover(
+                search_text,
+                parent=discover_node,
+                column_detail=False,
+                scope=scope,
+            )
             actions.append(f"progressive discovery for: {search_text}")
         except Exception as exc:
             discovery = None
             missing.append(f"progressive discovery failed: {exc}")
 
-        targets = _targets_from_scope(scope, database)
+        scope_targets = _targets_from_scope(scope, database)
+        note_targets = self._annotation_targets(search_text, database)
+        targets = _dedupe_targets(scope_targets + note_targets)
+        hard_count = len(targets)
         if discovery is not None:
             for hit in discovery.hits:
+                if len(targets) >= max(max(1, limit), hard_count):
+                    break
                 if hit.kind == "table" and hit.table:
                     db = hit.database or database or ""
                     key = (db, hit.table)
                     if key not in targets:
                         targets.append(key)
-                if len(targets) >= max(1, limit):
-                    break
+        if note_targets:
+            actions.append(
+                "included user-note matched table evidence: "
+                + ", ".join(f"{db}.{tbl}" if db else tbl for db, tbl in note_targets[:8])
+            )
 
         self.orch.progress(subagent_event(
             agent="schema_link",
@@ -122,7 +135,7 @@ class SchemaEvidenceRetriever:
         for db, table in targets[:max(1, limit)]:
             candidate = self._candidate(db, table, notes)
             candidates.append(candidate)
-            if candidate.columns:
+            if candidate.status == "active" and candidate.columns:
                 cols = [_column_from_payload(c) for c in candidate.columns]
                 _remember_table_schema(self.orch, table, db, cols)
             if candidate.status != "active":
@@ -177,7 +190,7 @@ class SchemaEvidenceRetriever:
             fingerprint=getattr(self.orch, "connection_fingerprint", ""),
         )
         if tdoc:
-            summary = str(tdoc.get("summary") or tdoc.get("comment") or "")[:240]
+            summary = str(tdoc.get("description") or tdoc.get("summary") or tdoc.get("source_comment") or tdoc.get("comment") or "")[:240]
             row_count = tdoc.get("row_count")
             indexes = list(tdoc.get("indexes") or [])
             foreign_keys = list(tdoc.get("foreign_keys") or [])
@@ -268,6 +281,25 @@ class SchemaEvidenceRetriever:
             out[(db_l, tbl_l)] = entry
         return out
 
+    def _annotation_targets(self, search_text: str, database: str) -> list[tuple[str, str]]:
+        store = getattr(self.orch, "annotations", None)
+        if store is None:
+            return []
+        try:
+            records = store.list_records(self.orch.instance, scope="table", database=database or "")
+        except Exception:
+            return []
+        out: list[tuple[str, str]] = []
+        for rec in records:
+            table = str(rec.get("table") or "").strip()
+            if not table:
+                continue
+            db = str(rec.get("database") or database or "").strip()
+            note = sanitize_note(str(rec.get("note") or ""))
+            if _annotation_matches(search_text, db, table, note):
+                out.append((db, table))
+        return _dedupe_targets(out)
+
 
 def _request_text(request: str, focus_terms: list[str], need: str) -> str:
     parts = [str(request or "").strip()]
@@ -289,8 +321,44 @@ def _targets_from_scope(scope: dict[str, Any] | None, database: str) -> list[tup
         if not table:
             continue
         db = str(raw.get("database") or database or "").strip()
+        db, table = normalize_db_table(table, db)
         out.append((db, table))
     return out
+
+
+def _dedupe_targets(targets: list[tuple[str, str]]) -> list[tuple[str, str]]:
+    out: list[tuple[str, str]] = []
+    seen: set[tuple[str, str]] = set()
+    for db, table in targets:
+        key = (str(db or "").strip(), str(table or "").strip())
+        if key[1] and key not in seen:
+            seen.add(key)
+            out.append(key)
+    return out
+
+
+def _annotation_matches(search_text: str, database: str, table: str, note: str) -> bool:
+    haystack = f"{database} {table} {note}".lower()
+    query = str(search_text or "").lower()
+    if table.lower() in query or f"{database}.{table}".lower() in query:
+        return True
+    tokens = _meaningful_tokens(query)
+    if not tokens:
+        return False
+    return sum(1 for token in tokens if token in haystack) >= 2
+
+
+def _meaningful_tokens(text: str) -> list[str]:
+    import re
+
+    tokens = re.findall(r"[a-zA-Z_][a-zA-Z0-9_]{2,}|[\u4e00-\u9fff]{2,}", text)
+    stop = {"检查", "一下", "数据", "是否", "一致", "主要", "关注", "identify", "table", "column", "need"}
+    out: list[str] = []
+    for token in tokens:
+        token = token.lower()
+        if token not in stop and token not in out:
+            out.append(token)
+    return out[:24]
 
 
 def _candidate_to_dict(c: SchemaCandidate) -> dict[str, Any]:

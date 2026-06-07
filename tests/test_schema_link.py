@@ -51,7 +51,7 @@ def _orch(tmp_path, *, hits, extra_schema: str = "", annotations=None):
         join_catalog=jc,
         annotations=annotations,
     )
-    orch._discover = lambda q, *, parent="", column_detail=True: DiscoveryResult(
+    orch._discover = lambda q, *, parent="", column_detail=True, scope=None: DiscoveryResult(
         question=q,
         hits=[
             SchemaHit(kind="table", path=f"shop.main.{t}", name=t, database="main", table=t, summary=f"{t} table")
@@ -72,6 +72,19 @@ def test_retrieve_schema_context_returns_broad_evidence(tmp_path):
     assert orch.run_state.memory.schema_reports[-1].id == report.id
     assert "main.orders" in orch.run_state.schemas
     assert orch.run_state.relations == []  # schema retrieval must not auto-load joins
+
+
+def test_retrieve_schema_context_splits_qualified_scope_table(tmp_path):
+    orch = _orch(tmp_path, hits=[])
+    report = SchemaEvidenceRetriever(orch).retrieve(
+        "orders",
+        database="main",
+        scope={"tables": [{"database": "main", "table": "main.orders"}]},
+    )
+
+    assert [c.table for c in report.candidates] == ["orders"]
+    assert report.candidates[0].database == "main"
+    assert report.candidates[0].columns
 
 
 def test_schema_context_keeps_table_metadata_without_join_workflow(tmp_path):
@@ -111,6 +124,38 @@ def test_deprecated_table_note_is_preserved_as_excluded_evidence(tmp_path):
     assert "deprecated" in orders.exclusion_reason
     assert any(x.target == "main.orders" for x in orch.run_state.memory.excluded_paths)
     assert any(c.get("type") == "deprecated" for c in report.conflicts)
+
+
+def test_user_note_matched_table_is_not_dropped_by_limit(tmp_path):
+    annotations = AnnotationStore(tmp_path / "ann")
+    annotations.add(
+        "shop",
+        scope="table",
+        note="退款数据的按天（北京日）+国家的统计表，从订单数据中统计同步",
+        database="main",
+        table="spu_delivered_refunds_stats_daily",
+    )
+    orch = _orch(
+        tmp_path,
+        hits=["orders", "sku_delivered_stats_daily", "items"],
+        extra_schema=(
+            "CREATE TABLE sku_delivered_stats_daily(id INTEGER PRIMARY KEY, dt TEXT, delivered_quantity INT);"
+            "CREATE TABLE spu_delivered_refunds_stats_daily("
+            "id INTEGER PRIMARY KEY, delivered_date TEXT, country TEXT, spu TEXT, "
+            "delivered_quantity INT, refunds INT);"
+        ),
+        annotations=annotations,
+    )
+
+    report = SchemaEvidenceRetriever(orch).retrieve(
+        "检查妥投退款统计表和订单表的数据是否一致",
+        focus_terms=["妥投", "退款", "统计", "订单"],
+        limit=2,
+    )
+
+    labels = {f"{c.database}.{c.table}" for c in report.candidates}
+    assert "main.spu_delivered_refunds_stats_daily" in labels
+    assert any("included user-note matched table evidence" in x for x in report.actions_taken)
 
 
 def test_join_evidence_is_separate_and_maps_active_candidates(tmp_path):
@@ -155,4 +200,6 @@ def test_normalize_db_table_splits_qualified_name():
     assert normalize_db_table("platform.sys_user", "") == ("platform", "sys_user")
     assert normalize_db_table("sys_user", "platform") == ("platform", "sys_user")
     assert normalize_db_table("`platform`.`sys_user`", "") == ("platform", "sys_user")
+    assert normalize_db_table("platform.sys_user", "platform") == ("platform", "sys_user")
+    assert normalize_db_table("platform.sys_user", "product_data") == ("product_data", "platform.sys_user")
     assert normalize_db_table("sys_user", "") == ("", "sys_user")

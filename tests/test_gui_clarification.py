@@ -1,5 +1,5 @@
-"""Clarification reply controls: full-text chips, an inline input+Send, and the
-multi-question fix (a chip fills the input instead of submitting one answer)."""
+"""Clarification reply controls: wrapped option rows, an inline input+Send, and
+the multi-question fix (an option fills the input instead of submitting one answer)."""
 
 from __future__ import annotations
 
@@ -10,7 +10,7 @@ import pytest
 pytest.importorskip("PyQt6")
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
-from PyQt6.QtWidgets import QApplication  # noqa: E402
+from PyQt6.QtWidgets import QApplication, QSizePolicy  # noqa: E402
 
 
 @pytest.fixture(scope="module")
@@ -18,7 +18,7 @@ def qapp():
     return QApplication.instance() or QApplication([])
 
 
-def test_single_question_chip_submits_directly(qapp):
+def test_single_question_option_submits_directly(qapp):
     from dbaide.desktop.components.conversation import _ClarificationBar
     bar = _ClarificationBar(["UTC", "America/New_York"], allow_direct_submit=True)
     got = []
@@ -27,7 +27,7 @@ def test_single_question_chip_submits_directly(qapp):
     assert got == ["America/New_York"]
 
 
-def test_multi_question_chip_fills_input_not_submit(qapp):
+def test_multi_question_option_fills_input_not_submit(qapp):
     from dbaide.desktop.components.conversation import _ClarificationBar
     bar = _ClarificationBar(["delivered", "returned"], allow_direct_submit=False)
     got = []
@@ -38,6 +38,21 @@ def test_multi_question_chip_fills_input_not_submit(qapp):
     assert bar._input.text() == "delivered; returned"  # answers accumulate
     bar._on_send()
     assert got == ["delivered; returned"]              # sent together
+
+
+def test_long_clarification_options_are_full_width_wrapped_rows(qapp):
+    from dbaide.desktop.components.conversation import _ClarificationBar
+    long_option = (
+        "Use the completed delivery timestamp from order_data.delivery_detail, "
+        "but only when refund_status is empty and the parcel state is delivered"
+    )
+    bar = _ClarificationBar([long_option], allow_direct_submit=True)
+    row = bar._option_rows[0]
+    assert row.sizePolicy().horizontalPolicy() == QSizePolicy.Policy.Expanding
+    assert row.sizePolicy().verticalPolicy() == QSizePolicy.Policy.Preferred
+    assert row.maximumHeight() > 1000
+    assert row.label.wordWrap() is True
+    assert row.label.text() == long_option
 
 
 def test_typed_reply_submits(qapp):
@@ -95,7 +110,7 @@ def test_clarification_stepper_steps_and_assembles(qapp):
     ])
     got = []
     stepper.submitted.connect(got.append)
-    # First question: picking a chip advances without submitting yet.
+    # First question: picking an option advances without submitting yet.
     assert stepper._idx == 0
     stepper._answer("Asia/Shanghai")
     assert got == [] and stepper._idx == 1               # advanced, not submitted
