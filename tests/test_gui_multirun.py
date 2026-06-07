@@ -97,14 +97,14 @@ def test_runs_over_cap_are_queued(qapp, tmp_path):
     # A third session asks → must queue.
     key = "C"
     win.ask_tab.ensure_slot(key); win._active_key = key; win.ask_tab.set_active(key)
-    win._start_ask(key, {"connection_name": "local", "question": "q", "session_id": ""})
+    win.conversation_controller.start_ask(key, {"connection_name": "local", "question": "q", "session_id": ""})
 
     assert key not in win._runs                      # not started (cap reached)
     assert any(k == key for k, _ in win._run_queue)  # queued instead
 
     # Freeing a slot drains the queue (the fake A finishes → C launches).
     win._runs.pop("A", None)
-    win._drain_queue()
+    win.conversation_controller.drain_queue()
     assert key in win._runs and not any(k == key for k, _ in win._run_queue)
 
     win._runs.clear(); win._run_queue.clear()
@@ -203,11 +203,16 @@ def test_oneoff_sql_result_routes_to_originating_editor(monkeypatch):
     win.current_connection = lambda: "current"  # type: ignore[method-assign]
     win.current_database = lambda: "other_db"  # type: ignore[method-assign]
     win._refresh_query_history = lambda: None  # type: ignore[method-assign]
-    win._sync_active_ui = lambda: None  # type: ignore[method-assign]
-    win._refresh_run_status = lambda: None  # type: ignore[method-assign]
+    from dbaide.desktop.run_controllers import OneOffActionController
+
+    win.conversation_controller = type("Runs", (), {
+        "sync_active_ui": lambda _self: None,
+        "refresh_run_status": lambda _self: None,
+    })()
+    win.oneoff_controller = OneOffActionController(win)
 
     result = {"columns": ["x"], "rows": [{"x": 1}], "row_count": 1, "elapsed_ms": 7}
-    win._on_oneoff_done("execute_sql", result)
+    win.oneoff_controller.on_done("execute_sql", result)
 
     assert origin.running == [False]
     assert origin.result == result
@@ -238,7 +243,7 @@ def test_query_completed_event_ignores_other_connections():
     assert calls == ["current"]
 
 
-def test_active_or_new_key_updates_window_and_ask_tab():
+def test_conversation_controller_active_or_new_key_updates_window_and_ask_tab():
     import dbaide.desktop.views.main_window as mw
     from dbaide.desktop.ui_state import ConversationRunState
 
@@ -248,7 +253,10 @@ def test_active_or_new_key_updates_window_and_ask_tab():
     win.current_session_id = "old"
     win.ask_tab = type("Ask", (), {"set_active": lambda _self, key: active_calls.append(key)})()
 
-    key = win._active_or_new_key()
+    from dbaide.desktop.run_controllers import ConversationRunController
+
+    win.conversation_controller = ConversationRunController(win)
+    key = win.conversation_controller.active_or_new_key()
 
     assert key == "new:1"
     assert win._active_key == "new:1"
@@ -313,11 +321,14 @@ def test_stale_ask_completion_is_ignored():
     calls: list[str] = []
     win._runs = {}
     win.ask_tab = type("Ask", (), {"append_result": lambda *_a: calls.append("append")})()
-    win._sync_active_ui = lambda: calls.append("sync")  # type: ignore[method-assign]
-    win._refresh_run_status = lambda: calls.append("status")  # type: ignore[method-assign]
-    win._drain_queue = lambda: calls.append("drain")  # type: ignore[method-assign]
+    from dbaide.desktop.run_controllers import ConversationRunController
 
-    win._on_ask_done("old", {"status": "completed"})
-    win._on_ask_failed("old", RuntimeError("late failure"))
+    win.conversation_controller = ConversationRunController(win)
+    win.conversation_controller.sync_active_ui = lambda: calls.append("sync")  # type: ignore[method-assign]
+    win.conversation_controller.refresh_run_status = lambda: calls.append("status")  # type: ignore[method-assign]
+    win.conversation_controller.drain_queue = lambda: calls.append("drain")  # type: ignore[method-assign]
+
+    win.conversation_controller.on_done("old", {"status": "completed"})
+    win.conversation_controller.on_failed("old", RuntimeError("late failure"))
 
     assert calls == []
