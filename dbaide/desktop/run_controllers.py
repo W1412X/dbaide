@@ -52,8 +52,7 @@ class OneOffActionController:
             on_failed=self.on_failed,
             on_progress=self.on_progress,
         ))
-        win.conversation_controller.sync_active_ui()
-        win.conversation_controller.refresh_run_status()
+        win.conversation_controller.sync_work_ui()
 
     def on_progress(self, message: object) -> None:
         win = self.win
@@ -77,8 +76,7 @@ class OneOffActionController:
         if data_doc is not None:
             win._ensure_ui_state().set_doc_running(data_doc, False)
         win.oneoff_state.finish()
-        win.conversation_controller.sync_active_ui()
-        win.conversation_controller.refresh_run_status()
+        win.conversation_controller.sync_work_ui()
         action = expected_action or action
         if action == "build_assets":
             stats = result.get("stats", {}) or {}
@@ -175,8 +173,7 @@ class OneOffActionController:
         if data_doc is not None:
             win._ensure_ui_state().set_doc_running(data_doc, False)
         win.oneoff_state.finish()
-        win.conversation_controller.sync_active_ui()
-        win.conversation_controller.refresh_run_status()
+        win.conversation_controller.sync_work_ui()
         if isinstance(exc, CancelledError):
             win.toast(_i18n_t("toast.cancelled"))
             return
@@ -224,8 +221,7 @@ class ConversationRunController:
         if len(win._runs) >= win._max_runs:
             win.run_state.queue_run(key, payload)
             win.toast(_i18n_t("toast.run_queued"))
-            self.sync_active_ui()
-            self.refresh_run_status()
+            self.sync_work_ui()
             return
         self.launch_ask(key, payload)
 
@@ -241,8 +237,7 @@ class ConversationRunController:
         )
         win._runs[key] = handle
         win._slot_connection[key] = str(payload.get("connection_name") or win.current_connection() or "")
-        self.sync_active_ui()
-        self.refresh_run_status()
+        self.sync_work_ui()
 
     def on_progress(self, key: str, message: object) -> None:
         win = self.win
@@ -299,8 +294,7 @@ class ConversationRunController:
         if status != "wait_user":
             win._slot_connection.pop(key, None)
         self.drain_queue()
-        self.sync_active_ui()
-        self.refresh_run_status()
+        self.sync_work_ui()
 
     def on_failed(self, key: str, exc: object) -> None:
         win = self.win
@@ -315,8 +309,7 @@ class ConversationRunController:
             win.ask_tab.finish_turn_error(key, msg)
         win.toast(_i18n_t("toast.cancelled") if isinstance(exc, CancelledError) else str(exc))
         self.drain_queue()
-        self.sync_active_ui()
-        self.refresh_run_status()
+        self.sync_work_ui()
 
     def bind_slot_to_session(self, temporary_key: str, session_id: str) -> None:
         self.win.ask_tab.remap(temporary_key, session_id)
@@ -342,13 +335,16 @@ class ConversationRunController:
             win.run_state.remove_queued(key)
             if win.ask_tab.turn_open(key):
                 win.ask_tab.finish_turn_error(key, "**Cancelled**: Task stopped by user.")
-            self.sync_active_ui()
-            self.refresh_run_status()
+            self.sync_work_ui()
             return
         if win._oneoff_worker and not win._oneoff_worker.is_cancelled:
             win._oneoff_worker.cancel()
             win.toast(_i18n_t("toast.cancelling"))
             return
+        self.sync_work_ui()
+
+    def sync_work_ui(self) -> None:
+        """Composer + top-bar + chat run indicators — keep these in lockstep."""
         self.sync_active_ui()
         self.refresh_run_status()
 
@@ -386,6 +382,7 @@ class ConversationRunController:
         else:
             win._restore_status_badge(force=True)
             win._ensure_ui_state().apply_chat_activity(win.run_state.running_ids(), pending, selected)
+            self.sync_active_ui()
             return
         win._ensure_ui_state().apply_run_status(RunStatusUiState(
             topbar_text=text,

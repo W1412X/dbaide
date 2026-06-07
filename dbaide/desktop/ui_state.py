@@ -173,9 +173,12 @@ class UiStateBinder:
         composer = getattr(self.window, "composer", None)
         if not self._usable(composer):
             return
-        composer.set_running(state.busy)
+        # Parent enable first, then per-child running — otherwise Qt re-enables
+        # children when the parent is turned back on and the input stays editable
+        # while the busy placeholder/spinner is still showing.
         composer.set_placeholder(state.placeholder)
         composer.setEnabled(state.has_connection)
+        composer.set_running(state.busy)
 
     def apply_run_status(self, state: RunStatusUiState) -> None:
         self._set_topbar_status(state.topbar_text, state.topbar_state)

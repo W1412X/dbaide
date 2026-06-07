@@ -337,6 +337,23 @@ def test_status_badge_restore_skips_while_assets_busy():
     assert calls == [("current", [{"name": "current", "asset_status": "ready"}])]
 
 
+def test_pop_asset_work_syncs_composer():
+    import dbaide.desktop.views.main_window as mw
+
+    win = mw.MainWindow.__new__(mw.MainWindow)
+    sync_calls: list[str] = []
+    win._asset_work_stack = [("schema_tree", "current", "Loading")]
+    win._asset_work_connection = mw.MainWindow._asset_work_connection.__get__(win, mw.MainWindow)  # type: ignore[method-assign]
+    win.current_connection = lambda: "current"  # type: ignore[method-assign]
+    win.conversation_controller = type("Ctrl", (), {  # type: ignore[method-assign]
+        "sync_work_ui": lambda _self: sync_calls.append("sync"),
+    })()
+
+    win._pop_asset_work("schema_tree", {"name": "current"})
+    assert win._asset_work_stack == []
+    assert sync_calls == ["sync"]
+
+
 def test_stale_ask_completion_is_ignored():
     import dbaide.desktop.views.main_window as mw
 

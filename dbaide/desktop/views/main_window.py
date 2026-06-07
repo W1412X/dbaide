@@ -396,7 +396,7 @@ class MainWindow(QMainWindow):
             self.fail(exc)
 
     def _on_bootstrap_failed(self, exc: object) -> None:
-        self._refresh_topbar_status()
+        self._sync_work_ui()
         self._ensure_ui_state().statusbar_message(f"Load failed: {exc}")
         self.toast(str(exc))
 
@@ -427,7 +427,7 @@ class MainWindow(QMainWindow):
             self.schema_rows = []
             self.sidebar.load_schema([])
             self.sidebar.chats.load([])
-            self._refresh_topbar_status()
+            self._sync_work_ui()
 
     _ASSET_STATUS_ACTIONS = frozenset({
         "build_assets",
@@ -459,7 +459,7 @@ class MainWindow(QMainWindow):
         label = self._asset_status_label(action)
         self._asset_work_stack.append((action, conn, label))
         if conn == self.current_connection():
-            self._ensure_ui_state().global_status(label, "building")
+            self._sync_work_ui()
 
     def _pop_asset_work(self, action: str, payload: dict[str, Any]) -> None:
         conn = self._asset_work_connection(payload)
@@ -471,7 +471,14 @@ class MainWindow(QMainWindow):
                 continue
             self._asset_work_stack.pop(index)
             break
-        self._refresh_topbar_status()
+        self._sync_work_ui()
+
+    def _sync_work_ui(self) -> None:
+        """Top-bar badge + composer + chat run indicators — one choke point."""
+        self.conversation_controller.sync_work_ui()
+
+    def _refresh_topbar_status(self) -> None:
+        self.conversation_controller.refresh_run_status()
 
     def _current_asset_label(self, conn: str | None = None) -> str:
         conn = conn or self.current_connection()
@@ -497,20 +504,6 @@ class MainWindow(QMainWindow):
         if self._building and str(oneoff.connection or "") == conn:
             return True
         return bool(self.service._build_active(conn))
-
-    def _refresh_topbar_status(self) -> None:
-        label = self._current_asset_label()
-        if label:
-            self._ensure_ui_state().global_status(label, "building")
-            return
-        active = self.run_state.active_count()
-        if self._building:
-            self._ensure_ui_state().global_status(_i18n_t("status.building"), "building")
-            return
-        if active > 0:
-            self.conversation_controller.refresh_run_status()
-            return
-        self._restore_status_badge(force=True)
 
     def _run_background(
         self,
@@ -616,15 +609,14 @@ class MainWindow(QMainWindow):
         self.run_state.reset()
         self.ask_tab.reset_all()
         self.current_session_id = ""
-        self.conversation_controller.refresh_run_status()
+        self.conversation_controller.sync_work_ui()
 
     def _refresh_connection_context(self, conn_name: str) -> None:
         self._load_schema(conn_name)
         self._load_sessions(conn_name)
         self._refresh_query_history()
         self.refresh_joins()
-        self._refresh_topbar_status()
-        self.conversation_controller.sync_active_ui()
+        self._sync_work_ui()
 
     def _load_sessions(self, name: str) -> None:
         if not name:
@@ -705,7 +697,12 @@ class MainWindow(QMainWindow):
             return
         self.schema_rows = rows
         self._ensure_ui_state().schema_loaded(self.schema_rows, self._schema_completion())
-        self._refresh_topbar_status()
+        if rows:
+            for conn in self.bootstrap.get("connections") or []:
+                if conn.get("name") == name:
+                    conn["asset_status"] = "ready"
+                    break
+        self._sync_work_ui()
         self._ensure_ui_state().statusbar_message(_i18n_t("status.ready"))
 
     def _schema_completion(self) -> dict[str, Any]:
@@ -769,7 +766,7 @@ class MainWindow(QMainWindow):
         self.schema_rows = []
         self._ensure_ui_state().schema_error(message)
         self.toast(f"Schema load failed: {message}")
-        self._refresh_topbar_status()
+        self._sync_work_ui()
         self._ensure_ui_state().statusbar_message(f"Schema load failed: {message}")
 
     def refresh_joins(self) -> None:
@@ -1063,7 +1060,7 @@ class MainWindow(QMainWindow):
             # Apply the concurrency cap live; a higher cap can release queued runs.
             self._max_runs = self.service.cfg.max_concurrent_runs()
             self.conversation_controller.drain_queue()
-            self.conversation_controller.refresh_run_status()
+            self.conversation_controller.sync_work_ui()
             self.toast(_i18n_t("toast.resources_saved"))
         except Exception as exc:
             self.fail(exc)
