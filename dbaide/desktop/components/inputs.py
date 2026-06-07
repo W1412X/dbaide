@@ -159,22 +159,3 @@ class Combo(QComboBox):
             container.setWindowFlag(Qt.WindowType.NoDropShadowWindowHint, True)
             container.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
             container.show()  # re-show once after the flag change (first open only)
-
-
-class DropdownCombo(Combo):
-    """Compact combo with capped popup height."""
-
-    def __init__(self, parent=None, *, max_visible: int = 8) -> None:
-        super().__init__(parent)
-        self.setMaxVisibleItems(max_visible)
-        # Size to the current item's text (capped) so labels show in full without
-        # forcing every selector to the same wide box.
-        self.setSizeAdjustPolicy(QComboBox.SizeAdjustPolicy.AdjustToContents)
-        self.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Fixed)
-        self.setFixedHeight(26)
-        self.setMinimumWidth(120)
-        self.setMaximumWidth(260)
-        self.setProperty("soft", True)  # lighter topbar-chip styling
-
-    def current_value(self) -> str:
-        return str(self.currentData() or "")

@@ -119,8 +119,6 @@ class TopBar(QWidget):
     sync_schema_requested = pyqtSignal()
     copy_conversation_requested = pyqtSignal()
     export_debug_requested = pyqtSignal()
-    new_query_requested = pyqtSignal()
-    new_conn_requested = pyqtSignal()
 
     def __init__(self, parent=None) -> None:
         super().__init__(parent)

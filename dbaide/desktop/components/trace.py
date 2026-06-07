@@ -220,7 +220,7 @@ class InlineTrace(QFrame):
         running = node.status == "running"
         glyph = "" if running else _GLYPH.get(node.status, "·")
         indicator = f"{glyph} {node.step}".strip() if (depth == 0 and node.step) else glyph
-        head = _node_head(node)
+        head = localized_node_head(node)
         if node.duration_ms > 0 and node.status in ("completed", "failed"):
             status_text = _fmt_ms(node.duration_ms)
         elif node.status in ("running", "waiting"):
@@ -483,10 +483,6 @@ def show_trace_detail(host: QWidget, data: dict) -> None:
     panel.show_detail(data)
 
 
-# Backwards-compatible alias for tests / imports.
-TraceDetailDialog = TraceDetailPanel
-
-
 def _copy_raw_label() -> str:
     from dbaide.i18n import t
     return t("trace.copy_raw")
@@ -659,12 +655,6 @@ def _code_block(text: str, *, escaped: bool = False) -> str:
         f" border-radius:6px; padding:8px; font-family:Menlo,monospace; font-size:11px;"
         f" color:{Theme.TEXT}; white-space:pre-wrap;'>{body}</pre>"
     )
-
-
-def _node_head(node: TraceNode) -> str:
-    """Row label, used at any depth. Sub-agent nodes read 'agent · title'; others
-    show a category chip in front of their phase/stage."""
-    return localized_node_head(node)
 
 
 def _depth_color(depth: int) -> QColor:

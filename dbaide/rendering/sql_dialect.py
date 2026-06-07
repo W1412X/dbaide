@@ -2,7 +2,17 @@
 
 from __future__ import annotations
 
-from dbaide.rendering.sanitize import _SQL_KEYWORDS
+_BASE_KEYWORDS = {
+    'select', 'from', 'where', 'and', 'or', 'not', 'in', 'between', 'like',
+    'join', 'inner', 'left', 'right', 'outer', 'cross', 'on', 'as',
+    'group', 'by', 'order', 'asc', 'desc', 'limit', 'offset', 'fetch',
+    'having', 'union', 'all', 'distinct', 'insert', 'into', 'values',
+    'update', 'set', 'delete', 'create', 'table', 'alter', 'drop',
+    'index', 'view', 'trigger', 'procedure', 'function', 'case', 'when',
+    'then', 'else', 'end', 'null', 'is', 'exists', 'any', 'some',
+    'count', 'sum', 'avg', 'min', 'max', 'coalesce', 'nullif', 'cast',
+    'with', 'recursive', 'lateral', 'unnest', 'array', 'json',
+}
 
 _DIALECT_ALIASES = {
     "mysql": "mysql",
@@ -57,7 +67,7 @@ def normalize_dialect(raw: str) -> str:
 
 
 def dialect_keywords(dialect: str) -> set[str]:
-    base = {kw.upper() for kw in _SQL_KEYWORDS}
+    base = {kw.upper() for kw in _BASE_KEYWORDS}
     name = normalize_dialect(dialect)
     extra = _DIALECT_KEYWORDS.get(name, set())
     return base | {kw.upper() for kw in extra}

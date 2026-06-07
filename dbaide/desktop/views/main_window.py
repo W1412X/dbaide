@@ -70,7 +70,6 @@ class MainWindow(QMainWindow):
         self.oneoff_state = OneOffRunState()
         self.oneoff_controller = OneOffActionController(self)
         self.conversation_controller = ConversationRunController(self)
-        self._status_owner = ""
         # (action, connection, label) — background asset/schema work tracked for the top bar.
         self._asset_work_stack: list[tuple[str, str, str]] = []
         self.bootstrap: dict[str, Any] = {}
@@ -276,8 +275,6 @@ class MainWindow(QMainWindow):
         self.topbar.sync_schema_requested.connect(self.sync_schema)
         self.topbar.copy_conversation_requested.connect(self.copy_conversation)
         self.topbar.export_debug_requested.connect(self.export_debug_bundle)
-        self.topbar.new_query_requested.connect(self._shortcut_new_query)
-        self.topbar.new_conn_requested.connect(lambda: self.open_settings("connections"))
         layout.addWidget(self.topbar)
         self.tabbar = self.topbar.mode_tabs
         mode_icons = {
@@ -397,7 +394,7 @@ class MainWindow(QMainWindow):
             self.fail(exc)
 
     def _on_bootstrap_failed(self, exc: object) -> None:
-        self._sync_work_ui()
+        self.conversation_controller.sync_work_ui()
         self._ensure_ui_state().statusbar_message(f"Load failed: {exc}")
         self.toast(str(exc))
 
@@ -419,7 +416,7 @@ class MainWindow(QMainWindow):
         has_conn = bool(conn_name)
         self.ask_tab.set_has_connection(has_conn)
         self.ask_tab.set_empty_context(has_conn, bool(models))
-        self.conversation_controller.sync_active_ui()
+        self.conversation_controller.sync_work_ui()
         if has_conn:
             self._refresh_connection_context(conn_name)
         else:
@@ -428,7 +425,7 @@ class MainWindow(QMainWindow):
             self.schema_rows = []
             self.sidebar.load_schema([])
             self.sidebar.chats.load([])
-            self._sync_work_ui()
+            self.conversation_controller.sync_work_ui()
 
     _ASSET_STATUS_ACTIONS = frozenset({
         "build_assets",
@@ -469,7 +466,7 @@ class MainWindow(QMainWindow):
         label = self._asset_status_label(action)
         self._asset_work_stack.append((action, conn, label))
         if conn == self.current_connection():
-            self._sync_work_ui()
+            self.conversation_controller.sync_work_ui()
 
     def _pop_asset_work(self, action: str, payload: dict[str, Any]) -> None:
         conn = self._asset_work_connection(payload)
@@ -481,14 +478,7 @@ class MainWindow(QMainWindow):
                 continue
             self._asset_work_stack.pop(index)
             break
-        self._sync_work_ui()
-
-    def _sync_work_ui(self) -> None:
-        """Top-bar badge + composer + chat run indicators — one choke point."""
         self.conversation_controller.sync_work_ui()
-
-    def _refresh_topbar_status(self) -> None:
-        self.conversation_controller.refresh_run_status()
 
     def _current_asset_label(self, conn: str | None = None) -> str:
         conn = conn or self.current_connection()
@@ -580,10 +570,6 @@ class MainWindow(QMainWindow):
     def current_connection(self) -> str:
         return self.topbar.connection.current_value()
 
-    def current_database(self) -> str:
-        # Database scope comes from composer attachments, not a global top-bar selector.
-        return ""
-
     def _on_tab_changed(self, index: int) -> None:
         if 0 <= index < self.stack.count():
             self._ensure_ui_state().apply_mode(ModeUiState(index=index, mode=self._tab_names[index]))
@@ -635,7 +621,7 @@ class MainWindow(QMainWindow):
         self._load_sessions(conn_name)
         self._refresh_query_history()
         self.refresh_joins()
-        self._sync_work_ui()
+        self.conversation_controller.sync_work_ui()
 
     def _load_sessions(self, name: str) -> None:
         if not name:
@@ -646,7 +632,7 @@ class MainWindow(QMainWindow):
             if name != self.current_connection():
                 return
             self.sidebar.chats.load(entries or [])
-            self.conversation_controller.sync_chat_selection()
+            self.conversation_controller.sync_work_ui()
         self._run_background("list_sessions", {"connection_name": name}, on_loaded)
 
     def _load_schema(self, name: str) -> None:
@@ -721,7 +707,7 @@ class MainWindow(QMainWindow):
                 if conn.get("name") == name:
                     conn["asset_status"] = "ready"
                     break
-        self._sync_work_ui()
+        self.conversation_controller.sync_work_ui()
         self._ensure_ui_state().statusbar_message(_i18n_t("status.ready"))
 
     def _schema_completion(self) -> dict[str, Any]:
@@ -785,7 +771,7 @@ class MainWindow(QMainWindow):
         self.schema_rows = []
         self._ensure_ui_state().schema_error(message)
         self.toast(f"Schema load failed: {message}")
-        self._sync_work_ui()
+        self.conversation_controller.sync_work_ui()
         self._ensure_ui_state().statusbar_message(f"Schema load failed: {message}")
 
     def refresh_joins(self) -> None:
@@ -881,22 +867,19 @@ class MainWindow(QMainWindow):
             self.ask_tab.set_active(key)
         self._last_question = question
         self._slot_question[key] = question
-        database = self.current_database()
-        # Pinned db/table context drives a *scoped* schema discovery (the agent
-        # prioritises these tables/databases and only broadens if they're
-        # insufficient) — passed as structured scope, NOT dumped into the prompt
-        # text, and shown as tags (not body text) on the user message.
+        # Database scope for the agent comes from composer attachments (schema_scope),
+        # not a global selector — payload database is left empty for auto scope.
         attachments = self.composer.attachments()
         schema_scope = self._build_attached_scope(attachments) if attachments else {}
         self.composer.clear_attachments()
         self.composer.clear_input()
-        self.ask_tab.append_user(key, question, connection=conn, database=database, attachments=attachments)
+        self.ask_tab.append_user(key, question, connection=conn, database="", attachments=attachments)
         # Fresh trace for this turn (streamed inline into the turn's status chip).
         self._slot_trace[key] = []
         self.conversation_controller.start_ask(key, {
             "connection_name": conn,
             "question": question,
-            "database": database,
+            "database": "",
             "session_id": self._slot_session.get(key, ""),
             "schema_scope": schema_scope,
         })
@@ -919,7 +902,6 @@ class MainWindow(QMainWindow):
         if self._assets_busy(conn):
             self.toast(_i18n_t("toast.assets_busy"))
             return
-        database = self.current_database()
         original_question = str(resume_state.get("question") or self._slot_question.get(key, ""))
         # Consume the pause: controller queueing guarantees the reply is never
         # lost even when every run slot is busy (it waits for a free slot).
@@ -933,12 +915,9 @@ class MainWindow(QMainWindow):
             "question": original_question,
             "user_reply": reply,
             "resume_state": resume_state,
-            "database": database,
+            "database": "",
             "session_id": self._slot_session.get(key, ""),
         })
-
-    def _restore_composer_placeholder(self) -> None:
-        self.conversation_controller.sync_active_ui()
 
     def build_assets(self) -> None:
         conn = self.current_connection()
@@ -1295,7 +1274,7 @@ class MainWindow(QMainWindow):
         self._active_sql_doc = editor
         self.oneoff_controller.run_action("explain_sql", {
             "connection_name": self.current_connection(),
-            "database": self.current_database(),
+            "database": "",
             "sql": sql,
         })
 
@@ -1325,34 +1304,19 @@ class MainWindow(QMainWindow):
         if widget is self._oneoff.data_doc:
             self._oneoff.data_doc = None
 
-    def _safe_sql_doc(self):
-        """Return the active SQL doc only if it's still alive (not deleteLater'd)."""
-        d = self._active_sql_doc
-        if d is not None and not sip.isdeleted(d):
-            return d
-        self._active_sql_doc = None
-        return None
-
-    def _safe_data_doc(self):
-        """Return the active data doc only if it's still alive."""
-        d = self._active_data_doc
-        if d is not None and not sip.isdeleted(d):
-            return d
-        self._active_data_doc = None
-        return None
-
-    def _safe_oneoff_sql_doc(self):
-        d = self._oneoff.sql_doc
-        if d is not None and not sip.isdeleted(d):
-            return d
-        self._oneoff.sql_doc = None
-        return None
-
-    def _safe_oneoff_data_doc(self):
-        d = self._oneoff.data_doc
-        if d is not None and not sip.isdeleted(d):
-            return d
-        self._oneoff.data_doc = None
+    def _safe_doc(self, kind: str):
+        """Return a workbench doc QWidget only if it is still alive (not deleteLater'd)."""
+        slots = {
+            "active_sql": (self, "_active_sql_doc"),
+            "active_data": (self, "_active_data_doc"),
+            "oneoff_sql": (self._oneoff, "sql_doc"),
+            "oneoff_data": (self._oneoff, "data_doc"),
+        }
+        holder, attr = slots[kind]
+        doc = getattr(holder, attr)
+        if doc is not None and not sip.isdeleted(doc):
+            return doc
+        setattr(holder, attr, None)
         return None
 
     def execute_sql(self, sql: str) -> None:
@@ -1361,7 +1325,7 @@ class MainWindow(QMainWindow):
         self._last_sql = sql
         self.oneoff_controller.run_action("execute_sql", {
             "connection_name": self.current_connection(),
-            "database": self.current_database(),
+            "database": "",
             "sql": sql,
         })
 
@@ -1372,11 +1336,10 @@ class MainWindow(QMainWindow):
         if not (sql or "").strip():
             return
         conn = connection or self.current_connection()
-        db = database if database != "" else self.current_database()
         self.query_history_store.record(
             conn, sql, ok=ok,
             row_count=row_count, elapsed_ms=elapsed_ms,
-            database=db,
+            database=database or "",
         )
         if conn == self.current_connection():
             self._refresh_query_history()
@@ -1694,8 +1657,7 @@ class MainWindow(QMainWindow):
         self.current_session_id = ""
         self.ask_tab.set_active(key)
         self.ask_tab.set_has_connection(bool(self.current_connection()))
-        self.conversation_controller.sync_chat_selection()
-        self.conversation_controller.sync_active_ui()
+        self.conversation_controller.sync_work_ui()
         self.composer.input.setFocus()
 
     def open_session(self, session_id: str) -> None:
@@ -1730,8 +1692,7 @@ class MainWindow(QMainWindow):
         self.current_session_id = self._slot_session.get(key, "") or (key if not key.startswith("new:") else "")
         self.ask_tab.set_has_connection(bool(self.current_connection()))
         self.ask_tab.set_active(key)
-        self.conversation_controller.sync_chat_selection()
-        self.conversation_controller.sync_active_ui()
+        self.conversation_controller.sync_work_ui()
 
     def rename_session(self, session_id: str, title: str) -> None:
         conn = self.current_connection()
@@ -1768,15 +1729,12 @@ class MainWindow(QMainWindow):
                 self._active_key = ""
                 self.current_session_id = ""
                 self.ask_tab.set_has_connection(bool(conn))
-                self.conversation_controller.sync_active_ui()
+                self.conversation_controller.sync_work_ui()
         self._load_sessions(conn)
 
-    def _restore_status_badge(self, *, owner: str = "", force: bool = False) -> None:
-        if owner and getattr(self, "_status_owner", "") != owner:
-            return
+    def _restore_status_badge(self, *, force: bool = False) -> None:
         if not force and self._assets_busy():
             return
-        self._status_owner = ""
         self._ensure_ui_state().restore_connection_status(
             self.current_connection(),
             self.bootstrap.get("connections") or [],

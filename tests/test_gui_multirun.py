@@ -201,14 +201,10 @@ def test_oneoff_sql_result_routes_to_originating_editor(monkeypatch):
     win.query_history_store = history
     win.bus = bus
     win.current_connection = lambda: "current"  # type: ignore[method-assign]
-    win.current_database = lambda: "other_db"  # type: ignore[method-assign]
     win._refresh_query_history = lambda: None  # type: ignore[method-assign]
+    win.conversation_controller = type("_", (), {"sync_work_ui": lambda _s: None})()
     from dbaide.desktop.run_controllers import OneOffActionController
 
-    win.conversation_controller = type("Runs", (), {
-        "sync_active_ui": lambda _self: None,
-        "refresh_run_status": lambda _self: None,
-    })()
     win.oneoff_controller = OneOffActionController(win)
 
     result = {"columns": ["x"], "rows": [{"x": 1}], "row_count": 1, "elapsed_ms": 7}
@@ -296,35 +292,11 @@ def test_refresh_all_failure_clears_loading_status():
     assert messages[-2:] == ["Load failed: boom", "toast:boom"]
 
 
-def test_status_badge_restore_respects_owner_token():
-    import dbaide.desktop.views.main_window as mw
-
-    win = mw.MainWindow.__new__(mw.MainWindow)
-    calls: list[tuple[str, list]] = []
-    win._status_owner = "sync:old"
-    win._asset_work_stack = []
-    win.bootstrap = {"connections": [{"name": "current", "asset_status": "ready"}]}
-    win.current_connection = lambda: "current"  # type: ignore[method-assign]
-    win._assets_busy = lambda conn=None: False  # type: ignore[method-assign]
-    win._ensure_ui_state = lambda: type("Ui", (), {  # type: ignore[method-assign]
-        "restore_connection_status": lambda _self, conn, conns: calls.append((conn, conns)),
-    })()
-
-    win._restore_status_badge(owner="sync:new")
-    assert calls == []
-    assert win._status_owner == "sync:old"
-
-    win._restore_status_badge(owner="sync:old")
-    assert calls == [("current", [{"name": "current", "asset_status": "ready"}])]
-    assert win._status_owner == ""
-
-
 def test_status_badge_restore_skips_while_assets_busy():
     import dbaide.desktop.views.main_window as mw
 
     win = mw.MainWindow.__new__(mw.MainWindow)
     calls: list[tuple[str, list]] = []
-    win._status_owner = ""
     win._asset_work_stack = [("refresh_instance", "current", "Syncing")]
     win.bootstrap = {"connections": [{"name": "current", "asset_status": "ready"}]}
     win.current_connection = lambda: "current"  # type: ignore[method-assign]
@@ -367,7 +339,7 @@ def test_stale_ask_completion_is_ignored():
     from dbaide.desktop.run_controllers import ConversationRunController
 
     win.conversation_controller = ConversationRunController(win)
-    win.conversation_controller.sync_active_ui = lambda: calls.append("sync")  # type: ignore[method-assign]
+    win.conversation_controller.sync_work_ui = lambda: calls.append("sync")  # type: ignore[method-assign]
     win.conversation_controller.refresh_run_status = lambda: calls.append("status")  # type: ignore[method-assign]
     win.conversation_controller.drain_queue = lambda: calls.append("drain")  # type: ignore[method-assign]
 

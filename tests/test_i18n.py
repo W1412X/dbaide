@@ -20,9 +20,9 @@ def _reset_language():
 
 def test_translation_switches_language():
     i18n.set_language("en")
-    assert i18n.t("tab.ask") == "Ask"
+    assert i18n.t("mode.assistant") == "Chat"
     i18n.set_language("zh")
-    assert i18n.t("tab.ask") == "提问"
+    assert i18n.t("mode.assistant") == "对话"
 
 
 def test_unknown_key_returns_key():

@@ -999,14 +999,6 @@ class DesktopService:
             name = self.cfg.get_connection(None).name
         return self.history.list_workflows(name, limit=int(payload.get("limit") or 50))
 
-    def load_history(self, payload: dict[str, Any]) -> dict[str, Any]:
-        conn = str(payload.get("connection_name") or "")
-        workflow_id = str(payload.get("workflow_id") or "")
-        data = self.history.load(conn, workflow_id)
-        if data is None:
-            raise FileNotFoundError(f"History not found: {conn}/{workflow_id}")
-        return data
-
     def delete_history(self, payload: dict[str, Any]) -> dict[str, Any]:
         conn = str(payload.get("connection_name") or "") or self.cfg.get_connection(None).name
         workflow_id = str(payload.get("workflow_id") or "")
@@ -1063,16 +1055,6 @@ class DesktopService:
             markdown = render_instance_markdown(doc)
         return {"path": path, "markdown": markdown, "doc": doc}
 
-    def test_model(self, payload: dict[str, Any] | None = None) -> dict[str, Any]:
-        payload = payload or {}
-        name = str(payload.get("name") or "").strip()
-        model = self.cfg.model(name or None)
-        llm = build_llm_client(model)
-        if isinstance(llm, NullLLMClient):
-            return {"ok": False, "message": "No model configured"}
-        text = llm.complete_text([LLMMessage("user", "Reply with OK only.")])
-        return {"ok": True, "message": text.strip()[:120]}
-
     def test_model_profile(self, payload: dict[str, Any]) -> dict[str, Any]:
         # Test the form values as-is without persisting them — pressing "Test"
         # must not silently save unsaved edits (or a typo'd api key).
@@ -1103,7 +1085,7 @@ class DesktopService:
         connection_name: str,
         database: str = "",
     ) -> str:
-        parts = ["dbaide ask", f'"{question.replace(chr(34), chr(92)+chr(34))}"', f"--connection {connection_name}"]
+        parts = ["dbaide ask", f'"{question.replace(chr(34), chr(92)+chr(34))}"', f"--conn {connection_name}"]
         if database:
             parts.append(f"--database {database}")
         return " ".join(parts)
@@ -1318,14 +1300,6 @@ class DesktopService:
         )
         return {"annotation": record}
 
-    def update_annotation(self, payload: dict[str, Any]) -> dict[str, Any]:
-        conn = self.cfg.get_connection(str(payload.get("connection_name") or payload.get("name") or None))
-        ann_id = str(payload.get("id") or "")
-        updated = self.annotations.update(conn.name, ann_id, {"note": payload.get("note")})
-        if updated is None:
-            raise ValueError(f"Note not found: {ann_id}")
-        return {"annotation": updated}
-
     def delete_annotation(self, payload: dict[str, Any]) -> dict[str, Any]:
         conn = self.cfg.get_connection(str(payload.get("connection_name") or payload.get("name") or None))
         ann_id = str(payload.get("id") or "")
@@ -1345,6 +1319,3 @@ class DesktopService:
 
     def _safe_llm(self):
         return build_llm_client(self.cfg.model())
-
-    def pretty_json(self, payload: Any) -> str:
-        return json.dumps(payload, ensure_ascii=False, indent=2, default=str)

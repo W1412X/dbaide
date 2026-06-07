@@ -313,28 +313,6 @@ class WorkflowEngine:
         logger.debug("trace: %s - %s", stage, title)
 
 
-class NullWorkflowEngine:
-    """Null engine for when no connection is available."""
-
-    def run(self, request: WorkflowRequest) -> WorkflowResult:
-        return WorkflowResult(
-            question=request.question,
-            status=WorkflowStatus.FAILED,
-            errors=[DBAideError(
-                code=ErrorCode.CONNECTION_FAILED,
-                stage="check_environment",
-                message="No connection configured",
-                hint="Add a connection first: dbaide connect add <name> --type <type>",
-                repair_action=RepairAction.STOP,
-            )],
-            created_at=time.time(),
-            completed_at=time.time(),
-        )
-
-    def stream(self, request: WorkflowRequest) -> Iterator[WorkflowResult]:
-        yield self.run(request)
-
-
 def _trace_kind(actor: str) -> TraceKind:
     if actor == "tool":
         return TraceKind.TOOL

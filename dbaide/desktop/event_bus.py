@@ -2,7 +2,7 @@
 
 The desktop controller used to refresh components imperatively: every action
 handler had to remember which widgets to reload (``refresh_all`` here,
-``refresh_joins`` there, ``_load_history`` elsewhere). That couples producers of a
+``refresh_joins`` there). That couples producers of a
 change to every consumer and makes it easy to leave a component showing stale data
 after an action finishes.
 

@@ -89,7 +89,6 @@ def build_parser() -> argparse.ArgumentParser:
     ask = sub.add_parser("ask", help="Ask a database question")
     add_common_conn_args(ask)
     ask.add_argument("question")
-    ask.add_argument("--show-disclosure", action="store_true")
     ask.add_argument("--debug-trace", action="store_true",
                      help="Full debug trace: every step's args/output + each LLM call's "
                           "prompt and response (set DBAIDE_TRACE_LLM=1 to capture LLM I/O).")
@@ -311,7 +310,8 @@ def dispatch(args: argparse.Namespace, cfg: ConfigManager) -> int:
         adapter, session = build_adapter_session(cfg, args)
         schema = SchemaTools(adapter, session.disclosure)
         info = schema.inspect_table(args.table, database=args.database)
-        print(_format_inspect(info))
+        from dbaide.agent.assistant import format_inspect
+        print(format_inspect(info))
         return 0
     if args.command == "profile":
         adapter, session = build_adapter_session(cfg, args)
@@ -767,12 +767,6 @@ def _populate_disclosure(adapter, session: Session, instance: str, database: str
         logger.debug("list_tables failed for %s.%s: %s", instance, active_db, exc)
 
 
-def build_assistant(cfg: ConfigManager, args: argparse.Namespace):
-    adapter, session = build_adapter_session(cfg, args)
-    llm = build_llm_client(cfg.model())
-    return DataAssistant(adapter, session, llm), adapter, session
-
-
 def build_any_assistant(cfg: ConfigManager, args: argparse.Namespace):
     targets = resolve_targets(cfg, args.conn, args.database)
     llm = build_llm_client(cfg.model())
@@ -903,21 +897,6 @@ def write_result(result: QueryResult, path: Path) -> None:
         writer = csv.DictWriter(fh, fieldnames=result.columns)
         writer.writeheader()
         writer.writerows(result.rows)
-
-
-def _response_json(response) -> dict:
-    return {
-        "answer": response.answer,
-        "sql": response.sql,
-        "rows": response.result.rows if response.result else None,
-        "disclosures": response.disclosures,
-        "warnings": response.warnings,
-    }
-
-
-def _format_inspect(info: dict) -> str:
-    from dbaide.agent.assistant import format_inspect as _fmt
-    return _fmt(info)
 
 
 if __name__ == "__main__":

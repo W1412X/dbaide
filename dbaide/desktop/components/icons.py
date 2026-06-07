@@ -120,24 +120,12 @@ def svg_icon(name: str, *, color: str = Theme.MUTED, size: int = 18, width: floa
 
 # ── named helpers ────────────────────────────────────────────────────────────
 
-def panel_icon(*, color: str = Theme.MUTED, size: int = 18) -> QIcon:
-    return svg_icon("panel-right", color=color, size=size)
-
-
 def more_icon(*, color: str = Theme.MUTED, size: int = 18) -> QIcon:
     return svg_icon("more-horizontal", color=color, size=size, width=2.4)
 
 
 def plus_icon(*, color: str = Theme.MUTED, size: int = 18) -> QIcon:
     return svg_icon("plus", color=color, size=size)
-
-
-def clock_icon(*, color: str = Theme.MUTED, size: int = 18) -> QIcon:
-    return svg_icon("clock", color=color, size=size)
-
-
-def link_icon(*, color: str = Theme.MUTED, size: int = 18) -> QIcon:
-    return svg_icon("link", color=color, size=size)
 
 
 ICON_SIZE = QSize(16, 16)

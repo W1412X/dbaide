@@ -122,13 +122,6 @@ def test_finalize_failed_marks_running_node_failed():
     assert m.steps[0].status == "failed"
 
 
-# 8) LOW: highlight_sql no longer raises NameError and highlights strings.
-def test_highlight_sql_runs():
-    from dbaide.rendering.sanitize import highlight_sql
-    out = highlight_sql("SELECT * FROM t WHERE name = 'bob' AND n = 5")
-    assert "color:#22863a" in out  # string span, no NameError
-
-
 # 9) loop charges budget for unknown tools (no infinite loop) + consume_step.
 def test_consume_step_charges_budget():
     rt = AgentRuntime(tool_registry=_FakeRegistry())

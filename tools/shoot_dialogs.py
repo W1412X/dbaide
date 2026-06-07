@@ -72,18 +72,7 @@ if __name__ == "__main__":
 def main_extra() -> int:
     app = QApplication.instance() or QApplication([])
     app.setStyleSheet(app_style())
-    from dbaide.desktop.views.history_tab import HistoryTab
     from dbaide.desktop.views.joins_tab import JoinsTab
-    h = HistoryTab(); h.resize(560, 460)
-    h.load([
-        {"workflow_id": "wf_8a21", "question": "Which cities have the most paying users?",
-         "status": "completed", "created_at": "2026-06-02 10:01", "row_count": 4},
-        {"workflow_id": "wf_7c10", "question": "Total refunds last month",
-         "status": "completed", "created_at": "2026-06-01 17:22", "row_count": 1},
-        {"workflow_id": "wf_5f9b", "question": "List products with no orders",
-         "status": "failed", "created_at": "2026-05-30 09:14", "row_count": 0},
-    ])
-    grab(h, "history")
     j = JoinsTab(); j.resize(560, 460)
     j.load([
         {"left_table": "orders", "left_column": "user_id", "right_table": "users",

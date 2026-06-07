@@ -20,8 +20,6 @@ LANGUAGE_NAMES = {"en": "English", "zh": "中文"}
 # id → {lang: text}. Keep ids stable; English is the fallback.
 _STRINGS: dict[str, dict[str, str]] = {
     # Tabs / panels
-    "tab.ask": {"en": "Ask", "zh": "提问"},
-    "tab.sql": {"en": "SQL", "zh": "SQL"},
     "tab.data": {"en": "Data", "zh": "数据"},
     "mode.assistant": {"en": "Chat", "zh": "对话"},
     "mode.workbench": {"en": "Workbench", "zh": "工作台"},
@@ -48,7 +46,6 @@ _STRINGS: dict[str, dict[str, str]] = {
     "tab.structure": {"en": "Structure", "zh": "结构"},
     "tab.history": {"en": "History", "zh": "历史"},
     "workbench.new_query": {"en": "New SQL editor", "zh": "新建 SQL 编辑器"},
-    "workbench.new_sql": {"en": "New SQL", "zh": "新建 SQL"},
     "workbench.query_n": {"en": "Query {n}", "zh": "查询 {n}"},
     "history.clear": {"en": "Clear", "zh": "清空"},
     "history.failed": {"en": "failed", "zh": "失败"},
@@ -71,16 +68,11 @@ _STRINGS: dict[str, dict[str, str]] = {
     "structure.referenced_by": {"en": "Referenced by:", "zh": "被引用："},
     "structure.indexes": {"en": "Indexes:", "zh": "索引："},
     "structure.copy_ddl": {"en": "Copy DDL", "zh": "复制 DDL"},
-    "panel.inspector": {"en": "Inspector", "zh": "检查器"},
-    "panel.trace": {"en": "Trace", "zh": "执行轨迹"},
-    "panel.plan": {"en": "Plan", "zh": "计划"},
     # Top bar
     "topbar.build": {"en": "Build Assets", "zh": "构建资产"},
     "topbar.settings": {"en": "Settings", "zh": "设置"},
     "topbar.refresh": {"en": "Refresh", "zh": "刷新"},
     "topbar.connection": {"en": "Connection", "zh": "连接"},
-    "topbar.database": {"en": "Database", "zh": "数据库"},
-    "topbar.database_auto": {"en": "Auto", "zh": "自动"},
     # Composer
     "composer.send": {"en": "Send", "zh": "发送"},
     "composer.stop": {"en": "Stop", "zh": "停止"},
@@ -111,7 +103,6 @@ _STRINGS: dict[str, dict[str, str]] = {
         "en": "Add a database/table as context",
         "zh": "添加数据库/表作为上下文",
     },
-    "composer.attach_menu": {"en": "Attach context", "zh": "添加上下文"},
     "agent.loop_failed": {
         "en": "I couldn't complete this request. Please try rephrasing it or run it again.",
         "zh": "我没能完成这个请求，请换个说法或重试。",
@@ -296,7 +287,6 @@ _STRINGS: dict[str, dict[str, str]] = {
     "res.explain_max_rows": {"en": "EXPLAIN cost gate (rows)", "zh": "EXPLAIN 成本闸（行）"},
     "res.join_sample_size": {"en": "Join sample size (rows)", "zh": "关联采样行数"},
     "res.max_concurrent_runs": {"en": "Max concurrent runs", "zh": "最大并发运行数"},
-    "res.concurrency_section": {"en": "Concurrency", "zh": "并发"},
     "res.per_run_note": {
         "en": "How many sessions may run at once. The limits below apply to each run individually.",
         "zh": "最多同时运行多少个会话。下面的限制对每个运行单独生效。",
@@ -306,16 +296,11 @@ _STRINGS: dict[str, dict[str, str]] = {
     "btn.cancel": {"en": "Cancel", "zh": "取消"},
     "btn.test": {"en": "Test", "zh": "测试"},
     "btn.build": {"en": "Build", "zh": "构建"},
-    "btn.delete": {"en": "Delete", "zh": "删除"},
-    "btn.add": {"en": "Add", "zh": "添加"},
     "btn.new": {"en": "New", "zh": "新建"},
     "btn.create": {"en": "Create", "zh": "创建"},
     "btn.reset_defaults": {"en": "Reset to defaults", "zh": "恢复默认"},
     # Status / toasts
-    "status.idle": {"en": "Idle", "zh": "空闲"},
-    "status.running": {"en": "Running", "zh": "运行中"},
     "status.ready": {"en": "Ready", "zh": "就绪"},
-    "status.loading": {"en": "Loading…", "zh": "加载中…"},
     "status.building": {"en": "Building assets", "zh": "正在构建资产"},
     "status.syncing": {"en": "Syncing schema…", "zh": "正在同步库结构…"},
     "status.enriching": {"en": "Enriching docs…", "zh": "正在补充文档…"},
@@ -335,7 +320,6 @@ _STRINGS: dict[str, dict[str, str]] = {
     "toast.assets_built": {"en": "Assets built", "zh": "资产已构建"},
     "toast.no_databases": {"en": "No databases found on this connection", "zh": "该连接下未发现数据库"},
     "toast.select_database": {"en": "Select at least one database", "zh": "请至少选择一个数据库"},
-    "toast.db_scope": {"en": "Database scope: {scope}", "zh": "数据库范围：{scope}"},
     "toast.table_not_found": {"en": "Table not found: {table}", "zh": "未找到表：{table}"},
     "schema.open_data": {"en": "Open data", "zh": "打开数据"},
     "schema.view_doc": {"en": "View doc", "zh": "查看文档"},
@@ -512,15 +496,10 @@ _STRINGS: dict[str, dict[str, str]] = {
         "zh": "调试包已保存至 {path}",
     },
     "toast.note_saved": {"en": "Note saved", "zh": "备注已保存"},
-    "toast.note_updated": {"en": "Note updated", "zh": "备注已更新"},
     "toast.note_deleted": {"en": "Note deleted", "zh": "备注已删除"},
     "toast.enter_question": {"en": "Enter a question first", "zh": "请先输入问题"},
     "toast.enter_reply": {"en": "Enter a reply first", "zh": "请先输入回复"},
-    "panel.copy_trace": {"en": "Copy current trace", "zh": "复制当前轨迹"},
     "panel.copy_conversation": {"en": "Copy conversation trace", "zh": "复制整个对话轨迹"},
-    "panel.clear_trace": {"en": "Clear trace", "zh": "清空轨迹"},
-    "panel.clear_conversation": {"en": "Clear conversation", "zh": "清空对话"},
-    "menu.history": {"en": "History…", "zh": "历史记录…"},
     "menu.joins": {"en": "Saved joins…", "zh": "已保存的关联…"},
     "menu.export_debug": {"en": "Export debug bundle…", "zh": "导出调试包…"},
     "menu.sync_schema": {"en": "Sync schema with database", "zh": "与数据库同步库结构"},
@@ -575,10 +554,6 @@ _STRINGS: dict[str, dict[str, str]] = {
     "result.export_title": {"en": "Export results", "zh": "导出结果"},
     "result.autofit_column": {"en": "Auto-fit column", "zh": "自适应列宽"},
     "result.autofit_all": {"en": "Auto-fit all columns", "zh": "自适应所有列宽"},
-    # TopBar quick-action buttons
-    "toolbar.new_query": {"en": "New Query", "zh": "新建查询"},
-    "toolbar.build": {"en": "Build Assets", "zh": "构建资产"},
-    "toolbar.new_conn": {"en": "New Connection", "zh": "新建连接"},
 }
 
 _current = DEFAULT_LANGUAGE

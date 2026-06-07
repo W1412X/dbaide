@@ -394,10 +394,6 @@ def localized_node_head(node: "TraceNode") -> str:
     return f"{chip} · {base}" if chip and node.node_type in _CHIP_TYPES else (base or title)
 
 
-def _node_head(node: "TraceNode") -> str:
-    return localized_node_head(node)
-
-
 def _fmt_ms(ms: float) -> str:
     return f"{ms / 1000:.1f}s" if ms >= 1000 else f"{ms:.0f}ms"
 
@@ -437,7 +433,7 @@ def render_trace_text(model: "TraceModel") -> str:
         glyph = _GLYPHS.get(node.status, "·")
         dur = f"  [{_fmt_ms(node.duration_ms)}]" if node.duration_ms else ""
         status_note = f"  ({node.status})" if node.status in ("failed", "waiting", "running") else ""
-        head = _node_head(node)
+        head = localized_node_head(node)
         lines.append(f"{indent}{glyph} {head}{status_note}{dur}")
         raw = node.raw if isinstance(node.raw, dict) else {}
 

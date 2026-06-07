@@ -33,14 +33,14 @@ class OneOffActionController:
             return
         win.oneoff_state.begin(OneOffState(
             action=action,
-            sql_doc=win._safe_sql_doc() if action in ("execute_sql", "explain_sql") else None,
-            data_doc=win._safe_data_doc() if action in ("browse_table", "count_table") else None,
+            sql_doc=win._safe_doc("active_sql") if action in ("execute_sql", "explain_sql") else None,
+            data_doc=win._safe_doc("active_data") if action in ("browse_table", "count_table") else None,
             sql=str(payload.get("sql") or win._last_sql or ""),
             connection=str(payload.get("connection_name") or payload.get("name") or win.current_connection() or ""),
-            database=str(payload.get("database") or win.current_database() or ""),
+            database=str(payload.get("database") or ""),
         ))
-        sql_doc = win._safe_oneoff_sql_doc()
-        data_doc = win._safe_oneoff_data_doc()
+        sql_doc = win._safe_doc("oneoff_sql")
+        data_doc = win._safe_doc("oneoff_data")
         if action in ("execute_sql", "explain_sql") and sql_doc is not None:
             win._ensure_ui_state().set_doc_running(sql_doc, True)
         if action in ("browse_table", "count_table") and data_doc is not None:
@@ -69,8 +69,8 @@ class OneOffActionController:
         sql_text = state.sql
         run_connection = state.connection
         run_database = state.database
-        sql_doc = win._safe_oneoff_sql_doc()
-        data_doc = win._safe_oneoff_data_doc()
+        sql_doc = win._safe_doc("oneoff_sql")
+        data_doc = win._safe_doc("oneoff_data")
         if sql_doc is not None:
             win._ensure_ui_state().set_doc_running(sql_doc, False)
         if data_doc is not None:
@@ -166,8 +166,8 @@ class OneOffActionController:
         sql_text = state.sql
         run_connection = state.connection
         run_database = state.database
-        sql_doc = win._safe_oneoff_sql_doc()
-        data_doc = win._safe_oneoff_data_doc()
+        sql_doc = win._safe_doc("oneoff_sql")
+        data_doc = win._safe_doc("oneoff_data")
         if sql_doc is not None:
             win._ensure_ui_state().set_doc_running(sql_doc, False)
         if data_doc is not None:
@@ -305,24 +305,22 @@ class ConversationRunController:
         win._pending_resume.pop(key, None)
         if win.ask_tab.turn_open(key):
             win.ask_tab.finish_turn_error(key, self._format_turn_error(exc))
-        from dbaide.llm_errors import is_llm_related, classify_llm_error, user_message_for_error
-        if isinstance(exc, CancelledError):
-            toast_msg = _i18n_t("toast.cancelled")
-        elif is_llm_related(exc):
-            toast_msg = user_message_for_error(classify_llm_error(exc))
-        else:
-            toast_msg = str(exc)
-        win.toast(toast_msg)
+        win.toast(self._user_error_message(exc))
         self.drain_queue()
         self.sync_work_ui()
+
+    def _user_error_message(self, exc: object) -> str:
+        if isinstance(exc, CancelledError):
+            return _i18n_t("toast.cancelled")
+        from dbaide.llm_errors import classify_llm_error, is_llm_related, user_message_for_error
+        if is_llm_related(exc):
+            return user_message_for_error(classify_llm_error(exc))
+        return str(exc)
 
     def _format_turn_error(self, exc: object) -> str:
         if isinstance(exc, CancelledError):
             return "**Cancelled**: Task stopped by user."
-        from dbaide.llm_errors import classify_llm_error, is_llm_related, user_message_for_error
-        if is_llm_related(exc):
-            return f"**Error**: {user_message_for_error(classify_llm_error(exc))}"
-        return f"**Error**: {exc}"
+        return f"**Error**: {self._user_error_message(exc)}"
 
     def bind_slot_to_session(self, temporary_key: str, session_id: str) -> None:
         self.win.ask_tab.remap(temporary_key, session_id)
@@ -395,7 +393,6 @@ class ConversationRunController:
         else:
             win._restore_status_badge(force=True)
             win._ensure_ui_state().apply_chat_activity(win.run_state.running_ids(), pending, selected)
-            self.sync_active_ui()
             return
         win._ensure_ui_state().apply_run_status(RunStatusUiState(
             topbar_text=text,
@@ -404,14 +401,6 @@ class ConversationRunController:
             pending_rows=pending,
             selected_chat=selected,
         ))
-
-    def sync_chat_selection(self) -> None:
-        win = self.win
-        win._ensure_ui_state().apply_chat_activity(
-            win.run_state.running_ids(),
-            self.pending_chat_rows(),
-            self.chat_selection_id(),
-        )
 
     def chat_selection_id(self) -> str:
         key = self.win._active_key

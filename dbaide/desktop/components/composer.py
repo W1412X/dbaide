@@ -180,17 +180,6 @@ class ComposerWidget(Panel):
     def set_placeholder(self, text: str) -> None:
         self.input.setPlaceholderText(text)
 
-    def set_context_hint(self, text: str) -> None:
-        """Pre-fill the composer input with a context hint (e.g. table schema summary).
-        Sets the placeholder so the user sees the context before typing their question."""
-        self.input.setPlaceholderText(text)
-        self.input.setFocus()
-
-    def set_disabled_no_connection(self, disabled: bool) -> None:
-        self.input.setEnabled(not disabled)
-        self.action_btn.setEnabled(not disabled)
-        self.model_select.setEnabled(not disabled)
-
     def clear_input(self) -> None:
         self.input.clear()
         self._sync_input_height()
