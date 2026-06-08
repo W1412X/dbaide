@@ -1,45 +1,34 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
-  <!-- Transparent canvas — adapts to any host surface (dock, taskbar, light/dark
-       theme) without a baked-in tile. -->
-
+  <!-- Standard app-icon container: a brand-coloured squircle. We use the brand
+       BLUE rather than black, so on a light theme it reads as a brand badge (like
+       Discord/LinkedIn/Twitter tiles), not as a harsh dark hole. -->
   <defs>
-    <!-- A gentle blue gradient on the sparkle gives it depth without an extra
-         colour. Light end at top-left, brand end at bottom-right. -->
-    <linearGradient id="spark" x1="0.2" y1="0.1" x2="0.85" y2="0.9">
-      <stop offset="0" stop-color="#8db8ff"/>
-      <stop offset="1" stop-color="#3b82f6"/>
+    <linearGradient id="bg" x1="0.2" y1="0" x2="0.8" y2="1">
+      <stop offset="0" stop-color="#5b9bff"/>
+      <stop offset="1" stop-color="#1d4ed8"/>
     </linearGradient>
   </defs>
+  <rect x="64" y="64" width="896" height="896" rx="208" fill="url(#bg)"/>
 
-  <!-- Database (the "data") — single-colour stroked cylinder, slightly off-centre
-       to leave room for the AI mark. -->
-  <g fill="none" stroke="#3b82f6" stroke-width="68" stroke-linecap="round" stroke-linejoin="round">
-    <ellipse cx="436" cy="488" rx="240" ry="80"/>
-    <path d="M196 488 V780 a240 80 0 0 0 480 0 V488"/>
-    <path d="M196 596 a240 80 0 0 0 480 0"/>
-    <path d="M196 692 a240 80 0 0 0 480 0"/>
+  <!-- AI sparkle (the "intelligence") — four-point needle star sitting above the
+       database. The white-on-blue contrast keeps it crisp at every size. -->
+  <path d="M512 130
+           Q540 286 580 320
+           Q606 332 698 350
+           Q606 368 580 380
+           Q540 414 512 570
+           Q484 414 444 380
+           Q418 368 326 350
+           Q418 332 444 320
+           Q484 286 512 130 Z"
+        fill="#ffffff"/>
+
+  <!-- Database (the "data") — filled white cylinder with two tier bands cut into
+       it so the storage tiers read clearly even at small sizes. -->
+  <path d="M276 532 V768 a236 76 0 0 0 472 0 V532 a236 76 0 0 0 -472 0 z"
+        fill="#ffffff"/>
+  <g fill="none" stroke="#3b82f6" stroke-width="16" stroke-linecap="round">
+    <path d="M276 620 a236 76 0 0 0 472 0"/>
+    <path d="M276 706 a236 76 0 0 0 472 0"/>
   </g>
-
-  <!-- AI sparkle (the "intelligence") — four-point needle star, the language used
-       by Claude / Apple Intelligence / Anthropic. Sits upper-right of the database
-       so the two read as one unit: AI + data. -->
-  <path d="M816,128
-           L840,300
-           L1000,324
-           L840,348
-           L816,520
-           L792,348
-           L632,324
-           L792,300 Z"
-        fill="url(#spark)"/>
-  <!-- A small companion sparkle for liveliness; same colour family. -->
-  <path d="M696,560
-           L706,612
-           L758,622
-           L706,632
-           L696,684
-           L686,632
-           L634,622
-           L686,612 Z"
-        fill="#67a7ff"/>
 </svg>
