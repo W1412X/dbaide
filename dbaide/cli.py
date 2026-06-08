@@ -273,7 +273,9 @@ def dispatch(args: argparse.Namespace, cfg: ConfigManager) -> int:
         conn = cfg.get_connection(args.conn or None)
         text = DeveloperTools().markdown(conn.name, database=args.database)
         if args.out:
-            Path(args.out).write_text(text, encoding="utf-8")
+            out = Path(args.out)
+            out.parent.mkdir(parents=True, exist_ok=True)
+            out.write_text(text, encoding="utf-8")
         else:
             print(text, end="")
         return 0
@@ -890,6 +892,7 @@ def print_result(result: QueryResult) -> None:
 
 
 def write_result(result: QueryResult, path: Path) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
     if path.suffix.lower() == ".json":
         path.write_text(json.dumps(result.rows, ensure_ascii=False, indent=2, default=str), encoding="utf-8")
         return

@@ -606,7 +606,12 @@ def t(key: str, /, **kwargs: object) -> str:
     if not entry:
         return key
     text = entry.get(_current) or entry.get(DEFAULT_LANGUAGE) or key
-    return text.format(**kwargs) if kwargs else text
+    if not kwargs:
+        return text
+    try:
+        return text.format(**kwargs)
+    except (KeyError, IndexError):
+        return text
 
 
 def on_change(callback: Callable[[str], None]) -> Callable[[], None]:
