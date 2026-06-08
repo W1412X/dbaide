@@ -17,6 +17,13 @@ from dbaide.i18n import answer_language_directive
 RAW_HISTORY_ITEMS = 32
 RAW_HISTORY_ITEM_LIMIT = 2400
 
+# Session-memory rendering: how many of the most-recent completed turns to
+# summarise into the user prompt by default. Older turns are NOT silently
+# truncated — the model can page through them via list_earlier_turns(offset=…).
+PRIOR_TURNS_WINDOW = 3
+PRIOR_TURN_ANSWER_CHARS = 160
+PRIOR_TURN_SQL_CHARS = 160
+
 
 class DecisionPromptBuilder:
     def __init__(self, orchestrator: Any) -> None:
@@ -153,6 +160,8 @@ class DecisionPromptBuilder:
             )
         timezone = str(getattr(self.orchestrator.session.connection, "session_timezone", "UTC") or "UTC")
         today = date.today().isoformat()
+        prior_turns_block = _prior_turns_block(self.orchestrator)
+        prior_turns_line = f"{prior_turns_block}\n\n" if prior_turns_block else ""
         return (
             f"User question:\n{state.question}\n\n"
             f"Database scope: {state.database or '(any)'}\n\n"
@@ -163,6 +172,7 @@ class DecisionPromptBuilder:
             f"{notes_line}"
             f"{criteria_line}"
             f"{pin_line}"
+            f"{prior_turns_line}"
             f"Compressed working memory:\n{self.orchestrator.run_state.memory.prompt_block() or '(empty)'}\n\n"
             f"Recent raw tool results (only for extra detail; prefer memory):\n{history}"
         )
@@ -174,6 +184,39 @@ def tool_prompt_line(spec: Any) -> str:
         args = ", ".join(f"{key}: {value}" for key, value in schema.items())
         return f"- {spec.name}(args: {{{args}}}): {spec.description}"
     return f"- {spec.name}(args: {{}}): {spec.description}"
+
+
+def _prior_turns_block(orchestrator: Any) -> str:
+    """Render the [Prior turns in this session] section: a thin window of the
+    most-recent completed turns (question + answer + selected SQL) so a follow-up
+    question can attach to the previous one. The model invokes retrieve_turn or
+    list_earlier_turns when it needs more than this summary — same progressive-
+    disclosure pattern as schema and join evidence."""
+    turns = list(getattr(orchestrator, "session_turns", []) or [])
+    if not turns:
+        return ""
+    window = turns[-PRIOR_TURNS_WINDOW:]
+    earlier = len(turns) - len(window)
+    lines = [f"[Prior turns in this session]  (showing {len(window)} of {len(turns)}; "
+             f"use retrieve_turn(turn_id) for clarifications/full SQL/full answer, "
+             f"list_earlier_turns(offset={len(window)}) for older turns)"]
+    base_index = earlier  # so the most recent gets the highest tN id
+    for i, turn in enumerate(window):
+        idx = base_index + i + 1
+        turn_id = f"t{idx}"
+        question = _shorten(str(turn.get("question") or ""), 200)
+        answer = _shorten(str(turn.get("answer_markdown") or "").replace("\n", " "),
+                          PRIOR_TURN_ANSWER_CHARS)
+        sql = _shorten(str(turn.get("selected_sql") or "").replace("\n", " "),
+                       PRIOR_TURN_SQL_CHARS)
+        lines.append(f"- {turn_id}: Q: {question or '(empty)'}")
+        if answer:
+            lines.append(f"     A: {answer}")
+        if sql:
+            lines.append(f"     SQL: {sql}")
+    if earlier > 0:
+        lines.append(f"(+{earlier} earlier turn(s) — list_earlier_turns(offset=0, limit=…) to page back)")
+    return "\n".join(lines)
 
 
 def _pinned_scope_labels(scope: dict | None) -> list[str]:

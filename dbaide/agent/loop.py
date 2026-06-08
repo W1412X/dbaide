@@ -39,6 +39,7 @@ BATCHABLE_TOOLS = frozenset({
     "discover_schema", "retrieve_schema_context", "list_databases", "list_tables",
     "describe_table", "inspect_metadata", "retrieve_join_context",
     "column_stats", "profile_table", "retrieve_memory_item",
+    "retrieve_turn", "list_earlier_turns",
 })
 MAX_BATCH = 6  # cap fan-out per decision so a bad batch can't blow the step budget
 # Tools whose step should carry the exact SQL the system ran/handled, so the trace

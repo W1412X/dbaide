@@ -32,6 +32,7 @@ class WorkflowResult:
         "assumptions", "warnings", "errors", "next_actions",
         "trace", "created_at", "completed_at",
         "pending_question", "pending_options", "pending_questions", "resume_state",
+        "clarifications", "disclosed_tables",
     )
 
     def __init__(
@@ -84,6 +85,11 @@ class WorkflowResult:
         self.pending_options = pending_options or []
         self.pending_questions: list[dict[str, Any]] = []
         self.resume_state = resume_state
+        # Snapshotted by WorkflowEngine.run() from the orchestrator at the end of
+        # the run, so service.ask can persist them onto the turn for the next
+        # turn's session memory to read.
+        self.clarifications: list[str] = []
+        self.disclosed_tables: list[str] = []
 
     def to_dict(self) -> dict[str, Any]:
         """Serialize to JSON-compatible dict."""
@@ -123,6 +129,7 @@ class WorkflowRequest:
         "question", "connection_name", "database_scope", "mode",
         "limit", "timeout_seconds", "model_name",
         "resume_state", "user_reply", "schema_scope", "stream_answers",
+        "session_turns", "active_criteria",
     )
 
     def __init__(
@@ -139,6 +146,8 @@ class WorkflowRequest:
         user_reply: str = "",
         schema_scope: dict[str, Any] | None = None,
         stream_answers: bool = False,
+        session_turns: list[dict[str, Any]] | None = None,
+        active_criteria: list[str] | None = None,
     ) -> None:
         self.question = question
         self.connection_name = connection_name
@@ -154,6 +163,13 @@ class WorkflowRequest:
         self.schema_scope = schema_scope or {}
         # Stream the final answer token-by-token to the UI (config-driven).
         self.stream_answers = bool(stream_answers)
+        # Session memory: every completed turn in this chat session (Q/A/SQL/
+        # clarifications/disclosed_tables, etc.) — the orchestrator picks the most
+        # recent few for the prompt and exposes the rest via retrieve_turn /
+        # list_earlier_turns. active_criteria is the consolidated union of every
+        # confirmed criterion stated earlier in the session (binding L2 facts).
+        self.session_turns = list(session_turns or [])
+        self.active_criteria = list(active_criteria or [])
 
 
 class QueryPlan:

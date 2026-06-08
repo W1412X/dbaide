@@ -58,9 +58,18 @@ def make_turn(
     workflow_id: str = "",
     trace: list[dict[str, Any]] | None = None,
     meta: dict[str, Any] | None = None,
+    clarifications: list[str] | None = None,
+    disclosed_tables: list[str] | None = None,
     created_at: float | None = None,
 ) -> dict[str, Any]:
-    """Build a turn dict from a workflow result's salient fields."""
+    """Build a turn dict from a workflow result's salient fields.
+
+    `clarifications` are the user-confirmed criteria from this turn (口径). Future
+    turns in the same session inherit them as binding context, so we have to
+    persist them — they're what makes "by Beijing time" stick across turns.
+    `disclosed_tables` records which tables this turn touched, so the next turn
+    can skip rediscovery when continuing the same line of questioning.
+    """
     return {
         "workflow_id": workflow_id,
         "question": question,
@@ -69,6 +78,8 @@ def make_turn(
         "status": status,
         "trace": trace or [],
         "meta": meta or {},
+        "clarifications": list(clarifications or []),
+        "disclosed_tables": list(disclosed_tables or []),
         "created_at": created_at if created_at is not None else _now(),
     }
 

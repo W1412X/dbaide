@@ -127,6 +127,10 @@ class WorkflowEngine:
         assistant._orchestrator.schema_scope = request.schema_scope or {}  # noqa: SLF001
         # Stream the final answer token-by-token when the user enabled it.
         assistant._orchestrator.stream_answers = bool(request.stream_answers)  # noqa: SLF001
+        # Session memory (prior completed turns in this chat session + the
+        # consolidated user-confirmed criteria from those turns).
+        assistant._orchestrator.session_turns = list(request.session_turns or [])  # noqa: SLF001
+        assistant._orchestrator.active_criteria = list(request.active_criteria or [])  # noqa: SLF001
         try:
             response = assistant.ask(
                 request.question,
@@ -169,6 +173,12 @@ class WorkflowEngine:
         result.answer_markdown = response.answer
         result.answer_plaintext = response.answer
         result.warnings = response.warnings or []
+        # Snapshot session-memory-relevant state from the orchestrator: criteria
+        # the user confirmed in THIS turn (so future turns inherit them) and the
+        # tables this turn touched (so the next follow-up can see the context).
+        run_state = assistant._orchestrator.run_state  # noqa: SLF001
+        result.clarifications = list(getattr(run_state, "clarifications", []) or [])
+        result.disclosed_tables = sorted({str(k) for k in (run_state.schemas or {}).keys()})
 
         if response.sql:
             self._trace(result, "sql_generated", "SQL generated", "agent", output=response.sql)

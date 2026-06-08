@@ -427,6 +427,50 @@ RETRIEVE_MEMORY_ITEM = ToolSpec(
     safe_for_auto_call=True,
 )
 
+RETRIEVE_TURN = ToolSpec(
+    name="retrieve_turn",
+    description=(
+        "Fetch the full content of one earlier turn in this chat session by turn_id "
+        "(t1, t2, …). [Prior turns in this session] shows only Q/A/SQL summaries; "
+        "call this when you need the user's exact clarifications, the full SQL, the "
+        "full answer, or the disclosed tables from that turn. `include` selects which "
+        "fields to return (clarifications/sql/answer/tables); omit it for all."
+    ),
+    input_schema={"turn_id": "string", "include": "list[string]"},
+    output_schema={
+        "turn_id": "string",
+        "question": "string",
+        "status": "string",
+        "clarifications": "list[string]",
+        "selected_sql": "string",
+        "answer_markdown": "string",
+        "disclosed_tables": "list[string]",
+        "created_at": "number",
+    },
+    permission_level=SAFE_METADATA,
+    timeout_seconds=5,
+    safe_for_auto_call=True,
+)
+
+LIST_EARLIER_TURNS = ToolSpec(
+    name="list_earlier_turns",
+    description=(
+        "Page earlier turns of this chat session (turns BEFORE the default window). "
+        "Returns each turn's id (t1, t2, …) + question + 1-line answer summary, so "
+        "you can spot a relevant earlier turn and then retrieve_turn(turn_id) for its "
+        "details. `offset` counts from the oldest (offset=0 → start); `limit` defaults to 5."
+    ),
+    input_schema={"offset": "integer", "limit": "integer"},
+    output_schema={
+        "turns": "list[dict]",
+        "total": "integer",
+        "more": "boolean",
+    },
+    permission_level=SAFE_METADATA,
+    timeout_seconds=5,
+    safe_for_auto_call=True,
+)
+
 DISCOVER_SCHEMA = ToolSpec(
     name="discover_schema",
     description="Progressive LLM schema discovery (instance → database → table → column)",

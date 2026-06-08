@@ -84,6 +84,13 @@ class AskOrchestrator:
         # Stream the final answer token-by-token (set by the workflow from config).
         self.stream_answers: bool = False
         self.cancel_check: Callable[[], None] | None = None
+        # Session memory (set by the workflow from ChatSessionStore each run):
+        # every completed turn earlier in this chat session, plus the consolidated
+        # set of user-confirmed criteria across the session. Used to render
+        # [Prior turns] + [Active session criteria] in the user prompt and to back
+        # the retrieve_turn / list_earlier_turns tools.
+        self.session_turns: list[dict[str, Any]] = []
+        self.active_criteria: list[str] = []
 
         self.schema = SchemaTools(adapter, session.disclosure, instance=self.instance, assets=self.asset_store)
         self.profile = ProfileTools(adapter, session.disclosure, instance=self.instance, assets=self.asset_store)
@@ -122,6 +129,13 @@ class AskOrchestrator:
             answer_language=normalize(answer_language or detect_user_language(question)),
         )
         self.run_state.memory.reset_goal(question, database=database, execute_allowed=execute)
+        # L2 carry-over: criteria the user confirmed earlier in THIS chat session
+        # become the new turn's binding clarifications. The SQL writer applies them
+        # verbatim via its [Business criteria] block, and the decision prompt sees
+        # them in [Confirmed criteria] — so a follow-up doesn't lose 口径 ("Beijing
+        # time", "paid only") that the user already settled.
+        if self.active_criteria:
+            self.run_state.clarifications = list(self.active_criteria)
 
     def run(
         self,

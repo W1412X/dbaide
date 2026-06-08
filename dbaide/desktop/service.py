@@ -761,7 +761,18 @@ class DesktopService:
         self._guard_busy(conn.name)
         in_session_id = str(payload.get("session_id") or "")
         database = str(payload.get("database") or "")
-        request = self._build_request(payload, connection_name=conn.name, database=database)
+        # Session memory: load every completed turn already in this chat session
+        # so the agent gets [Prior turns] context and L2 carry-over criteria. Skip
+        # this when resuming an ask_user pause — the same in-flight turn is just
+        # continuing, the prior-turn context already shaped it.
+        session_turns, active_criteria = self._load_session_memory(
+            conn.name, in_session_id,
+            skip=bool(payload.get("resume_state") or payload.get("user_reply")),
+        )
+        request = self._build_request(
+            payload, connection_name=conn.name, database=database,
+            session_turns=session_turns, active_criteria=active_criteria,
+        )
         engine = WorkflowEngine(conn, self._safe_llm(), self.store, self.join_catalog)
         progress_cb = payload.get("progress")
         cancel_check = payload.get("cancel_check")
@@ -787,7 +798,9 @@ class DesktopService:
         return payload
 
     def _build_request(self, payload: dict[str, Any], *, connection_name: str,
-                       database: str) -> WorkflowRequest:
+                       database: str,
+                       session_turns: list[dict[str, Any]] | None = None,
+                       active_criteria: list[str] | None = None) -> WorkflowRequest:
         """Assemble the WorkflowRequest from a GUI ask payload (defaults applied here so
         ask() reads as request → run → record)."""
         conn = self.cfg.get_connection(connection_name)
@@ -802,7 +815,42 @@ class DesktopService:
             user_reply=str(payload.get("user_reply") or ""),
             schema_scope=payload.get("schema_scope") or {},
             stream_answers=bool(payload.get("stream_answers", self.cfg.stream_answers())),
+            session_turns=session_turns or [],
+            active_criteria=active_criteria or [],
         )
+
+    def _load_session_memory(
+        self, conn_name: str, session_id: str, *, skip: bool,
+    ) -> tuple[list[dict[str, Any]], list[str]]:
+        """Return (session_turns, active_criteria) for the agent's session memory.
+
+        - session_turns: every COMPLETED turn in this chat session (oldest→newest),
+          so the orchestrator can summarise the most-recent few into the prompt and
+          back retrieve_turn / list_earlier_turns.
+        - active_criteria: dedup'd union of every confirmed criterion across the
+          session. The most-recent occurrence wins (later turns can refine an
+          earlier statement). These are seeded into the new run's clarifications.
+        - skip=True for resume runs: an ask_user pause is one in-flight turn, not a
+          new one — the prior context already shaped it; injecting again would
+          double-count it via clarifications + prior-turn block.
+        """
+        if skip or not session_id:
+            return [], []
+        session = self.sessions.load(conn_name, session_id)
+        if not isinstance(session, dict):
+            return [], []
+        all_turns = [t for t in (session.get("turns") or []) if isinstance(t, dict)]
+        completed = [t for t in all_turns if str(t.get("status") or "") == "completed"]
+        # Dedupe criteria preserving order, but later occurrences override earlier
+        # (so a follow-up turn that refined "all 2024" → "Q4 2024" sticks).
+        seen: dict[str, int] = {}
+        for i, turn in enumerate(completed):
+            for c in (turn.get("clarifications") or []):
+                key = str(c).strip()
+                if key:
+                    seen[key] = i  # last writer wins
+        criteria = [c for c, _ in sorted(seen.items(), key=lambda kv: kv[1])]
+        return completed, criteria
 
     def _record_session_turn(self, conn_name, session_id, request, result, database) -> str:
         session_id = str(session_id or "")
@@ -815,6 +863,10 @@ class DesktopService:
         try:
             if not session_id or self.sessions.load(conn_name, session_id) is None:
                 session_id = self.sessions.create(conn_name)["session_id"]
+            # Persist clarifications + disclosed tables on the turn so the next
+            # turn's session-memory load can carry them forward / show them.
+            clarifications = list(getattr(result, "clarifications", []) or [])
+            disclosed = list(getattr(result, "disclosed_tables", []) or [])
             self.sessions.append_turn(conn_name, session_id, make_turn(
                 question=request.question,
                 answer_markdown=result.answer_markdown or result.answer_plaintext or "",
@@ -823,6 +875,8 @@ class DesktopService:
                 workflow_id=result.workflow_id,
                 trace=[e.to_dict() for e in result.trace],
                 meta={"database": database},
+                clarifications=clarifications,
+                disclosed_tables=disclosed,
                 created_at=result.created_at or None,
             ))
         except Exception:  # noqa: BLE001 — session persistence must never break a query
