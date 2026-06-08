@@ -1722,7 +1722,7 @@ class MainWindow(QMainWindow):
             worker = self._runs.pop(session_id, None)
             if worker and not worker.is_cancelled:
                 worker.cancel()
-            for d in (self._pending_resume, self._slot_question, self._slot_session, self._slot_trace):
+            for d in (self._pending_resume, self._slot_question, self._slot_session, self._slot_trace, self._slot_connection):
                 d.pop(session_id, None)
             was_active = session_id == self._active_key
             self.ask_tab.discard_slot(session_id)

@@ -65,6 +65,23 @@ def _cte_names(sql: str) -> list[str]:
             depth = 1
             continue
         ch = text[pos]
+        # Skip string literals so parentheses inside them don't affect depth.
+        if ch in ("'", "$$"[0]):
+            if text[pos: pos + 2] == "$$":
+                end = text.find("$$", pos + 2)
+                pos = (end + 2) if end != -1 else len(text)
+                continue
+            if ch == "'":
+                pos += 1
+                while pos < len(text):
+                    if text[pos] == "'" and (pos + 1 >= len(text) or text[pos + 1] != "'"):
+                        pos += 1
+                        break
+                    if text[pos] == "'" and pos + 1 < len(text) and text[pos + 1] == "'":
+                        pos += 2
+                        continue
+                    pos += 1
+                continue
         if ch == "(":
             depth += 1
         elif ch == ")":

@@ -425,3 +425,66 @@ class TestTablesInSqlExtractCleanup:
         )
         assert "users" in tables
         assert "name" not in tables
+
+
+class TestCTEParserStringLiterals:
+    """_cte_names must skip parentheses inside string literals."""
+
+    def test_closing_paren_in_string_does_not_break_cte(self):
+        ctx = DisclosureContext()
+        ctx.record_tables([TableInfo(name="users")], instance="local", database="main")
+        sql = (
+            "WITH cte1 AS (\n"
+            "  SELECT * FROM users WHERE name = ')'\n"
+            "), cte2 AS (\n"
+            "  SELECT 1\n"
+            ")\n"
+            "SELECT * FROM cte1"
+        )
+        result = SchemaGuard().validate(sql, ctx)
+        assert result.ok, f"CTE with string paren broke parser: {[i.message for i in result.issues]}"
+
+    def test_escaped_quote_in_cte_body(self):
+        ctx = DisclosureContext()
+        ctx.record_tables([TableInfo(name="t")], instance="local", database="main")
+        sql = (
+            "WITH c AS (\n"
+            "  SELECT * FROM t WHERE v = 'it''s )'\n"
+            ")\n"
+            "SELECT * FROM c"
+        )
+        result = SchemaGuard().validate(sql, ctx)
+        assert result.ok
+
+    def test_multiple_ctes_with_string_parens(self):
+        ctx = DisclosureContext()
+        ctx.record_tables([TableInfo(name="a"), TableInfo(name="b")], instance="local", database="main")
+        sql = (
+            "WITH x AS (\n"
+            "  SELECT ')' AS col FROM a\n"
+            "), y AS (\n"
+            "  SELECT '(' AS col FROM b\n"
+            ")\n"
+            "SELECT * FROM x JOIN y ON x.col = y.col"
+        )
+        result = SchemaGuard().validate(sql, ctx)
+        assert result.ok
+
+
+class TestWorkflowResultSerialization:
+    """WorkflowResult.to_dict() must include all fields."""
+
+    def test_to_dict_includes_clarifications_and_disclosed_tables(self):
+        from dbaide.core.result import WorkflowResult
+        r = WorkflowResult(question="test")
+        r.clarifications = ["use Beijing time"]
+        r.disclosed_tables = ["orders", "users"]
+        d = r.to_dict()
+        assert d["clarifications"] == ["use Beijing time"]
+        assert d["disclosed_tables"] == ["orders", "users"]
+
+    def test_to_dict_defaults_empty(self):
+        from dbaide.core.result import WorkflowResult
+        d = WorkflowResult().to_dict()
+        assert d["clarifications"] == []
+        assert d["disclosed_tables"] == []

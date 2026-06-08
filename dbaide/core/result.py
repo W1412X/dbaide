@@ -119,6 +119,8 @@ class WorkflowResult:
             "pending_options": self.pending_options,
             "pending_questions": self.pending_questions,
             "resume_state": self.resume_state,
+            "clarifications": self.clarifications,
+            "disclosed_tables": self.disclosed_tables,
         }
 
 

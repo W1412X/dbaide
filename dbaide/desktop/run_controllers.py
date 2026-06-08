@@ -303,6 +303,8 @@ class ConversationRunController:
         win._runs.pop(key, None)
         win._slot_connection.pop(key, None)
         win._pending_resume.pop(key, None)
+        win._slot_question.pop(key, None)
+        win._slot_trace.pop(key, None)
         if win.ask_tab.turn_open(key):
             win.ask_tab.finish_turn_error(key, self._format_turn_error(exc))
         win.toast(self._user_error_message(exc))

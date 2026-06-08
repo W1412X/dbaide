@@ -179,12 +179,7 @@ def register(registry: ToolRegistry, orchestrator) -> None:
         if not orchestrator.run_state.execute_allowed:
             return ToolResult(
                 ok=False,
-                data={
-                    "blocked": True,
-                    "reason": "Execution disabled for this request",
-                    "sql": sql,
-                    "database": database,
-                },
+                error=_err(tool_label, "Execution disabled for this request", retryable=False),
             )
 
         validation = orchestrator.query.validate_sql(sql, add_limit=True, limit=limit)
