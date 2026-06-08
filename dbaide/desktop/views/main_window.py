@@ -5,7 +5,7 @@ from typing import Any, Callable
 
 from PyQt6 import sip
 from PyQt6.QtCore import Qt, QSettings
-from PyQt6.QtGui import QKeySequence, QShortcut
+from PyQt6.QtGui import QIcon, QKeySequence, QShortcut
 from PyQt6.QtWidgets import (
     QApplication,
     QDialog,
@@ -1802,8 +1802,24 @@ class DBAideDesktop:
     def run(self) -> None:
         app = QApplication.instance() or QApplication(sys.argv)
         app.setApplicationName("DBAide")
+        icon = _app_icon()
+        if icon is not None:
+            app.setWindowIcon(icon)
         # Fusion makes global QSS apply consistently on macOS (native style ignores many label rules).
         app.setStyle("Fusion")
         window = MainWindow(self.service)
+        if icon is not None:
+            window.setWindowIcon(icon)
         window.show()
         app.exec()
+
+
+def _app_icon() -> "QIcon | None":
+    """The bundled app icon (dev tree and PyInstaller datas use the same relative
+    path); returns None rather than failing startup if it is missing."""
+    from pathlib import Path
+
+    path = Path(__file__).resolve().parents[1] / "assets" / "app_icon.png"
+    if path.exists():
+        return QIcon(str(path))
+    return None

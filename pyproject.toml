@@ -26,3 +26,6 @@ dbaide-gui = "dbaide.gui:main"
 
 [tool.setuptools.packages.find]
 include = ["dbaide*"]
+
+[tool.setuptools.package-data]
+"dbaide.desktop" = ["assets/*.png"]

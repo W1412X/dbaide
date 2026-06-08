@@ -7,6 +7,9 @@ from pathlib import Path
 from PyInstaller.utils.hooks import collect_submodules
 
 ROOT = Path(SPECPATH).resolve().parents[1]
+ICON_DIR = ROOT / "packaging" / "icons"
+# Per-OS app icon: .ico for the Windows EXE, .icns for the macOS .app bundle.
+ICON = str(ICON_DIR / ("dbaide.ico" if sys.platform == "win32" else "dbaide.icns"))
 
 block_cipher = None
 STRIP = sys.platform != "win32"  # strip symbols on macOS/Linux (saves size); not on Windows
@@ -71,7 +74,8 @@ a = Analysis(
     [str(ROOT / "dbaide" / "desktop" / "launcher.py")],
     pathex=[str(ROOT)],
     binaries=[],
-    datas=[],
+    datas=[(str(ROOT / "dbaide" / "desktop" / "assets" / "app_icon.png"),
+            "dbaide/desktop/assets")],
     hiddenimports=hiddenimports,
     hookspath=[],
     hooksconfig={},
@@ -101,6 +105,7 @@ exe = EXE(
     target_arch=None,
     codesign_identity=None,
     entitlements_file=None,
+    icon=ICON,
 )
 
 coll = COLLECT(
@@ -121,7 +126,7 @@ if sys.platform == "darwin":
     app = BUNDLE(
         coll,
         name="DBAide.app",
-        icon=None,
+        icon=str(ICON_DIR / "dbaide.icns"),
         bundle_identifier="dev.dbaide.app",
         version=os.environ.get("DBAIDE_VERSION", "0.0.0"),
         info_plist={
