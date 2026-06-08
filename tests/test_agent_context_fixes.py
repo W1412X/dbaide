@@ -289,11 +289,48 @@ def test_decision_prompt_requires_tool_evidence_before_clarification(tmp_path):
         "allowed",
     )
 
-    assert "Ask the user only for irreducible business intent" in prompt
+    # Structure/fact uncertainty must be discovered with tools, never asked.
+    assert "STRUCTURE / FACTS" in prompt
+    assert "NEVER ask" in prompt
     assert "table/column existence" in prompt
     assert "retrieve_schema_context" in prompt and "describe_table" in prompt
     assert "retrieve_memory_item" in prompt
     assert "Simplified Chinese" in prompt
+
+
+def test_decision_prompt_requires_business_caliber_clarification(tmp_path):
+    from dbaide.agent.loop import AskAgentLoop, LoopState
+
+    orch = _orch(tmp_path)
+    loop = AskAgentLoop(orch)
+    prompt = loop.prompts.system_prompt(
+        LoopState(question="5月份妥投数量", database="", execute_allowed=True, answer_language="zh"),
+        "ask_user: spec",
+        "allowed",
+    )
+
+    # Business-caliber choices must be confirmed (not guessed) before answering.
+    assert "BUSINESS CALIBER" in prompt
+    assert "MUST" in prompt and "ask_user" in prompt
+    assert "which year" in prompt          # under-specified time window
+    assert "Beijing-calendar" in prompt    # reporting day-boundary / timezone
+    assert "妥投数量" in prompt              # metric 口径 (count grain + status mapping)
+    assert "退款率" in prompt               # rate numerator/denominator
+    assert "过高" in prompt                 # qualitative threshold has no fixed cutoff
+
+
+def test_decision_user_prompt_includes_today_for_relative_periods(tmp_path):
+    from dbaide.agent.loop import AskAgentLoop, LoopState
+
+    orch = _orch(tmp_path)
+    orch._reset_loop_state("上个月的订单数", "", True)
+    loop = AskAgentLoop(orch)
+    user = loop.prompts.user_prompt(
+        LoopState(question="上个月的订单数", database="", execute_allowed=True, answer_language="zh"),
+        [],
+    )
+    assert "Today's date:" in user
+    assert "bare month/quarter with no year is still ambiguous" in user
 
 
 def test_decision_memory_updates_ignore_non_list_shapes(tmp_path):
