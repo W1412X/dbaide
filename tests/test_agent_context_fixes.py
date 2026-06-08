@@ -893,6 +893,27 @@ def test_work_log_records_purpose_and_judgment():
     assert "judged: orders has delivered_at" in prompt
 
 
+def test_work_log_rolls_up_dropped_steps_keeping_object_names():
+    from dbaide.agent.memory import AgentMemory, PROMPT_SLICE_WORK
+
+    mem = AgentMemory()
+    # Earliest steps will fall out of the prompt window; they must not vanish.
+    mem.record_work(action="describe_table", args={"database": "shop", "table": "legacy_orders"}, ok=True, summary="x")
+    mem.record_work(action="execute_readonly_sql", args={"sql": "SELECT 1"}, ok=False, summary="boom")
+    for i in range(PROMPT_SLICE_WORK + 5):
+        mem.record_work(action="column_stats", args={"database": "shop", "table": f"t{i}"}, ok=True, summary="ok")
+
+    prompt = mem.prompt_block()
+    # A rollup line stands in for the dropped older steps...
+    assert "steps, summarized)" in prompt
+    assert "describe_table×1" in prompt
+    assert "1 failed" in prompt
+    # ...and it preserves the concrete object name from a dropped step.
+    assert "shop.legacy_orders" in prompt
+    # The earliest step is no longer listed individually.
+    assert "w1 describe_table" not in prompt
+
+
 def test_apply_decision_memory_attaches_result_assessment(tmp_path):
     from dbaide.agent.loop import AskAgentLoop
 

@@ -561,6 +561,8 @@ class AgentMemory:
             lines += ["[Candidate Hypotheses]", *[f"- {x}" for x in self.hypotheses[-PROMPT_SLICE_FINDINGS:]], ""]
         if self.work_log:
             lines += ["[Work Done] (did-what → result → judgment)"]
+            if len(self.work_log) > PROMPT_SLICE_WORK:
+                lines.append(_summarize_dropped_steps(self.work_log[:-PROMPT_SLICE_WORK]))
             for step in self.work_log[-PROMPT_SLICE_WORK:]:
                 refs_list = [*step.artifact_refs]
                 if step.raw_ref:
@@ -858,6 +860,67 @@ def next_prefixed_id(memory: AgentMemory, prefix: str, *, collections: tuple[str
                 for key in ("report_id", "artifact_id"):
                     ids.append(str(data.get(key) or ""))
     return f"{prefix}{_next_index_from_ids(ids, prefix)}"
+
+
+def _summarize_dropped_steps(steps: list[WorkStep]) -> str:
+    """Roll older work steps that fell out of the prompt window into one line.
+
+    Compression must not lose what was attempted or which schema objects were
+    touched, so this keeps the action counts, the failure count, and the distinct
+    db/table names referenced by the dropped steps (their full
+    columns/profiles/exclusions persist in the evidence sections below and via
+    retrieve_memory_item). It is a narrative backstop, not the detail of record.
+    """
+    if not steps:
+        return ""
+    counts: dict[str, int] = {}
+    for step in steps:
+        counts[step.action] = counts.get(step.action, 0) + 1
+    failed = sum(1 for s in steps if s.status == "failed")
+    labels: list[str] = []
+    seen: set[str] = set()
+    for step in steps:
+        for label in _targets_from_input(step.input_summary):
+            if label not in seen:
+                seen.add(label)
+                labels.append(label)
+    actions = ", ".join(f"{action}×{n}" for action, n in sorted(counts.items(), key=lambda kv: -kv[1]))
+    line = f"Earlier {steps[0].id}–{steps[-1].id} ({len(steps)} steps, summarized): {actions}"
+    if failed:
+        line += f"; {failed} failed"
+    if labels:
+        line += f"; objects touched: {', '.join(labels[:24])}"
+    return line
+
+
+def _targets_from_input(input_summary: str) -> list[str]:
+    """Best-effort db/table labels from a step's compact-JSON arg summary."""
+    try:
+        args = json.loads(input_summary)
+    except Exception:
+        return []
+    if not isinstance(args, dict):
+        return []
+    database = str(args.get("database") or "").strip()
+    out: list[str] = []
+
+    def _label(table: str) -> str:
+        table = str(table or "").strip()
+        if not table:
+            return ""
+        return f"{database}.{table}" if database and "." not in table else table
+
+    for key in ("table", "ref_table"):
+        label = _label(args.get(key))
+        if label:
+            out.append(label)
+    tables = args.get("tables")
+    if isinstance(tables, list):
+        for t in tables:
+            label = _label(t if isinstance(t, str) else (t.get("table") if isinstance(t, dict) else ""))
+            if label:
+                out.append(label)
+    return out
 
 
 def _trim(text: str, limit: int) -> str:
