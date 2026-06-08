@@ -60,9 +60,10 @@ def register(registry: ToolRegistry, orchestrator) -> None:
         database, table = _normalize_tool_table(orchestrator, table, database)
         columns = _string_list(args.get("columns")) or None
         metrics = _string_list(args.get("metrics")) or None
+        top_k = max(1, _int(args.get("top_k"), 10))
         try:
             stats = orchestrator.profile.column_stats(
-                table, columns, metrics=metrics, database=database,
+                table, columns, metrics=metrics, database=database, top_k=top_k,
             )
         except Exception as exc:
             return ToolResult(ok=False, error=_err("column_stats", str(exc), retryable=True))

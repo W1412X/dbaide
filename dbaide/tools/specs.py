@@ -376,9 +376,13 @@ COLUMN_STATS = ToolSpec(
         "metrics that matter for the question; omit `metrics` to get sensible defaults "
         "per type. Candidates: numeric/temporal → min,max,null_rate(,distinct_count); "
         "string → min_len,max_len,null_rate,empty_rate(,distinct_count); "
-        "categorical/boolean → distinct_count,null_rate(,top_values)."
+        "categorical/boolean → distinct_count,null_rate(,top_values). Omitting `columns` "
+        "covers EVERY column in one scan. top_values returns the `top_k` most frequent "
+        "values (default 10); distinct_count is the true total — raise `top_k` (or GROUP BY "
+        "in SQL) when the value you need isn't among the most frequent."
     ),
-    input_schema={"table": "string", "columns": "list[string]", "metrics": "list[string]", "database": "string"},
+    input_schema={"table": "string", "columns": "list[string]", "metrics": "list[string]",
+                  "database": "string", "top_k": "integer"},
     output_schema={"columns": "list[dict]"},
     permission_level=SAFE_PROFILE,
     timeout_seconds=60,
