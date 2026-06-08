@@ -106,6 +106,7 @@ class SQLArtifact:
     rows_preview: list[dict[str, Any]] = field(default_factory=list)
     result_summary: str = ""
     warnings: list[str] = field(default_factory=list)
+    truncated: bool = False
 
 
 @dataclass(slots=True)
@@ -344,9 +345,10 @@ class AgentMemory:
     def add_sql_artifact(self, artifact: SQLArtifact) -> None:
         self.sql_artifacts.append(artifact)
         self.sql_artifacts = self.sql_artifacts[-MAX_SQL_ARTIFACTS:]
+        capped = " — TRUNCATED at the row cap; more rows exist (aggregate or narrow)" if artifact.truncated else ""
         self.add_finding(
-            f"SQL artifact {artifact.id}: {artifact.row_count} row(s), columns={', '.join(artifact.columns[:8])}. "
-            f"{artifact.result_summary}",
+            f"SQL artifact {artifact.id}: {artifact.row_count} row(s){capped}, "
+            f"columns={', '.join(artifact.columns[:8])}. {artifact.result_summary}",
             source=artifact.id,
         )
 
@@ -369,8 +371,9 @@ class AgentMemory:
                 return
             sql = str(data.get("sql") or args.get("sql") or "").strip()
             rows = data.get("row_count")
+            capped = " — TRUNCATED at the row cap; more rows exist" if data.get("truncated") else ""
             self.add_finding(
-                f"Executed SQL returned {rows if rows is not None else '?'} row(s): {_trim(sql, 220)}",
+                f"Executed SQL returned {rows if rows is not None else '?'} row(s){capped}: {_trim(sql, 220)}",
                 source=str(data.get("artifact_id") or action),
             )
 
@@ -474,12 +477,9 @@ class AgentMemory:
                     metric_bits.append(f"{key}={_trim(str(stats.get(key)), 60)}")
             top = stats.get("top_values")
             if isinstance(top, list) and top:
-                vals = []
-                for item in top[:4]:
-                    if isinstance(item, dict):
-                        vals.append(f"{_trim(str(item.get('value')), 40)}:{item.get('count')}")
-                if vals:
-                    metric_bits.append("top_values=" + ", ".join(vals))
+                tv = _top_values_field(top)
+                if tv:
+                    metric_bits.append(tv)
             if metric_bits:
                 bits.append(f"{name} ({'; '.join(metric_bits[:8])})")
         if bits:
@@ -506,12 +506,9 @@ class AgentMemory:
                     metrics.append(f"{key}={_trim(str(profile.get(key)), 60)}")
             top = profile.get("top_values")
             if isinstance(top, list) and top:
-                values = []
-                for item in top[:4]:
-                    if isinstance(item, dict):
-                        values.append(f"{_trim(str(item.get('value')), 40)}:{item.get('count')}")
-                if values:
-                    metrics.append("top_values=" + ", ".join(values))
+                tv = _top_values_field(top)
+                if tv:
+                    metrics.append(tv)
             if metrics:
                 bits.append(f"{column} ({'; '.join(metrics[:8])})")
         if bits:
@@ -592,7 +589,8 @@ class AgentMemory:
             lines += ["[Schema Evidence]"]
             for report in self.schema_reports[-PROMPT_SLICE_SCHEMA:]:
                 cand = []
-                for c in report.candidates[:8]:
+                shown_candidates = report.candidates[:20]
+                for c in shown_candidates:
                     label = f"{c.database}.{c.table}" if c.database else c.table
                     bits = [label, c.status]
                     if c.notes.get("table"):
@@ -609,6 +607,8 @@ class AgentMemory:
                     if c.foreign_keys:
                         bits.append(f"declared_fk={len(c.foreign_keys)}")
                     cand.append(" / ".join(bits))
+                if len(report.candidates) > len(shown_candidates):
+                    cand.append(f"… +{len(report.candidates) - len(shown_candidates)} more candidate table(s)")
                 lines.append(f"- {report.id}: " + "; ".join(cand))
             lines.append("")
         if self.join_reports:
@@ -629,9 +629,11 @@ class AgentMemory:
         if self.sql_artifacts:
             lines += ["[SQL Artifacts]"]
             for art in self.sql_artifacts[-PROMPT_SLICE_SQL:]:
+                flags = " TRUNCATED(row-capped)" if art.truncated else ""
+                warn = f" warnings={'; '.join(art.warnings[:3])}" if art.warnings else ""
                 lines.append(
-                    f"- {art.id}: purpose={art.purpose or '(not stated)'} rows={art.row_count} "
-                    f"columns={', '.join(art.columns[:8])} sql={_trim(art.sql, 220)}"
+                    f"- {art.id}: purpose={art.purpose or '(not stated)'} rows={art.row_count}{flags} "
+                    f"columns={', '.join(art.columns[:8])}{warn} sql={_trim(art.sql, 220)}"
                 )
             lines.append("")
         if self.open_questions:
@@ -782,6 +784,7 @@ def _sql_artifact_from_dict(data: dict[str, Any]) -> SQLArtifact:
         rows_preview=[dict(x) for x in _list_or_empty(data.get("rows_preview")) if isinstance(x, dict)],
         result_summary=str(data.get("result_summary") or ""),
         warnings=[str(x) for x in _list_or_empty(data.get("warnings"))],
+        truncated=bool(data.get("truncated")),
     )
 
 
@@ -945,6 +948,20 @@ def _column_names(columns: Any) -> list[str]:
         if name:
             out.append(name)
     return out
+
+
+def _top_values_field(top: list, cap: int = 8) -> str:
+    """Render a column's top values, signalling when more distinct values exist.
+    A status/flag value the question hinges on can be the 5th most common; the old
+    [:4] cap hid it with no trace, so the model couldn't know to look further."""
+    vals: list[str] = []
+    for item in top[:cap]:
+        if isinstance(item, dict):
+            vals.append(f"{_trim(str(item.get('value')), 40)}:{item.get('count')}")
+    if not vals:
+        return ""
+    more = f", … +{len(top) - cap} more distinct value(s)" if len(top) > cap else ""
+    return "top_values=" + ", ".join(vals) + more
 
 
 def _cols_with_overflow(names: list[str], cap: int) -> str:

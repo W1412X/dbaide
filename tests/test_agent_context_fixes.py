@@ -945,6 +945,41 @@ def test_schema_evidence_signals_overflow_instead_of_hiding():
     assert _cols_with_overflow(["a", "b", "c"], 50) == "a, b, c"
 
 
+def test_truncated_sql_result_is_surfaced_to_the_model():
+    from dbaide.agent.memory import AgentMemory, SQLArtifact
+
+    mem = AgentMemory()
+    mem.learn_tool_result(
+        action="execute_sql", args={}, data={"sql": "SELECT * FROM users", "row_count": 100, "truncated": True},
+    )
+    mem.add_sql_artifact(SQLArtifact(id="sql:1", purpose="list", sql="SELECT * FROM users",
+                                     row_count=100, columns=["id"], truncated=True))
+    prompt = mem.prompt_block()
+    # The brain must know the 100 rows were row-capped, not the full set.
+    assert "TRUNCATED" in prompt
+    assert prompt.count("TRUNCATED") >= 2  # both the executed-finding and the SQL Artifacts line
+
+
+def test_schema_evidence_candidate_overflow_is_signalled():
+    from dbaide.agent.memory import AgentMemory, SchemaCandidate, SchemaEvidenceReport
+
+    cands = [SchemaCandidate(database="d", table=f"t{i}", columns=[{"name": "id"}]) for i in range(25)]
+    mem = AgentMemory()
+    mem.add_schema_report(SchemaEvidenceReport(id="schema:1", request="q", candidates=cands))
+    prompt = mem.prompt_block()
+    assert "+5 more candidate table(s)" in prompt  # 25 - 20 shown
+
+
+def test_top_values_overflow_is_signalled():
+    from dbaide.agent.memory import _top_values_field
+
+    top = [{"value": f"v{i}", "count": 100 - i} for i in range(12)]
+    rendered = _top_values_field(top)
+    assert "v0:100" in rendered and "v7:" in rendered
+    assert "v8:" not in rendered
+    assert "+4 more distinct value(s)" in rendered
+
+
 def test_decide_coerces_tool_named_action_into_call_tool(tmp_path):
     from dbaide.agent.loop import AskAgentLoop, LoopState
 

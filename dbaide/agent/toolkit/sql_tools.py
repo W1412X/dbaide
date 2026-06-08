@@ -321,6 +321,7 @@ def register(registry: ToolRegistry, orchestrator) -> None:
                 rows_preview=list((result.rows or [])[:10]),
                 result_summary=result_summary,
                 warnings=list(validation_report.warnings or []),
+                truncated=bool(getattr(result, "truncated", False)),
             ))
             orchestrator.progress(
                 subagent_event(
