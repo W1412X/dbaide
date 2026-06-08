@@ -590,6 +590,11 @@ class AskAgentLoop:
                 )
             else:
                 mem.add_finding(str(item), source="model_note", confidence="model_note")
+        for item in _list_update_items(updates.get("verified")) + _list_update_items(updates.get("confirmed")):
+            if isinstance(item, dict):
+                mem.mark_verified(str(item.get("text") or ""), source=str(item.get("source") or "verified"))
+            else:
+                mem.mark_verified(str(item), source="verified")
         for item in _list_update_items(updates.get("open_questions")):
             mem.add_open_question(str(item.get("text") if isinstance(item, dict) else item))
         for item in _list_update_items(updates.get("hypotheses")):

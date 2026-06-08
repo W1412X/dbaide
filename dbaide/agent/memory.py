@@ -246,6 +246,27 @@ class AgentMemory:
         self.findings.append(Finding(text=text, source=source, confidence=confidence))
         self.findings = self.findings[-MAX_FINDINGS:]
 
+    def mark_verified(self, text: str, *, source: str = "") -> None:
+        """Record a conclusion the agent has verified with tool evidence.
+
+        Verified findings render in the [Confirmed & Verified] section, kept apart
+        from merely observed notes so the model can tell "settled" from "noticed".
+        If the same text was already noted at a weaker confidence, upgrade it in
+        place rather than dropping the upgrade to a dedup no-op.
+        """
+        text = _trim(text, 500)
+        if not text:
+            return
+        key = text.lower()
+        for f in self.findings:
+            if f.text.lower() == key:
+                f.confidence = "verified"
+                if source and not f.source:
+                    f.source = source
+                return
+        self.findings.append(Finding(text=text, source=source, confidence="verified"))
+        self.findings = self.findings[-MAX_FINDINGS:]
+
     def add_open_question(self, text: str) -> None:
         text = _trim(text, 400)
         if text and text not in self.open_questions:
@@ -514,8 +535,17 @@ class AgentMemory:
         lines += ["[Goal]", self.goal or "(unknown)", ""]
         if self.constraints:
             lines += ["[Constraints]", *[f"- {c}" for c in self.constraints], ""]
-        if self.confirmed_facts:
-            lines += ["[Authoritative Facts]", *[f"- {x}" for x in self.confirmed_facts[-PROMPT_SLICE_FACTS:]], ""]
+        verified = [f for f in self.findings if f.confidence == "verified"]
+        if self.confirmed_facts or verified:
+            lines += [
+                "[Confirmed & Verified] (settled — rely on these; do not re-investigate "
+                "or contradict them without new evidence)"
+            ]
+            lines += [f"- (user-confirmed) {x}" for x in self.confirmed_facts[-PROMPT_SLICE_FACTS:]]
+            for f in verified[-PROMPT_SLICE_FACTS:]:
+                src = f" ({f.source})" if f.source else ""
+                lines.append(f"- (verified) {f.text}{src}")
+            lines.append("")
         if self.hypotheses:
             lines += ["[Candidate Hypotheses]", *[f"- {x}" for x in self.hypotheses[-PROMPT_SLICE_FINDINGS:]], ""]
         if self.work_log:
@@ -527,9 +557,10 @@ class AgentMemory:
                 refs = f" refs={', '.join(refs_list)}" if refs_list else ""
                 lines.append(f"- {step.id} {step.action} {step.status}{refs}: {step.result_summary}")
             lines.append("")
-        if self.findings:
+        observed = [f for f in self.findings if f.confidence != "verified"]
+        if observed:
             lines.append("[Observed Evidence / Model Working Notes]")
-            for f in self.findings[-PROMPT_SLICE_FINDINGS:]:
+            for f in observed[-PROMPT_SLICE_FINDINGS:]:
                 qualifier = f.confidence if f.confidence != "observed" else "observed"
                 suffix_parts = [part for part in (f.source, qualifier) if part]
                 suffix = f" ({'; '.join(suffix_parts)})" if suffix_parts else ""

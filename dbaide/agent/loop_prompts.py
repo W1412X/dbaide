@@ -39,6 +39,12 @@ class DecisionPromptBuilder:
             "• Treat failed tool calls as observations, not as the end of the task. Read the error, "
             "then decide whether to use another tool, answer from existing evidence, or ask only "
             "for irreducible business intent.\n"
+            "• Maintain memory deliberately via memory_updates each round: put a conclusion you have "
+            "VERIFIED with tool evidence or a user-confirmed fact in `verified` (it becomes settled "
+            "context you should not re-investigate); put tentative observations in `findings`, guesses "
+            "in `hypotheses`, ruled-out tables/columns/interpretations in `excluded_paths` (with a "
+            "reason), and remaining unknowns in `open_questions`. This is how you keep track of what is "
+            "confirmed vs. still open across rounds.\n"
             "• Use retrieve_schema_context first for data questions. It returns only schema evidence: "
             "candidate tables, user notes, inactive/missing paths, and columns. If it shows "
             "several plausible active tables/columns/grains whose choice changes the answer, ask_user "
@@ -90,7 +96,7 @@ class DecisionPromptBuilder:
             f"{tool_lines}\n\n"
             "Return JSON only. You may include memory_updates so the next round has compressed context:\n"
             '  {"action":"call_tool","tool":"retrieve_schema_context","args":{"request":"..."},"thought":"...",'
-            '"memory_updates":{"findings":[],"hypotheses":[],"excluded_paths":[],"open_questions":[]},"next_action_hint":"..."}\n'
+            '"memory_updates":{"verified":[],"findings":[],"hypotheses":[],"excluded_paths":[],"open_questions":[]},"next_action_hint":"..."}\n'
             '  {"action":"finish","answer":"markdown answer for the user","memory_updates":{"findings":[]}}\n\n'
             "Tool guidance:\n"
             "- Schema / where-is questions: discover_schema or retrieve_schema_context → finish\n"

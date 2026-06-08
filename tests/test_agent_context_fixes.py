@@ -836,6 +836,51 @@ def test_memory_compresses_tool_result_without_keyword_resolving_open_question()
     assert "Do Not Repeat Exactly" not in prompt
 
 
+def test_memory_separates_verified_from_observed():
+    from dbaide.agent.memory import AgentMemory
+
+    mem = AgentMemory()
+    mem.add_finding("orders.status has values paid, refunded, delivered", source="column_stats")
+    mem.mark_verified("delivered status value is 'delivered' (confirmed via column_stats)", source="w3")
+    mem.confirmed_facts.append("Reporting timezone is Asia/Shanghai (user-confirmed)")
+
+    prompt = mem.prompt_block()
+    block = prompt.split("[Confirmed & Verified]", 1)[1].split("[", 1)[0]
+    # Both user-confirmed and evidence-verified land in the settled section.
+    assert "(user-confirmed) Reporting timezone is Asia/Shanghai" in block
+    assert "(verified) delivered status value is 'delivered'" in block
+    # A merely-observed finding stays in Observed Evidence, not the settled section.
+    assert "values paid, refunded, delivered" not in block
+    assert "Observed Evidence" in prompt
+
+
+def test_mark_verified_upgrades_existing_observed_finding():
+    from dbaide.agent.memory import AgentMemory
+
+    mem = AgentMemory()
+    mem.add_finding("join orders.user_id -> users.id matches 100% on sample", source="validate_joins")
+    mem.mark_verified("join orders.user_id -> users.id matches 100% on sample")
+
+    verified = [f for f in mem.findings if f.confidence == "verified"]
+    assert len(verified) == 1
+    # Upgraded in place — not duplicated as a second finding.
+    assert len(mem.findings) == 1
+
+
+def test_apply_decision_memory_records_verified(tmp_path):
+    from dbaide.agent.loop import AskAgentLoop
+
+    orch = _orch(tmp_path)
+    loop = AskAgentLoop(orch)
+    loop._apply_decision_memory({
+        "memory_updates": {
+            "verified": ["spu_refunds_daily.delivered_date is a Beijing-day bucket"],
+        }
+    })
+    verified = [f for f in orch.run_state.memory.findings if f.confidence == "verified"]
+    assert verified and "Beijing-day bucket" in verified[0].text
+
+
 def test_memory_from_dict_restores_current_shapes_and_trims_unknown_fields():
     from dbaide.agent.memory import AgentMemory
 
