@@ -320,6 +320,25 @@ def test_decision_prompt_clarifies_intent_the_data_cannot_decide(tmp_path):
         assert example not in prompt
 
 
+def test_decision_prompt_instructs_memory_discipline(tmp_path):
+    from dbaide.agent.loop import AskAgentLoop, LoopState
+
+    orch = _orch(tmp_path)
+    loop = AskAgentLoop(orch)
+    prompt = loop.prompts.system_prompt(
+        LoopState(question="q", database="", execute_allowed=True, answer_language="zh"),
+        "ask_user: spec",
+        "allowed",
+    )
+
+    # Each round the model must judge the prior result and classify knowledge so the
+    # next decision knows what is done/confirmed/excluded/open.
+    assert "result_assessment" in prompt
+    assert "did-what → result → judgment" in prompt
+    assert "verified" in prompt and "excluded_paths" in prompt and "open_questions" in prompt
+    assert "confirmed vs. still open" in prompt
+
+
 def test_decision_user_prompt_includes_today_for_relative_periods(tmp_path):
     from dbaide.agent.loop import AskAgentLoop, LoopState
 
