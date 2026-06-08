@@ -381,9 +381,8 @@ class AgentMemory:
         columns = _column_names(data.get("columns") or [])
         if not label or not columns:
             return
-        key_cols = _key_columns(columns)
         self.add_finding(
-            f"Described {label}: columns include {', '.join(key_cols[:18])}; "
+            f"Described {label}: columns include {_cols_with_overflow(columns, 40)}; "
             f"indexes={len(data.get('indexes') or [])}, fks={len(data.get('foreign_keys') or [])}.",
             source=f"describe_table:{label}",
         )
@@ -602,7 +601,7 @@ class AgentMemory:
                         bits.append(f"excluded={_trim(c.exclusion_reason, 90)}")
                     col_names = _column_names(c.columns)
                     if col_names:
-                        bits.append(f"cols={', '.join(_key_columns(col_names)[:10])}")
+                        bits.append(f"cols={_cols_with_overflow(col_names, 50)}")
                     if c.row_count is not None:
                         bits.append(f"rows~{c.row_count}")
                     if c.indexes:
@@ -946,6 +945,18 @@ def _column_names(columns: Any) -> list[str]:
         if name:
             out.append(name)
     return out
+
+
+def _cols_with_overflow(names: list[str], cap: int) -> str:
+    """Join column names for a memory line, SIGNALLING truncation instead of hiding
+    it. Silently dropping columns past a cap once hid the exact column a question
+    hinged on (e.g. nick_name), so the model never knew to look. Normal tables fit
+    under the cap and show in full; wider tables show the overflow + how to recover.
+    """
+    uniq = _key_columns(names)
+    if len(uniq) <= cap:
+        return ", ".join(uniq)
+    return ", ".join(uniq[:cap]) + f" … +{len(uniq) - cap} more (describe_table for full list)"
 
 
 def _key_columns(columns: list[str]) -> list[str]:

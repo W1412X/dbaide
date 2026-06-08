@@ -912,6 +912,60 @@ def test_work_log_records_purpose_and_judgment():
     assert "judged: orders has delivered_at" in prompt
 
 
+def test_schema_evidence_shows_columns_past_old_10_cap():
+    from dbaide.agent.memory import AgentMemory, SchemaCandidate, SchemaEvidenceReport
+
+    # A real sys_user-shaped table: the name column sits past position 10, which the
+    # old [:10] cap silently dropped — hiding exactly the column a question needs.
+    cols = [
+        {"name": n} for n in [
+            "user_id", "username", "password", "salt", "phone", "avatar",
+            "dept_id", "create_time", "update_time", "lock_flag", "nick_name", "email",
+        ]
+    ]
+    mem = AgentMemory()
+    mem.add_schema_report(SchemaEvidenceReport(
+        id="schema:1",
+        request="员工姓名",
+        candidates=[SchemaCandidate(database="platform", table="sys_user", columns=cols, status="active")],
+    ))
+    prompt = mem.prompt_block()
+    assert "nick_name" in prompt  # no longer hidden by the cap
+
+
+def test_schema_evidence_signals_overflow_instead_of_hiding():
+    from dbaide.agent.memory import _cols_with_overflow
+
+    wide = [f"c{i}" for i in range(70)]
+    rendered = _cols_with_overflow(wide, 50)
+    assert "c0" in rendered and "c49" in rendered
+    assert "c69" not in rendered
+    assert "+20 more (describe_table for full list)" in rendered
+    # A table within the cap shows every column, no overflow marker.
+    assert _cols_with_overflow(["a", "b", "c"], 50) == "a, b, c"
+
+
+def test_decide_coerces_tool_named_action_into_call_tool(tmp_path):
+    from dbaide.agent.loop import AskAgentLoop, LoopState
+
+    class AskAsActionLLM(LLMClient):
+        def complete_json(self, messages, *, schema_hint=""):
+            # The model names the tool as the action and puts args at top level.
+            return {"action": "ask_user", "question": "按用户名还是昵称匹配？", "options": ["用户名", "昵称"]}
+
+        def complete_text(self, messages):
+            return "ok"
+
+    orch = _orch(tmp_path)
+    orch.llm = AskAsActionLLM()
+    loop = AskAgentLoop(orch)
+    decision = loop._decide(LoopState(question="q", database="", execute_allowed=True), [])
+    assert decision["action"] == "call_tool"
+    assert decision["tool"] == "ask_user"
+    assert decision["args"]["question"] == "按用户名还是昵称匹配？"
+    assert decision["args"]["options"] == ["用户名", "昵称"]
+
+
 def test_work_log_rolls_up_dropped_steps_keeping_object_names():
     from dbaide.agent.memory import AgentMemory, PROMPT_SLICE_WORK
 

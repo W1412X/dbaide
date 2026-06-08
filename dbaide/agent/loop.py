@@ -673,6 +673,18 @@ class AskAgentLoop:
                 return payload
             if action == "call_tool" and payload.get("tool"):
                 return payload
+            # Tolerate the model naming a tool directly as the action, e.g.
+            # {"action":"ask_user","question":"..."} instead of
+            # {"action":"call_tool","tool":"ask_user","args":{...}}. Coerce it rather
+            # than failing the whole run — this once turned a correct "ask the user"
+            # into a hard failure after the model had done the right thing.
+            if action in self.allowed_tool_names:
+                args = payload.get("args") if isinstance(payload.get("args"), dict) else {
+                    k: v for k, v in payload.items()
+                    if k not in ("action", "tool", "args", "thought", "result_assessment",
+                                 "memory_updates", "next_action_hint", "answer")
+                }
+                return {**payload, "action": "call_tool", "tool": action, "args": args}
             last_error = f"invalid action payload: {payload!r}"
         raise LoopDecisionError(last_error or "no valid decision")
 
