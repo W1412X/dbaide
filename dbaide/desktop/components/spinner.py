@@ -1,10 +1,10 @@
-"""A shared "busy" spinner — the DBAide spiral mark rotating smoothly.
+"""A shared "busy" spinner — the DBAide spiral mark with counter-rotating arcs.
 
-The three concentric arcs from the project logo spin as a single unit, giving
-a distinctive "vortex in motion" feel that replaces the generic Lucide loader
-arc.  Rendered as a vector (via QSvgRenderer) at the screen's device-pixel-
-ratio, so it stays sharp on HiDPI.  Driven off a single QTimer; rotating a few
-degrees per tick produces a smooth revolution.
+The three concentric arcs from the project logo each spin independently:
+outer clockwise, middle counter-clockwise, inner clockwise — creating a
+mesmerising "living vortex" effect.  Rendered as a vector (via QSvgRenderer)
+at the screen's device-pixel-ratio, so it stays sharp on HiDPI.  Driven off
+a single QTimer; rotating a few degrees per tick produces smooth motion.
 """
 
 from __future__ import annotations
@@ -17,24 +17,34 @@ from PyQt6.QtSvg import QSvgRenderer
 
 from dbaide.desktop.theme import Theme
 
-# Degrees advanced per tick — 30 deg * ~70 ms  =>  smooth ~0.85 s per revolution.
+# Degrees advanced per tick — 30 deg * ~70 ms => smooth ~0.85 s per revolution.
 _ANGLE_STEP = 30
 # Logical px — always pair with ``widget.setIconSize(QSize(SPINNER_SIZE, SPINNER_SIZE))``.
 SPINNER_SIZE = 15
 
+# ── Per-arc rotation multipliers ───────────────────────────────────────────
+# Adjacent arcs spin in opposite directions; inner arcs spin faster for depth.
+_OUTER_MULT = 1.0    # clockwise
+_MIDDLE_MULT = -1.3   # counter-clockwise, slightly faster
+_INNER_MULT = 1.7     # clockwise, fastest
+
+# SVG centre — all arcs pivot around this point.
+_CX, _CY = 512, 512
+
 # ── The project spiral mark as inline SVG ──────────────────────────────────
-# Copied from packaging/icons/dbaide.svg but with a configurable stroke colour
-# (the gradient is replaced by a solid colour so it tints nicely to match each
-# call-site's theme).  The viewBox is centred on the mark so it renders at any
-# size without clipping.
+# Each arc gets its own ``rotate()`` transform around the centre so they can
+# spin independently. The {ang_*} placeholders are filled per frame.
 
 _SPINNER_SVG = (
     '<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" '
     'viewBox="0 0 1024 1024">'
     '<g fill="none" stroke="{color}" stroke-linecap="round">'
-    '<path d="M 512 192 A 320 320 0 1 1 192 512" stroke-width="58"/>'
-    '<path d="M 512 304 A 208 208 0 1 0 720 512" stroke-width="50" opacity="0.75"/>'
-    '<path d="M 512 392 A 120 120 0 1 1 392 512" stroke-width="42" opacity="0.5"/>'
+    '<path d="M 512 192 A 320 320 0 1 1 192 512" stroke-width="58"'
+    ' transform="rotate({ang_outer}, 512, 512)"/>'
+    '<path d="M 512 304 A 208 208 0 1 0 720 512" stroke-width="50" opacity="0.75"'
+    ' transform="rotate({ang_middle}, 512, 512)"/>'
+    '<path d="M 512 392 A 120 120 0 1 1 392 512" stroke-width="42" opacity="0.5"'
+    ' transform="rotate({ang_inner}, 512, 512)"/>'
     '</g></svg>'
 )
 
@@ -50,10 +60,13 @@ def _dpr() -> float:
 
 
 def spinner_pixmap(angle: float, *, size: int = SPINNER_SIZE, color: str = Theme.BLUE, **_kw) -> QPixmap:
-    """The DBAide spiral mark rotated to *angle* — crisp vector, HiDPI-aware.
+    """The DBAide spiral mark with counter-rotating arcs — crisp vector, HiDPI.
 
-    The ``color`` and ``**_kw`` signature is kept compatible with the old Lucide
-    loader API so callers don't need changes (``width`` is silently ignored).
+    *angle* is the base rotation in degrees; each arc derives its own angle
+    from it via per-layer multipliers so they spin at different speeds in
+    alternating directions.
+
+    The ``**_kw`` signature keeps backward compatibility (``width`` is ignored).
     """
     dpr = _dpr()
     px_size = int(round(size * dpr))
@@ -62,11 +75,12 @@ def spinner_pixmap(angle: float, *, size: int = SPINNER_SIZE, color: str = Theme
     painter = QPainter(px)
     painter.setRenderHint(QPainter.RenderHint.Antialiasing)
     painter.scale(dpr, dpr)
-    if angle:
-        painter.translate(size / 2, size / 2)
-        painter.rotate(angle)
-        painter.translate(-size / 2, -size / 2)
-    svg_data = _SPINNER_SVG.format(color=color)
+    svg_data = _SPINNER_SVG.format(
+        color=color,
+        ang_outer=angle * _OUTER_MULT,
+        ang_middle=angle * _MIDDLE_MULT,
+        ang_inner=angle * _INNER_MULT,
+    )
     renderer = QSvgRenderer(QByteArray(svg_data.encode("utf-8")))
     renderer.render(painter, QRectF(0, 0, size, size))
     painter.end()
