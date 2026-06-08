@@ -6,6 +6,47 @@ All notable changes to DBAide are documented here. The format is loosely based o
 
 ## [Unreleased]
 
+## [0.0.5] — 2026-06-07
+
+### Added
+
+- **App icon** — a minimalist database mark (a blue "data" top on a dark squircle,
+  in the app's accent colour) now ships for the macOS app, the Windows installer,
+  and the running window / dock / taskbar.
+- **Verified-knowledge tier in working memory** — the agent separates conclusions
+  it has *verified* with tool evidence (or that you confirmed) from tentative
+  observations and guesses, so each decision can rely on what is actually settled
+  instead of re-litigating it.
+- **Paginated, range-aware tools** — `profile_table` windows columns with
+  `column_offset`/`column_limit` and reports `total_columns`; `column_stats`
+  exposes `top_k`; `inspect_metadata` reports `total_tables`. No column, table, or
+  value is silently skipped — the tool says how many exist and how to fetch the rest.
+
+### Changed
+
+- **Working memory reads did-what → result → judgment** — every step records why it
+  ran, a readable one-line result (instead of a raw JSON dump), and the model's
+  assessment of the outcome, so the agent keeps a clear, honest account of progress.
+- **No silent truncation anywhere the agent looks** — every capped list it sees
+  (table columns, candidate tables, distinct values, join relations, SQL result
+  rows) now signals "+N more" *and* how to get the rest (retrieve the archived
+  result, page with a range parameter, or use SQL `LIMIT`/`OFFSET`).
+- **Leaner decision prompt** — de-duplicated the agent's instructions (~3.1k → ~2.5k
+  tokens) with no change in behaviour.
+
+### Fixed
+
+- **The agent could miss the column or table a question depended on.** Schema
+  evidence silently capped at the first 10 columns / 8 candidate tables, so it could
+  query the wrong field (e.g. searching `username` while the name lived in
+  `nick_name`) and then spiral. It now sees them, or is explicitly told they exist
+  and how to load them.
+- **A clarification request could crash the run.** When the model phrased `ask_user`
+  as the action rather than a tool call, the loop failed the whole run; it now
+  coerces the shape and pauses to ask you, as intended.
+- **Row-capped SQL results are flagged** so the agent does not report a truncated
+  list as if it were complete.
+
 ## [0.0.4] — 2026-06-07
 
 ### Added
@@ -120,7 +161,8 @@ and a PyQt6 desktop app, sharing one Python core.
   drag-to-Applications)**, **Windows (`.msi` wizard)**, and **Linux (`.tar.gz`)** —
   pushing a `v*` tag cuts a GitHub Release automatically.
 
-[Unreleased]: https://github.com/W1412X/dbaide/compare/v0.0.4...HEAD
+[Unreleased]: https://github.com/W1412X/dbaide/compare/v0.0.5...HEAD
+[0.0.5]: https://github.com/W1412X/dbaide/compare/v0.0.4...v0.0.5
 [0.0.4]: https://github.com/W1412X/dbaide/compare/v0.0.3...v0.0.4
 [0.0.3]: https://github.com/W1412X/dbaide/compare/v0.0.2...v0.0.3
 [0.0.2]: https://github.com/W1412X/dbaide/compare/v0.1.0...v0.0.2
