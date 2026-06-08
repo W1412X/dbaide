@@ -284,12 +284,19 @@ class SQLWriter:
             conf = validation.get("confidence")
         tags: list[str] = []
         if conf is not None:
-            tags.append(f"conf={float(conf):.0%}")
+            try:
+                tags.append(f"conf={float(conf):.0%}")
+            except (TypeError, ValueError):
+                pass
         if join_type and join_type != "unknown":
             tags.append(join_type)
         match_rate = validation.get("match_rate")
-        if match_rate is not None and float(match_rate) > 0:
-            tags.append(f"match={float(match_rate):.0%}")
+        if match_rate is not None:
+            try:
+                if float(match_rate) > 0:
+                    tags.append(f"match={float(match_rate):.0%}")
+            except (TypeError, ValueError):
+                pass
         reason = str(fk.get("reason") or validation.get("message") or "").strip()
         suffix = f" [{', '.join(tags)}]" if tags else ""
         if reason:

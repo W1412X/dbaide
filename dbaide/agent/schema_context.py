@@ -388,7 +388,12 @@ def join_confidence_for_sql(relations: list[dict[str, Any]], sql: str) -> float:
             matched.append(rel)
     if not matched:
         return 0.0
-    return min(float(rel.get("confidence") or 0.0) for rel in matched)
+    def _conf(rel: dict[str, Any]) -> float:
+        try:
+            return float(rel.get("confidence") or 0.0)
+        except (TypeError, ValueError):
+            return 0.0
+    return min(_conf(rel) for rel in matched)
 
 
 def _sql_table_names(sql: str) -> set[str]:
