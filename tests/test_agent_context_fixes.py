@@ -1002,6 +1002,42 @@ def test_finding_list_overflows_all_signal_and_offer_retrieval():
             assert "retrieve_memory_item" in line
 
 
+def test_profile_table_windows_columns_and_signals_pagination(tmp_path):
+    import sqlite3
+    from dbaide.adapters import build_adapter
+    from dbaide.agent.orchestrator import AskOrchestrator
+    from dbaide.agent.toolkit import build_tool_registry
+    from dbaide.models import ConnectionConfig
+    from dbaide.session import Session
+    from dbaide.tools.registry import ToolContext
+
+    db = tmp_path / "p.db"
+    extra = ", ".join(f"c{i} INTEGER" for i in range(12))
+    con = sqlite3.connect(db)
+    con.execute(f"CREATE TABLE wide(id INTEGER PRIMARY KEY, {extra})")
+    con.execute("INSERT INTO wide(id) VALUES (1)")
+    con.commit()
+    con.close()
+    cfg = ConnectionConfig(name="local", type="sqlite", path=str(db))
+    orch = AskOrchestrator(build_adapter(cfg), Session(connection=cfg), _MockLLM())
+    orch._reset_loop_state("q", "", True)
+    reg = build_tool_registry(orch)
+
+    r = reg.invoke("profile_table", {"table": "wide"}, ToolContext())
+    assert r.ok
+    assert r.data["total_columns"] == 13       # id + c0..c11
+    assert r.data["column_count"] == 8          # default window
+    assert r.data["more_columns"] is True
+    assert "column_offset=8" in r.data["note"]  # tells the model how to get the rest
+
+    # Page 2 via the advertised range param fetches the un-profiled columns.
+    r2 = reg.invoke("profile_table", {"table": "wide", "column_offset": 8}, ToolContext())
+    assert r2.ok
+    assert r2.data["column_offset"] == 8
+    assert r2.data["column_count"] == 5         # remaining 13 - 8
+    assert r2.data["more_columns"] is False
+
+
 def test_decide_coerces_tool_named_action_into_call_tool(tmp_path):
     from dbaide.agent.loop import AskAgentLoop, LoopState
 

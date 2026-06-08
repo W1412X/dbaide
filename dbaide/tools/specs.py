@@ -296,7 +296,11 @@ EXECUTE_READONLY_SQL = ToolSpec(
     name="execute_readonly_sql",
     description=(
         "Execute a validated read-only SQL query as exploratory/intermediate evidence. "
-        "The agent loop continues after success; use execute_sql for the final answer query."
+        "The agent loop continues after success; use execute_sql for the final answer query. "
+        "The result returns row_count (rows fetched) and a preview of the first 20 rows; "
+        "`truncated`=true means the row cap was hit and MORE rows exist. To read a specific "
+        "window of rows, page in the SQL itself with LIMIT/OFFSET (or aggregate) — the "
+        "preview is not the full set."
     ),
     input_schema={
         "sql": "string",
@@ -333,9 +337,28 @@ EXECUTE_SQL = ToolSpec(
 
 PROFILE_TABLE = ToolSpec(
     name="profile_table",
-    description="Profile columns of a table",
-    input_schema={"table": "string", "columns": "list[string]", "database": "string"},
-    output_schema={"profiles": "list[ColumnProfile]"},
+    description=(
+        "Profile columns of a table. Pass `columns` to profile exactly those. If you "
+        "omit `columns`, it profiles a WINDOW of the table's columns (default the first "
+        "`column_limit`, from `column_offset`) — it does NOT profile every column, and "
+        "the un-profiled ones are not computed (retrieve_memory_item cannot recover "
+        "them). The result reports `total_columns`; when total_columns exceeds the "
+        "window, page with column_offset=<next index> or name the columns explicitly so "
+        "no column is silently skipped."
+    ),
+    input_schema={
+        "table": "string",
+        "columns": "list[string]",
+        "database": "string",
+        "column_offset": "integer",
+        "column_limit": "integer",
+    },
+    output_schema={
+        "profiles": "list[ColumnProfile]",
+        "total_columns": "integer",
+        "column_offset": "integer",
+        "more_columns": "boolean",
+    },
     permission_level=SAFE_PROFILE,
     timeout_seconds=60,
     safe_for_auto_call=True,

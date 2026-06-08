@@ -519,10 +519,14 @@ class AgentMemory:
             if metrics:
                 bits.append(f"{column} ({'; '.join(metrics[:8])})")
         if bits:
-            self.add_finding(
-                f"Profile for {label}: " + " | ".join(bits) + _more_suffix(len(profiles), 8, "column(s)"),
-                source=f"profile_table:{label}",
-            )
+            line = f"Profile for {label}: " + " | ".join(bits) + _more_suffix(len(profiles), 8, "column(s)")
+            if data.get("more_columns"):
+                # Source truncation: the un-profiled columns were never computed, so
+                # point to the range interface, not retrieve_memory_item.
+                nxt = int(data.get("column_offset") or 0) + len(profiles)
+                line += (f" [only {len(profiles)} of {data.get('total_columns')} columns profiled — "
+                         f"profile_table column_offset={nxt} (or explicit `columns`) for the rest]")
+            self.add_finding(line, source=f"profile_table:{label}")
 
     def _learn_validated_joins(self, data: dict[str, Any]) -> None:
         relations = [r for r in data.get("relations") or [] if isinstance(r, dict)]
