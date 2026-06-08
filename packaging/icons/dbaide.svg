@@ -1,19 +1,45 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
-  <!-- Transparent background by design: the mark sits on whatever surface the app
-       paints (dock, header, taskbar, light theme, dark theme) without a baked-in
-       tile that clashes with the host colour. -->
+  <!-- Transparent canvas — adapts to any host surface (dock, taskbar, light/dark
+       theme) without a baked-in tile. -->
 
-  <!-- Database mark in a single brand blue. Top disk is FILLED (the "data" entering
-       the store); body is STROKED (the container) — same shape language as before
-       but resolved to one solid colour so it reads on any background. -->
-  <g fill="none" stroke="#3b82f6" stroke-width="72" stroke-linecap="round" stroke-linejoin="round">
-    <!-- Sides + bottom curve -->
-    <path d="M264 332 V692 a248 88 0 0 0 496 0 V332"/>
-    <!-- Horizontal data bands -->
-    <path d="M264 460 a248 88 0 0 0 496 0"/>
-    <path d="M264 580 a248 88 0 0 0 496 0"/>
+  <defs>
+    <!-- A gentle blue gradient on the sparkle gives it depth without an extra
+         colour. Light end at top-left, brand end at bottom-right. -->
+    <linearGradient id="spark" x1="0.2" y1="0.1" x2="0.85" y2="0.9">
+      <stop offset="0" stop-color="#8db8ff"/>
+      <stop offset="1" stop-color="#3b82f6"/>
+    </linearGradient>
+  </defs>
+
+  <!-- Database (the "data") — single-colour stroked cylinder, slightly off-centre
+       to leave room for the AI mark. -->
+  <g fill="none" stroke="#3b82f6" stroke-width="68" stroke-linecap="round" stroke-linejoin="round">
+    <ellipse cx="436" cy="488" rx="240" ry="80"/>
+    <path d="M196 488 V780 a240 80 0 0 0 480 0 V488"/>
+    <path d="M196 596 a240 80 0 0 0 480 0"/>
+    <path d="M196 692 a240 80 0 0 0 480 0"/>
   </g>
-  <!-- Top disk: solid fill so the "data in" reads strongly even at small sizes
-       (a stroked ellipse vanishes at 16–32 px). -->
-  <ellipse cx="512" cy="332" rx="248" ry="88" fill="#3b82f6"/>
+
+  <!-- AI sparkle (the "intelligence") — four-point needle star, the language used
+       by Claude / Apple Intelligence / Anthropic. Sits upper-right of the database
+       so the two read as one unit: AI + data. -->
+  <path d="M816,128
+           L840,300
+           L1000,324
+           L840,348
+           L816,520
+           L792,348
+           L632,324
+           L792,300 Z"
+        fill="url(#spark)"/>
+  <!-- A small companion sparkle for liveliness; same colour family. -->
+  <path d="M696,560
+           L706,612
+           L758,622
+           L706,632
+           L696,684
+           L686,632
+           L634,622
+           L686,612 Z"
+        fill="#67a7ff"/>
 </svg>
