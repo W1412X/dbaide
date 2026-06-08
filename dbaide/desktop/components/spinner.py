@@ -1,8 +1,8 @@
 """A shared "busy" spinner — the DBAide spiral mark with counter-rotating arcs.
 
 The three concentric arcs from the project logo each spin independently:
-outer clockwise, middle counter-clockwise, inner clockwise — creating a
-mesmerising "living vortex" effect.  Rendered as a vector (via QSvgRenderer)
+outer clockwise, middle counter-clockwise, inner clockwise — outer leads,
+inner lags slightly for a calmer vortex.  Rendered as a vector (via QSvgRenderer)
 at the screen's device-pixel-ratio, so it stays sharp on HiDPI.  Driven off
 a single QTimer; rotating a few degrees per tick produces smooth motion.
 """
@@ -17,16 +17,17 @@ from PyQt6.QtSvg import QSvgRenderer
 
 from dbaide.desktop.theme import Theme
 
-# Degrees advanced per tick — 30 deg * ~70 ms => smooth ~0.85 s per revolution.
-_ANGLE_STEP = 30
+# Animation timing — keep step and interval in sync so outer arc stays ~0.9 s/rev.
+_ANGLE_STEP = 8          # degrees advanced per tick (was 30; smaller = smoother)
+_TICK_MS = 20            # timer interval; 8° / 20 ms ≈ 400 °/s
 # Logical px — always pair with ``widget.setIconSize(QSize(SPINNER_SIZE, SPINNER_SIZE))``.
 SPINNER_SIZE = 15
 
 # ── Per-arc rotation multipliers ───────────────────────────────────────────
-# Adjacent arcs spin in opposite directions; inner arcs spin faster for depth.
-_OUTER_MULT = 1.0    # clockwise
-_MIDDLE_MULT = -1.3   # counter-clockwise, slightly faster
-_INNER_MULT = 1.7     # clockwise, fastest
+# Adjacent arcs spin in opposite directions; magnitudes decrease toward the centre.
+_OUTER_MULT = 1.0     # clockwise — fastest
+_MIDDLE_MULT = -1.0   # counter-clockwise
+_INNER_MULT = 0.75    # clockwise — slightly slower than outer
 
 # SVG centre — all arcs pivot around this point.
 _CX, _CY = 512, 512
@@ -95,7 +96,7 @@ def spinner_icon(angle: float, *, size: int = SPINNER_SIZE, color: str = Theme.B
 class BusyAnimator(QObject):
     """Calls ``on_tick()`` on a timer while started, advancing ``angle`` each time."""
 
-    def __init__(self, on_tick: Callable[[], None], *, interval_ms: int = 70, parent=None) -> None:
+    def __init__(self, on_tick: Callable[[], None], *, interval_ms: int = _TICK_MS, parent=None) -> None:
         super().__init__(parent)
         self._on_tick = on_tick
         self._angle = 0.0
