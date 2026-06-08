@@ -100,10 +100,8 @@ DESCRIBE_TABLE = ToolSpec(
 INSPECT_METADATA = ToolSpec(
     name="inspect_metadata",
     description=(
-        "Inspect database metadata without running business-data SQL. Use this for "
-        "schema/system catalog questions such as checking exact table/column existence, "
-        "checking column existence across tables, or retrieving indexes/FKs for selected tables. "
-        "This is the controlled alternative to querying information_schema directly."
+        "Inspect database metadata without running business-data SQL: exact table/column "
+        "existence, column existence across tables, or indexes/FKs for selected tables."
     ),
     input_schema={
         "database": "string",
@@ -129,11 +127,9 @@ INSPECT_METADATA = ToolSpec(
 RETRIEVE_JOIN_CONTEXT = ToolSpec(
     name="retrieve_join_context",
     description=(
-        "Retrieve join evidence for selected tables without deciding the final join. "
-        "By default reads only user-saved join catalog entries and declared foreign keys. "
-        "Set infer_semantic=true and/or validate_sample=true only when the main LLM explicitly "
-        "needs that extra evidence. Use after the main LLM "
-        "has narrowed candidate tables and needs relation evidence for SQL planning."
+        "Retrieve join evidence for selected tables without deciding the final join: "
+        "user-saved joins and declared FKs by default; set infer_semantic/validate_sample "
+        "for semantic inference or sample validation."
     ),
     input_schema={
         "request": "string",
@@ -360,12 +356,8 @@ COLUMN_STATS = ToolSpec(
 ASK_USER = ToolSpec(
     name="ask_user",
     description=(
-        "Ask the user a clarification question only for irreducible business intent. "
-        "Do not use for evidence the tools can inspect first: table/column existence, "
-        "field source, joins/FKs, indexes, row samples, value distributions, SQL "
-        "feasibility, or timezone/date conversion implied by schema/user notes. "
-        "Gather evidence with schema/profile/SQL tools first, then ask only the "
-        "remaining business choice with concrete options."
+        "Pause the run and ask the user to settle an irreducible business choice "
+        "(per the clarification rule); provide concrete options. Pauses until the user replies."
     ),
     input_schema={"question": "string", "options": "list[string]"},
     output_schema={"pending": "boolean", "question": "string", "options": "list[string]"},
@@ -377,10 +369,8 @@ ASK_USER = ToolSpec(
 RETRIEVE_MEMORY_ITEM = ToolSpec(
     name="retrieve_memory_item",
     description=(
-        "Retrieve archived raw evidence from compressed working memory by ref. "
-        "Use when prompt memory has a raw ref (for example mem:3, w2, schema:1, sql:1) "
-        "and the compressed summary is not enough. This avoids repeating database tools "
-        "only to recover details already observed."
+        "Fetch archived raw evidence by ref (e.g. mem:3, w2, schema:1, sql:1) when a "
+        "compressed memory summary is not enough."
     ),
     input_schema={"ref": "string"},
     output_schema={
@@ -408,12 +398,9 @@ DISCOVER_SCHEMA = ToolSpec(
 RETRIEVE_SCHEMA_CONTEXT = ToolSpec(
     name="retrieve_schema_context",
     description=(
-        "Retrieve schema evidence for the current question without deciding the final schema. "
-        "Returns candidate tables, columns, authoritative user notes, inactive/missing "
-        "paths, and missing information. It does NOT retrieve join relations; "
-        "it also does not profile/sample rows or validate relationships. "
-        "call retrieve_join_context after the main LLM decides relation evidence is needed. Use this as the default "
-        "schema evidence tool for data questions; the main LLM must decide what to do next."
+        "Retrieve schema evidence for the question without deciding the final schema: "
+        "candidate tables, columns, authoritative user notes, inactive/missing paths. "
+        "Does not fetch join relations, profile/sample rows, or validate relationships."
     ),
     input_schema={
         "request": "string",
