@@ -1,16 +1,19 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
-  <defs>
-    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
-      <stop offset="0" stop-color="#171c26"/>
-      <stop offset="1" stop-color="#0a0c10"/>
-    </linearGradient>
-  </defs>
-  <rect x="0" y="0" width="1024" height="1024" rx="224" ry="224" fill="url(#bg)"/>
-  <!-- Minimal database cylinder: white strokes, blue "data" top -->
-  <g fill="none" stroke="#eef1f5" stroke-width="42" stroke-linecap="round" stroke-linejoin="round">
-    <path d="M300 360 V664 a212 78 0 0 0 424 0 V360"/>
-    <path d="M300 462 a212 78 0 0 0 424 0"/>
-    <path d="M300 562 a212 78 0 0 0 424 0"/>
-    <ellipse cx="512" cy="360" rx="212" ry="78" stroke="#3b82f6"/>
+  <!-- Transparent background by design: the mark sits on whatever surface the app
+       paints (dock, header, taskbar, light theme, dark theme) without a baked-in
+       tile that clashes with the host colour. -->
+
+  <!-- Database mark in a single brand blue. Top disk is FILLED (the "data" entering
+       the store); body is STROKED (the container) — same shape language as before
+       but resolved to one solid colour so it reads on any background. -->
+  <g fill="none" stroke="#3b82f6" stroke-width="72" stroke-linecap="round" stroke-linejoin="round">
+    <!-- Sides + bottom curve -->
+    <path d="M264 332 V692 a248 88 0 0 0 496 0 V332"/>
+    <!-- Horizontal data bands -->
+    <path d="M264 460 a248 88 0 0 0 496 0"/>
+    <path d="M264 580 a248 88 0 0 0 496 0"/>
   </g>
+  <!-- Top disk: solid fill so the "data in" reads strongly even at small sizes
+       (a stroked ellipse vanishes at 16–32 px). -->
+  <ellipse cx="512" cy="332" rx="248" ry="88" fill="#3b82f6"/>
 </svg>
