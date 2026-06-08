@@ -128,10 +128,19 @@ class TopBar(QWidget):
         row.setContentsMargins(12, 0, 12, 0)
         row.setSpacing(6)
 
+        from dbaide.desktop.components.icons import app_logo_pixmap
+        logo_pm = app_logo_pixmap(20)
+        if logo_pm is not None:
+            logo = QLabel()
+            logo.setPixmap(logo_pm)
+            logo.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
+            logo.setStyleSheet("padding:0 2px 0 0;")
+            row.addWidget(logo, 0, Qt.AlignmentFlag.AlignVCenter)
+
         brand = QLabel("DBAide")
         brand.setStyleSheet(
             "font-size:15px;font-weight:700;letter-spacing:0.3px;"
-            f"color:{Theme.TEXT};padding:0 8px 0 2px;"
+            f"color:{Theme.TEXT};padding:0 8px 0 6px;"
         )
         brand.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
         row.addWidget(brand)

@@ -604,6 +604,10 @@ QTabBar[panelTabs="true"]::tab {{
     padding: 0 10px;
     border: none;
     margin: 0;
+    /* Reserve room for a short label + the close button so closable tabs like
+       "Query 1" aren't clipped to "Quer…" (padding + the 16px close button + its
+       margins eat ~42px before any text). */
+    min-width: 90px;
     min-height: 24px;
     max-height: 24px;
     font-size: 12px;

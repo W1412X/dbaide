@@ -14,7 +14,6 @@ from PyQt6.QtWidgets import (
 )
 
 from dbaide.desktop.components.base import compact_button
-from dbaide.desktop.components.icons import svg_icon
 from dbaide.desktop.components.inputs import FORM_INNER_LABEL_RULES, Combo, configure_form, form_label
 from dbaide.desktop.theme import Theme
 
@@ -189,7 +188,7 @@ class ConnectionForm(QWidget):
         return bool(self.name.text().strip())
 
 
-from PyQt6.QtWidgets import QDialog, QDialogButtonBox  # noqa: E402
+from PyQt6.QtWidgets import QDialog  # noqa: E402
 
 
 class ConnectionDialog(QDialog):
@@ -201,18 +200,19 @@ class ConnectionDialog(QDialog):
         layout = QVBoxLayout(self)
         self.form = ConnectionForm(conn_type=conn_type)
         layout.addWidget(self.form)
-        buttons = QDialogButtonBox(
-            QDialogButtonBox.StandardButton.Save | QDialogButtonBox.StandardButton.Cancel
-        )
-        save_btn = buttons.button(QDialogButtonBox.StandardButton.Save)
-        cancel_btn = buttons.button(QDialogButtonBox.StandardButton.Cancel)
-        if save_btn is not None:
-            save_btn.setIcon(svg_icon("save", color=Theme.GREEN, size=14))
-        if cancel_btn is not None:
-            cancel_btn.setIcon(svg_icon("x", color=Theme.TEXT_2, size=14))
-        buttons.accepted.connect(self.accept)
-        buttons.rejected.connect(self.reject)
-        layout.addWidget(buttons)
+        # Match the app's button language (accent primary + ghost) instead of a
+        # native QDialogButtonBox, so dialogs read consistently.
+        btn_row = QHBoxLayout()
+        btn_row.setContentsMargins(0, 6, 0, 0)
+        btn_row.addStretch(1)
+        cancel_btn = compact_button(t("btn.cancel"), width=88)
+        save_btn = compact_button(t("btn.save"), primary=True, width=88)
+        cancel_btn.clicked.connect(self.reject)
+        save_btn.clicked.connect(self.accept)
+        btn_row.addWidget(cancel_btn)
+        btn_row.addSpacing(8)
+        btn_row.addWidget(save_btn)
+        layout.addLayout(btn_row)
 
     def payload(self) -> dict:
         return self.form.payload(make_default=True)

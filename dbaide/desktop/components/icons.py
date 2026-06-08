@@ -128,4 +128,22 @@ def plus_icon(*, color: str = Theme.MUTED, size: int = 18) -> QIcon:
     return svg_icon("plus", color=color, size=size)
 
 
+def app_logo_pixmap(size: int = 22) -> "QPixmap | None":
+    """The DBAide app icon as a crisp HiDPI pixmap (None if the asset is missing).
+    Shared by the window icon and the header wordmark so the brand stays consistent."""
+    from pathlib import Path
+
+    path = Path(__file__).resolve().parents[1] / "assets" / "app_icon.png"
+    if not path.exists():
+        return None
+    screen = QGuiApplication.primaryScreen()
+    ratio = screen.devicePixelRatio() if screen else 1.0
+    pm = QPixmap(str(path)).scaled(
+        int(size * ratio), int(size * ratio),
+        Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation,
+    )
+    pm.setDevicePixelRatio(ratio)
+    return pm
+
+
 ICON_SIZE = QSize(16, 16)
