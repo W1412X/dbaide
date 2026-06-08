@@ -348,7 +348,8 @@ class AgentMemory:
         capped = " — TRUNCATED at the row cap; more rows exist (aggregate or narrow)" if artifact.truncated else ""
         self.add_finding(
             f"SQL artifact {artifact.id}: {artifact.row_count} row(s){capped}, "
-            f"columns={', '.join(artifact.columns[:8])}. {artifact.result_summary}",
+            f"columns={', '.join(artifact.columns[:8])}{_more_suffix(len(artifact.columns), 8, 'column(s)')}. "
+            f"{artifact.result_summary}",
             source=artifact.id,
         )
 
@@ -397,7 +398,7 @@ class AgentMemory:
         if hits and not candidates:
             labels: list[str] = []
             noted_labels: list[str] = []
-            for hit in hits[:12]:
+            for hit in hits:
                 database = str(hit.get("database") or "").strip()
                 table = str(hit.get("table") or hit.get("name") or "").strip()
                 path = str(hit.get("path") or "").strip()
@@ -409,17 +410,22 @@ class AgentMemory:
                         noted_labels.append(f"{label}: {_trim(note, 120)}")
             if labels:
                 self.add_finding(
-                    f"Schema discovery found: {', '.join(labels[:10])}.",
+                    f"Schema discovery found: {', '.join(labels[:10])}{_more_suffix(len(labels), 10, 'table(s)')}.",
                     source=report_id or "discover_schema",
                 )
             for item in noted_labels[:8]:
                 self.add_finding(f"User-note schema discovery hit: {item}", source=report_id or "discover_schema")
+            if len(noted_labels) > 8:
+                self.add_finding(
+                    f"(+{len(noted_labels) - 8} more user-note schema hit(s) — retrieve_memory_item for the full set)",
+                    source=report_id or "discover_schema",
+                )
             return
         if not candidates:
             return
         active_labels: list[str] = []
         noted_labels: list[str] = []
-        for c in candidates[:10]:
+        for c in candidates:
             label = _table_label(c)
             if not label:
                 continue
@@ -430,7 +436,8 @@ class AgentMemory:
                 noted_labels.append(f"{label}: {_trim(str(notes.get('table')), 120)}")
         if active_labels:
             self.add_finding(
-                f"Schema evidence {report_id or ''} active candidates: {', '.join(active_labels[:8])}.",
+                f"Schema evidence {report_id or ''} active candidates: {', '.join(active_labels[:8])}"
+                f"{_more_suffix(len(active_labels), 8, 'table(s)')}.",
                 source=report_id or "schema",
             )
         for item in noted_labels:
@@ -439,10 +446,10 @@ class AgentMemory:
     def _learn_metadata_result(self, data: dict[str, Any]) -> None:
         tables = [t for t in data.get("tables") or [] if isinstance(t, dict)]
         matched_columns = [c for c in data.get("matched_columns") or [] if isinstance(c, dict)]
-        labels = [_table_label(t) for t in tables[:8]]
+        labels = [x for x in (_table_label(t) for t in tables) if x]
         bits: list[str] = []
         if labels:
-            bits.append(f"tables={', '.join([x for x in labels if x][:8])}")
+            bits.append(f"tables={', '.join(labels[:8])}{_more_suffix(len(labels), 8, 'table(s)')}")
         if matched_columns:
             cols = []
             for col in matched_columns[:10]:
@@ -451,7 +458,7 @@ class AgentMemory:
                 if label and name:
                     cols.append(f"{label}.{name}")
             if cols:
-                bits.append(f"matched_columns={', '.join(cols)}")
+                bits.append(f"matched_columns={', '.join(cols)}{_more_suffix(len(matched_columns), 10, 'matched column(s)')}")
         if bits:
             self.add_finding(
                 f"Metadata inspection: {'; '.join(bits)}.",
@@ -484,7 +491,7 @@ class AgentMemory:
                 bits.append(f"{name} ({'; '.join(metric_bits[:8])})")
         if bits:
             self.add_finding(
-                f"Column stats for {label}: " + " | ".join(bits),
+                f"Column stats for {label}: " + " | ".join(bits) + _more_suffix(len(columns), 8, "column(s)"),
                 source=f"column_stats:{label}",
             )
 
@@ -513,7 +520,7 @@ class AgentMemory:
                 bits.append(f"{column} ({'; '.join(metrics[:8])})")
         if bits:
             self.add_finding(
-                f"Profile for {label}: " + " | ".join(bits),
+                f"Profile for {label}: " + " | ".join(bits) + _more_suffix(len(profiles), 8, "column(s)"),
                 source=f"profile_table:{label}",
             )
 
@@ -533,7 +540,7 @@ class AgentMemory:
                 suffix += f" match_rate={match_rate}"
             bits.append(f"{left}->{right}{suffix}")
         self.add_finding(
-            "Validated join evidence: " + "; ".join(bits),
+            "Validated join evidence: " + "; ".join(bits) + _more_suffix(len(relations), 6, "relation(s)"),
             source="validate_joins",
         )
 
@@ -625,6 +632,10 @@ class AgentMemory:
                         f"  - {left} -> {right}; source={rel.get('source')}; "
                         f"confidence={rel.get('confidence')}; reason={_trim(str(rel.get('reason') or ''), 100)}"
                     )
+                if len(report.relations) > 5:
+                    lines.append(
+                        f"  … +{len(report.relations) - 5} more relation(s) (retrieve_memory_item for the full set)"
+                    )
             lines.append("")
         if self.sql_artifacts:
             lines += ["[SQL Artifacts]"]
@@ -633,7 +644,8 @@ class AgentMemory:
                 warn = f" warnings={'; '.join(art.warnings[:3])}" if art.warnings else ""
                 lines.append(
                     f"- {art.id}: purpose={art.purpose or '(not stated)'} rows={art.row_count}{flags} "
-                    f"columns={', '.join(art.columns[:8])}{warn} sql={_trim(art.sql, 220)}"
+                    f"columns={', '.join(art.columns[:8])}{_more_suffix(len(art.columns), 8, 'column(s)')}{warn} "
+                    f"sql={_trim(art.sql, 220)}"
                 )
             lines.append("")
         if self.open_questions:
@@ -891,7 +903,8 @@ def _summarize_dropped_steps(steps: list[WorkStep]) -> str:
     if failed:
         line += f"; {failed} failed"
     if labels:
-        line += f"; objects touched: {', '.join(labels[:24])}"
+        more = f" (+{len(labels) - 24} more)" if len(labels) > 24 else ""
+        line += f"; objects touched: {', '.join(labels[:24])}{more}"
     return line
 
 
@@ -950,6 +963,15 @@ def _column_names(columns: Any) -> list[str]:
     return out
 
 
+def _more_suffix(total: int, shown: int, noun: str) -> str:
+    """Signal hidden list items AND how to recover them, so truncation is never
+    silent and the model can choose to fetch the full set."""
+    extra = total - shown
+    if extra <= 0:
+        return ""
+    return f" … +{extra} more {noun} (retrieve_memory_item for the full set)"
+
+
 def _top_values_field(top: list, cap: int = 8) -> str:
     """Render a column's top values, signalling when more distinct values exist.
     A status/flag value the question hinges on can be the 5th most common; the old
@@ -960,7 +982,8 @@ def _top_values_field(top: list, cap: int = 8) -> str:
             vals.append(f"{_trim(str(item.get('value')), 40)}:{item.get('count')}")
     if not vals:
         return ""
-    more = f", … +{len(top) - cap} more distinct value(s)" if len(top) > cap else ""
+    more = (f", … +{len(top) - cap} more distinct value(s) (retrieve_memory_item for the full set)"
+            if len(top) > cap else "")
     return "top_values=" + ", ".join(vals) + more
 
 

@@ -978,6 +978,28 @@ def test_top_values_overflow_is_signalled():
     assert "v0:100" in rendered and "v7:" in rendered
     assert "v8:" not in rendered
     assert "+4 more distinct value(s)" in rendered
+    assert "retrieve_memory_item" in rendered  # the model is told how to get the rest
+
+
+def test_finding_list_overflows_all_signal_and_offer_retrieval():
+    from dbaide.agent.memory import AgentMemory
+
+    mem = AgentMemory()
+    # discover_schema with 14 hits → finding caps at 10 + signal
+    mem.learn_tool_result(action="discover_schema", args={}, data={
+        "hits": [{"database": "d", "table": f"t{i}", "name": f"t{i}"} for i in range(14)],
+    })
+    # inspect_metadata with 13 matched columns → caps at 10 + signal
+    mem.learn_tool_result(action="inspect_metadata", args={}, data={
+        "matched_columns": [{"database": "d", "table": "t", "name": f"c{i}"} for i in range(13)],
+    })
+    prompt = mem.prompt_block()
+    assert "+4 more table(s)" in prompt           # 14 - 10
+    assert "+3 more matched column(s)" in prompt   # 13 - 10
+    # Every overflow names a recovery path so the model can choose to fetch more.
+    for line in prompt.splitlines():
+        if "more table(s)" in line or "more matched column(s)" in line:
+            assert "retrieve_memory_item" in line
 
 
 def test_decide_coerces_tool_named_action_into_call_tool(tmp_path):
