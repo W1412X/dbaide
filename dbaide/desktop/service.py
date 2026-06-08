@@ -773,6 +773,15 @@ class DesktopService:
             conn.name, in_session_id,
             skip_criteria=is_resume,
         )
+        # Carry forward: if the user didn't attach new schema scope on this turn,
+        # inherit the most recent prior turn's scope so the pinned context sticks
+        # across follow-up questions in the same session.
+        if not payload.get("schema_scope") and session_turns:
+            for prior in reversed(session_turns):
+                prior_scope = prior.get("schema_scope")
+                if prior_scope and (prior_scope.get("databases") or prior_scope.get("tables")):
+                    payload.setdefault("schema_scope", prior_scope)
+                    break
         request = self._build_request(
             payload, connection_name=conn.name, database=database,
             session_turns=session_turns, active_criteria=active_criteria,
@@ -809,7 +818,7 @@ class DesktopService:
         ask() reads as request → run → record)."""
         conn = self.cfg.get_connection(connection_name)
         resource_policy = self.cfg.policy_for(conn)
-        return WorkflowRequest(
+        request = WorkflowRequest(
             question=str(payload.get("question") or ""),
             connection_name=connection_name,
             database_scope=[database] if database else [],
@@ -822,6 +831,11 @@ class DesktopService:
             session_turns=session_turns or [],
             active_criteria=active_criteria or [],
         )
+        # Stash the raw UI attachment chips so _record_session_turn can persist
+        # them alongside schema_scope. Not part of WorkflowRequest's formal API
+        # (the agent only needs schema_scope); this is a display-layer concern.
+        request._ui_attachments = list(payload.get("attachments") or [])  # noqa: SLF001
+        return request
 
     def _load_session_memory(
         self, conn_name: str, session_id: str, *, skip_criteria: bool = False,
@@ -875,6 +889,11 @@ class DesktopService:
             # turn's session-memory load can carry them forward / show them.
             clarifications = list(getattr(result, "clarifications", []) or [])
             disclosed = list(getattr(result, "disclosed_tables", []) or [])
+            # Persist the user's composer attachments + structured schema_scope so
+            # (a) the UI can restore attachment tags when loading the session and
+            # (b) the agent can carry forward pinned scope on follow-up turns.
+            attachments = list(getattr(request, "_ui_attachments", None) or [])
+            schema_scope = getattr(request, "schema_scope", None) or {}
             self.sessions.append_turn(conn_name, session_id, make_turn(
                 question=request.question,
                 answer_markdown=result.answer_markdown or result.answer_plaintext or "",
@@ -885,6 +904,8 @@ class DesktopService:
                 meta={"database": database},
                 clarifications=clarifications,
                 disclosed_tables=disclosed,
+                attachments=attachments,
+                schema_scope=schema_scope,
                 created_at=result.created_at or None,
             ))
         except Exception:  # noqa: BLE001 — session persistence must never break a query

@@ -71,3 +71,30 @@ def test_per_connection_isolation(tmp_path):
 def test_append_to_missing_session_returns_none(tmp_path):
     store = ChatSessionStore(base_dir=tmp_path)
     assert store.append_turn("shop", "nope", make_turn(question="q")) is None
+
+
+def test_attachments_and_schema_scope_persisted(tmp_path):
+    """Composer attachments + schema_scope round-trip through the session store."""
+    store = ChatSessionStore(base_dir=tmp_path)
+    s = store.create("shop")
+    attachments = [
+        {"kind": "database", "path": "local.shop", "name": "shop", "database": "shop"},
+        {"kind": "table", "path": "local.shop.orders", "name": "orders", "database": "shop"},
+    ]
+    scope = {"databases": ["shop"], "tables": [{"database": "shop", "table": "orders"}]}
+    store.append_turn("shop", s["session_id"], make_turn(
+        question="How many orders last month?",
+        attachments=attachments,
+        schema_scope=scope,
+    ))
+    loaded = store.load("shop", s["session_id"])
+    turn = loaded["turns"][0]
+    assert turn["attachments"] == attachments
+    assert turn["schema_scope"] == scope
+
+
+def test_make_turn_defaults_empty_attachments():
+    """Backward-compatible: turns without attachments get empty defaults."""
+    turn = make_turn(question="plain question")
+    assert turn["attachments"] == []
+    assert turn["schema_scope"] == {}

@@ -247,7 +247,10 @@ class AskTab(QWidget):
             meta = turn.get("meta") or {}
             database = str(meta.get("database") or "")
             meta_line = " · ".join(x for x in (connection, database or "auto") if x)
-            view.begin_turn(str(turn.get("question") or ""), meta=meta_line, placeholder=False)
+            # Restore attachment tags (db/table chips) if this turn had pinned context.
+            attachments = turn.get("attachments") or None
+            view.begin_turn(str(turn.get("question") or ""), meta=meta_line, placeholder=False,
+                            attachments=attachments)
             sql = str(turn.get("selected_sql") or "")
             status = str(turn.get("status") or "completed")
             view.complete_turn(

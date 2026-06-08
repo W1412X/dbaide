@@ -60,6 +60,8 @@ def make_turn(
     meta: dict[str, Any] | None = None,
     clarifications: list[str] | None = None,
     disclosed_tables: list[str] | None = None,
+    attachments: list[dict[str, Any]] | None = None,
+    schema_scope: dict[str, Any] | None = None,
     created_at: float | None = None,
 ) -> dict[str, Any]:
     """Build a turn dict from a workflow result's salient fields.
@@ -69,6 +71,10 @@ def make_turn(
     persist them — they're what makes "by Beijing time" stick across turns.
     `disclosed_tables` records which tables this turn touched, so the next turn
     can skip rediscovery when continuing the same line of questioning.
+    `attachments` are the UI-level composer chips (db/table the user pinned for
+    this prompt); `schema_scope` is the structured form sent to the agent.
+    Persisting both lets the UI restore the attachment tags *and* lets the agent
+    carry forward pinned scope on follow-up turns.
     """
     return {
         "workflow_id": workflow_id,
@@ -80,6 +86,8 @@ def make_turn(
         "meta": meta or {},
         "clarifications": list(clarifications or []),
         "disclosed_tables": list(disclosed_tables or []),
+        "attachments": list(attachments or []),
+        "schema_scope": schema_scope or {},
         "created_at": created_at if created_at is not None else _now(),
     }
 

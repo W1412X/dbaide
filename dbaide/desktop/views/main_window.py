@@ -882,6 +882,7 @@ class MainWindow(QMainWindow):
             "database": "",
             "session_id": self._slot_session.get(key, ""),
             "schema_scope": schema_scope,
+            "attachments": attachments,  # raw UI chips — persisted on the turn
         })
 
     def _submit_clarification(self, key: str, reply: str) -> None:
