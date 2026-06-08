@@ -191,7 +191,9 @@ class SQLiteAdapter(DatabaseAdapter):
                 sample = conn.execute(sample_sql, (top_k,)).fetchall()
         elapsed = (time.perf_counter() - start) * 1000
         logger.debug("profile_column %s.%s elapsed_ms=%.1f heavy=%s", table, column, elapsed, heavy_scan)
-        keys = row.keys() if row is not None else []
+        if row is None:
+            return ColumnProfile(table=table, column=column, row_count=0, null_count=0)
+        keys = row.keys()
         numeric_stats = {"avg": row["avg_value"]} if include_avg and "avg_value" in keys else {}
         text_stats = (
             {"min_length": row["min_length"], "max_length": row["max_length"], "avg_length": row["avg_length"]}

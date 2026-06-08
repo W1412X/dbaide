@@ -84,8 +84,15 @@ class DisclosureContext:
         out: dict[str, set[str]] = {}
         for ref, entry in self.tables.items():
             if entry.columns:
-                out[ref] = {c.name for c in entry.columns}
-                out[entry.table.name] = {c.name for c in entry.columns}
+                col_names = {c.name for c in entry.columns}
+                out[ref] = col_names
+                # Bare table name → union of columns from all databases so
+                # validation accepts any column that exists in any variant.
+                bare = entry.table.name
+                if bare in out:
+                    out[bare] = out[bare] | col_names
+                else:
+                    out[bare] = col_names
         return out
 
     def table_names(self) -> list[str]:

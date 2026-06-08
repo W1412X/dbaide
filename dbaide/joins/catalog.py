@@ -347,7 +347,7 @@ def merge_relation_layers(*layers: list[dict[str, Any]]) -> list[dict[str, Any]]
                 str(rel.get("ref_column") or ""),
             )
             rev = (key[2], key[3], key[0], key[1])
-            if not key[0] or key in seen or rev in seen:
+            if not (key[0] and key[2]) or key in seen or rev in seen:
                 continue
             seen.add(key)
             merged.append(dict(rel))
