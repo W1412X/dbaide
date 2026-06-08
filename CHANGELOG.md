@@ -6,6 +6,38 @@ All notable changes to DBAide are documented here. The format is loosely based o
 
 ## [Unreleased]
 
+## [0.0.6] — 2026-06-08
+
+### Added
+
+- **Batched tool calls** — one decision may now carry several independent read-only
+  evidence calls (e.g. describe two tables + profile a column) and the loop runs
+  them in order, decides once from all results. Significantly cuts the number of
+  LLM round-trips on data questions. The generate→validate→execute SQL chain,
+  ask_user, and writes stay one-per-decision so each keeps its safety gate.
+
+### Changed
+
+- **New app icon** — three concentric arcs in a polished-graphite gradient on a
+  transparent canvas. Single mark, restrained, reads well on both light and dark
+  surfaces. Same SVG drives the macOS `.icns`, the Windows `.ico`, and the in-app
+  window/dock icon.
+- **UI polish** — header now shows the app mark next to the wordmark; workbench
+  tabs no longer clip "Query 1" to "Quer…"; the Connection dialog uses the app's
+  accent/ghost buttons instead of a native button box so dialogs read consistently.
+
+### Fixed
+
+- **Trace tree mangled after a clarification** — when an `ask_user` pause was
+  followed by the user replying, the resumed steps used the same `decision:N` /
+  `step:N` node ids as the pre-pause portion of the same turn. The desktop's
+  TraceModel keyed nodes by id, so the resumed steps silently overwrote the
+  earlier ones — work disappeared from the tree. Step numbering is now carried
+  across the pause so every node id stays unique within a turn.
+- **The "Waiting for user clarification" marker sat outside the loop** — it was
+  emitted at the trace root with no parent. Now it nests under the `ask_user`
+  tool step, so the hierarchy reads *loop → ask_user → Waiting…*.
+
 ## [0.0.5] — 2026-06-07
 
 ### Added
@@ -161,7 +193,8 @@ and a PyQt6 desktop app, sharing one Python core.
   drag-to-Applications)**, **Windows (`.msi` wizard)**, and **Linux (`.tar.gz`)** —
   pushing a `v*` tag cuts a GitHub Release automatically.
 
-[Unreleased]: https://github.com/W1412X/dbaide/compare/v0.0.5...HEAD
+[Unreleased]: https://github.com/W1412X/dbaide/compare/v0.0.6...HEAD
+[0.0.6]: https://github.com/W1412X/dbaide/compare/v0.0.5...v0.0.6
 [0.0.5]: https://github.com/W1412X/dbaide/compare/v0.0.4...v0.0.5
 [0.0.4]: https://github.com/W1412X/dbaide/compare/v0.0.3...v0.0.4
 [0.0.3]: https://github.com/W1412X/dbaide/compare/v0.0.2...v0.0.3
