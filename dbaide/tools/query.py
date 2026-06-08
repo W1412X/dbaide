@@ -76,6 +76,12 @@ class QueryTools:
         validation = self.sql_guard.validate(sql, add_limit=False)
         if not validation.ok:
             raise ValueError("; ".join(issue.message for issue in validation.issues))
+        # Schema guard: ensure EXPLAIN only touches disclosed tables (same
+        # boundary as execute_sql). Without this, the LLM could probe for
+        # undisclosed tables via EXPLAIN, bypassing progressive disclosure.
+        schema_result = self.schema_guard.validate(validation.normalized_sql, self.context)
+        if not schema_result.ok:
+            raise ValueError("; ".join(issue.message for issue in schema_result.issues))
         explain_target = _strip_leading_explain(validation.normalized_sql)
         result = self.adapter.explain(explain_target, database=database, timeout_seconds=self.timeout_seconds)
         self.context.record_execution(result.sql, instance=self.instance, database=database)

@@ -27,6 +27,24 @@ def test_quote_identifier_handles_qualified_names():
     assert quote_identifier("shop.orders", "mysql") == "`shop`.`orders`"
 
 
+def test_explain_sql_rejects_undisclosed_table():
+    """explain_sql must enforce the schema guard — same boundary as execute_sql.
+    Without this, the LLM could probe for undisclosed tables via EXPLAIN."""
+    import pytest
+    ctx = DisclosureContext()
+    ctx.record_tables([TableInfo(name="orders")], instance="local", database="main")
+    adapter = ExplainSpyAdapter(ConnectionConfig(name="local", type="sqlite", path="/tmp/test.db"))
+    query = QueryTools(adapter, ctx)
+
+    # Known table → succeeds
+    query.explain_sql("SELECT * FROM orders")
+    assert "orders" in adapter.explained_sql
+
+    # Undisclosed table → rejected
+    with pytest.raises(ValueError, match="undisclosed"):
+        query.explain_sql("SELECT * FROM secret_table")
+
+
 def test_mysql_validation_rejects_full_outer_join():
     adapter = ExplainSpyAdapter(ConnectionConfig(name="shop", type="mysql"))
     adapter.dialect = "mysql"
