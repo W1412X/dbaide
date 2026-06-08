@@ -806,12 +806,20 @@ class AskAgentLoop:
         # unique across the pause (TraceModel keys nodes by id; duplicate ids would
         # collapse the resumed steps onto the pre-pause ones).
         snapshot["step_base"] = int(step_base)
+        # Nest the wait marker UNDER the ask_user tool step, not at the trace root —
+        # the pause was caused by that tool call, so the hierarchy should read
+        # loop → ask_user step → "Waiting for user clarification". Without an
+        # explicit parent_id this event used to land outside the loop node.
+        ask_step_id = (f"{self._trace_parent}:step:{step_base}"
+                       if self._trace_parent else f"step:{step_base}")
         wait_event = progress_event(
             stage="ask_user",
             title="Waiting for user clarification",
             status="waiting",
             kind="user",
             detail=question,
+            node_id=f"{ask_step_id}:waiting",
+            parent_id=ask_step_id,
         )
         # Record the exact clarification so a copied trace shows what was asked and the
         # candidate options the user chose between (previously absent from copies).

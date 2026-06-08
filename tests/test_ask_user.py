@@ -142,30 +142,58 @@ def test_resume_step_numbers_do_not_collide_with_pre_pause(tmp_path):
     sqlite3.connect(db).execute("CREATE TABLE orders (id INTEGER PRIMARY KEY, created_at TEXT)")
     conn = ConnectionConfig(name="local", type="sqlite", path=str(db))
     llm = ClarifyMockLLM()
+    # Wire orch.progress BEFORE constructing the loop — AskAgentLoop snapshots
+    # orchestrator.progress at init, so re-assigning it after is a no-op for the loop.
+    captured: list[list[dict]] = [[]]
     orch = AskOrchestrator(build_adapter(conn), Session(connection=conn), llm)
+    orch.progress = lambda ev: captured[0].append(dict(ev))  # type: ignore[assignment]
     loop = AskAgentLoop(orch)
 
-    pause_events: list[dict] = []
-    orch.progress = lambda ev: pause_events.append(dict(ev))  # type: ignore[assignment]
     paused = loop.run("order stats", execute=False)
     assert paused is not None and paused.status == "wait_user"
+    pause_events = list(captured[0])
 
     # The pause snapshot must carry step_base so resume can continue numbering.
     step_base = paused.resume_state.get("step_base") if paused.resume_state else None
     assert isinstance(step_base, int) and step_base >= 1
 
-    resumed_events: list[dict] = []
-    orch.progress = lambda ev: resumed_events.append(dict(ev))  # type: ignore[assignment]
+    captured[0] = []
     resumed = loop.run(
         "order stats", execute=False, resume_state=paused.resume_state, user_reply="By day",
     )
     assert resumed is not None and resumed.status == "completed"
+    resumed_events = list(captured[0])
 
     pre_ids = {ev.get("node_id") for ev in pause_events if ev.get("node_id")}
     post_ids = {ev.get("node_id") for ev in resumed_events if ev.get("node_id")}
     # Exclude the loop wrapper node — that one is intentionally the same id ("loop").
     overlap = (pre_ids & post_ids) - {"loop"}
+    assert pre_ids and post_ids, "expected events on both sides of the pause"
     assert overlap == set(), f"resumed node ids collide with pre-pause: {sorted(overlap)}"
+
+
+def test_ask_user_wait_event_nests_under_the_tool_step(tmp_path):
+    """The 'Waiting for user clarification' marker is caused by the ask_user tool
+    call, so it must hang under that step (loop → ask_user → waiting), not float
+    at the trace root outside the loop."""
+    db = tmp_path / "app.db"
+    sqlite3.connect(db).execute("CREATE TABLE orders (id INTEGER PRIMARY KEY, created_at TEXT)")
+    conn = ConnectionConfig(name="local", type="sqlite", path=str(db))
+    events: list[dict] = []
+    orch = AskOrchestrator(build_adapter(conn), Session(connection=conn), ClarifyMockLLM())
+    orch.progress = lambda ev: events.append(dict(ev))  # type: ignore[assignment]
+    loop = AskAgentLoop(orch)  # snapshots orch.progress, so wire it BEFORE constructing.
+    paused = loop.run("order stats", execute=False)
+    assert paused is not None and paused.status == "wait_user"
+
+    wait = next(e for e in events if e.get("title") == "Waiting for user clarification")
+    # It carries an explicit parent that is the ask_user tool step under the loop,
+    # not the root and not the loop wrapper itself.
+    assert wait["parent_id"].endswith(":waiting") is False
+    assert wait["parent_id"].startswith("step:") or ":step:" in wait["parent_id"]
+    # And it is a distinct child node of that step.
+    assert wait["node_id"].endswith(":waiting")
+    assert wait["node_id"].startswith(wait["parent_id"] + ":")
 
 
 def test_loop_state_roundtrip(tmp_path):
