@@ -404,6 +404,9 @@ def test_memory_archives_raw_evidence_without_prompt_bloat():
     assert step.raw_ref.startswith("mem:")
     assert "raw=" + step.raw_ref in prompt
     assert huge_value not in prompt
+    # The raw ref lives on the Work Done line; the redundant standalone archive
+    # section is gone (its refs + summaries duplicated Work Done one-for-one).
+    assert "[Raw Evidence Archive]" not in prompt
     assert archived is not None
     assert archived.payload["data"]["sample_rows"][0]["payload"] == huge_value
 

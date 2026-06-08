@@ -28,7 +28,6 @@ PROMPT_SLICE_FINDINGS = 48
 PROMPT_SLICE_SCHEMA = 12
 PROMPT_SLICE_JOIN = 12
 PROMPT_SLICE_SQL = 24
-PROMPT_SLICE_ARCHIVE = 48
 PROMPT_SLICE_FACTS = 48
 PROMPT_SLICE_LEDGER = 48
 
@@ -132,7 +131,6 @@ class AgentMemory:
     join_reports: list[JoinEvidenceReport] = field(default_factory=list)
     sql_artifacts: list[SQLArtifact] = field(default_factory=list)
     confirmed_facts: list[str] = field(default_factory=list)
-    pending_confirmations: list[str] = field(default_factory=list)
     action_ledger: list[str] = field(default_factory=list)
     resolved_questions: list[str] = field(default_factory=list)
     next_action_hint: str = ""
@@ -573,6 +571,10 @@ class AgentMemory:
                 if step.judgment:
                     line += f" | judged: {step.judgment}"
                 lines.append(line)
+            lines.append(
+                "Refs above (raw=mem:n, report/artifact ids) hold the full untruncated "
+                "evidence — call retrieve_memory_item(ref=...) when a summary is insufficient."
+            )
             lines.append("")
         observed = [f for f in self.findings if f.confidence != "verified"]
         if observed:
@@ -640,13 +642,6 @@ class AgentMemory:
             lines.append("")
         if self.action_ledger:
             lines += ["[Recent Action Ledger]", *[f"- {x}" for x in self.action_ledger[-PROMPT_SLICE_LEDGER:]], ""]
-        if self.archive:
-            lines += ["[Raw Evidence Archive]"]
-            for item in self.archive[-PROMPT_SLICE_ARCHIVE:]:
-                refs = f" refs={', '.join(item.source_refs[:6])}" if item.source_refs else ""
-                lines.append(f"- {item.id} {item.action}{refs}: {item.summary}")
-            lines.append("Use retrieve_memory_item(ref=...) when a compressed summary is insufficient.")
-            lines.append("")
         if self.next_action_hint:
             lines += ["[Last Suggested Next Step]", self.next_action_hint, ""]
         return "\n".join(lines).strip()
@@ -679,7 +674,6 @@ class AgentMemory:
             _sql_artifact_from_dict(x) for x in _list_or_empty(data.get("sql_artifacts")) if isinstance(x, dict)
         ][-MAX_SQL_ARTIFACTS:]
         mem.confirmed_facts = [str(x) for x in _list_or_empty(data.get("confirmed_facts"))][-12:]
-        mem.pending_confirmations = [str(x) for x in _list_or_empty(data.get("pending_confirmations"))]
         mem.action_ledger = [str(x) for x in _list_or_empty(data.get("action_ledger"))][-MAX_WORK_STEPS:]
         mem.resolved_questions = [str(x) for x in _list_or_empty(data.get("resolved_questions"))][-MAX_RESOLVED_QUESTIONS:]
         mem.next_action_hint = str(data.get("next_action_hint") or "")
