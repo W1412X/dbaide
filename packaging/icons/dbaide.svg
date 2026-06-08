@@ -3,9 +3,12 @@
        single mark on a transparent canvas — geometric, restrained, with a
        little internal variation via the gradient + per-arc opacity. -->
   <defs>
+    <!-- Polished-graphite gradient: silver highlight → deep graphite. Brighter
+         than pure slate so the mark stays readable on the near-black dark theme,
+         while still reading as "石墨色" on light backgrounds. -->
     <linearGradient id="g" x1="0" y1="0" x2="1" y2="1">
-      <stop offset="0" stop-color="#475569"/>
-      <stop offset="1" stop-color="#0f172a"/>
+      <stop offset="0" stop-color="#cbd5e1"/>
+      <stop offset="1" stop-color="#475569"/>
     </linearGradient>
   </defs>
   <g fill="none" stroke="url(#g)" stroke-linecap="round">
