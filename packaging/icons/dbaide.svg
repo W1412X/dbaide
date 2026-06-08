@@ -1,23 +1,16 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
-  <!-- 简约 · 大气 — one mark, nothing else.
-       A single four-point sparkle (the modern AI symbol) on a transparent canvas.
-       The database identity lives in the app name; the icon doesn't need to
-       depict the product literally. Soft quadratic-curve concavity gives the
-       form its "elegant" rather than "spiky" character. -->
+  <!-- Three concentric arcs in alternating rotation, graphite gradient. The
+       single mark on a transparent canvas — geometric, restrained, with a
+       little internal variation via the gradient + per-arc opacity. -->
   <defs>
-    <linearGradient id="g" x1="0.25" y1="0.1" x2="0.75" y2="0.9">
-      <stop offset="0" stop-color="#7eb1ff"/>
-      <stop offset="1" stop-color="#1d4ed8"/>
+    <linearGradient id="g" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#475569"/>
+      <stop offset="1" stop-color="#0f172a"/>
     </linearGradient>
   </defs>
-  <path d="M512 80
-           Q548 444 596 472
-           Q628 488 944 512
-           Q628 536 596 552
-           Q548 580 512 944
-           Q476 580 428 552
-           Q396 536 80 512
-           Q396 488 428 472
-           Q476 444 512 80 Z"
-        fill="url(#g)"/>
+  <g fill="none" stroke="url(#g)" stroke-linecap="round">
+    <path d="M 512 192 A 320 320 0 1 1 192 512" stroke-width="58"/>
+    <path d="M 512 304 A 208 208 0 1 0 720 512" stroke-width="50" opacity="0.85"/>
+    <path d="M 512 392 A 120 120 0 1 1 392 512" stroke-width="42" opacity="0.65"/>
+  </g>
 </svg>
