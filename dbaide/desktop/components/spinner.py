@@ -1,34 +1,81 @@
-"""A shared "busy" spinner — a crisp, smoothly rotating loader ring.
+"""A shared "busy" spinner — the DBAide spiral mark rotating smoothly.
 
-The ring is the Lucide "loader" arc rendered as a vector (via the SVG icon system)
-at the screen's device-pixel-ratio, so it stays sharp on HiDPI instead of the soft
-pixels a small hand-painted arc produced. Driven off a single QTimer; rotating a
-few degrees per tick looks smooth rather than stepping through glyphs.
+The three concentric arcs from the project logo spin as a single unit, giving
+a distinctive "vortex in motion" feel that replaces the generic Lucide loader
+arc.  Rendered as a vector (via QSvgRenderer) at the screen's device-pixel-
+ratio, so it stays sharp on HiDPI.  Driven off a single QTimer; rotating a few
+degrees per tick produces a smooth revolution.
 """
 
 from __future__ import annotations
 
 from collections.abc import Callable
 
-from PyQt6.QtCore import QObject, QTimer
-from PyQt6.QtGui import QIcon, QPixmap
+from PyQt6.QtCore import QByteArray, QObject, QRectF, QTimer, Qt
+from PyQt6.QtGui import QGuiApplication, QIcon, QPainter, QPixmap
+from PyQt6.QtSvg import QSvgRenderer
 
-from dbaide.desktop.components.icons import svg_pixmap
 from dbaide.desktop.theme import Theme
 
-# Degrees advanced per tick — 30° × ~70ms ≈ a smooth ~0.8s revolution.
+# Degrees advanced per tick — 30 deg * ~70 ms  =>  smooth ~0.85 s per revolution.
 _ANGLE_STEP = 30
 # Logical px — always pair with ``widget.setIconSize(QSize(SPINNER_SIZE, SPINNER_SIZE))``.
 SPINNER_SIZE = 15
 
+# ── The project spiral mark as inline SVG ──────────────────────────────────
+# Copied from packaging/icons/dbaide.svg but with a configurable stroke colour
+# (the gradient is replaced by a solid colour so it tints nicely to match each
+# call-site's theme).  The viewBox is centred on the mark so it renders at any
+# size without clipping.
 
-def spinner_pixmap(angle: float, *, size: int = SPINNER_SIZE, color: str = Theme.BLUE, width: float = 2.0) -> QPixmap:
-    """The loader arc rotated to ``angle`` — crisp vector, HiDPI-aware."""
-    return svg_pixmap("loader", color=color, size=size, width=width, angle=angle)
+_SPINNER_SVG = (
+    '<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" '
+    'viewBox="0 0 1024 1024">'
+    '<g fill="none" stroke="{color}" stroke-linecap="round">'
+    '<path d="M 512 192 A 320 320 0 1 1 192 512" stroke-width="58"/>'
+    '<path d="M 512 304 A 208 208 0 1 0 720 512" stroke-width="50" opacity="0.75"/>'
+    '<path d="M 512 392 A 120 120 0 1 1 392 512" stroke-width="42" opacity="0.5"/>'
+    '</g></svg>'
+)
 
 
-def spinner_icon(angle: float, *, size: int = SPINNER_SIZE, color: str = Theme.BLUE, width: float = 2.0) -> QIcon:
-    return QIcon(spinner_pixmap(angle, size=size, color=color, width=width))
+def _dpr() -> float:
+    app = QGuiApplication.instance()
+    try:
+        if app is not None and app.primaryScreen() is not None:
+            return max(2.0, float(app.primaryScreen().devicePixelRatio()))
+    except Exception:  # noqa: BLE001
+        pass
+    return 2.0
+
+
+def spinner_pixmap(angle: float, *, size: int = SPINNER_SIZE, color: str = Theme.BLUE, **_kw) -> QPixmap:
+    """The DBAide spiral mark rotated to *angle* — crisp vector, HiDPI-aware.
+
+    The ``color`` and ``**_kw`` signature is kept compatible with the old Lucide
+    loader API so callers don't need changes (``width`` is silently ignored).
+    """
+    dpr = _dpr()
+    px_size = int(round(size * dpr))
+    px = QPixmap(px_size, px_size)
+    px.fill(Qt.GlobalColor.transparent)
+    painter = QPainter(px)
+    painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+    painter.scale(dpr, dpr)
+    if angle:
+        painter.translate(size / 2, size / 2)
+        painter.rotate(angle)
+        painter.translate(-size / 2, -size / 2)
+    svg_data = _SPINNER_SVG.format(color=color)
+    renderer = QSvgRenderer(QByteArray(svg_data.encode("utf-8")))
+    renderer.render(painter, QRectF(0, 0, size, size))
+    painter.end()
+    px.setDevicePixelRatio(dpr)
+    return px
+
+
+def spinner_icon(angle: float, *, size: int = SPINNER_SIZE, color: str = Theme.BLUE, **_kw) -> QIcon:
+    return QIcon(spinner_pixmap(angle, size=size, color=color))
 
 
 class BusyAnimator(QObject):
