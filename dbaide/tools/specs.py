@@ -103,7 +103,10 @@ INSPECT_METADATA = ToolSpec(
         "Inspect database metadata without running business-data SQL. Use this for "
         "schema/system catalog questions such as checking exact table/column existence, "
         "checking column existence across tables, or retrieving indexes/FKs for selected tables. "
-        "This is the controlled alternative to querying information_schema directly."
+        "This is the controlled alternative to querying information_schema directly. "
+        "A whole-database scan returns up to `limit` tables (default 256) and reports "
+        "`total_tables`; when total_tables exceeds what was returned (`more_tables`), the "
+        "rest were NOT inspected — raise `limit` or pass table_name/tables to reach them."
     ),
     input_schema={
         "database": "string",
@@ -120,6 +123,8 @@ INSPECT_METADATA = ToolSpec(
         "tables": "list[dict]",
         "matched_columns": "list[dict]",
         "disclosed_tables": "list[string]",
+        "total_tables": "integer",
+        "more_tables": "boolean",
     },
     permission_level=SAFE_METADATA,
     timeout_seconds=20,
@@ -436,7 +441,9 @@ RETRIEVE_SCHEMA_CONTEXT = ToolSpec(
         "paths, and missing information. It does NOT retrieve join relations; "
         "it also does not profile/sample rows or validate relationships. "
         "call retrieve_join_context after the main LLM decides relation evidence is needed. Use this as the default "
-        "schema evidence tool for data questions; the main LLM must decide what to do next."
+        "schema evidence tool for data questions; the main LLM must decide what to do next. "
+        "Returns up to `limit` candidate tables (default 64), ranked by relevance; raise `limit` "
+        "for a very broad question that may span more tables."
     ),
     input_schema={
         "request": "string",

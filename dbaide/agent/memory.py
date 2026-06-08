@@ -460,8 +460,9 @@ class AgentMemory:
             if cols:
                 bits.append(f"matched_columns={', '.join(cols)}{_more_suffix(len(matched_columns), 10, 'matched column(s)')}")
         if bits:
+            note = str(data.get("note") or "").strip()
             self.add_finding(
-                f"Metadata inspection: {'; '.join(bits)}.",
+                f"Metadata inspection: {'; '.join(bits)}." + (f" {note}" if note else ""),
                 source="inspect_metadata",
             )
 

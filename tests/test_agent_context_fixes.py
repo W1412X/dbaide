@@ -1038,6 +1038,34 @@ def test_profile_table_windows_columns_and_signals_pagination(tmp_path):
     assert r2.data["more_columns"] is False
 
 
+def test_inspect_metadata_signals_table_cap(tmp_path):
+    import sqlite3
+    from dbaide.adapters import build_adapter
+    from dbaide.agent.orchestrator import AskOrchestrator
+    from dbaide.agent.toolkit import build_tool_registry
+    from dbaide.models import ConnectionConfig
+    from dbaide.session import Session
+    from dbaide.tools.registry import ToolContext
+
+    db = tmp_path / "m.db"
+    con = sqlite3.connect(db)
+    for i in range(6):
+        con.execute(f"CREATE TABLE t{i}(id INTEGER PRIMARY KEY)")
+    con.commit()
+    con.close()
+    cfg = ConnectionConfig(name="local", type="sqlite", path=str(db))
+    orch = AskOrchestrator(build_adapter(cfg), Session(connection=cfg), _MockLLM())
+    orch._reset_loop_state("q", "", True)
+    reg = build_tool_registry(orch)
+
+    r = reg.invoke("inspect_metadata", {"limit": 4}, ToolContext())
+    assert r.ok
+    assert r.data["total_tables"] == 6
+    assert r.data["table_count"] == 4
+    assert r.data["more_tables"] is True
+    assert "limit=4" in r.data["note"] and "6 tables" in r.data["note"]
+
+
 def test_decide_coerces_tool_named_action_into_call_tool(tmp_path):
     from dbaide.agent.loop import AskAgentLoop, LoopState
 

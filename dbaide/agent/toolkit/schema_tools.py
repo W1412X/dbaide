@@ -200,18 +200,22 @@ def register(registry: ToolRegistry, orchestrator) -> None:
             for raw in explicit_tables:
                 ref_db, ref_table = _normalize_tool_table(orchestrator, raw, database)
                 table_refs.append((ref_db, ref_table))
+            total_eligible = len(table_refs)
         else:
             tables = orchestrator.schema.list_tables(database=database)
-            table_refs = []
+            eligible: list[tuple[str, str]] = []
             for table in tables:
                 name = str(table.name or "").strip()
                 if not name:
                     continue
                 if table_filter and table_filter != name:
                     continue
-                table_refs.append((database or str(table.schema or ""), name))
-                if not column_filter and len(table_refs) >= limit:
-                    break
+                eligible.append((database or str(table.schema or ""), name))
+            total_eligible = len(eligible)
+            # When listing columns (not searching by column) cap the table window so a
+            # wide scan stays cheap — but report the total + how to page so it is not
+            # a silent cut.
+            table_refs = eligible if column_filter else eligible[:limit]
 
         out_tables: list[dict[str, Any]] = []
         matched_columns: list[dict[str, Any]] = []
@@ -268,13 +272,25 @@ def register(registry: ToolRegistry, orchestrator) -> None:
             if len(out_tables) >= limit or (column_filter and len(matched_columns) >= limit):
                 break
 
-        return ToolResult(ok=True, data={
+        data = {
             "database": database,
             "table_count": len(out_tables),
+            "total_tables": total_eligible,
             "tables": out_tables,
             "matched_columns": matched_columns,
             "disclosed_tables": _disclosed_table_names(orchestrator),
-        })
+        }
+        if (not explicit_tables) and (not column_filter) and total_eligible > len(out_tables):
+            data["more_tables"] = True
+            data["note"] = (
+                f"Listed {len(out_tables)} of {total_eligible} tables (capped at limit={limit}). "
+                f"Raise `limit` or pass table_name/tables to reach the rest — they were not inspected."
+            )
+        elif column_filter and len(matched_columns) >= limit:
+            data["note"] = (
+                f"Reached the match cap (limit={limit}); more columns may match. Raise `limit`."
+            )
+        return ToolResult(ok=True, data=data)
 
     registry.register(DISCOVER_SCHEMA, _discover_schema)
     registry.register(RETRIEVE_SCHEMA_CONTEXT, _retrieve_schema_context)
