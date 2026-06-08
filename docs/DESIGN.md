@@ -224,6 +224,20 @@ flowchart TB
 
 Join catalog CRUD (`list/add/update/delete_join`) is available via GUI/Service but **not exposed to the loop LLM** during normal queries.
 
+### Batched read-only evidence (`action: call_tools`)
+
+To cut round-trips, one decision may carry several **independent, read-only** tool
+calls (`action: "call_tools"`, `calls: [{tool, args}, …]`). The loop runs them **in
+order** through the same per-tool path (each records into memory, traces, and charges
+a step), then makes one combined next decision. Only `BATCHABLE_TOOLS` qualify —
+`describe_table`, `column_stats`, `profile_table`, `retrieve_schema_context`,
+`inspect_metadata`, `retrieve_join_context`, `list_tables/databases`,
+`retrieve_memory_item`. Anything with a safety gate or ordering dependency — the
+`generate_sql → validate_sql → execute_sql` chain, `ask_user`, and writes — is
+**dropped from the batch** (surfaced to the model to re-issue singly), so each keeps
+its risk gate, validation order, and pause/resume. Batching is sequential, not
+parallel, so the `QueryBudget` in-flight cap is unchanged.
+
 ### Schema discovery source
 
 ```mermaid

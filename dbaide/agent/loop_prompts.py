@@ -99,6 +99,15 @@ class DecisionPromptBuilder:
             '"result_assessment":"what the previous tool result showed and what you conclude from it",'
             '"memory_updates":{"verified":[],"findings":[],"hypotheses":[],"excluded_paths":[],"open_questions":[]},"next_action_hint":"..."}\n'
             '  {"action":"finish","answer":"markdown answer for the user","memory_updates":{"findings":[]}}\n\n'
+            "To cut round-trips you MAY batch several INDEPENDENT read-only evidence calls in one "
+            "decision; the loop runs them in order and you see all results next round:\n"
+            '  {"action":"call_tools","calls":[{"tool":"describe_table","args":{"table":"orders"}},'
+            '{"tool":"describe_table","args":{"table":"users"}}],"thought":"..."}\n'
+            "Only batch tools that do NOT depend on each other's result: describe_table, column_stats, "
+            "profile_table, retrieve_schema_context, inspect_metadata, retrieve_join_context, list_tables, "
+            "retrieve_memory_item. NEVER batch the generate_sql → validate_sql → execute_sql chain (each "
+            "needs the previous result and its safety gate), ask_user, or any write — use a single "
+            "call_tool for those so the loop decides from each result.\n"
             "Tool guidance:\n"
             "- Schema / where-is questions: discover_schema or retrieve_schema_context → finish\n"
             "- Data queries: retrieve_schema_context, inspect/profile/run exploratory execute_readonly_sql "

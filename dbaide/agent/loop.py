@@ -28,6 +28,19 @@ logger = logging.getLogger("dbaide.agent.loop")
 DECISION_RETRIES = 1
 # Both names bind to the same execute handler; the loop must treat them alike.
 _EXECUTE_TOOLS = frozenset({"execute_sql", "execute_readonly_sql"})
+
+# Tools the model may emit several of in ONE decision (action="call_tools"), to cut
+# loop round-trips. Deliberately limited to INDEPENDENT, READ-ONLY evidence gathering
+# with no ordering dependency, no user pause, and no state mutation. Everything else
+# — the generate→validate→execute SQL chain, ask_user, and writes (annotate/joins) —
+# stays one-per-decision so its safety gates (risk controller, validation order,
+# pause/resume) and the "decide from the result" loop are preserved.
+BATCHABLE_TOOLS = frozenset({
+    "discover_schema", "retrieve_schema_context", "list_databases", "list_tables",
+    "describe_table", "inspect_metadata", "retrieve_join_context",
+    "column_stats", "profile_table", "retrieve_memory_item",
+})
+MAX_BATCH = 6  # cap fan-out per decision so a bad batch can't blow the step budget
 # Tools whose step should carry the exact SQL the system ran/handled, so the trace
 # is a complete, clickable audit of every auto-executed statement.
 _SQL_TOOLS = frozenset({"execute_sql", "execute_readonly_sql", "explain_sql",
@@ -380,11 +393,47 @@ class AskAgentLoop:
                 )
                 return self._build_response(orch, answer, disclosures_before or [])
 
+            if action == "call_tools":
+                calls, dropped = self._batch_calls(decision)
+                if dropped:
+                    transcript.append(
+                        "Note: these can't be batched (issue them one at a time so each keeps "
+                        f"its gate / depends on prior results): {', '.join(dropped)}."
+                    )
+                if not calls:
+                    if not dropped:
+                        transcript.append(
+                            "Error: action 'call_tools' needs a non-empty 'calls' list of "
+                            'independent read-only tools ({"tool":...,"args":...}).'
+                        )
+                    runtime.consume_step()
+                    continue
+                paused = stopped = False
+                for call in calls:
+                    if runtime.steps_remaining <= 0:
+                        break
+                    step_no += 1
+                    llm_start = recorder.snapshot_len() if recorder is not None else 0
+                    sig = self._run_tool_call(orch, state, transcript, runtime, tool_ctx,
+                                              decision, call["tool"], call["args"], step_no,
+                                              llm_start, recorder)
+                    if sig == "pending":
+                        paused = True
+                        break
+                    if sig == "stop":
+                        stopped = True
+                        break
+                if paused:
+                    return self._build_wait_response(orch, state, transcript, disclosures_before or [])
+                if stopped:
+                    break
+                continue
+
             if action != "call_tool":
                 logger.warning("loop_unknown_action: %s", action)
                 # Retry rather than bail: tell the model the only valid actions.
-                transcript.append(f"Error: unknown action {action!r}. "
-                                  "Use action 'call_tool' (with a tool) or 'finish' (with an answer).")
+                transcript.append(f"Error: unknown action {action!r}. Use 'call_tool' (one tool), "
+                                  "'call_tools' (several independent read-only tools), or 'finish'.")
                 runtime.consume_step()
                 continue
 
@@ -400,102 +449,12 @@ class AskAgentLoop:
 
             args = decision.get("args") if isinstance(decision.get("args"), dict) else {}
             step_no += 1
-            self.progress(
-                self._ns_step(progress_event(
-                    stage=tool_name,
-                    title=f"Calling {tool_name}",
-                    status="running",
-                    kind="tool",
-                    detail=str(args)[:200] if args else "",
-                    step=step_no,
-                ))
-            )
-            # Expose this step's trace node id so the tool's sub-agents/sub-tools nest
-            # under it (true call hierarchy), not flattened by stage-name resolution.
-            orch.run_state.trace_node = (f"{self._trace_parent}:step:{step_no}"
-                                     if self._trace_parent else f"step:{step_no}")
-            with llm_stage(tool_name):
-                result = runtime.call_tool(tool_name, args, tool_ctx)
-            summary = _summarize_tool_result(tool_name, result)
-            brief = brief_tool_summary(tool_name, result)
-            state.calls.append(ToolCallRecord(tool=tool_name, args=args, ok=result.ok, summary=summary))
-            transcript.append(f"Tool `{tool_name}` → {summary}")
-            artifacts = []
-            data_for_memory = result.data if isinstance(result.data, dict) else {}
-            if result.error:
-                data_for_memory = dict(data_for_memory)
-                data_for_memory["error"] = result.error.to_dict()
-            if isinstance(data_for_memory, dict):
-                for key in ("report_id", "artifact_id"):
-                    if data_for_memory.get(key):
-                        artifacts.append(str(data_for_memory[key]))
-                if data_for_memory.get("pending"):
-                    q = str(data_for_memory.get("question") or orch.run_state.pending_question or "")
-                    if q:
-                        orch.run_state.memory.add_open_question(q)
-            orch.run_state.memory.record_work(
-                action=tool_name,
-                args=args,
-                ok=result.ok,
-                summary=brief or summary,
-                purpose=str(decision.get("thought") or "").strip(),
-                artifacts=artifacts,
-                data=data_for_memory if isinstance(data_for_memory, dict) else None,
-            )
-            # Put the exact SQL on the execute/explain step itself, so clicking the
-            # step in the trace surfaces the SQL the system ran (full auditability).
-            done_detail = brief
-            executed_sql = _executed_sql(tool_name, orch, result)
-            if executed_sql:
-                done_detail = executed_sql
-            done_event = progress_event(
-                stage=tool_name,
-                title=f"{tool_name} done",
-                status="completed" if result.ok else "failed",
-                kind="tool",
-                detail=done_detail,
-                duration_ms=float(getattr(result, "duration_ms", 0) or 0),
-                step=step_no,
-            )
-            done_event = self._ns_step(done_event)
-            # Carry the tool's INPUT (full args, not the truncated 'Calling' preview)
-            # and OUTPUT (full result summary) so a copied trace fully describes the
-            # step — the running 'Calling' frame is overwritten by this 'done' frame,
-            # so anything not put here is lost from the persisted trace.
-            if args:
-                done_event["args"] = args
-            if summary and summary != done_detail:
-                done_event["output"] = summary
-            # Full prompt+response of every model call this iteration made — the
-            # tool's own sub-agent calls (debug trace). The main decision call is a
-            # separate clickable `decide` node so thought and action are inspectable
-            # independently.
-            if recorder is not None:
-                iter_calls = recorder.since(tool_llm_start)
-                if iter_calls:
-                    done_event["llm_calls"] = iter_calls
-            # Full structured tool output (e.g. discovery hits, resolved schema,
-            # relations, SQL result previews). This is always recorded so copied
-            # traces remain detailed even when full LLM prompt capture is disabled.
-            # execute_sql already caps rows in its ToolResult.
-            if isinstance(result.data, dict):
-                done_event["result_data"] = result.data
-            if executed_sql:
-                done_event["sql"] = executed_sql
-                # Carry the SQL facts so the typed SQL step can show rows/db on click.
-                data = result.data if isinstance(result.data, dict) else {}
-                if data.get("row_count") is not None:
-                    done_event["row_count"] = data.get("row_count")
-                db = str(data.get("database") or orch.run_state.database or "").strip()
-                if db:
-                    done_event["database"] = db
-            self.progress(done_event)
-
-            # Any tool may pause for the user by returning a pending question.
-            if result.ok and isinstance(result.data, dict) and result.data.get("pending"):
+            llm_start = recorder.snapshot_len() if recorder is not None else 0
+            sig = self._run_tool_call(orch, state, transcript, runtime, tool_ctx, decision,
+                                      tool_name, args, step_no, llm_start, recorder)
+            if sig == "pending":
                 return self._build_wait_response(orch, state, transcript, disclosures_before or [])
-
-            if self._stop_after_tool(orch, state, tool_name, result):
+            if sig == "stop":
                 break
 
         # Distinguish a clean stop (a tool `break` above, steps left) from running out
@@ -518,6 +477,105 @@ class AskAgentLoop:
 
         logger.warning("loop_budget_exhausted steps=%d", len(state.calls))
         return self._build_failed_response(orch, "step_budget_exhausted", disclosures_before or [])
+
+    def _batch_calls(self, decision: dict[str, Any]) -> tuple[list[dict[str, Any]], list[str]]:
+        """Validate an action='call_tools' decision into a safe, ordered list of calls.
+
+        Returns (runnable, dropped): only INDEPENDENT read-only tools that are both
+        advertised and in BATCHABLE_TOOLS are runnable (capped at MAX_BATCH); anything
+        else — SQL execution, ask_user, writes, unknown names — is dropped and named
+        so the model re-issues it on its own turn with its gate intact."""
+        raw = decision.get("calls")
+        if not isinstance(raw, list):
+            return [], []
+        runnable: list[dict[str, Any]] = []
+        dropped: list[str] = []
+        for item in raw:
+            if not isinstance(item, dict):
+                continue
+            tool = str(item.get("tool") or "").strip()
+            if not tool:
+                continue
+            if tool in BATCHABLE_TOOLS and tool in self.allowed_tool_names:
+                if len(runnable) < MAX_BATCH:
+                    args = item.get("args") if isinstance(item.get("args"), dict) else {}
+                    runnable.append({"tool": tool, "args": args})
+            elif tool not in dropped:
+                dropped.append(tool)
+        return runnable, dropped
+
+    def _run_tool_call(self, orch: AskOrchestrator, state: LoopState, transcript: list[str],
+                       runtime: AgentRuntime, tool_ctx: ToolContext, decision: dict[str, Any],
+                       tool_name: str, args: dict[str, Any], step_no: int,
+                       llm_start: int, recorder: Any) -> str:
+        """Run one tool: emit trace, invoke, record into memory, and emit the done
+        frame. Returns 'pending' (tool paused for the user), 'stop' (a terminal tool
+        whose result is the answer), or 'ok'. Shared by single and batched dispatch so
+        both paths record/trace identically."""
+        self.progress(self._ns_step(progress_event(
+            stage=tool_name, title=f"Calling {tool_name}", status="running", kind="tool",
+            detail=str(args)[:200] if args else "", step=step_no,
+        )))
+        # Expose this step's trace node so the tool's sub-agents/sub-tools nest under it.
+        orch.run_state.trace_node = (f"{self._trace_parent}:step:{step_no}"
+                                     if self._trace_parent else f"step:{step_no}")
+        with llm_stage(tool_name):
+            result = runtime.call_tool(tool_name, args, tool_ctx)
+        summary = _summarize_tool_result(tool_name, result)
+        brief = brief_tool_summary(tool_name, result)
+        state.calls.append(ToolCallRecord(tool=tool_name, args=args, ok=result.ok, summary=summary))
+        transcript.append(f"Tool `{tool_name}` → {summary}")
+        artifacts: list[str] = []
+        data_for_memory = result.data if isinstance(result.data, dict) else {}
+        if result.error:
+            data_for_memory = dict(data_for_memory)
+            data_for_memory["error"] = result.error.to_dict()
+        if isinstance(data_for_memory, dict):
+            for key in ("report_id", "artifact_id"):
+                if data_for_memory.get(key):
+                    artifacts.append(str(data_for_memory[key]))
+            if data_for_memory.get("pending"):
+                q = str(data_for_memory.get("question") or orch.run_state.pending_question or "")
+                if q:
+                    orch.run_state.memory.add_open_question(q)
+        orch.run_state.memory.record_work(
+            action=tool_name, args=args, ok=result.ok, summary=brief or summary,
+            purpose=str(decision.get("thought") or "").strip(), artifacts=artifacts,
+            data=data_for_memory if isinstance(data_for_memory, dict) else None,
+        )
+        done_detail = brief
+        executed_sql = _executed_sql(tool_name, orch, result)
+        if executed_sql:
+            done_detail = executed_sql
+        done_event = self._ns_step(progress_event(
+            stage=tool_name, title=f"{tool_name} done",
+            status="completed" if result.ok else "failed", kind="tool", detail=done_detail,
+            duration_ms=float(getattr(result, "duration_ms", 0) or 0), step=step_no,
+        ))
+        if args:
+            done_event["args"] = args
+        if summary and summary != done_detail:
+            done_event["output"] = summary
+        if recorder is not None:
+            iter_calls = recorder.since(llm_start)
+            if iter_calls:
+                done_event["llm_calls"] = iter_calls
+        if isinstance(result.data, dict):
+            done_event["result_data"] = result.data
+        if executed_sql:
+            done_event["sql"] = executed_sql
+            data = result.data if isinstance(result.data, dict) else {}
+            if data.get("row_count") is not None:
+                done_event["row_count"] = data.get("row_count")
+            db = str(data.get("database") or orch.run_state.database or "").strip()
+            if db:
+                done_event["database"] = db
+        self.progress(done_event)
+        if result.ok and isinstance(result.data, dict) and result.data.get("pending"):
+            return "pending"
+        if self._stop_after_tool(orch, state, tool_name, result):
+            return "stop"
+        return "ok"
 
     def _stop_after_tool(self, orch: AskOrchestrator, state: LoopState,
                          tool_name: str, result: ToolResult) -> bool:
@@ -630,8 +688,8 @@ class AskAgentLoop:
             messages = [LLMMessage("system", system), LLMMessage("user", user)]
             if last_error:
                 messages.append(LLMMessage("user", f"Previous decision invalid: {last_error}. Try again."))
-            schema_hint = ('Return {"action":"call_tool|finish","tool":"...","args":{},'
-                           '"thought":"...","answer":"..."}')
+            schema_hint = ('Return {"action":"call_tool|call_tools|finish","tool":"...","args":{},'
+                           '"calls":[{"tool":"...","args":{}}],"thought":"...","answer":"..."}')
             orch = self.orchestrator
             try:
                 if orch.cancel_check:
@@ -672,6 +730,8 @@ class AskAgentLoop:
             if action == "finish":
                 return payload
             if action == "call_tool" and payload.get("tool"):
+                return payload
+            if action == "call_tools" and isinstance(payload.get("calls"), list) and payload.get("calls"):
                 return payload
             # Tolerate the model naming a tool directly as the action, e.g.
             # {"action":"ask_user","question":"..."} instead of
