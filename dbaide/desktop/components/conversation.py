@@ -900,7 +900,6 @@ class ConversationView(QScrollArea):
             return
         if self._live_answer is None:
             self._live_answer = _MarkdownBlock("", title="DBAide")
-            self._live_answer_text = ""
             self._current_turn.append_content(self._live_answer)
         self._live_answer_text += text
         try:
@@ -1191,4 +1190,6 @@ class ConversationView(QScrollArea):
         self._turns = []
         self._current_record = None
         self._last_meta = ""
+        self._live_answer = None
+        self._live_answer_text = ""
         self._sync_viewport_width()

@@ -27,10 +27,7 @@ class SchemaGuard:
                 continue
             if "." not in ref and ref in unique_bare_refs:
                 continue
-            if bare in cte_names:
-                continue
-            if ref not in exact_refs:
-                issues.append(ValidationIssue("UNKNOWN_TABLE", f"SQL references undisclosed or unknown table: {ref}"))
+            issues.append(ValidationIssue("UNKNOWN_TABLE", f"SQL references undisclosed or unknown table: {ref}"))
         return ValidationResult(ok=not issues, issues=issues, normalized_sql=sql)
 
 
