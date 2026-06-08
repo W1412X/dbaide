@@ -6,6 +6,8 @@ All notable changes to DBAide are documented here. The format is loosely based o
 
 ## [Unreleased]
 
+## [0.0.4] — 2026-06-07
+
 ### Added
 
 - **Streaming answers** — the assistant's final answer now streams in token-by-token
@@ -15,6 +17,21 @@ All notable changes to DBAide are documented here. The format is loosely based o
   stream, the answer renders once it's ready. No front-end simulation — what you see
   is the real generation.
 
+### Changed
+
+- **Proactive business-caliber clarification** — the agent now applies one clear
+  principle: separate what the **data can reveal** (table/column existence, what
+  values a column holds, how tables relate — discovered with tools, never asked)
+  from what only **your intent can decide**, and it confirms the latter before
+  answering whenever the question, the schema, the data, your saved notes, and
+  today's date still can't pin down which interpretation you mean — e.g. an
+  under-specified time range, what a metric actually counts, how a qualitative
+  judgement becomes a concrete rule, or which records are included. It asks one
+  consolidated question with concrete options instead of silently picking a
+  default and reporting a subtly wrong number; your confirmed answers are applied
+  verbatim to the generated SQL. Today's date is now given to the agent so
+  genuinely relative periods resolve on their own.
+
 ### Fixed
 
 - **Agent no longer aborts on valid multi-line answers** — a finish answer whose
@@ -23,6 +40,13 @@ All notable changes to DBAide are documented here. The format is loosely based o
   characters in strings, and a malformed decision is retried instead of crashing.
 - **Cancellation during answer streaming** — cancelling mid-stream now stops
   immediately instead of being swallowed into a wasteful non-stream re-request.
+
+### Internal
+
+- Removed a large amount of dead code with no behaviour change: the orphaned
+  `eval/` package, unreferenced functions across the agent/adapters/core/history/
+  rendering layers, and test-only helpers; tidied stale imports. Refreshed
+  `docs/DESIGN.md` to match the code.
 
 ## [0.0.3] — 2026-06-05
 
@@ -96,7 +120,8 @@ and a PyQt6 desktop app, sharing one Python core.
   drag-to-Applications)**, **Windows (`.msi` wizard)**, and **Linux (`.tar.gz`)** —
   pushing a `v*` tag cuts a GitHub Release automatically.
 
-[Unreleased]: https://github.com/W1412X/dbaide/compare/v0.0.3...HEAD
+[Unreleased]: https://github.com/W1412X/dbaide/compare/v0.0.4...HEAD
+[0.0.4]: https://github.com/W1412X/dbaide/compare/v0.0.3...v0.0.4
 [0.0.3]: https://github.com/W1412X/dbaide/compare/v0.0.2...v0.0.3
 [0.0.2]: https://github.com/W1412X/dbaide/compare/v0.1.0...v0.0.2
 [0.1.0]: https://github.com/W1412X/dbaide/releases/tag/v0.1.0
