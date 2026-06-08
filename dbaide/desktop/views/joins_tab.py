@@ -160,6 +160,9 @@ class JoinsTab(QWidget):
         if dialog.exec() != QDialog.DialogCode.Accepted:
             return
         payload = dialog.payload()
+        if not all(payload.get(k) for k in ("table", "column", "ref_table", "ref_column")):
+            dialog_warn(self, "Join", "All four endpoint fields are required.")
+            return
         payload["id"] = rec.get("id")
         self.update_requested.emit(payload)
 

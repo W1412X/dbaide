@@ -173,6 +173,7 @@ class ComposerWidget(Panel):
             self.action_btn.setToolTip(t("composer.send"))
         self.input.setEnabled(not running)
         self.model_select.setEnabled(not running)
+        self.attach_btn.setEnabled(not running)
 
     def _on_spin(self) -> None:
         self.action_btn.setIcon(spinner_icon(self._busy.angle, color="#ffffff"))

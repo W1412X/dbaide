@@ -117,7 +117,10 @@ class ConnectionForm(QWidget):
         self.host.setText(str(payload.get("host") or "localhost"))
         port = payload.get("port")
         if port not in (None, ""):
-            self.port.setValue(int(port))
+            try:
+                self.port.setValue(int(port))
+            except (TypeError, ValueError):
+                pass
         self.database.setText(str(payload.get("database") or ""))
         self.user.setText(str(payload.get("user") or ""))
         self.password.clear()
