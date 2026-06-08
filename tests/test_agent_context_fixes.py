@@ -867,6 +867,39 @@ def test_mark_verified_upgrades_existing_observed_finding():
     assert len(mem.findings) == 1
 
 
+def test_work_log_records_purpose_and_judgment():
+    from dbaide.agent.memory import AgentMemory
+
+    mem = AgentMemory()
+    mem.record_work(
+        action="describe_table",
+        args={"database": "shop", "table": "orders"},
+        ok=True,
+        summary="disclosed shop.orders",
+        purpose="check whether orders has a delivered timestamp",
+    )
+    mem.note_last_judgment("orders has delivered_at; usable for the May filter")
+
+    step = mem.work_log[-1]
+    assert step.purpose == "check whether orders has a delivered timestamp"
+    assert step.judgment == "orders has delivered_at; usable for the May filter"
+
+    prompt = mem.prompt_block()
+    assert "(to check whether orders has a delivered timestamp)" in prompt
+    assert "→ disclosed shop.orders" in prompt
+    assert "judged: orders has delivered_at" in prompt
+
+
+def test_apply_decision_memory_attaches_result_assessment(tmp_path):
+    from dbaide.agent.loop import AskAgentLoop
+
+    orch = _orch(tmp_path)
+    orch.run_state.memory.record_work(action="execute_readonly_sql", args={"sql": "SELECT 1"}, ok=True, summary="1 row")
+    loop = AskAgentLoop(orch)
+    loop._apply_decision_memory({"result_assessment": "returned 1 row, the probe worked"})
+    assert orch.run_state.memory.work_log[-1].judgment == "returned 1 row, the probe worked"
+
+
 def test_apply_decision_memory_records_verified(tmp_path):
     from dbaide.agent.loop import AskAgentLoop
 

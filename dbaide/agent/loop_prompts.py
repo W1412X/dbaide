@@ -39,6 +39,9 @@ class DecisionPromptBuilder:
             "• Treat failed tool calls as observations, not as the end of the task. Read the error, "
             "then decide whether to use another tool, answer from existing evidence, or ask only "
             "for irreducible business intent.\n"
+            "• Each round, briefly assess the previous tool's result in `result_assessment` (what it "
+            "showed and what you conclude) — it is attached to that step so the work log reads "
+            "did-what → result → judgment.\n"
             "• Maintain memory deliberately via memory_updates each round: put a conclusion you have "
             "VERIFIED with tool evidence or a user-confirmed fact in `verified` (it becomes settled "
             "context you should not re-investigate); put tentative observations in `findings`, guesses "
@@ -96,6 +99,7 @@ class DecisionPromptBuilder:
             f"{tool_lines}\n\n"
             "Return JSON only. You may include memory_updates so the next round has compressed context:\n"
             '  {"action":"call_tool","tool":"retrieve_schema_context","args":{"request":"..."},"thought":"...",'
+            '"result_assessment":"what the previous tool result showed and what you conclude from it",'
             '"memory_updates":{"verified":[],"findings":[],"hypotheses":[],"excluded_paths":[],"open_questions":[]},"next_action_hint":"..."}\n'
             '  {"action":"finish","answer":"markdown answer for the user","memory_updates":{"findings":[]}}\n\n'
             "Tool guidance:\n"

@@ -268,7 +268,8 @@ class AskAgentLoop:
                 action=approved_risk_tool,
                 args=approved_risk_args or {"sql": approved_risk_sql},
                 ok=result.ok,
-                summary=_summarize_tool_result(approved_risk_tool, result),
+                summary=brief_tool_summary(approved_risk_tool, result),
+                purpose="execute the SQL the user just confirmed",
                 artifacts=artifacts,
                 data=data if isinstance(data, dict) else None,
             )
@@ -436,7 +437,8 @@ class AskAgentLoop:
                 action=tool_name,
                 args=args,
                 ok=result.ok,
-                summary=summary,
+                summary=brief or summary,
+                purpose=str(decision.get("thought") or "").strip(),
                 artifacts=artifacts,
                 data=data_for_memory if isinstance(data_for_memory, dict) else None,
             )
@@ -580,6 +582,11 @@ class AskAgentLoop:
 
     def _apply_decision_memory(self, decision: dict[str, Any]) -> None:
         mem = self.orchestrator.run_state.memory
+        # The model's read of the previous step's result, attached to that step so
+        # the work log records did-what → result → judgment in one place.
+        assessment = str(decision.get("result_assessment") or "").strip()
+        if assessment:
+            mem.note_last_judgment(assessment)
         updates = decision.get("memory_updates") if isinstance(decision.get("memory_updates"), dict) else {}
         for item in _list_update_items(updates.get("findings")):
             if isinstance(item, dict):

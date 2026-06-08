@@ -155,6 +155,7 @@ class AgentMemory:
         args: dict[str, Any] | None = None,
         ok: bool = True,
         summary: str = "",
+        purpose: str = "",
         artifacts: list[str] | None = None,
         data: dict[str, Any] | None = None,
     ) -> None:
@@ -180,6 +181,7 @@ class AgentMemory:
         self.work_log.append(WorkStep(
             id=step_id,
             action=action,
+            purpose=_trim(purpose, 240),
             input_summary=input_summary,
             result_summary=result_summary,
             status="completed" if ok else "failed",
@@ -229,6 +231,17 @@ class AgentMemory:
             if item.id == needle or needle in item.source_refs:
                 return item
         return None
+
+    def note_last_judgment(self, text: str) -> None:
+        """Attach the model's read of the most recent step's result to that step.
+
+        Called at the start of the next round (the previous tool call is the last
+        work step), so the work log carries did-what → result → how-it-was-judged
+        instead of leaving the interpretation in a disconnected note.
+        """
+        text = _trim(text, 300)
+        if text and self.work_log:
+            self.work_log[-1].judgment = text
 
     def add_hypothesis(self, text: str) -> None:
         text = _trim(text, 500)
@@ -549,13 +562,17 @@ class AgentMemory:
         if self.hypotheses:
             lines += ["[Candidate Hypotheses]", *[f"- {x}" for x in self.hypotheses[-PROMPT_SLICE_FINDINGS:]], ""]
         if self.work_log:
-            lines += ["[Work Done]"]
+            lines += ["[Work Done] (did-what → result → judgment)"]
             for step in self.work_log[-PROMPT_SLICE_WORK:]:
                 refs_list = [*step.artifact_refs]
                 if step.raw_ref:
                     refs_list.append(f"raw={step.raw_ref}")
                 refs = f" refs={', '.join(refs_list)}" if refs_list else ""
-                lines.append(f"- {step.id} {step.action} {step.status}{refs}: {step.result_summary}")
+                purpose = f" (to {step.purpose})" if step.purpose else ""
+                line = f"- {step.id} {step.action} [{step.status}]{purpose}{refs} → {step.result_summary or '(no result)'}"
+                if step.judgment:
+                    line += f" | judged: {step.judgment}"
+                lines.append(line)
             lines.append("")
         observed = [f for f in self.findings if f.confidence != "verified"]
         if observed:
