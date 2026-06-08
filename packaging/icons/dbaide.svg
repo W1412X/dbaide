@@ -1,34 +1,23 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
-  <!-- Standard app-icon container: a brand-coloured squircle. We use the brand
-       BLUE rather than black, so on a light theme it reads as a brand badge (like
-       Discord/LinkedIn/Twitter tiles), not as a harsh dark hole. -->
+  <!-- 简约 · 大气 — one mark, nothing else.
+       A single four-point sparkle (the modern AI symbol) on a transparent canvas.
+       The database identity lives in the app name; the icon doesn't need to
+       depict the product literally. Soft quadratic-curve concavity gives the
+       form its "elegant" rather than "spiky" character. -->
   <defs>
-    <linearGradient id="bg" x1="0.2" y1="0" x2="0.8" y2="1">
-      <stop offset="0" stop-color="#5b9bff"/>
+    <linearGradient id="g" x1="0.25" y1="0.1" x2="0.75" y2="0.9">
+      <stop offset="0" stop-color="#7eb1ff"/>
       <stop offset="1" stop-color="#1d4ed8"/>
     </linearGradient>
   </defs>
-  <rect x="64" y="64" width="896" height="896" rx="208" fill="url(#bg)"/>
-
-  <!-- AI sparkle (the "intelligence") — four-point needle star sitting above the
-       database. The white-on-blue contrast keeps it crisp at every size. -->
-  <path d="M512 130
-           Q540 286 580 320
-           Q606 332 698 350
-           Q606 368 580 380
-           Q540 414 512 570
-           Q484 414 444 380
-           Q418 368 326 350
-           Q418 332 444 320
-           Q484 286 512 130 Z"
-        fill="#ffffff"/>
-
-  <!-- Database (the "data") — filled white cylinder with two tier bands cut into
-       it so the storage tiers read clearly even at small sizes. -->
-  <path d="M276 532 V768 a236 76 0 0 0 472 0 V532 a236 76 0 0 0 -472 0 z"
-        fill="#ffffff"/>
-  <g fill="none" stroke="#3b82f6" stroke-width="16" stroke-linecap="round">
-    <path d="M276 620 a236 76 0 0 0 472 0"/>
-    <path d="M276 706 a236 76 0 0 0 472 0"/>
-  </g>
+  <path d="M512 80
+           Q548 444 596 472
+           Q628 488 944 512
+           Q628 536 596 552
+           Q548 580 512 944
+           Q476 580 428 552
+           Q396 536 80 512
+           Q396 488 428 472
+           Q476 444 512 80 Z"
+        fill="url(#g)"/>
 </svg>
