@@ -1192,4 +1192,5 @@ class ConversationView(QScrollArea):
         self._last_meta = ""
         self._live_answer = None
         self._live_answer_text = ""
+        self._clarification_bar = None
         self._sync_viewport_width()
