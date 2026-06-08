@@ -582,12 +582,6 @@ class ProgressiveSchemaAgent:
                 )
         return sorted(set(kept))
 
-    def top_table(self, discovery: DiscoveryResult) -> tuple[str, str]:
-        for hit in discovery.hits:
-            if hit.kind == "table" and hit.table:
-                return hit.table, hit.database
-        return "", ""
-
 
 def _filter_system(level: str) -> str:
     return (
@@ -619,13 +613,3 @@ def _format_batch(items: list[dict]) -> str:
 def _brief(text: str, limit: int = 200) -> str:
     text = " ".join(text.split())
     return text[:limit] + "…" if len(text) > limit else text
-
-
-def format_discovery_markdown(discovery: DiscoveryResult) -> str:
-    if not discovery.hits:
-        return "No relevant schema found."
-    lines: list[str] = []
-    for hit in discovery.hits:
-        summary = f" — {hit.summary[:200]}" if hit.summary else ""
-        lines.append(f"- `{hit.path}`{summary}")
-    return "\n".join(lines)

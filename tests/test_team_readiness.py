@@ -1,9 +1,6 @@
-import pytest
-
 from dbaide.config import CONFIG_VERSION, ConfigManager, migrate_config, sanitize_config_data
 from dbaide.core.errors import ErrorCode
 from dbaide.llm_errors import classify_llm_error, is_llm_related, user_message_for_error
-from dbaide.models import ConnectionConfig
 
 
 def test_migrate_legacy_config_adds_meta_version():

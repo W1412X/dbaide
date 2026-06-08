@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import logging
 import time
-from typing import Any, Callable, Iterator
+from typing import Any, Callable
 
 from dbaide.adapters import build_adapter
 from dbaide.agent.progress_events import progress_label
@@ -206,11 +206,6 @@ class WorkflowEngine:
             self._trace(result, "workflow_completed", "Workflow completed", "system")
         result.completed_at = time.time()
         return result
-
-    def stream(self, request: WorkflowRequest) -> Iterator[TraceEvent | WorkflowResult]:
-        """Execute a workflow with streaming trace events."""
-        result = self.run(request)
-        yield result
 
     def _build_assistant(self, request: WorkflowRequest) -> DataAssistant:
         adapter = self._get_adapter()

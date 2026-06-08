@@ -123,19 +123,3 @@ def _csv_value(value: Any) -> str:
     if value is None:
         return ""
     return str(value)
-
-
-def infer_column_alignment(column_name: str, values: list[Any]) -> str:
-    """Infer column alignment from values."""
-    numeric_count = 0
-    for v in values[:20]:
-        if v is None:
-            continue
-        try:
-            float(str(v))
-            numeric_count += 1
-        except (ValueError, TypeError):
-            pass
-    if numeric_count > len(values[:20]) * 0.7:
-        return "right"
-    return "left"

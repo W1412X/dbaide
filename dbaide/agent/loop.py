@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 import logging
 from dataclasses import dataclass, field
-from typing import Any, Callable
+from typing import TYPE_CHECKING, Any, Callable
 
 from dbaide.agent.answer_stream import JsonFieldStreamer
 from dbaide.agent.loop_state import dump_loop_state, restore_loop_state
@@ -20,7 +20,7 @@ from dbaide.llm import LLMMessage
 from dbaide.models import AssistantResponse
 from dbaide.tools.registry import ToolContext, ToolResult
 
-if True:  # TYPE_CHECKING without circular import at runtime
+if TYPE_CHECKING:
     from dbaide.agent.orchestrator import AskOrchestrator
 
 logger = logging.getLogger("dbaide.agent.loop")

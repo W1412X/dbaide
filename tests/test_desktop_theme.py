@@ -19,7 +19,7 @@ def test_panel_tabs_are_generated_from_active_theme():
         )
         assert f"background: {Theme.SURFACE};" in dark_bar
         assert f"background: {Theme.PANEL_3};" in dark_selected
-        assert "border-radius: 3px;" in dark_selected
+        assert f"border-radius: {Theme.RADIUS_SM}px;" in dark_selected
 
         set_theme("light")
         light = app_style()
@@ -31,7 +31,7 @@ def test_panel_tabs_are_generated_from_active_theme():
         )
         assert f"background: {Theme.SURFACE};" in light_bar
         assert f"background: {Theme.PANEL_3};" in light_selected
-        assert "border-radius: 3px;" in light_selected
+        assert f"border-radius: {Theme.RADIUS_SM}px;" in light_selected
         assert light != dark
     finally:
         set_theme("dark")

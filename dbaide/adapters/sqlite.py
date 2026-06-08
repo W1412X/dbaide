@@ -13,10 +13,6 @@ from dbaide.models import ColumnInfo, ColumnProfile, ForeignKeyInfo, IndexInfo, 
 logger = logging.getLogger("dbaide.sqlite")
 
 
-class _TimeoutError(TimeoutError):
-    """Raised when SQLite progress handler signals a timeout."""
-
-
 class SQLiteAdapter(DatabaseAdapter):
     dialect = "sqlite"
 

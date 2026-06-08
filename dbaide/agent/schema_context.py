@@ -8,14 +8,11 @@ import logging
 
 from dbaide.llm import NullLLMClient
 from dbaide.models import ColumnInfo
-from dbaide.db.identifiers import (
-    normalize_db_table as _normalize_db_table,
-    normalize_db_table_for_dialect as _normalize_db_table_for_dialect,
-)
+from dbaide.db.identifiers import normalize_db_table as _normalize_db_table
 
 if TYPE_CHECKING:
     from dbaide.agent.orchestrator import AskOrchestrator
-    from dbaide.agent.progressive_schema import DiscoveryResult, SchemaHit
+    from dbaide.agent.progressive_schema import SchemaHit
 
 logger = logging.getLogger("dbaide.schema_context")
 
@@ -25,11 +22,6 @@ MAX_DISCLOSED_TABLES = 32
 def normalize_db_table(table: str, database: str = "") -> tuple[str, str]:
     """Public schema-context entry for generic db/table normalization."""
     return _normalize_db_table(table, database)
-
-
-def normalize_db_table_for_dialect(table: str, database: str = "", dialect: str = "") -> tuple[str, str]:
-    """Public schema-context entry for dialect-aware db/table normalization."""
-    return _normalize_db_table_for_dialect(table, database, dialect)
 
 
 def table_targets_from_hits(
@@ -53,15 +45,6 @@ def table_targets_from_hits(
         if len(targets) >= limit:
             break
     return targets
-
-
-def table_targets_from_discovery(
-    discovery: DiscoveryResult,
-    active_database: str,
-    *,
-    limit: int = MAX_DISCLOSED_TABLES,
-) -> list[tuple[str, str]]:
-    return table_targets_from_hits(discovery.hits, active_database, limit=limit)
 
 
 def foreign_keys_for_table(orchestrator: AskOrchestrator, database: str, table: str) -> list[dict[str, Any]]:

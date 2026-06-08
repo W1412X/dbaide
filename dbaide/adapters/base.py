@@ -180,10 +180,6 @@ class DatabaseAdapter(ABC):
                        include_avg: bool = False, include_length: bool = False) -> ColumnProfile:
         raise NotImplementedError
 
-    @contextmanager
-    def lifecycle(self) -> Iterator["DatabaseAdapter"]:
-        yield self
-
 
 def _parse_explain_rows(dialect: str, result: QueryResult) -> int | None:
     rows = result.rows or []

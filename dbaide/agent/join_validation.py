@@ -58,11 +58,6 @@ def type_alignment_score(left_type: str, right_type: str) -> float:
     return 0.35
 
 
-def types_compatible(left_type: str, right_type: str) -> bool:
-    """Legacy helper: True when alignment is reasonably high."""
-    return type_alignment_score(left_type, right_type) >= 0.75
-
-
 def join_confidence(
     *,
     source: str,

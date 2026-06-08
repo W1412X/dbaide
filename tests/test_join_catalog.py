@@ -138,37 +138,3 @@ def test_join_tools(tmp_path):
     deleted = registry.invoke("delete_join", {"id": join_id}, ctx)
     assert deleted.ok
     assert registry.invoke("list_joins", {}, ctx).data["count"] == 0
-
-
-def test_persist_agent_candidates(tmp_path):
-    store = JoinCatalogStore(tmp_path / "joins")
-    saved = store.persist_agent_candidates(
-        "local",
-        [
-            {
-                "table": "sensors",
-                "column": "asset_id",
-                "ref_table": "assets",
-                "ref_column": "id",
-                "source": "semantic",
-                "confidence": 0.72,
-            }
-        ],
-    )
-    assert len(saved) == 1
-    assert saved[0]["source"] == "agent"
-    again = store.persist_agent_candidates(
-        "local",
-        [
-            {
-                "table": "sensors",
-                "column": "asset_id",
-                "ref_table": "assets",
-                "ref_column": "id",
-                "source": "semantic",
-                "confidence": 0.8,
-            }
-        ],
-    )
-    assert len(again) == 1
-    assert store.list_records("local")[0]["confidence"] == 0.8

@@ -12,7 +12,7 @@ from typing import Any
 from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtWidgets import QTabWidget, QVBoxLayout, QWidget
 
-from dbaide.desktop.theme import Theme, workbench_tab_stylesheet
+from dbaide.desktop.theme import workbench_tab_stylesheet
 from dbaide.desktop.views.data_browser import DataBrowser
 from dbaide.desktop.views.structure_panel import StructurePanel
 

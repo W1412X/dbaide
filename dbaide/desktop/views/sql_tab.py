@@ -51,8 +51,8 @@ class SqlTab(QWidget):
         self.editor.setFont(QFont("Menlo", 11))
         configure_sql_editor_pane(self.editor, min_height=100)
         self.editor.setStyleSheet(
-            f"QPlainTextEdit {{ background: transparent; border: none; }}"
-            f"QPlainTextEdit:focus {{ border: none; }}"
+            "QPlainTextEdit { background: transparent; border: none; }"
+            "QPlainTextEdit:focus { border: none; }"
         )
         self.editor.installEventFilter(self)
         from dbaide.desktop.components.sql_highlighter import SqlHighlighter

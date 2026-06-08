@@ -289,27 +289,6 @@ def normalize_trace_key(text: str) -> str:
     return text.lower()
 
 
-def trace_dedupe_keys(event: dict[str, Any]) -> frozenset[str]:
-    """Fingerprints for skipping duplicate in-turn / persisted trace lines."""
-    stage = str(event.get("stage") or "").strip()
-    title = str(event.get("title") or "").strip()
-    summary = str(event.get("summary") or "").strip()
-    detail = str(event.get("detail") or "").strip()
-    keys: set[str] = set()
-    for raw in (
-        title,
-        summary,
-        detail,
-        progress_label(event) if (title or stage or detail) else "",
-        f"{stage}: {title}" if stage and title else "",
-    ):
-        if raw:
-            keys.add(normalize_trace_key(raw))
-    if stage:
-        keys.add(normalize_trace_key(stage))
-    return frozenset(keys)
-
-
 def _stage_title(stage: str, title: str) -> str:
     """Combine a stage id and a human title without doubling — when the title
     already echoes the stage, the stage prefix is dropped."""

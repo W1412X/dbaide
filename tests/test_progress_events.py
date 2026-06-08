@@ -5,7 +5,6 @@ from dbaide.agent.progress_events import (
     progress_event,
     progress_label,
     subagent_event,
-    trace_dedupe_keys,
 )
 
 
@@ -51,16 +50,6 @@ def test_normalize_trace_key_strips_detail_suffix():
     assert normalize_trace_key("discover_schema: Calling discover_schema — args") == normalize_trace_key(
         "discover_schema: Calling discover_schema"
     )
-
-
-def test_trace_dedupe_keys_links_live_and_persisted():
-    live = progress_event(stage="discover_schema", title="Calling discover_schema", status="running")
-    persisted = {
-        "stage": "discover_schema",
-        "title": progress_label(live),
-        "summary": "discover_schema: Calling discover_schema",
-    }
-    assert trace_dedupe_keys(live) & trace_dedupe_keys(persisted)
 
 
 def test_conversation_trace_step_substep():

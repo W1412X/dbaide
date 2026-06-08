@@ -22,7 +22,6 @@ MAX_SCHEMA_REPORTS = 64
 MAX_JOIN_REPORTS = 64
 MAX_SQL_ARTIFACTS = 128
 MAX_RESOLVED_QUESTIONS = 128
-MAX_DO_NOT_REPEAT = 0  # unused — repetition is governed by the outer step budget only
 MAX_ARCHIVE_INDEX = 128
 PROMPT_SLICE_WORK = 48
 PROMPT_SLICE_FINDINGS = 48
@@ -136,7 +135,6 @@ class AgentMemory:
     pending_confirmations: list[str] = field(default_factory=list)
     action_ledger: list[str] = field(default_factory=list)
     resolved_questions: list[str] = field(default_factory=list)
-    do_not_repeat: list[str] = field(default_factory=list)
     next_action_hint: str = ""
     archive: list[MemoryArchiveItem] = field(default_factory=list)
     next_work_index: int = 1
@@ -231,22 +229,6 @@ class AgentMemory:
             if item.id == needle or needle in item.source_refs:
                 return item
         return None
-
-    def add_do_not_repeat(self, key: str, reason: str = "") -> None:
-        if MAX_DO_NOT_REPEAT <= 0:
-            return
-        key = _trim(key, 420)
-        reason = _trim(reason, 260)
-        if not key:
-            return
-        entry = f"{key} -> {reason}" if reason else key
-        normalized_key = key.lower()
-        self.do_not_repeat = [
-            x for x in self.do_not_repeat
-            if x.lower().split(" -> ", 1)[0] != normalized_key
-        ]
-        self.do_not_repeat.append(entry)
-        self.do_not_repeat = self.do_not_repeat[-MAX_DO_NOT_REPEAT:]
 
     def add_hypothesis(self, text: str) -> None:
         text = _trim(text, 500)
@@ -652,11 +634,6 @@ class AgentMemory:
         mem.pending_confirmations = [str(x) for x in _list_or_empty(data.get("pending_confirmations"))]
         mem.action_ledger = [str(x) for x in _list_or_empty(data.get("action_ledger"))][-MAX_WORK_STEPS:]
         mem.resolved_questions = [str(x) for x in _list_or_empty(data.get("resolved_questions"))][-MAX_RESOLVED_QUESTIONS:]
-        mem.do_not_repeat = (
-            [str(x) for x in _list_or_empty(data.get("do_not_repeat"))][-MAX_DO_NOT_REPEAT:]
-            if MAX_DO_NOT_REPEAT > 0
-            else []
-        )
         mem.next_action_hint = str(data.get("next_action_hint") or "")
         mem.archive = [_archive_item_from_dict(x) for x in _list_or_empty(data.get("archive")) if isinstance(x, dict)]
         archive_work_refs = [

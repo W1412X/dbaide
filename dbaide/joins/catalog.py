@@ -14,7 +14,6 @@ from typing import Any
 logger = logging.getLogger("dbaide.join_catalog")
 
 USER_JOIN_CONFIDENCE = 0.99
-AGENT_PERSIST_MIN_CONFIDENCE = 0.55
 DEFAULT_JOIN_DIR = Path.home() / ".dbaide" / "joins"
 
 
@@ -291,35 +290,6 @@ class JoinCatalogStore:
             self._save(instance, new_records)
             return True
         return False
-
-    def persist_agent_candidates(
-        self,
-        instance: str,
-        relations: list[dict[str, Any]],
-        *,
-        database: str = "",
-        min_confidence: float = AGENT_PERSIST_MIN_CONFIDENCE,
-        fingerprint: str = "",
-    ) -> list[dict[str, Any]]:
-        saved: list[dict[str, Any]] = []
-        for rel in relations:
-            source = str(rel.get("source") or "")
-            if source == "user":
-                continue
-            conf = float(rel.get("confidence") or 0)
-            if conf < min_confidence:
-                continue
-            if rel.get("catalog"):
-                continue
-            record = self.add(
-                instance,
-                {**rel, "database": rel.get("database") or database},
-                source="agent",
-                database=database,
-                fingerprint=fingerprint,
-            )
-            saved.append(record)
-        return saved
 
     def _load(self, instance: str) -> list[dict[str, Any]]:
         path = self.instance_path(instance)

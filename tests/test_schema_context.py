@@ -2,15 +2,14 @@ import sqlite3
 
 from dbaide.adapters import build_adapter
 from dbaide.agent.orchestrator import AskOrchestrator
-from dbaide.agent.progressive_schema import DiscoveryResult, SchemaHit
+from dbaide.agent.progressive_schema import SchemaHit
 from dbaide.agent.schema_context import (
     collect_relations,
     merge_sql_context,
-    normalize_db_table_for_dialect,
-    table_targets_from_discovery,
     table_targets_from_hits,
     validation_feedback,
 )
+from dbaide.db.identifiers import normalize_db_table_for_dialect
 from dbaide.agent.join_validation import JoinSampleValidator
 from dbaide.agent.sql_writer import SQLWriter
 from dbaide.agent.toolkit import build_tool_registry
@@ -62,17 +61,6 @@ def test_table_targets_from_hits_dedupes_and_limits():
     ]
     targets = table_targets_from_hits(hits, "main", limit=4)
     assert targets == [("main", "orders"), ("main", "users")]
-
-
-def test_table_targets_from_discovery():
-    discovery = DiscoveryResult(
-        question="orders and users",
-        hits=[
-            SchemaHit(kind="table", name="orders", table="orders", database="", path="", summary=""),
-            SchemaHit(kind="table", name="users", table="users", database="", path="", summary=""),
-        ],
-    )
-    assert table_targets_from_discovery(discovery, "app") == [("app", "orders"), ("app", "users")]
 
 
 def test_normalize_db_table_for_dialect_respects_mysql_database_prefix():

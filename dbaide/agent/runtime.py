@@ -6,8 +6,7 @@ import time
 from typing import Any, Callable
 
 from dbaide.core.cancellation import CancelledError
-from dbaide.core.errors import DBAideError, ErrorCode, RepairAction
-from dbaide.core.events import TraceEvent, TraceKind, TraceLevel
+from dbaide.core.events import TraceEvent
 from dbaide.llm import LLMClient, NullLLMClient
 from dbaide.tools.registry import ToolContext, ToolRegistry, ToolResult
 
@@ -74,27 +73,6 @@ class AgentRuntime:
         """Emit a trace event."""
         self.trace_sink(event)
 
-    def trace_step(self, *, stage: str, title: str, kind: TraceKind = TraceKind.AGENT) -> None:
-        """Record a step in the trace."""
-        self._step_count += 1
-        self.emit_trace(TraceEvent(
-            level=TraceLevel.INFO,
-            kind=kind,
-            stage=stage,
-            actor="runtime",
-            title=title,
-            status="running",
-        ))
-
-    def trace_tool_call(self, tool_name: str, args: dict[str, Any]) -> ToolContext:
-        """Prepare a tool call context with trace."""
-        self.check_budget()
-        self._step_count += 1
-        return ToolContext(
-            trace_sink=self.trace_sink,
-            cancel_check=self.cancel_check,
-        )
-
     def call_tool(self, name: str, args: dict[str, Any], ctx: ToolContext) -> ToolResult:
         """Call a tool with budget checking. Each call consumes one step so the
         agent loop (driven by ``steps_remaining``) is actually bounded by MAX_STEPS."""
@@ -113,25 +91,3 @@ class AgentRuntime:
     def elapsed_ms(self) -> float:
         """Get elapsed time in milliseconds."""
         return (time.perf_counter() - self._start_time) * 1000
-
-    def build_error(self, code: ErrorCode, stage: str, message: str, *, hint: str = "",
-                    retryable: bool = False, repair: RepairAction = RepairAction.STOP) -> DBAideError:
-        """Build a structured error with trace."""
-        error = DBAideError(
-            code=code,
-            stage=stage,
-            message=message,
-            hint=hint,
-            retryable=retryable,
-            repair_action=repair,
-        )
-        self.emit_trace(TraceEvent(
-            level=TraceLevel.ERROR,
-            kind=TraceKind.AGENT,
-            stage=stage,
-            actor="runtime",
-            title=f"Error: {code.value}",
-            summary=message,
-            status="failed",
-        ))
-        return error

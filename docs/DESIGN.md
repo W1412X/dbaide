@@ -216,7 +216,7 @@ flowchart TB
 |------|-------|--------|
 | `discover_schema` | `question` | `hits[]`, `trace` |
 | `describe_table` | `table`, `database?` | `columns[]` → `run_state.schemas` |
-| `get_relations` | disclosed tables | `relations[]` + confidence; may persist agent candidates |
+| `get_relations` | disclosed tables | `relations[]` + confidence |
 | `generate_sql` | question + schemas + relations | `sql`, `rationale`, `confidence` |
 | `validate_sql` | `sql` | `ok`, `normalized_sql`, `issues`, `risk_level` |
 | `execute_sql` | `sql` | `rows`, `row_count` or `blocked` |
@@ -282,7 +282,6 @@ flowchart LR
     MERGE --> C5["JoinSampleValidator<br/>sample evidence → soft confidence"]
     C5 --> C6["Re-apply user catalog edges on top"]
     C6 --> OUT["relations[] → generate_sql prompt"]
-    C5 --> PERSIST["persist_agent_candidates<br/>conf ≥ 0.55"]
 ```
 
 Principles:
@@ -354,7 +353,6 @@ flowchart LR
     AS -->|discover / FK| LD
     JN -->|get_relations read-first| LR
     LD --> LS --> LR --> LQ
-    LR -->|agent candidates| JN
     LQ --> HI
 ```
 
@@ -491,7 +489,7 @@ dbaide queries prod --tail 50
 3. **Join catalog is a fact layer** — User pins at 0.99; agent reads, does not CRUD during queries.
 4. **Risk gate only at execute** — Validation checks syntax/safety; `RiskController` checks whether to run.
 5. **Soft signals, hard safety** — Join confidence and sample match rates inform ranking and confirm; they do not replace LLM judgment for SQL.
-6. **Deterministic helpers in code** — Auto `get_relations`, persist join candidates, validation, budgets—not extra LLM agents.
+6. **Deterministic helpers in code** — Auto `get_relations`, validation, budgets—not extra LLM agents.
 
 ---
 
@@ -506,8 +504,8 @@ dbaide queries prod --tail 50
 **Add an agent tool**
 
 1. Define spec in `tools/specs.py`.
-2. Register handler in `agent/toolkit.py`.
-3. Add to `LOOP_DECISION_TOOL_NAMES` if the loop LLM should see it.
+2. Register the handler in the relevant `agent/toolkit/*_tools.py` module.
+3. Add to `LOOP_DECISION_TOOL_NAMES` in `agent/toolkit/__init__.py` if the loop LLM should see it.
 4. Add tests via `build_tool_registry`.
 
 **Add a model provider**

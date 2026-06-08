@@ -6,7 +6,6 @@ from PyQt6.QtCore import Qt
 from PyQt6.QtWidgets import QDialog, QHBoxLayout, QLabel, QVBoxLayout, QWidget
 
 from dbaide.desktop.components.base import compact_button
-from dbaide.desktop.components.icons import svg_icon
 from dbaide.desktop.theme import Theme, app_style
 
 

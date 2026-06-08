@@ -889,7 +889,6 @@ def test_memory_from_dict_trims_prompt_lists_and_keeps_unique_next_ids():
     assert len(mem.open_questions) == MAX_OPEN_QUESTIONS
     assert len(mem.schema_reports) == MAX_SCHEMA_REPORTS
     assert len(mem.action_ledger) == MAX_WORK_STEPS
-    assert mem.do_not_repeat == []
     assert mem.next_work_index == MAX_WORK_STEPS + 8
     assert mem.next_archive_index == 11
 

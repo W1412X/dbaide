@@ -3,7 +3,6 @@ from __future__ import annotations
 
 import json
 import logging
-import time
 from pathlib import Path
 from typing import Any
 
@@ -103,20 +102,3 @@ class WorkflowHistoryStore:
             path.unlink()
             return True
         return False
-
-    def cleanup(self, connection_name: str, max_age_days: int = 30) -> int:
-        """Delete old workflow results."""
-        conn_dir = self._conn_dir(connection_name)
-        if not conn_dir.exists():
-            return 0
-
-        cutoff = time.time() - (max_age_days * 86400)
-        removed = 0
-        for path in conn_dir.glob("*.json"):
-            try:
-                if path.stat().st_mtime < cutoff:
-                    path.unlink()
-                    removed += 1
-            except Exception:
-                continue
-        return removed

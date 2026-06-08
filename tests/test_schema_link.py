@@ -104,7 +104,7 @@ def test_schema_context_does_not_infer_conflicts_from_column_names(tmp_path):
         hits=["orders", "order_amount_daily"],
         extra_schema="CREATE TABLE order_amount_daily(id INTEGER PRIMARY KEY, dt TEXT, amount REAL);",
     )
-    report = SchemaEvidenceRetriever(orch).retrieve("total amount")
+    SchemaEvidenceRetriever(orch).retrieve("total amount")
 
     assert orch.run_state.pending_question == ""  # main LLM decides whether to ask
 

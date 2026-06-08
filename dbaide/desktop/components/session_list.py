@@ -137,7 +137,7 @@ class _SessionRow(QWidget):
         self._elide()
 
     @staticmethod
-    def height_for(title: str, *, content_width: int = 0) -> int:
+    def height_for(title: str) -> int:
         """Row height for a single-line title + the (smaller) subtitle.
 
         Uses generous padding on top of the metric heights: "Inter" is often absent
