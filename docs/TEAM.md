@@ -13,6 +13,9 @@ All local state lives under `~/.dbaide/`:
 | `logs/dbaide.log` | Rotating application log (stderr also receives logs in CLI) |
 | `logs/queries/{connection}.jsonl` | Audit log of executed SQL |
 | `assets/instances/{connection}/` | Offline schema/catalog documents |
+| `joins/instances/{connection}/` | User-saved and agent-discovered join catalog |
+| `sessions/{connection}/` | Chat session memory (per-turn Q/A/trace) |
+| `query_history/{connection}.jsonl` | Workbench SQL editor history |
 | `debug/` | Exported debug bundles (ZIP) |
 
 Environment overrides:
@@ -37,7 +40,8 @@ much older DBAide and the schema tree looks wrong, use **Build Assets** or
 2. **API keys via environment variables** (`password_env`, `api_key_env`) instead of
    plaintext in `config.toml` when possible.
 3. **Set resource limits** in Settings → Resources (row limits, concurrent runs).
-4. **Enable debug trace** (Settings) only while investigating agent behaviour.
+4. **Set Max concurrent runs** to control how many sessions run at once (default: 3).
+5. **Enable debug trace** (Settings) only while investigating agent behaviour.
 
 ## Troubleshooting
 
@@ -65,11 +69,33 @@ badge to return to **Ready**. If it persists:
 - **Sync schema with database** (⋮ menu) after DDL changes in the database.
 - **Build Assets** for enriched summaries and better agent accuracy.
 
+### Clarifications not carrying forward
+
+Confirmed clarifications carry forward within the same chat session. If the agent keeps
+re-asking:
+
+1. Check that you're asking in the **same session** (same sidebar entry, not a new one).
+2. The carry-forward window is the most recent N turns. Very old confirmations may fall
+   out. Re-confirm if needed.
+3. Clarifications apply to the **current connection** only.
+
 ### SQL results truncated
 
 Workbench SQL uses row limits from Settings → Resources. The Messages tab explains
 when results are truncated. Use `WHERE` / `LIMIT` or browse large tables via the
 **Data** tab (paginated).
+
+## Join catalog
+
+DBAide discovers table relationships automatically via foreign keys and LLM inference,
+but you can also pin known joins manually:
+
+- **Desktop:** Settings → Joins tab → **Add** (or edit/delete existing ones).
+- **CLI:** joins are read-only from the agent loop; manage via the desktop.
+
+User-pinned joins have confidence 0.99 and always take priority. Agent-discovered joins
+are saved as candidates with lower confidence. The agent reads the catalog via
+`get_relations` but does not modify it during queries.
 
 ## Exporting a debug bundle
 
@@ -77,7 +103,7 @@ when results are truncated. Use `WHERE` / `LIMIT` or browse large tables via the
 
 Creates a ZIP under `~/.dbaide/debug/` containing:
 
-- Sanitized `config.json` (passwords/API keys redacted)
+- Sanitized config (passwords/API keys redacted)
 - Active session trace (if any)
 - Environment metadata
 - Tail of `dbaide.log`

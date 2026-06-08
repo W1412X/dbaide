@@ -26,13 +26,16 @@ number. DBAide is built on the opposite principle:
 
 - 🧠 **Agentic, not a one-shot generator.** A tool loop discovers schema, maps joins,
   writes SQL, validates it, runs it, and interprets the result — you watch every step.
+  The answer **streams in token-by-token** as the model writes it.
 - 🙋 **Never guesses.** When the question is ambiguous (which table, what a status value
   means, which timezone, what a metric counts), it **asks you to confirm** instead of
-  inventing a default. Your confirmations are remembered for the run.
+  inventing a default. Your confirmations carry forward across the session.
 - 🛡️ **Safe by default.** Read-only, single statement, per-statement timeout, row caps,
   `EXPLAIN` cost gate, and confirmation on risky queries. Every executed SQL is logged.
 - 🗂️ **Progressive disclosure.** It narrows instance → database → table → column instead
   of dumping the whole schema into the prompt.
+- 📌 **Pin context.** Use the composer's **+** button to attach specific databases or
+  tables as schema context — discovery prioritises what you pin.
 - 💬 **Run many conversations at once.** Each session runs in its own thread; start a
   query in one and switch to another while it works (concurrency is configurable).
 - 🧰 **A real database client, too.** Switch to the **Workbench** for a DBeaver-style
@@ -76,6 +79,10 @@ final answer **streams in token-by-token**, and every turn carries the agent's s
 inline — click **View agent trace** under a turn to expand the discovery, SQL, and
 execution it ran. Generated SQL can be opened in the **Workbench** to tweak and re-run.
 
+Use the **+** button in the composer to pin databases or tables as context for the next
+question. Clarifications you confirm carry forward to future questions in the same
+session, so the agent learns your intent as you go.
+
 ### Workbench — the database client
 
 Toggle **Assistant / Workbench** at the top. The Workbench is a multi-document
@@ -109,6 +116,9 @@ dbaide connect add local --type sqlite --path ./app.db
 # Ask in natural language
 dbaide ask "Which cities have the most paying users?" --conn local
 
+# Interactive multi-turn chat
+dbaide chat --conn local
+
 # Inspect / profile / run SQL
 dbaide inspect users --conn local
 dbaide profile users --conn local
@@ -116,6 +126,24 @@ dbaide sql "select * from users limit 10" --conn local --execute
 
 # Find where something lives, across one or all connections
 dbaide find "where is the user email" --conn all
+
+# Schema documentation and diffs
+dbaide doc --conn local                     # export schema markdown
+dbaide tree --conn local                    # print schema tree
+dbaide diff --conn local --conn2 staging    # diff two schemas
+dbaide relations --conn local               # show FK and join hints
+
+# Annotate schema with business notes
+dbaide annotate add --conn local --table orders --note "orders.status: 1=pending, 2=paid"
+dbaide annotate list --conn local
+
+# Offline assets
+dbaide assets build local --database mydb   # build for a specific database
+dbaide assets status local                  # show asset status
+dbaide assets show local orders             # show a specific table asset
+
+# SQL audit log
+dbaide queries local --tail 50
 ```
 
 ## Safe by default
@@ -145,10 +173,21 @@ timeout_seconds = 60
 
 [ui]
 language = "en"   # or "zh"
+
+[resource_defaults]
+# Override per-knob limits; see docs/DESIGN.md for all knobs
+# statement_timeout_seconds = 8
+# default_row_limit = 100
 ```
 
 The agent's answer language follows the UI language so everything stays consistent. If
 no model is configured, DBAide uses local heuristics instead of failing.
+
+Environment overrides:
+
+- `DBAIDE_CONFIG` — alternate config file path
+- `DBAIDE_LOG_DIR` — log directory (default `~/.dbaide/logs`)
+- `DBAIDE_LOG_LEVEL` — `DEBUG`, `INFO`, `WARNING`, `ERROR`
 
 ## Multiple connections
 
@@ -164,19 +203,46 @@ dbaide ask "daily order count last 7 days" --conn dev,prod --database dev=shop,p
 
 ```text
 dbaide/
-  cli.py            command-line entry point
-  config.py         TOML config (connections, models, resources, language)
-  i18n.py           en / zh strings + answer-language policy
-  agent/            tool loop, clarifier, SQL writer, controllers, orchestrator
-  adapters/         SQLite / MySQL / PostgreSQL
-  assets/           offline schema assets (instance → db → table → column)
-  rendering/        safe Markdown (mistune) + sanitization
-  history/          chat sessions + workflow history
-  desktop/          PyQt6 app (views, components, dialogs)
+  cli.py              command-line entry point
+  gui.py              desktop app entry point
+  config.py           TOML config (connections, models, resources, language)
+  i18n.py             en / zh strings + answer-language policy
+  llm.py              LLM client (OpenAI-compatible API, streaming support)
+  models.py           query result / column / profile data models
+  agent/              tool loop, clarifier, SQL writer, controllers, orchestrator
+    loop.py           AskAgentLoop — the single tool-calling loop
+    orchestrator.py   AskOrchestrator — sets up and runs the loop
+    run_state.py      per-run state (schemas, relations, SQL, memory)
+    toolkit/          tool implementations (schema, SQL, profile, catalog, memory)
+  adapters/           SQLite / MySQL / PostgreSQL
+  assets/             offline schema assets (instance → db → table → column)
+  core/               result types, events, errors
+  db/                 connection pool, resource policy, query budget
+  validation/         deterministic SQL guards (SchemaGuard, CTE parser)
+  rendering/          safe Markdown (mistune) + sanitization
+  history/            chat sessions, query history, debug bundles
+  desktop/            PyQt6 app
+    views/            main window, sidebar, topbar, workbench, ask tab, SQL tab
+    components/       composer, conversation, session list, table, trace, editor
+    dialogs/          settings, connection, joins, build assets, note editor
 ```
 
 The deep design — assets → agent loop → execution, and the safety model — is documented
 in **[docs/DESIGN.md](docs/DESIGN.md)**.
+
+## Data layout
+
+All local state lives under `~/.dbaide/`:
+
+| Path | Purpose |
+|------|---------|
+| `config.toml` | Connections, models, UI language, resource limits |
+| `assets/instances/{conn}/` | Offline schema documents |
+| `joins/instances/{conn}/` | User-saved and agent-discovered join catalog |
+| `logs/dbaide.log` | Rotating application log |
+| `logs/queries/{conn}.jsonl` | SQL audit log (every executed statement) |
+| `query_history/{conn}.jsonl` | Workbench SQL editor history |
+| `sessions/{conn}/` | Chat session memory (per-turn Q/A/trace) |
 
 ## Development
 

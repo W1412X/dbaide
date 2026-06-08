@@ -11,8 +11,19 @@ design in [docs/DESIGN.md](docs/DESIGN.md)). For team operations and troubleshoo
 see [docs/TEAM.md](docs/TEAM.md).
 
 - `dbaide/agent/` — the agent tool loop, clarifier, SQL writer, controllers, orchestrator.
-- `dbaide/desktop/` — the PyQt6 app (`views/`, `components/`, `dialogs/`).
+  - `loop.py` — `AskAgentLoop`, the single LLM tool-calling loop.
+  - `orchestrator.py` — `AskOrchestrator`, sets up context and runs the loop.
+  - `run_state.py` — per-run state (schemas, relations, working memory).
+  - `toolkit/` — tool implementations: schema, SQL, profile, catalog, memory, interaction.
+- `dbaide/core/` — result types (`WorkflowRequest`, `WorkflowResult`), events, errors.
+- `dbaide/db/` — connection pool, resource policy, query budget.
+- `dbaide/validation/` — deterministic SQL guards (`SchemaGuard`, CTE parser).
+- `dbaide/desktop/` — the PyQt6 app.
+  - `views/` — main window, sidebar, topbar, workbench, ask tab, SQL tab.
+  - `components/` — composer, conversation view, session list, SQL editor, data table.
+  - `dialogs/` — settings, connection, joins, build assets, note editor.
 - `dbaide/adapters/` — SQLite / MySQL / PostgreSQL.
+- `dbaide/history/` — chat sessions, query history, debug bundles.
 - `tests/` — pytest suite (GUI tests render off-screen).
 
 ## Setup
@@ -50,6 +61,14 @@ QT_QPA_PLATFORM=offscreen python tools/shoot_dialogs.py  # dialogs
 
 Please add or update tests for behavior you change.
 
+Note: use the project venv (Python 3.11+), not the system Python. If you use `uv`:
+
+```bash
+uv venv .venv --python 3.11
+source .venv/bin/activate
+uv pip install -e ".[gui,dev]"
+```
+
 ## Conventions
 
 - **Style:** match the surrounding code — comment density, naming, and idioms. Prefer
@@ -58,8 +77,13 @@ Please add or update tests for behavior you change.
   single-statement, timeout, and row-limit guarantees. Don't bypass the risk controller.
 - **No guessing:** the agent must confirm ambiguous business meaning with the user rather
   than invent defaults — keep that contract intact when editing `agent/`.
+- **`__slots__`:** core data classes (`WorkflowRequest`, `WorkflowResult`, etc.) use
+  `__slots__`. Add new fields to the `__slots__` tuple before setting them in `__init__`.
 - **i18n:** user-facing strings go through `dbaide/i18n.py` (`t(...)`) with both `en` and
   `zh`. Agent answer language follows the UI language.
+- **Desktop threading:** all Qt widget access must happen on the main thread. The agent
+  loop runs in a worker thread and communicates via signals. Modal menus and dialogs
+  block the main thread — avoid launching them from slots that may race.
 - **Commits / PRs:** keep commits focused with a clear subject line; describe the user-facing
   effect and the reasoning in the body.
 

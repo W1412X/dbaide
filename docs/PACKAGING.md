@@ -178,10 +178,12 @@ Workflow 在 macOS (arm64/x86_64)、Ubuntu、Windows 上分别运行 PyInstaller
 打包后用户数据仍在标准路径，与 pip 安装一致：
 
 ```text
-~/.dbaide/config.json          # 连接与模型配置
+~/.dbaide/config.toml          # 连接与模型配置
 ~/.dbaide/assets/              # 离线 schema assets
 ~/.dbaide/joins/               # Join 目录
-~/.dbaide/history/             # 工作流历史
+~/.dbaide/sessions/            # 聊天会话记录
+~/.dbaide/query_history/       # SQL 编辑器历史
+~/.dbaide/logs/                # 应用日志与 SQL 审计日志
 ```
 
 升级安装包时**无需迁移**这些目录。

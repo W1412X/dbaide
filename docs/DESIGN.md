@@ -154,6 +154,12 @@ flowchart LR
 | `question` | Natural language question |
 | `database_scope` | Optional database filter |
 | `resume_state` + `user_reply` | Resume after `ask_user` clarification |
+| `schema_scope` | User-pinned databases/tables (composer attachments); discovery prioritises these |
+| `stream_answers` | Stream the final answer token-by-token over SSE |
+| `session_turns` | Prior turns in this chat session (for carry-forward context) |
+| `active_criteria` | Confirmed clarifications from earlier turns (binding facts) |
+| `model_name` | Override the default model for this request |
+| `ui_attachments` | Raw composer chip data (persisted for display, not used by the agent) |
 
 **Output (`WorkflowResult` / `AssistantResponse`):**
 
@@ -165,6 +171,8 @@ flowchart LR
 | `warnings` | Loop failure notices, risk confirmations, execution warnings |
 | `status` | `completed` / `wait_user` / `failed` / `cancelled` |
 | `resume_state` | Serialized loop state when waiting for user |
+| `clarifications` | Confirmed clarifications from this turn (carried forward to next) |
+| `disclosed_tables` | Tables the agent disclosed during this turn |
 
 ### Loop flow
 
@@ -507,6 +515,71 @@ dbaide queries prod --tail 50
 
 ---
 
+## Desktop Application Architecture
+
+The PyQt6 desktop app (`dbaide/desktop/`) is organized into three layers:
+
+```text
+views/              top-level screens and panels
+  main_window.py    QMainWindow — mode switch, connection, keyboard shortcuts
+  sidebar.py        schema tree + session list (Assistant mode)
+  topbar.py         connection picker, Build Assets, Sync Schema, ⋮ menu
+  ask_tab.py        Assistant mode — composer + conversation + trace panel
+  workbench.py      Workbench mode — multi-document SQL/table workspace
+  sql_tab.py        SQL editor document (QSplitter: editor + result grid)
+  table_document.py per-table document (Structure / Data tabs)
+
+components/         reusable widgets
+  composer.py       ComposerWidget — input, model selector, +attachments, send/stop
+  conversation.py   ConversationView — turn blocks, streaming, clarification chips
+  session_list.py   chat session sidebar (new / switch / delete)
+  sql_editor.py     syntax-highlighted SQL editor with autocomplete
+  table.py          paginated data grid with sort, filter, FK navigation
+  trace.py          agent trace tree / step viewer
+
+dialogs/            modal dialogs
+  settings.py       Settings (General, Connections, Models, Resources, Join catalog)
+  connection.py     ConnectionForm + standalone ConnectionDialog
+  joins.py          join catalog management (add / edit / delete)
+  build_assets.py   asset build progress dialog
+```
+
+### Threading model
+
+```text
+Main thread (Qt event loop)
+  ├── UI widgets (all Qt access)
+  ├── Signals from worker → main thread (queued connection)
+  └── DesktopService (dispatches to workers)
+
+Worker threads (one per concurrent run slot)
+  ├── WorkflowEngine.run()
+  ├── AskOrchestrator → AskAgentLoop
+  └── Emits signals: trace_event, answer_chunk, clarification, complete
+```
+
+Each session runs in its own thread via `ConversationRunState`. The desktop supports
+N concurrent sessions (configurable via **Max concurrent runs** in Settings → General).
+When all slots are busy, new runs queue. `run_state.remap()` migrates all state dict
+entries when a temporary slot key is replaced by the server session ID.
+
+### Session persistence
+
+Chat sessions are saved as JSON under `~/.dbaide/sessions/{connection}/`. Each turn
+records the question, answer, SQL, trace events, clarifications, and disclosed tables.
+When a session is reopened, `session_turns` and `active_criteria` from prior turns feed
+into the next `WorkflowRequest`, giving the agent carry-forward memory of what you
+confirmed.
+
+### Composer attachments
+
+The **+** button in the composer lets users pin databases or tables as context. These
+are converted into `schema_scope` on `WorkflowRequest` (so `discover_schema` prioritises
+them) and persisted as `ui_attachments` on the session turn for display when reloading.
+Chips appear above the toolbar and can be individually removed.
+
+---
+
 ## Extensibility
 
 **Add a database adapter**
@@ -532,6 +605,11 @@ dbaide queries prod --tail 50
 
 ## Related Docs
 
-- [README.md](../README.md) — quick start and CLI usage
+- [README.md](../README.md) — quick start, CLI usage, and feature overview
+- [CONTRIBUTING.md](../CONTRIBUTING.md) — dev setup, tests, conventions
+- [PACKAGING.md](PACKAGING.md) — PyInstaller builds, CI, and distribution
+- [TEAM.md](TEAM.md) — team operations, troubleshooting, and support
 - Join catalog path: `~/.dbaide/joins/instances/{instance}/joins.json`
 - Asset path: `~/.dbaide/assets/instances/{instance}/`
+- Session path: `~/.dbaide/sessions/{connection}/`
+- Query log path: `~/.dbaide/logs/queries/{connection}.jsonl`

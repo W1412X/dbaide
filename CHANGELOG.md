@@ -6,6 +6,33 @@ All notable changes to DBAide are documented here. The format is loosely based o
 
 ## [Unreleased]
 
+### Fixed
+
+- **Streaming text loss on RuntimeError recovery** — when the answer widget was
+  destroyed mid-stream (PyQt RuntimeError), recreating it reset the accumulated
+  text, losing all chunks received so far. The unnecessary reset is removed;
+  `begin_turn()` handles the normal-path reset.
+- **Schema guard dead code** — an unreachable duplicate CTE check and a redundant
+  condition were removed from `validate_table_refs`, simplifying the logic.
+- **LLM non-streaming JSON decode crash** — `json.JSONDecodeError` (a `ValueError`
+  subclass) escaped the retry loop, crashing the run on malformed model responses.
+  `ValueError` is now caught alongside `URLError`/`TimeoutError`/`OSError`.
+- **Float conversion crash on non-numeric confidence** — `float("high")` in
+  `sql_writer` and `schema_context` raised `ValueError`. Both sites now guard
+  with try-except.
+- **Stale widget references after session switch** — `_live_answer`,
+  `_live_answer_text`, and `_clarification_bar` were not reset in `clear()`,
+  leaving dangling references to deleted widgets.
+- **Composer attach button enabled during execution** — the "+" context button
+  remained clickable while a query was running. It is now disabled alongside the
+  input and model selector.
+- **Port field crash on malformed config** — `int(port)` in `ConnectionForm.load()`
+  could crash the settings dialog on non-numeric port values. Guarded with
+  try-except.
+- **Join editor missing required-field validation** — `_edit()` in the joins tab
+  lacked the same required-field check that `_add()` had. Both now validate that
+  all four endpoint fields are populated.
+
 ## [0.0.6] — 2026-06-08
 
 ### Added
