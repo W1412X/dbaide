@@ -126,7 +126,7 @@ class OpenAICompatibleClient(LLMClient):
                     time.sleep(delay)
                     continue
                 raise last_exc from exc
-            except (urllib.error.URLError, TimeoutError, OSError) as exc:
+            except (urllib.error.URLError, TimeoutError, OSError, ValueError) as exc:
                 last_exc = RuntimeError(f"LLM connection failed: {exc}")
                 if attempt < self.MAX_RETRIES - 1:
                     delay = self.RETRY_BACKOFF[min(attempt, len(self.RETRY_BACKOFF) - 1)]
