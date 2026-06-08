@@ -832,9 +832,9 @@ class DesktopService:
             active_criteria=active_criteria or [],
         )
         # Stash the raw UI attachment chips so _record_session_turn can persist
-        # them alongside schema_scope. Not part of WorkflowRequest's formal API
-        # (the agent only needs schema_scope); this is a display-layer concern.
-        request._ui_attachments = list(payload.get("attachments") or [])  # noqa: SLF001
+        # them alongside schema_scope — the UI restores them as visual tags when
+        # reloading a session.
+        request.ui_attachments = list(payload.get("attachments") or [])
         return request
 
     def _load_session_memory(
@@ -892,7 +892,7 @@ class DesktopService:
             # Persist the user's composer attachments + structured schema_scope so
             # (a) the UI can restore attachment tags when loading the session and
             # (b) the agent can carry forward pinned scope on follow-up turns.
-            attachments = list(getattr(request, "_ui_attachments", None) or [])
+            attachments = list(getattr(request, "ui_attachments", None) or [])
             schema_scope = getattr(request, "schema_scope", None) or {}
             self.sessions.append_turn(conn_name, session_id, make_turn(
                 question=request.question,

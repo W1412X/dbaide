@@ -130,6 +130,7 @@ class WorkflowRequest:
         "limit", "timeout_seconds", "model_name",
         "resume_state", "user_reply", "schema_scope", "stream_answers",
         "session_turns", "active_criteria",
+        "ui_attachments",
     )
 
     def __init__(
@@ -170,6 +171,10 @@ class WorkflowRequest:
         # confirmed criterion stated earlier in the session (binding L2 facts).
         self.session_turns = list(session_turns or [])
         self.active_criteria = list(active_criteria or [])
+        # Raw UI composer chips (db/table the user pinned). Not used by the
+        # agent (it reads schema_scope); kept so the service layer can persist
+        # attachment tags on the session turn for display when reloading.
+        self.ui_attachments: list[dict[str, Any]] = []
 
 
 class QueryPlan:
