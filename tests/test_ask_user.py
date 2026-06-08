@@ -133,6 +133,41 @@ def test_loop_pauses_on_ask_user_and_resumes(tmp_path):
     assert "Grouped by day" in resumed.answer
 
 
+def test_resume_step_numbers_do_not_collide_with_pre_pause(tmp_path):
+    """After an ask_user pause, the resumed run must keep numbering steps from
+    where it left off — otherwise the resumed `decision:1/step:1/…` collide with
+    the pre-pause node ids and TraceModel collapses the resumed steps onto the
+    earlier ones, mangling the trace tree."""
+    db = tmp_path / "app.db"
+    sqlite3.connect(db).execute("CREATE TABLE orders (id INTEGER PRIMARY KEY, created_at TEXT)")
+    conn = ConnectionConfig(name="local", type="sqlite", path=str(db))
+    llm = ClarifyMockLLM()
+    orch = AskOrchestrator(build_adapter(conn), Session(connection=conn), llm)
+    loop = AskAgentLoop(orch)
+
+    pause_events: list[dict] = []
+    orch.progress = lambda ev: pause_events.append(dict(ev))  # type: ignore[assignment]
+    paused = loop.run("order stats", execute=False)
+    assert paused is not None and paused.status == "wait_user"
+
+    # The pause snapshot must carry step_base so resume can continue numbering.
+    step_base = paused.resume_state.get("step_base") if paused.resume_state else None
+    assert isinstance(step_base, int) and step_base >= 1
+
+    resumed_events: list[dict] = []
+    orch.progress = lambda ev: resumed_events.append(dict(ev))  # type: ignore[assignment]
+    resumed = loop.run(
+        "order stats", execute=False, resume_state=paused.resume_state, user_reply="By day",
+    )
+    assert resumed is not None and resumed.status == "completed"
+
+    pre_ids = {ev.get("node_id") for ev in pause_events if ev.get("node_id")}
+    post_ids = {ev.get("node_id") for ev in resumed_events if ev.get("node_id")}
+    # Exclude the loop wrapper node — that one is intentionally the same id ("loop").
+    overlap = (pre_ids & post_ids) - {"loop"}
+    assert overlap == set(), f"resumed node ids collide with pre-pause: {sorted(overlap)}"
+
+
 def test_loop_state_roundtrip(tmp_path):
     db = tmp_path / "app.db"
     sqlite3.connect(db).execute("CREATE TABLE orders (id INTEGER PRIMARY KEY, created_at TEXT)")

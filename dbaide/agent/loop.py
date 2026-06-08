@@ -308,7 +308,13 @@ class AskAgentLoop:
                 reason = result.error or brief_tool_summary(approved_risk_tool, result) or "confirmed_execution_failed"
                 return self._build_failed_response(orch, reason, disclosures_before or [])
 
-        step_no = 1 if approved_risk_sql else 0
+        # Step numbering must be CONTINUOUS across an ask_user pause/resume — node
+        # IDs are derived from step_no (decision:N, step:N), and the trace is one
+        # tree, so resuming from 0 would collide with the pre-pause nodes and
+        # overwrite them in TraceModel. Pick up where the prior run paused.
+        step_no = int(resume_state.get("step_base") or 0) if resume_state else 0
+        if approved_risk_sql:
+            step_no += 1
         recorder = getattr(orch, "llm_recorder", None)
         while runtime.steps_remaining > 0:
             decide_start = recorder.snapshot_len() if recorder else 0
@@ -424,7 +430,9 @@ class AskAgentLoop:
                         stopped = True
                         break
                 if paused:
-                    return self._build_wait_response(orch, state, transcript, disclosures_before or [])
+                    return self._build_wait_response(
+                        orch, state, transcript, disclosures_before or [], step_base=step_no,
+                    )
                 if stopped:
                     break
                 continue
@@ -453,7 +461,9 @@ class AskAgentLoop:
             sig = self._run_tool_call(orch, state, transcript, runtime, tool_ctx, decision,
                                       tool_name, args, step_no, llm_start, recorder)
             if sig == "pending":
-                return self._build_wait_response(orch, state, transcript, disclosures_before or [])
+                return self._build_wait_response(
+                    orch, state, transcript, disclosures_before or [], step_base=step_no,
+                )
             if sig == "stop":
                 break
 
@@ -780,6 +790,8 @@ class AskAgentLoop:
         state: LoopState,
         transcript: list[str],
         disclosures_before: list[str],
+        *,
+        step_base: int = 0,
     ) -> AssistantResponse:
         question = orch.run_state.pending_question
         options = list(orch.run_state.pending_options)
@@ -790,6 +802,10 @@ class AskAgentLoop:
             lines.extend(f"- {item}" for item in options)
         answer = "\n".join(lines)
         snapshot = dump_loop_state(orch, transcript=transcript, execute_allowed=state.execute_allowed)
+        # Carry the current step count so resume can keep decision:/step: node IDs
+        # unique across the pause (TraceModel keys nodes by id; duplicate ids would
+        # collapse the resumed steps onto the pre-pause ones).
+        snapshot["step_base"] = int(step_base)
         wait_event = progress_event(
             stage="ask_user",
             title="Waiting for user clarification",
