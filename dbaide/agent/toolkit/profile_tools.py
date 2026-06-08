@@ -5,7 +5,7 @@ from typing import Any
 
 from dbaide.tools.registry import ToolContext, ToolRegistry, ToolResult
 from dbaide.tools.specs import PROFILE_TABLE, COLUMN_STATS
-from dbaide.agent.toolkit.support import _err, _normalize_tool_table, _string_list
+from dbaide.agent.toolkit.support import _err, _normalize_tool_table, _safe_int, _string_list
 
 
 def register(registry: ToolRegistry, orchestrator) -> None:
@@ -16,7 +16,7 @@ def register(registry: ToolRegistry, orchestrator) -> None:
             return ToolResult(ok=False, error=_err("profile_table", "table is required"))
         database, table = _normalize_tool_table(orchestrator, table, database)
         explicit = _string_list(args.get("columns"))
-        offset = max(0, _int(args.get("column_offset"), 0))
+        offset = max(0, _safe_int(args.get("column_offset"), 0))
         # Profiling scans the table per column, so an unbounded auto-profile is costly;
         # window the columns but report the total and how to page so none is hidden.
         if explicit:
@@ -28,7 +28,7 @@ def register(registry: ToolRegistry, orchestrator) -> None:
                 return ToolResult(ok=False, error=_err("profile_table", f"table not found or has no readable columns: {target}"))
             all_names = [c.name for c in cols]
             total_columns = len(all_names)
-            limit = max(1, _int(args.get("column_limit"), 8))
+            limit = max(1, _safe_int(args.get("column_limit"), 8))
             columns = all_names[offset:offset + limit]
             more = (offset + len(columns)) < total_columns
         profiles = orchestrator.profile.profile_table(table, list(columns), database=database)
@@ -60,7 +60,7 @@ def register(registry: ToolRegistry, orchestrator) -> None:
         database, table = _normalize_tool_table(orchestrator, table, database)
         columns = _string_list(args.get("columns")) or None
         metrics = _string_list(args.get("metrics")) or None
-        top_k = max(1, _int(args.get("top_k"), 10))
+        top_k = max(1, _safe_int(args.get("top_k"), 10))
         try:
             stats = orchestrator.profile.column_stats(
                 table, columns, metrics=metrics, database=database, top_k=top_k,
@@ -74,13 +74,6 @@ def register(registry: ToolRegistry, orchestrator) -> None:
 
     registry.register(PROFILE_TABLE, _profile_table)
     registry.register(COLUMN_STATS, _column_stats)
-
-
-def _int(value: Any, default: int) -> int:
-    try:
-        return int(value)
-    except (TypeError, ValueError):
-        return default
 
 
 def _profile_to_dict(profile: Any) -> dict[str, Any]:

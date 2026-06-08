@@ -21,7 +21,7 @@ from dbaide.agent.schema_context import (
 )
 from dbaide.agent.toolkit.support import (
     _collect_disclosed_schemas, _err,
-    _note_working_db, _tables_in_sql,
+    _note_working_db, _safe_float, _tables_in_sql,
     _requested_table_names, _ambiguous_requested_tables,
     _requested_table_labels,
 )
@@ -204,7 +204,7 @@ def register(registry: ToolRegistry, orchestrator) -> None:
         # exactly the low-confidence plans the risk gate must catch. Only a missing
         # (None) confidence falls back to the neutral default.
         _conf = orchestrator.run_state.sql_confidence
-        confidence = 0.7 if _conf is None else float(_conf)
+        confidence = 0.7 if _conf is None else _safe_float(_conf, 0.7)
         table_count = max(1, len(_tables_in_sql(validation.normalized_sql)))
         has_joins = table_count > 1
         join_conf = (
@@ -347,9 +347,20 @@ def register(registry: ToolRegistry, orchestrator) -> None:
                     "database": database,
                 },
             )
+        except PermissionError as exc:
+            # Permission / auth errors are never retryable — the SQL is valid
+            # but the connection lacks privileges.
+            if not exploratory:
+                orchestrator.run_state.sql_feedback = str(exc)
+            return ToolResult(ok=False, error=_err(tool_label, str(exc), retryable=False))
         except Exception as exc:
             if not exploratory:
                 orchestrator.run_state.sql_feedback = str(exc)
+            # Timeout / transient errors MAY be retryable; schema/structural
+            # errors likely are not, but it's hard to classify every adapter
+            # exception. Mark as retryable so the model can adjust its SQL, but
+            # the circuit-breaker in the agent loop will cut off identical
+            # repeated failures.
             return ToolResult(ok=False, error=_err(tool_label, str(exc), retryable=True))
 
     def _explain_sql(args: dict[str, Any], _ctx: ToolContext) -> ToolResult:

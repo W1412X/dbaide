@@ -12,7 +12,8 @@ from dbaide.agent.schema_context import disclosed_schemas_for_tables
 from dbaide.agent.join_validation import validate_join_relations
 from dbaide.joins import USER_JOIN_CONFIDENCE, catalog_record_to_relation
 from dbaide.agent.toolkit.support import (
-    _err, _normalize_tool_table, _relations_payload, _string_list, _targets_from_relations,
+    _err, _normalize_tool_table, _relations_payload, _safe_float, _safe_int,
+    _string_list, _targets_from_relations,
 )
 
 
@@ -42,7 +43,7 @@ def register(registry: ToolRegistry, orchestrator) -> None:
         # are extra work and must be explicitly requested by the main LLM.
         infer_semantic = bool(args.get("infer_semantic", False))
         validate_sample = bool(args.get("validate_sample", False))
-        sample_size = int(args.get("sample_size") or 150)
+        sample_size = _safe_int(args.get("sample_size") or 150, 150)
         try:
             report = JoinEvidenceRetriever(orchestrator).retrieve(
                 request,
@@ -64,7 +65,7 @@ def register(registry: ToolRegistry, orchestrator) -> None:
         if len({t for _, t in targets}) < 2:
             return ToolResult(ok=False, error=_err("validate_joins", "need at least two tables"))
         schemas = disclosed_schemas_for_tables(orchestrator, targets)
-        sample_size = int(args.get("sample_size") or 150)
+        sample_size = _safe_int(args.get("sample_size") or 150, 150)
         validated = validate_join_relations(
             orchestrator,
             relations,
@@ -86,7 +87,7 @@ def register(registry: ToolRegistry, orchestrator) -> None:
             if len(explicit_dbs) == 1:
                 database = next(iter(explicit_dbs))
             tables = [table for _db, table in normalized if table]
-        min_conf = float(args.get("min_confidence") or 0.0)
+        min_conf = _safe_float(args.get("min_confidence") or 0.0, 0.0)
         endpoint = None
         if args.get("table") and args.get("column"):
             ep_db, endpoint = _normalize_endpoint(args)
@@ -117,7 +118,7 @@ def register(registry: ToolRegistry, orchestrator) -> None:
             "ref_column": endpoint["ref_column"],
             "join_type": str(args.get("join_type") or ""),
             "reason": str(args.get("reason") or ""),
-            "confidence": USER_JOIN_CONFIDENCE if source == "user" else float(args.get("confidence") or 0.7),
+            "confidence": USER_JOIN_CONFIDENCE if source == "user" else _safe_float(args.get("confidence") or 0.7, 0.7),
         }
         record = orchestrator.join_catalog.add(
             orchestrator.instance,

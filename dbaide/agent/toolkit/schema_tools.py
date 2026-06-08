@@ -12,7 +12,7 @@ from dbaide.tools.specs import (
 from dbaide.agent.schema_context import apply_column_notes, object_notes_for_tables
 from dbaide.agent.toolkit.support import (
     _err, _note_working_db, _remember_table_schema, _disclosed_table_names,
-    _normalize_tool_table, _string_list,
+    _normalize_tool_table, _safe_int, _string_list,
 )
 from dbaide.models import ColumnInfo
 
@@ -64,7 +64,7 @@ def register(registry: ToolRegistry, orchestrator) -> None:
                 focus_terms=_string_list(args.get("focus_terms")),
                 scope=args.get("scope") if isinstance(args.get("scope"), dict) else None,
                 need=str(args.get("need") or ""),
-                limit=int(args.get("limit") or 64),
+                limit=_safe_int(args.get("limit") or 64, 64),
             )
         except Exception as exc:
             logger.warning("retrieve_schema_context_failed: %s", exc)

@@ -2,6 +2,7 @@ from dbaide.validation.sql_guard import SQLGuard, _strip_strings_and_comments
 from dbaide.validation.schema_guard import SchemaGuard
 from dbaide.validation.sql_cleanup import strip_function_from_keywords
 from dbaide.agent.loop import LoopState, ToolCallRecord, _inject_stuck_loop_hint
+from dbaide.agent.toolkit.support import _safe_int, _safe_float, _tables_in_sql
 from dbaide.core.workflow import _extract_tables as workflow_extract_tables
 from dbaide.context.disclosure import DisclosureContext
 from dbaide.models import TableInfo
@@ -369,3 +370,58 @@ class TestStuckLoopCircuitBreaker:
         _inject_stuck_loop_hint(state, transcript)
         # Last call succeeded, so all 3 are NOT all failures
         assert len(transcript) == 0
+
+
+class TestSafeTypeConversion:
+    """_safe_int and _safe_float must absorb bad LLM input."""
+
+    def test_safe_int_valid(self):
+        assert _safe_int("42", 0) == 42
+        assert _safe_int(42, 0) == 42
+        assert _safe_int(3.7, 0) == 3
+
+    def test_safe_int_invalid_returns_default(self):
+        assert _safe_int("large", 150) == 150
+        assert _safe_int("5000rows", 150) == 150
+        assert _safe_int(None, 150) == 150
+        assert _safe_int([], 150) == 150
+        assert _safe_int("", 150) == 150
+
+    def test_safe_float_valid(self):
+        assert _safe_float("0.7", 0.0) == 0.7
+        assert _safe_float(0.5, 0.0) == 0.5
+        assert _safe_float(1, 0.0) == 1.0
+
+    def test_safe_float_invalid_returns_default(self):
+        assert _safe_float("high", 0.7) == 0.7
+        assert _safe_float("0.5abc", 0.7) == 0.7
+        assert _safe_float(None, 0.7) == 0.7
+        assert _safe_float([], 0.7) == 0.7
+
+    def test_safe_float_zero_preserved(self):
+        """A genuine 0.0 must NOT be replaced by default."""
+        assert _safe_float(0.0, 0.7) == 0.0
+        assert _safe_float("0.0", 0.7) == 0.0
+
+
+class TestTablesInSqlExtractCleanup:
+    """support._tables_in_sql must not be tricked by SQL function FROM."""
+
+    def test_extract_from_ignored(self):
+        tables = _tables_in_sql(
+            "SELECT EXTRACT(YEAR FROM created_at) FROM orders"
+        )
+        assert "orders" in tables
+        assert "created_at" not in tables
+
+    def test_trim_from_ignored(self):
+        tables = _tables_in_sql("SELECT TRIM(' ' FROM name) FROM users")
+        assert "users" in tables
+        assert "name" not in tables
+
+    def test_substring_from_ignored(self):
+        tables = _tables_in_sql(
+            "SELECT SUBSTRING(name FROM 1 FOR 3) FROM users"
+        )
+        assert "users" in tables
+        assert "name" not in tables

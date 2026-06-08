@@ -39,7 +39,7 @@ def _relations_payload(relations: list[dict[str, Any]]) -> dict[str, Any]:
     declared = sum(1 for r in relations if str(r.get("source") or "") in {"foreign_key", "agent", "user"})
     semantic = sum(1 for r in relations if r.get("source") == "semantic")
     catalog = sum(1 for r in relations if r.get("catalog") or str(r.get("source") or "") in {"user", "agent"})
-    validated = sum(1 for r in relations if float(r.get("confidence") or 0) >= 0.35)
+    validated = sum(1 for r in relations if _safe_float(r.get("confidence") or 0, 0.0) >= 0.35)
     return {
         "relations": relations,
         "count": len(relations),
@@ -187,8 +187,35 @@ def _err(stage: str, message: str, *, retryable: bool = False) -> DBAideError:
     )
 
 
+# ── Safe type conversion helpers ──────────────────────────────────────────
+# LLMs sometimes pass non-numeric strings for int/float parameters (e.g.
+# "large", "high"). Bare int()/float() would raise ValueError and crash the
+# agent loop. These wrappers absorb bad input silently.
+
+
+def _safe_int(value: Any, default: int) -> int:
+    """Convert *value* to int, returning *default* on failure."""
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return default
+
+
+def _safe_float(value: Any, default: float) -> float:
+    """Convert *value* to float, returning *default* on failure."""
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return default
+
+
 def _tables_in_sql(sql: str) -> list[str]:
-    tokens = sql.replace("\n", " ").replace(",", " ").split()
+    from dbaide.validation.sql_cleanup import strip_function_from_keywords
+
+    # Strip FROM inside SQL functions (EXTRACT, TRIM, SUBSTRING) so that
+    # column names are not mistaken for table references.
+    cleaned = strip_function_from_keywords(sql)
+    tokens = cleaned.replace("\n", " ").replace(",", " ").split()
     tables: list[str] = []
     for index, token in enumerate(tokens[:-1]):
         if token.lower() in {"from", "join"}:
