@@ -5,6 +5,7 @@ import re
 
 from dbaide.core.result import ValidationReport
 from dbaide.models import ValidationIssue, ValidationResult
+from dbaide.validation.sql_cleanup import strip_function_from_keywords
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -231,17 +232,20 @@ class SQLGuard:
     def _extract_tables(self, sql: str) -> set[str]:
         """Extract table names from SQL (heuristic)."""
         tables = set()
+        # Strip FROM inside SQL functions (EXTRACT, TRIM, SUBSTRING) so that
+        # column names are not mistaken for table references.
+        cleaned = strip_function_from_keywords(sql)
         # FROM clause
-        for match in re.finditer(r"\bfrom\s+(\w+)", sql):
+        for match in re.finditer(r"\bfrom\s+(\w+)", cleaned):
             tables.add(match.group(1).lower())
         # JOIN clause
-        for match in re.finditer(r"\bjoin\s+(\w+)", sql):
+        for match in re.finditer(r"\bjoin\s+(\w+)", cleaned):
             tables.add(match.group(1).lower())
         # UPDATE clause
-        for match in re.finditer(r"\bupdate\s+(\w+)", sql):
+        for match in re.finditer(r"\bupdate\s+(\w+)", cleaned):
             tables.add(match.group(1).lower())
         # INSERT INTO
-        for match in re.finditer(r"\binto\s+(\w+)", sql):
+        for match in re.finditer(r"\binto\s+(\w+)", cleaned):
             tables.add(match.group(1).lower())
         return tables
 

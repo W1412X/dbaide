@@ -331,7 +331,12 @@ def _trace_kind(actor: str) -> TraceKind:
 
 
 def _extract_tables(sql: str) -> list[str]:
-    tokens = sql.replace("\n", " ").replace(",", " ").split()
+    from dbaide.validation.sql_cleanup import strip_function_from_keywords
+
+    # Strip FROM inside SQL functions (EXTRACT, TRIM, SUBSTRING) so that
+    # column names are not mistaken for table references.
+    cleaned = strip_function_from_keywords(sql)
+    tokens = cleaned.replace("\n", " ").replace(",", " ").split()
     tables: list[str] = []
     for index, token in enumerate(tokens[:-1]):
         if token.lower() in {"from", "join"}:

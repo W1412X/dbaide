@@ -172,3 +172,67 @@ def test_both_session_tools_are_batchable_and_in_loop_set():
     for name in ("retrieve_turn", "list_earlier_turns"):
         assert name in BATCHABLE_TOOLS, f"{name} should be batchable (read-only, no pause)"
         assert name in LOOP_DECISION_TOOL_NAMES, f"{name} should be exposed to the loop LLM"
+
+
+def test_prior_turns_header_hint_uses_offset_zero(tmp_path):
+    """The [Prior turns] header should suggest offset=0 for older turns, not
+    offset=window_size (which overlaps with the visible window)."""
+    orch = _orch(tmp_path)
+    orch._reset_loop_state("q", "", True)
+    orch.session_turns = [
+        {"question": f"q{i}", "answer_markdown": f"a{i}", "selected_sql": "",
+         "status": "completed"}
+        for i in range(5)
+    ]
+    prompt = DecisionPromptBuilder(orch).user_prompt(_state("q"), [])
+    # Should suggest offset=0, NOT offset=<window_size>
+    assert "list_earlier_turns(offset=0)" in prompt
+    assert "list_earlier_turns(offset=3)" not in prompt
+
+
+def test_retrieve_turn_works_with_empty_optional_fields(tmp_path):
+    """Turns persisted before session memory feature have no clarifications or
+    disclosed_tables fields — the tools should handle None gracefully."""
+    orch = _orch(tmp_path)
+    orch._reset_loop_state("q", "", True)
+    orch.session_turns = [
+        {"question": "old question", "answer_markdown": "old answer",
+         "selected_sql": "", "status": "completed"},
+        # Note: no clarifications, no disclosed_tables keys at all
+    ]
+    reg = build_tool_registry(orch)
+    r = reg.invoke("retrieve_turn", {"turn_id": "t1"}, ToolContext())
+    assert r.ok
+    assert r.data["clarifications"] == []
+    assert r.data["disclosed_tables"] == []
+
+
+def test_list_earlier_turns_clamps_negative_offset_and_zero_limit(tmp_path):
+    """Boundary: negative offset → 0; limit=0 → 1."""
+    orch = _orch(tmp_path)
+    orch._reset_loop_state("q", "", True)
+    orch.session_turns = [
+        {"question": "q1", "answer_markdown": "a1", "status": "completed"},
+    ]
+    reg = build_tool_registry(orch)
+    r = reg.invoke("list_earlier_turns", {"offset": -5, "limit": 0}, ToolContext())
+    assert r.ok
+    assert r.data["total"] == 1
+    assert len(r.data["turns"]) == 1  # limit clamped to 1
+
+
+def test_no_prior_turns_block_when_session_empty(tmp_path):
+    """First turn in a session: no session_turns → no [Prior turns] section."""
+    orch = _orch(tmp_path)
+    orch._reset_loop_state("first question", "", True)
+    orch.session_turns = []
+    prompt = DecisionPromptBuilder(orch).user_prompt(_state("first question"), [])
+    assert "[Prior turns in this session]" not in prompt
+
+
+def test_active_criteria_not_seeded_when_empty(tmp_path):
+    """If there are no active criteria, clarifications should start empty."""
+    orch = _orch(tmp_path)
+    orch.active_criteria = []
+    orch._reset_loop_state("q", "", True)
+    assert orch.run_state.clarifications == []

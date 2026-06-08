@@ -199,7 +199,7 @@ def _prior_turns_block(orchestrator: Any) -> str:
     earlier = len(turns) - len(window)
     lines = [f"[Prior turns in this session]  (showing {len(window)} of {len(turns)}; "
              f"use retrieve_turn(turn_id) for clarifications/full SQL/full answer, "
-             f"list_earlier_turns(offset={len(window)}) for older turns)"]
+             f"list_earlier_turns(offset=0) for older turns)"]
     base_index = earlier  # so the most recent gets the highest tN id
     for i, turn in enumerate(window):
         idx = base_index + i + 1

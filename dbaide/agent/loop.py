@@ -64,6 +64,10 @@ def _risk_reply_confirms(reply: str) -> bool:
 
 RESULT_PREVIEW_LIMIT = 1400
 
+# Circuit-breaker: if the same tool fails with the same error this many
+# consecutive times, inject a strong hint so the model stops retrying.
+_STUCK_LOOP_THRESHOLD = 3
+
 
 class LoopDecisionError(RuntimeError):
     """LLM returned an invalid or empty loop decision."""
@@ -536,6 +540,12 @@ class AskAgentLoop:
         brief = brief_tool_summary(tool_name, result)
         state.calls.append(ToolCallRecord(tool=tool_name, args=args, ok=result.ok, summary=summary))
         transcript.append(f"Tool `{tool_name}` → {summary}")
+        # ── Circuit-breaker: detect repeated identical failures ──
+        # If the last N calls are the same tool with the same error, the model
+        # is stuck retrying a validation bug.  Inject explicit guidance so it
+        # stops wasting the step budget.
+        if not result.ok:
+            _inject_stuck_loop_hint(state, transcript)
         artifacts: list[str] = []
         data_for_memory = result.data if isinstance(result.data, dict) else {}
         if result.error:
@@ -887,6 +897,29 @@ def _list_update_items(value: Any) -> list[Any]:
     still provide valid structured updates.
     """
     return value if isinstance(value, list) else []
+
+
+def _inject_stuck_loop_hint(state: LoopState, transcript: list[str]) -> None:
+    """If the last N calls are the same tool with the same error, inject a
+    transcript hint telling the model it's stuck.
+
+    This prevents the model from wasting the entire step budget retrying a
+    validation bug (e.g. the SchemaGuard EXTRACT/FROM false-positive that
+    caused 66 identical retries in production).
+    """
+    n = _STUCK_LOOP_THRESHOLD
+    recent = state.calls[-n:]
+    if len(recent) < n:
+        return
+    if all(not r.ok for r in recent) and len({r.tool for r in recent}) == 1 and len({r.summary for r in recent}) == 1:
+        logger.warning("stuck_loop_detected tool=%s repeats=%d", recent[0].tool, n)
+        transcript.append(
+            f"WARNING: tool `{recent[0].tool}` has failed {n} consecutive times "
+            f"with the same error. This is likely a validation limitation, not "
+            f"a fixable SQL issue. DO NOT retry the same approach — either try "
+            f"a fundamentally different SQL structure, use a different tool, "
+            f"or call finish with an explanation of the limitation."
+        )
 
 
 def _looks_cancelled(exc: Exception) -> bool:

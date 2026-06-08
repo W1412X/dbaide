@@ -762,12 +762,16 @@ class DesktopService:
         in_session_id = str(payload.get("session_id") or "")
         database = str(payload.get("database") or "")
         # Session memory: load every completed turn already in this chat session
-        # so the agent gets [Prior turns] context and L2 carry-over criteria. Skip
-        # this when resuming an ask_user pause — the same in-flight turn is just
-        # continuing, the prior-turn context already shaped it.
+        # so the agent gets [Prior turns] context and L2 carry-over criteria.
+        # On resume (ask_user pause continuing), we still load the TURNS so that
+        # retrieve_turn / list_earlier_turns tools work and the [Prior turns]
+        # prompt section stays consistent — but skip active_criteria because
+        # those were already seeded into clarifications before the pause and
+        # are captured in the loop-state snapshot (re-seeding would double-count).
+        is_resume = bool(payload.get("resume_state") or payload.get("user_reply"))
         session_turns, active_criteria = self._load_session_memory(
             conn.name, in_session_id,
-            skip=bool(payload.get("resume_state") or payload.get("user_reply")),
+            skip_criteria=is_resume,
         )
         request = self._build_request(
             payload, connection_name=conn.name, database=database,
@@ -820,7 +824,7 @@ class DesktopService:
         )
 
     def _load_session_memory(
-        self, conn_name: str, session_id: str, *, skip: bool,
+        self, conn_name: str, session_id: str, *, skip_criteria: bool = False,
     ) -> tuple[list[dict[str, Any]], list[str]]:
         """Return (session_turns, active_criteria) for the agent's session memory.
 
@@ -830,17 +834,21 @@ class DesktopService:
         - active_criteria: dedup'd union of every confirmed criterion across the
           session. The most-recent occurrence wins (later turns can refine an
           earlier statement). These are seeded into the new run's clarifications.
-        - skip=True for resume runs: an ask_user pause is one in-flight turn, not a
-          new one — the prior context already shaped it; injecting again would
-          double-count it via clarifications + prior-turn block.
+        - skip_criteria=True for resume runs: an ask_user pause is one in-flight
+          turn; criteria were already seeded before the pause and live in the
+          loop-state snapshot. Re-seeding would double-count. But turns are always
+          loaded so the retrieve_turn / list_earlier_turns tools stay operational
+          and the [Prior turns] prompt section is consistent across pause/resume.
         """
-        if skip or not session_id:
+        if not session_id:
             return [], []
         session = self.sessions.load(conn_name, session_id)
         if not isinstance(session, dict):
             return [], []
         all_turns = [t for t in (session.get("turns") or []) if isinstance(t, dict)]
         completed = [t for t in all_turns if str(t.get("status") or "") == "completed"]
+        if skip_criteria:
+            return completed, []
         # Dedupe criteria preserving order, but later occurrences override earlier
         # (so a follow-up turn that refined "all 2024" → "Q4 2024" sticks).
         seen: dict[str, int] = {}

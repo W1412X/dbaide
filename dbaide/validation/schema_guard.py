@@ -4,6 +4,7 @@ import re
 
 from dbaide.context.disclosure import DisclosureContext
 from dbaide.models import ValidationIssue, ValidationResult
+from dbaide.validation.sql_cleanup import strip_function_from_keywords
 
 
 class SchemaGuard:
@@ -35,9 +36,12 @@ class SchemaGuard:
 
 def _table_refs(sql: str) -> list[str]:
     refs: list[str] = []
+    # Strip the FROM keyword inside SQL functions (EXTRACT, TRIM, SUBSTRING)
+    # so the regex below doesn't mistake column names for table references.
+    cleaned = strip_function_from_keywords(sql)
     ident = r"(?:[A-Za-z_][\w$]*|`[^`]+`|\"[^\"]+\"|\[[^\]]+\])"
     pattern = re.compile(rf"\b(?:from|join)\s+({ident}(?:\s*\.\s*{ident})*)", re.I)
-    for match in pattern.finditer(sql):
+    for match in pattern.finditer(cleaned):
         refs.append(_normalize_ref(match.group(1).strip()))
     return refs
 

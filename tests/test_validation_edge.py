@@ -1,5 +1,8 @@
 from dbaide.validation.sql_guard import SQLGuard, _strip_strings_and_comments
 from dbaide.validation.schema_guard import SchemaGuard
+from dbaide.validation.sql_cleanup import strip_function_from_keywords
+from dbaide.agent.loop import LoopState, ToolCallRecord, _inject_stuck_loop_hint
+from dbaide.core.workflow import _extract_tables as workflow_extract_tables
 from dbaide.context.disclosure import DisclosureContext
 from dbaide.models import TableInfo
 
@@ -148,6 +151,42 @@ class TestSchemaGuardEdgeCases:
         result = SchemaGuard().validate('SELECT * FROM "main"."users"', ctx)
         assert result.ok
 
+    def test_extract_from_not_mistaken_for_table(self):
+        """EXTRACT(YEAR FROM col) uses FROM as function syntax, not as a table
+        reference. The schema guard must not reject it as 'undisclosed table: col'.
+        This was the root cause of a production infinite-loop (66 retries)."""
+        ctx = DisclosureContext()
+        ctx.record_tables([TableInfo(name="order")], instance="local", database="order_data")
+        sql = (
+            'SELECT EXTRACT(YEAR FROM order_created_at) AS year, '
+            'EXTRACT(MONTH FROM order_created_at) AS month, '
+            'SUM(quantity) AS total '
+            'FROM order_data."order" '
+            'WHERE order_created_at >= \'2025-01-01\' '
+            'GROUP BY year, month'
+        )
+        result = SchemaGuard().validate(sql, ctx)
+        assert result.ok, f"False positive: {[i.message for i in result.issues]}"
+
+    def test_trim_from_not_mistaken_for_table(self):
+        """TRIM(chars FROM col) is another SQL function that uses FROM."""
+        ctx = DisclosureContext()
+        ctx.record_tables([TableInfo(name="users")], instance="local", database="main")
+        sql = "SELECT TRIM(' ' FROM name) FROM users"
+        result = SchemaGuard().validate(sql, ctx)
+        assert result.ok, f"False positive: {[i.message for i in result.issues]}"
+
+    def test_real_table_ref_still_validated_alongside_extract(self):
+        """EXTRACT in the same SQL shouldn't suppress real table validation."""
+        ctx = DisclosureContext()
+        ctx.record_tables([TableInfo(name="users")], instance="local", database="main")
+        sql = (
+            'SELECT EXTRACT(YEAR FROM created_at) FROM nonexistent'
+        )
+        result = SchemaGuard().validate(sql, ctx)
+        assert not result.ok
+        assert any("nonexistent" in i.message for i in result.issues)
+
     def test_duplicate_bare_table_requires_qualification(self):
         ctx = DisclosureContext()
         ctx.record_tables([TableInfo(name="orders")], instance="local", database="sales")
@@ -158,3 +197,175 @@ class TestSchemaGuardEdgeCases:
 
         assert not bare.ok
         assert qualified.ok
+
+    def test_substring_from_not_mistaken_for_table(self):
+        """SUBSTRING(col FROM n FOR m) is SQL-standard syntax using FROM."""
+        ctx = DisclosureContext()
+        ctx.record_tables([TableInfo(name="users")], instance="local", database="main")
+        sql = "SELECT SUBSTRING(name FROM 1 FOR 3) FROM users"
+        result = SchemaGuard().validate(sql, ctx)
+        assert result.ok, f"False positive: {[i.message for i in result.issues]}"
+
+
+class TestWorkflowExtractTables:
+    """workflow.py::_extract_tables must not be tricked by SQL function FROM."""
+
+    def test_extract_from_ignored(self):
+        tables = workflow_extract_tables(
+            "SELECT EXTRACT(YEAR FROM created_at) FROM orders"
+        )
+        assert "orders" in tables
+        assert "created_at" not in tables
+
+    def test_trim_from_ignored(self):
+        tables = workflow_extract_tables(
+            "SELECT TRIM(' ' FROM name) FROM users"
+        )
+        assert "users" in tables
+        assert "name" not in tables
+
+    def test_substring_from_ignored(self):
+        tables = workflow_extract_tables(
+            "SELECT SUBSTRING(name FROM 1 FOR 3) FROM users"
+        )
+        assert "users" in tables
+        assert "name" not in tables
+
+
+class TestSQLGuardExtractTables:
+    """SQLGuard._extract_tables must not be tricked by SQL function FROM."""
+
+    def test_extract_from_ignored(self):
+        guard = SQLGuard()
+        tables = guard._extract_tables(
+            "select extract(year from created_at) from orders"
+        )
+        assert "orders" in tables
+        assert "created_at" not in tables
+
+    def test_trim_from_ignored(self):
+        guard = SQLGuard()
+        tables = guard._extract_tables(
+            "select trim(' ' from name) from users"
+        )
+        assert "users" in tables
+        assert "name" not in tables
+
+    def test_substring_from_ignored(self):
+        guard = SQLGuard()
+        tables = guard._extract_tables(
+            "select substring(name from 1 for 3) from users"
+        )
+        assert "users" in tables
+        assert "name" not in tables
+
+    def test_real_tables_still_extracted(self):
+        guard = SQLGuard()
+        tables = guard._extract_tables(
+            "select extract(year from created_at) from orders join users on orders.uid = users.id"
+        )
+        assert "orders" in tables
+        assert "users" in tables
+        assert "created_at" not in tables
+
+
+class TestStripFunctionFromKeywords:
+    """Shared cleanup utility covers all known SQL-function FROM usages."""
+
+    def test_extract(self):
+        cleaned = strip_function_from_keywords("EXTRACT(YEAR FROM created_at)")
+        assert "FROM" not in cleaned.upper().replace("EXTRACT(", "")
+
+    def test_trim(self):
+        cleaned = strip_function_from_keywords("TRIM(' ' FROM name)")
+        assert cleaned.count("FROM") == 0 or "TRIM(" in cleaned
+
+    def test_substring(self):
+        cleaned = strip_function_from_keywords("SUBSTRING(col FROM 1 FOR 3)")
+        assert cleaned.count("FROM") == 0 or "SUBSTRING(" in cleaned
+
+    def test_preserves_real_from(self):
+        sql = "SELECT EXTRACT(YEAR FROM created_at) FROM orders"
+        cleaned = strip_function_from_keywords(sql)
+        assert "FROM orders" in cleaned
+
+    def test_multiple_functions_cleaned(self):
+        sql = (
+            "SELECT EXTRACT(YEAR FROM d), TRIM(' ' FROM n), "
+            "SUBSTRING(s FROM 1 FOR 3) FROM t"
+        )
+        cleaned = strip_function_from_keywords(sql)
+        # Only the real FROM (before "t") should remain
+        # Count how many FROM remain — should be exactly 1 (the table ref)
+        from_count = len(__import__("re").findall(r"\bFROM\b", cleaned, __import__("re").I))
+        assert from_count == 1, f"Expected 1 FROM, got {from_count} in: {cleaned}"
+
+    def test_case_insensitive(self):
+        cleaned = strip_function_from_keywords("extract(year from col)")
+        assert "from" not in cleaned.lower().replace("extract(", "")
+
+
+class TestStuckLoopCircuitBreaker:
+    """Circuit-breaker injects a hint when the same tool fails repeatedly."""
+
+    def _make_state(self, calls):
+        state = LoopState(question="test", database="", execute_allowed=True)
+        state.calls = calls
+        return state
+
+    def test_hint_injected_after_three_identical_failures(self):
+        calls = [
+            ToolCallRecord(tool="execute_readonly_sql", args={"sql": "SELECT 1"}, ok=False, summary="ERROR: undisclosed table: x"),
+            ToolCallRecord(tool="execute_readonly_sql", args={"sql": "SELECT 1"}, ok=False, summary="ERROR: undisclosed table: x"),
+            ToolCallRecord(tool="execute_readonly_sql", args={"sql": "SELECT 1"}, ok=False, summary="ERROR: undisclosed table: x"),
+        ]
+        state = self._make_state(calls)
+        transcript: list[str] = []
+        _inject_stuck_loop_hint(state, transcript)
+        assert len(transcript) == 1
+        assert "WARNING" in transcript[0]
+        assert "execute_readonly_sql" in transcript[0]
+
+    def test_no_hint_with_only_two_failures(self):
+        calls = [
+            ToolCallRecord(tool="execute_readonly_sql", args={"sql": "SELECT 1"}, ok=False, summary="ERROR: x"),
+            ToolCallRecord(tool="execute_readonly_sql", args={"sql": "SELECT 1"}, ok=False, summary="ERROR: x"),
+        ]
+        state = self._make_state(calls)
+        transcript: list[str] = []
+        _inject_stuck_loop_hint(state, transcript)
+        assert len(transcript) == 0
+
+    def test_no_hint_when_errors_differ(self):
+        calls = [
+            ToolCallRecord(tool="execute_readonly_sql", args={"sql": "SELECT 1"}, ok=False, summary="ERROR: undisclosed table: x"),
+            ToolCallRecord(tool="execute_readonly_sql", args={"sql": "SELECT 1"}, ok=False, summary="ERROR: syntax error"),
+            ToolCallRecord(tool="execute_readonly_sql", args={"sql": "SELECT 1"}, ok=False, summary="ERROR: undisclosed table: x"),
+        ]
+        state = self._make_state(calls)
+        transcript: list[str] = []
+        _inject_stuck_loop_hint(state, transcript)
+        assert len(transcript) == 0
+
+    def test_no_hint_when_tools_differ(self):
+        calls = [
+            ToolCallRecord(tool="validate_sql", args={"sql": "SELECT 1"}, ok=False, summary="ERROR: x"),
+            ToolCallRecord(tool="execute_readonly_sql", args={"sql": "SELECT 1"}, ok=False, summary="ERROR: x"),
+            ToolCallRecord(tool="execute_readonly_sql", args={"sql": "SELECT 1"}, ok=False, summary="ERROR: x"),
+        ]
+        state = self._make_state(calls)
+        transcript: list[str] = []
+        _inject_stuck_loop_hint(state, transcript)
+        assert len(transcript) == 0
+
+    def test_no_hint_when_last_call_succeeds(self):
+        calls = [
+            ToolCallRecord(tool="execute_readonly_sql", args={"sql": "SELECT 1"}, ok=False, summary="ERROR: x"),
+            ToolCallRecord(tool="execute_readonly_sql", args={"sql": "SELECT 1"}, ok=False, summary="ERROR: x"),
+            ToolCallRecord(tool="execute_readonly_sql", args={"sql": "SELECT 1"}, ok=True, summary="ok"),
+        ]
+        state = self._make_state(calls)
+        transcript: list[str] = []
+        _inject_stuck_loop_hint(state, transcript)
+        # Last call succeeded, so all 3 are NOT all failures
+        assert len(transcript) == 0
