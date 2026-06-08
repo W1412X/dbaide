@@ -289,34 +289,35 @@ def test_decision_prompt_requires_tool_evidence_before_clarification(tmp_path):
         "allowed",
     )
 
-    # Structure/fact uncertainty must be discovered with tools, never asked.
-    assert "STRUCTURE / FACTS" in prompt
+    # Facts the data can reveal must be discovered with tools, never asked.
+    assert "FACTS the database can reveal" in prompt
     assert "NEVER ask" in prompt
-    assert "table/column existence" in prompt
     assert "retrieve_schema_context" in prompt and "describe_table" in prompt
     assert "retrieve_memory_item" in prompt
     assert "Simplified Chinese" in prompt
 
 
-def test_decision_prompt_requires_business_caliber_clarification(tmp_path):
+def test_decision_prompt_clarifies_intent_the_data_cannot_decide(tmp_path):
     from dbaide.agent.loop import AskAgentLoop, LoopState
 
     orch = _orch(tmp_path)
     loop = AskAgentLoop(orch)
     prompt = loop.prompts.system_prompt(
-        LoopState(question="5月份妥投数量", database="", execute_allowed=True, answer_language="zh"),
+        LoopState(question="q", database="", execute_allowed=True, answer_language="zh"),
         "ask_user: spec",
         "allowed",
     )
 
-    # Business-caliber choices must be confirmed (not guessed) before answering.
-    assert "BUSINESS CALIBER" in prompt
+    # The policy is the general principle (facts vs. intent), not a fixed example list:
+    # an undecidable interpretation that changes the result must be confirmed, not guessed.
+    assert "INTENT the data cannot decide" in prompt
     assert "MUST" in prompt and "ask_user" in prompt
-    assert "which year" in prompt          # under-specified time window
-    assert "Beijing-calendar" in prompt    # reporting day-boundary / timezone
-    assert "妥投数量" in prompt              # metric 口径 (count grain + status mapping)
-    assert "退款率" in prompt               # rate numerator/denominator
-    assert "过高" in prompt                 # qualitative threshold has no fixed cutoff
+    assert "several interpretations" in prompt
+    assert "materially different results" in prompt
+    assert "Never silently pick one default" in prompt
+    # And it must NOT hard-code the user's specific examples as special cases.
+    for example in ("5月", "妥投", "退款率", "Beijing"):
+        assert example not in prompt
 
 
 def test_decision_user_prompt_includes_today_for_relative_periods(tmp_path):
@@ -330,7 +331,7 @@ def test_decision_user_prompt_includes_today_for_relative_periods(tmp_path):
         [],
     )
     assert "Today's date:" in user
-    assert "bare month/quarter with no year is still ambiguous" in user
+    assert "under-specified after using it" in user
 
 
 def test_decision_memory_updates_ignore_non_list_shapes(tmp_path):
