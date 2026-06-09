@@ -6,6 +6,8 @@ All notable changes to DBAide are documented here. The format is loosely based o
 
 ## [Unreleased]
 
+## [0.0.7] — 2026-06-09
+
 ### Added
 
 - **Connection & model import/export** — export a single connection (with joins,
@@ -310,7 +312,8 @@ and a PyQt6 desktop app, sharing one Python core.
   drag-to-Applications)**, **Windows (`.msi` wizard)**, and **Linux (`.tar.gz`)** —
   pushing a `v*` tag cuts a GitHub Release automatically.
 
-[Unreleased]: https://github.com/W1412X/dbaide/compare/v0.0.6...HEAD
+[Unreleased]: https://github.com/W1412X/dbaide/compare/v0.0.7...HEAD
+[0.0.7]: https://github.com/W1412X/dbaide/compare/v0.0.6...v0.0.7
 [0.0.6]: https://github.com/W1412X/dbaide/compare/v0.0.5...v0.0.6
 [0.0.5]: https://github.com/W1412X/dbaide/compare/v0.0.4...v0.0.5
 [0.0.4]: https://github.com/W1412X/dbaide/compare/v0.0.3...v0.0.4
