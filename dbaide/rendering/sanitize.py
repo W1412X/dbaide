@@ -29,8 +29,8 @@ def sanitize_markdown_html(html_text: str) -> str:
     """
     # Remove script tags and content
     html_text = re.sub(r'<script[^>]*>.*?</script>', '', html_text, flags=re.S | re.I)
-    # Remove event handlers
-    html_text = re.sub(r'\bon\w+\s*=\s*["\'][^"\']*["\']', '', html_text, flags=re.I)
+    # Remove event handlers (quoted and unquoted attribute values)
+    html_text = re.sub(r'\bon\w+\s*=\s*(?:["\'][^"\']*["\']|\S+)', '', html_text, flags=re.I)
     # Remove javascript: URLs
     html_text = re.sub(r'javascript\s*:', '', html_text, flags=re.I)
     # Remove data: URLs (except images)

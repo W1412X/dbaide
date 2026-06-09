@@ -26,11 +26,10 @@ def _sql_literal(value: Any, *, dialect: str = "generic") -> str:
     if isinstance(value, (int, float)):
         return str(value)
     s = str(value).replace("'", "''")
-    # MySQL/MariaDB treat backslash as an escape character by default
-    # (unless NO_BACKSLASH_ESCAPES is set), so a trailing \ would break
-    # the literal.  Doubling backslashes is harmless on other dialects.
-    if dialect in ("mysql", "mariadb"):
-        s = s.replace("\\", "\\\\")
+    # A trailing backslash would escape the closing quote on any dialect.
+    # MySQL/MariaDB also interpret \n, \t etc. inside literals, so doubling
+    # is required there; for others it's still necessary to avoid broken SQL.
+    s = s.replace("\\", "\\\\")
     return "'" + s + "'"
 
 
@@ -125,7 +124,8 @@ def _format_cell(value: Any) -> str:
 
 
 def _csv_value(value: Any) -> str:
-    """Format a value for CSV export."""
+    """Format a value for CSV export. NULL is rendered literally so
+    it round-trips distinctly from empty string."""
     if value is None:
-        return ""
+        return "NULL"
     return str(value)
