@@ -1015,6 +1015,9 @@ class MainWindow(QMainWindow):
         dialog.theme_changed.connect(self._change_theme)
         dialog.stream_answers_changed.connect(self._change_stream_answers)
         dialog.debug_trace_changed.connect(self._change_debug_trace)
+        dialog.export_connection.connect(lambda name: self._settings_export_connection(dialog, name))
+        dialog.import_requested.connect(lambda path: self._settings_import_connection(dialog, path))
+        dialog.export_all_requested.connect(lambda: self._settings_export_all(dialog))
         dialog.exec()
 
     def _change_debug_trace(self, enabled: bool) -> None:
@@ -1273,6 +1276,112 @@ class MainWindow(QMainWindow):
             dialog.show_test_result(False, str(exc), target="model")
 
         self._run_background("test_model_profile", payload, on_done, on_error=on_fail)
+
+    # ── import / export ─────────────────────────────────────────────────────--
+
+    def _settings_export_connection(self, dialog: SettingsDialog, name: str) -> None:
+        from PyQt6.QtWidgets import QFileDialog
+        default_name = f"dbaide-{name}.json"
+        path, _ = QFileDialog.getSaveFileName(
+            dialog, _i18n_t("settings.export_conn"), default_name,
+            _i18n_t("import.file_filter"),
+        )
+        if not path:
+            return
+
+        def on_done(result: dict[str, Any]) -> None:
+            import json
+            try:
+                with open(path, "w", encoding="utf-8") as fh:
+                    json.dump(result, fh, ensure_ascii=False, indent=2, default=str)
+                self.toast(_i18n_t("toast.export_ok", path=path))
+            except OSError as exc:
+                self.toast(_i18n_t("error.export_failed", error=str(exc)))
+
+        self._run_background("export_connection", {"connection_name": name}, on_done)
+
+    def _settings_import_connection(self, dialog: SettingsDialog, path: str) -> None:
+        import json
+        try:
+            with open(path, "r", encoding="utf-8") as fh:
+                data = json.load(fh)
+        except (OSError, json.JSONDecodeError) as exc:
+            self.toast(_i18n_t("error.import_failed", error=str(exc)))
+            return
+
+        export_meta = data.get("dbaide_export") or {}
+        export_type = export_meta.get("type", "")
+        if export_type not in ("connection", "full"):
+            self.toast(_i18n_t("error.import_failed", error="Not a valid DBAide export file"))
+            return
+
+        from dbaide.desktop.dialogs.message_dialog import confirm as dialog_confirm
+        if export_type == "connection":
+            conn_name = str((data.get("connection") or {}).get("name") or "")
+            existing_names = {c.get("name") for c in (self.bootstrap.get("connections") or [])}
+            if conn_name and conn_name in existing_names:
+                if not dialog_confirm(dialog, _i18n_t("import.confirm_title"),
+                                      _i18n_t("import.confirm_overwrite", name=conn_name)):
+                    return
+        elif export_type == "full":
+            n_conn = len(data.get("connections") or [])
+            n_model = len(data.get("models") or [])
+            if not dialog_confirm(dialog, _i18n_t("import.confirm_title"),
+                                  _i18n_t("import.confirm_overwrite_full", n=n_conn, m=n_model)):
+                return
+
+        def on_done(result: dict[str, Any]) -> None:
+            if export_type == "connection":
+                name = str(result.get("name") or "")
+                self.toast(_i18n_t("toast.import_ok", name=name))
+                if not sip.isdeleted(dialog):
+                    # Reload connection data.
+                    self._reload_after_import(dialog)
+            else:
+                nc = int(result.get("connections") or 0)
+                nm = int(result.get("models") or 0)
+                self.toast(_i18n_t("toast.import_all_ok", n=nc, m=nm))
+                if not sip.isdeleted(dialog):
+                    self._reload_after_import(dialog)
+
+        def on_error(exc: object) -> None:
+            self.toast(_i18n_t("error.import_failed", error=str(exc)))
+
+        self._run_background("import_connection", {"data": data}, on_done, on_error=on_error)
+
+    def _settings_export_all(self, dialog: SettingsDialog) -> None:
+        from PyQt6.QtWidgets import QFileDialog
+        path, _ = QFileDialog.getSaveFileName(
+            dialog, _i18n_t("settings.export_all"), "dbaide-config.json",
+            _i18n_t("import.file_filter"),
+        )
+        if not path:
+            return
+
+        def on_done(result: dict[str, Any]) -> None:
+            import json
+            try:
+                with open(path, "w", encoding="utf-8") as fh:
+                    json.dump(result, fh, ensure_ascii=False, indent=2, default=str)
+                self.toast(_i18n_t("toast.export_ok", path=path))
+            except OSError as exc:
+                self.toast(_i18n_t("error.export_failed", error=str(exc)))
+
+        self._run_background("export_all", {}, on_done)
+
+    def _reload_after_import(self, dialog: SettingsDialog) -> None:
+        """Refresh the settings dialog and main UI after an import."""
+        def on_loaded(result: dict[str, Any]) -> None:
+            self._on_bootstrap_loaded(result)
+            if not sip.isdeleted(dialog):
+                dialog._connections = {c["name"]: dict(c) for c in (result.get("connections") or [])}
+                dialog._models = {m["name"]: dict(m) for m in (result.get("models") or [])}
+                dialog._default_connection = str(result.get("default_connection") or "")
+                dialog._default_model = str(result.get("default_model") or "default")
+                dialog._reload_connection_list()
+                dialog._reload_model_list()
+
+        self._run_background("bootstrap", {}, on_loaded)
 
     def _run_sql_from(self, editor, sql: str) -> None:
         self._active_sql_doc = editor

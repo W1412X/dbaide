@@ -133,6 +133,9 @@ class SettingsDialog(QDialog):
     theme_changed = pyqtSignal(str)
     stream_answers_changed = pyqtSignal(bool)
     debug_trace_changed = pyqtSignal(bool)
+    export_connection = pyqtSignal(str)       # connection name
+    import_requested = pyqtSignal(str)        # file path
+    export_all_requested = pyqtSignal()
 
     # Numeric resource knobs shown on the Resources page: (key, min, max).
     # The display label comes from i18n ("res.<key>").
@@ -476,14 +479,22 @@ class SettingsDialog(QDialog):
         actions.setSpacing(8)
         self.add_conn_btn = compact_button(_pt("btn.new"), width=72)
         self.add_conn_btn.clicked.connect(self._add_connection)
+        self.import_conn_btn = compact_button(_pt("settings.import"), width=72)
+        self.import_conn_btn.setToolTip(_pt("settings.import_conn_tooltip"))
+        self.import_conn_btn.clicked.connect(self._import_connection)
         self.save_conn_btn = compact_button(_pt("btn.save"), primary=True, width=80)
         self.save_conn_btn.clicked.connect(self._save_connection)
         self.test_conn_btn = compact_button(_pt("btn.test"), width=72)
         self.test_conn_btn.clicked.connect(self._test_connection)
         self.conn_more = MenuButton(_pt("settings.more"), max_width=88)
         self.conn_more.add_action(_pt("settings.set_default"), self._set_default_connection)
+        self.conn_more.add_action(_pt("settings.export_conn"), self._export_connection)
+        self.conn_more.add_separator()
+        self.conn_more.add_action(_pt("settings.export_all"), self._export_all)
+        self.conn_more.add_separator()
         self.conn_more.add_action(_pt("settings.remove"), self._remove_connection)
         actions.addWidget(self.add_conn_btn)
+        actions.addWidget(self.import_conn_btn)
         actions.addStretch(1)
         actions.addWidget(self.save_conn_btn)
         actions.addWidget(self.test_conn_btn)
@@ -711,6 +722,7 @@ class SettingsDialog(QDialog):
             self.save_conn_btn.setEnabled(not busy)
             self.test_conn_btn.setEnabled(not busy)
             self.add_conn_btn.setEnabled(not busy)
+            self.import_conn_btn.setEnabled(not busy)
             key = self._selected_list_key(self.conn_list)
             self.conn_more.setEnabled((not busy) and bool(key) and key != _NEW_CONNECTION_ID)
             if busy:
@@ -731,6 +743,7 @@ class SettingsDialog(QDialog):
             self.test_conn_btn.setEnabled(not busy)
             self.save_conn_btn.setEnabled(not busy)
             self.add_conn_btn.setEnabled(not busy)
+            self.import_conn_btn.setEnabled(not busy)
             key = self._selected_list_key(self.conn_list)
             self.conn_more.setEnabled((not busy) and bool(key) and key != _NEW_CONNECTION_ID)
             if busy:
@@ -754,3 +767,33 @@ class SettingsDialog(QDialog):
         label.setText(f"{prefix}: {message}")
         if not ok:
             dialog_warn(self, _pt("settings.title"), message)
+
+    # ── import / export ─────────────────────────────────────────────────────--
+
+    def _export_connection(self) -> None:
+        key = self._selected_list_key(self.conn_list)
+        if not key or key == _NEW_CONNECTION_ID:
+            dialog_warn(self, _pt("settings.title"), _pt("settings.err.save_conn_first"))
+            return
+        self.export_connection.emit(key)
+
+    def _import_connection(self) -> None:
+        from PyQt6.QtWidgets import QFileDialog
+        path, _ = QFileDialog.getOpenFileName(
+            self, _pt("import.confirm_title"), "",
+            _pt("import.file_filter"),
+        )
+        if path:
+            self.import_requested.emit(path)
+
+    def _export_all(self) -> None:
+        self.export_all_requested.emit()
+
+    def add_imported_connection(self, name: str) -> None:
+        """Update the connection list after a successful import."""
+        # The caller is expected to have already persisted the connection.
+        # Refresh from the parent window's bootstrap data.
+        if name and name not in self._connections:
+            self._connections[name] = {"name": name, "type": "?"}
+        self._selected_conn = name
+        self._reload_connection_list()

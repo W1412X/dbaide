@@ -56,6 +56,9 @@ ACTION_METHODS: tuple[tuple[str, str], ...] = (
     ("resource_defaults", "resource_defaults"),
     ("save_resource_defaults", "save_resource_defaults"),
     ("recent_queries", "recent_queries"),
+    ("export_connection", "export_connection"),
+    ("import_connection", "import_connection"),
+    ("export_all", "export_all"),
 )
 
 

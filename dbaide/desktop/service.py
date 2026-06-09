@@ -1406,5 +1406,264 @@ class DesktopService:
         # Clearing an already-empty note is a no-op, not an error.
         return {"deleted": bool(ok)}
 
+    # ── import / export ──────────────────────────────────────────────────--
+
+    def export_connection(self, payload: dict[str, Any]) -> dict[str, Any]:
+        """Export one connection's config + joins + annotations as a portable dict."""
+        name = str(payload.get("connection_name") or payload.get("name") or "")
+        conn = self.cfg.get_connection(name)
+        include_secrets = bool(payload.get("include_secrets", False))
+
+        conn_dict: dict[str, Any] = {
+            "name": conn.name,
+            "type": conn.type,
+            "database": conn.database,
+            "host": conn.host,
+            "port": conn.port,
+            "user": conn.user,
+            "password_env": conn.password_env,
+            "path": conn.path,
+            "load_profile": conn.load_profile,
+            "session_timezone": conn.session_timezone,
+        }
+        if include_secrets and conn.password:
+            conn_dict["password"] = conn.password
+        # Strip empty values for cleaner output.
+        conn_dict = {k: v for k, v in conn_dict.items() if v not in (None, "", 0)}
+        conn_dict.setdefault("name", conn.name)
+        conn_dict.setdefault("type", conn.type)
+
+        joins = self.join_catalog._load(conn.name)
+        annotations = self.annotations._load(conn.name)
+
+        from datetime import datetime, timezone
+        return {
+            "dbaide_export": {
+                "version": 1,
+                "type": "connection",
+                "exported_at": datetime.now(timezone.utc).isoformat(),
+            },
+            "connection": conn_dict,
+            "joins": joins,
+            "annotations": annotations,
+        }
+
+    def import_connection(self, payload: dict[str, Any]) -> dict[str, Any]:
+        """Import a connection from a previously exported dict."""
+        data = payload.get("data") or {}
+        export_meta = data.get("dbaide_export") or {}
+        if export_meta.get("type") not in ("connection", "full"):
+            raise ValueError("Not a valid DBAide export file")
+
+        if export_meta.get("type") == "full":
+            return self._import_full(data)
+
+        conn_data = data.get("connection") or {}
+        name = str(conn_data.get("name") or "")
+        if not name:
+            raise ValueError("Export file is missing a connection name")
+
+        from dbaide.config import _CONNECTION_KEYS
+        conn_payload = {k: v for k, v in conn_data.items() if k in _CONNECTION_KEYS}
+        conn_payload.setdefault("name", name)
+        conn_payload.setdefault("type", "")
+        conn = ConnectionConfig(**conn_payload)
+        self.cfg.upsert_connection(conn, make_default=False)
+
+        # Merge joins (user-source only; avoid duplicating agent-generated entries).
+        imported_joins = data.get("joins") or []
+        if imported_joins:
+            existing = self.join_catalog._load(conn.name)
+            from dbaide.joins.catalog import relation_endpoint_key
+            existing_keys = set()
+            for j in existing:
+                try:
+                    existing_keys.add(relation_endpoint_key(
+                        j.get("table", ""), j.get("column", ""),
+                        j.get("ref_table", ""), j.get("ref_column", ""),
+                    ))
+                except Exception:
+                    pass
+            added = 0
+            for j in imported_joins:
+                try:
+                    key = relation_endpoint_key(
+                        j.get("table", ""), j.get("column", ""),
+                        j.get("ref_table", ""), j.get("ref_column", ""),
+                    )
+                except Exception:
+                    continue
+                if key not in existing_keys:
+                    existing.append(j)
+                    existing_keys.add(key)
+                    added += 1
+            if added:
+                self.join_catalog._save(conn.name, existing)
+
+        # Merge annotations (upsert by scope+database+table+column).
+        imported_anns = data.get("annotations") or []
+        if imported_anns:
+            for ann in imported_anns:
+                scope = str(ann.get("scope") or "table")
+                database = str(ann.get("database") or "")
+                table = str(ann.get("table") or "")
+                column = str(ann.get("column") or "")
+                note = str(ann.get("note") or "")
+                if not note:
+                    continue
+                self.annotations.add(
+                    conn.name, scope=scope, database=database,
+                    table=table, column=column, note=note,
+                    source=str(ann.get("source") or "user"),
+                )
+
+        self.cfg.reload()
+        return {"name": conn.name, "joins_count": len(imported_joins), "annotations_count": len(imported_anns)}
+
+    def export_all(self, payload: dict[str, Any]) -> dict[str, Any]:
+        """Export all connections, models, joins, annotations and resource defaults."""
+        include_secrets = bool(payload.get("include_secrets", False))
+        from datetime import datetime, timezone
+
+        connections: list[dict[str, Any]] = []
+        all_joins: dict[str, list] = {}
+        all_annotations: dict[str, list] = {}
+
+        for name, conn in self.cfg.connections().items():
+            conn_dict: dict[str, Any] = {
+                "name": conn.name, "type": conn.type, "database": conn.database,
+                "host": conn.host, "port": conn.port, "user": conn.user,
+                "password_env": conn.password_env, "path": conn.path,
+                "load_profile": conn.load_profile, "session_timezone": conn.session_timezone,
+            }
+            if include_secrets and conn.password:
+                conn_dict["password"] = conn.password
+            conn_dict = {k: v for k, v in conn_dict.items() if v not in (None, "", 0)}
+            conn_dict.setdefault("name", conn.name)
+            conn_dict.setdefault("type", conn.type)
+            connections.append(conn_dict)
+
+            joins = self.join_catalog._load(name)
+            if joins:
+                all_joins[name] = joins
+            annotations = self.annotations._load(name)
+            if annotations:
+                all_annotations[name] = annotations
+
+        models: list[dict[str, Any]] = []
+        for name, model in self.cfg.models().items():
+            m_dict: dict[str, Any] = {
+                "name": model.name, "provider": model.provider,
+                "base_url": model.base_url, "api_key_env": model.api_key_env,
+                "model": model.model, "timeout_seconds": model.timeout_seconds,
+            }
+            if include_secrets and model.api_key:
+                m_dict["api_key"] = model.api_key
+            m_dict = {k: v for k, v in m_dict.items() if v not in (None, "", 0)}
+            m_dict.setdefault("name", name)
+            models.append(m_dict)
+
+        resource_defaults = self.cfg.resource_defaults()
+
+        return {
+            "dbaide_export": {
+                "version": 1,
+                "type": "full",
+                "exported_at": datetime.now(timezone.utc).isoformat(),
+            },
+            "connections": connections,
+            "models": models,
+            "resource_defaults": resource_defaults,
+            "joins": all_joins,
+            "annotations": all_annotations,
+        }
+
+    def _import_full(self, data: dict[str, Any]) -> dict[str, Any]:
+        """Import a full export (all connections + models + resource defaults)."""
+        from dbaide.config import _CONNECTION_KEYS, _MODEL_KEYS
+        conn_count = 0
+        model_count = 0
+
+        for conn_data in (data.get("connections") or []):
+            name = str(conn_data.get("name") or "")
+            if not name:
+                continue
+            conn_payload = {k: v for k, v in conn_data.items() if k in _CONNECTION_KEYS}
+            conn_payload.setdefault("name", name)
+            conn_payload.setdefault("type", "")
+            try:
+                conn = ConnectionConfig(**conn_payload)
+                self.cfg.upsert_connection(conn, make_default=False)
+                conn_count += 1
+            except (TypeError, ValueError):
+                continue
+
+        for model_data in (data.get("models") or []):
+            name = str(model_data.get("name") or "")
+            if not name:
+                continue
+            m_payload = {k: v for k, v in model_data.items() if k in _MODEL_KEYS}
+            m_payload.setdefault("name", name)
+            try:
+                model = ModelConfig(**m_payload)
+                self.cfg.upsert_model(model, make_default=False)
+                model_count += 1
+            except (TypeError, ValueError):
+                continue
+
+        # Import per-connection joins and annotations.
+        all_joins = data.get("joins") or {}
+        if isinstance(all_joins, dict):
+            for instance, joins_list in all_joins.items():
+                if isinstance(joins_list, list) and joins_list:
+                    existing = self.join_catalog._load(instance)
+                    from dbaide.joins.catalog import relation_endpoint_key
+                    existing_keys = set()
+                    for j in existing:
+                        try:
+                            existing_keys.add(relation_endpoint_key(
+                                j.get("table", ""), j.get("column", ""),
+                                j.get("ref_table", ""), j.get("ref_column", ""),
+                            ))
+                        except Exception:
+                            pass
+                    for j in joins_list:
+                        try:
+                            key = relation_endpoint_key(
+                                j.get("table", ""), j.get("column", ""),
+                                j.get("ref_table", ""), j.get("ref_column", ""),
+                            )
+                        except Exception:
+                            continue
+                        if key not in existing_keys:
+                            existing.append(j)
+                            existing_keys.add(key)
+                    self.join_catalog._save(instance, existing)
+
+        all_anns = data.get("annotations") or {}
+        if isinstance(all_anns, dict):
+            for instance, anns_list in all_anns.items():
+                if isinstance(anns_list, list):
+                    for ann in anns_list:
+                        note = str(ann.get("note") or "")
+                        if not note:
+                            continue
+                        self.annotations.upsert(
+                            instance,
+                            scope=str(ann.get("scope") or "table"),
+                            database=str(ann.get("database") or ""),
+                            table=str(ann.get("table") or ""),
+                            column=str(ann.get("column") or ""),
+                            note=note,
+                            source=str(ann.get("source") or "user"),
+                        )
+
+        rd = data.get("resource_defaults")
+        if isinstance(rd, dict) and rd:
+            self.cfg.set_resource_defaults(rd)
+
+        self.cfg.reload()
+        return {"connections": conn_count, "models": model_count}
+
     def _safe_llm(self):
         return build_llm_client(self.cfg.model())

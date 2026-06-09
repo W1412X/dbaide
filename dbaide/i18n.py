@@ -524,6 +524,38 @@ _STRINGS: dict[str, dict[str, str]] = {
     "conn.load_profile": {"en": "Load profile", "zh": "负载档位"},
     # Settings page headers
     "settings.connections.subtitle": {"en": "Manage database connections.", "zh": "管理数据库连接。"},
+    "settings.export": {"en": "Export", "zh": "导出"},
+    "settings.import": {"en": "Import", "zh": "导入"},
+    "settings.export_conn": {"en": "Export connection", "zh": "导出连接"},
+    "settings.import_conn": {"en": "Import connection…", "zh": "导入连接…"},
+    "settings.export_conn_tooltip": {
+        "en": "Export this connection's config, joins & notes to a JSON file.",
+        "zh": "将此连接的配置、关联和备注导出为 JSON 文件。",
+    },
+    "settings.import_conn_tooltip": {
+        "en": "Import a previously exported connection file.",
+        "zh": "导入之前导出的连接文件。",
+    },
+    "settings.export_all": {"en": "Export all…", "zh": "导出全部…"},
+    "settings.export_all_tooltip": {
+        "en": "Export all connections, models and settings to a JSON file.",
+        "zh": "将所有连接、模型和设置导出为 JSON 文件。",
+    },
+    "toast.export_ok": {"en": "Exported to {path}", "zh": "已导出到 {path}"},
+    "toast.import_ok": {"en": "Imported connection: {name}", "zh": "已导入连接：{name}"},
+    "toast.import_all_ok": {"en": "Imported {n} connection(s), {m} model(s)", "zh": "已导入 {n} 个连接、{m} 个模型"},
+    "error.import_failed": {"en": "Import failed: {error}", "zh": "导入失败：{error}"},
+    "error.export_failed": {"en": "Export failed: {error}", "zh": "导出失败：{error}"},
+    "import.file_filter": {"en": "DBAide Export (*.json)", "zh": "DBAide 导出文件 (*.json)"},
+    "import.confirm_title": {"en": "Import Connection", "zh": "导入连接"},
+    "import.confirm_overwrite": {
+        "en": 'Connection "{name}" already exists. Overwrite?',
+        "zh": '连接 "{name}" 已存在，是否覆盖？',
+    },
+    "import.confirm_overwrite_full": {
+        "en": "{n} connection(s) and {m} model(s) will be imported. Existing entries with the same name will be overwritten. Continue?",
+        "zh": "将导入 {n} 个连接和 {m} 个模型。同名项将被覆盖。是否继续？",
+    },
     "settings.new_connection": {"en": "New connection", "zh": "新建连接"},
     "settings.new_connection_hint": {
         "en": "Fill the form, then create the connection.",
