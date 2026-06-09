@@ -730,12 +730,18 @@ class SettingsDialog(QDialog):
         if target == "connection":
             self.test_conn_btn.setEnabled(not busy)
             self.save_conn_btn.setEnabled(not busy)
+            self.add_conn_btn.setEnabled(not busy)
+            key = self._selected_list_key(self.conn_list)
+            self.conn_more.setEnabled((not busy) and bool(key) and key != _NEW_CONNECTION_ID)
             if busy:
                 self.conn_test_status.setText(_pt("settings.testing_conn"))
                 self.conn_test_status.setStyleSheet(f"color:{Theme.MUTED}; font-size:12px;")
         else:
             self.test_model_btn.setEnabled(not busy)
             self.save_model_btn.setEnabled(not busy)
+            self.add_model_btn.setEnabled(not busy)
+            key = self._selected_list_key(self.model_list)
+            self.model_more.setEnabled((not busy) and bool(key) and key != _NEW_MODEL_ID)
             if busy:
                 self.model_test_status.setText(_pt("settings.testing_model"))
                 self.model_test_status.setStyleSheet(f"color:{Theme.MUTED}; font-size:12px;")

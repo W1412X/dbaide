@@ -91,6 +91,9 @@ class MainWindow(QMainWindow):
 
     def closeEvent(self, event) -> None:  # noqa: N802
         self.tasks.cancel_all()
+        # Give in-flight pool threads a moment to finish so their callbacks don't
+        # fire on already-destroyed widgets.
+        self.tasks.pool.waitForDone(2000)
         super().closeEvent(event)
 
     def _ensure_run_state(self) -> ConversationRunState:
@@ -784,12 +787,11 @@ class MainWindow(QMainWindow):
         if not conn:
             self.joins.load([])
             return
-        try:
-            result = self.service.dispatch("list_joins", {"connection_name": conn})
+
+        def on_loaded(result: dict[str, Any]) -> None:
             self.joins.load(result.get("joins") or [])
-        except Exception as exc:
-            from dbaide.llm_errors import format_user_error
-            self.toast(format_user_error(exc))
+
+        self._run_background("list_joins", {"connection_name": conn}, on_loaded)
 
     def open_joins(self) -> None:
         """Open the on-demand Joins manager (relocated here from the old side panel)."""
@@ -812,38 +814,38 @@ class MainWindow(QMainWindow):
         conn = self.current_connection()
         if not conn:
             return
-        try:
-            payload = {**payload, "connection_name": conn, "source": "user"}
-            self.service.dispatch("add_join", payload)
+        payload = {**payload, "connection_name": conn, "source": "user"}
+
+        def on_done(_result: object) -> None:
             self.bus.emit(JOINS_CHANGED, {"instance": conn})
             self.toast(_i18n_t("toast.join_saved"))
-        except Exception as exc:
-            from dbaide.llm_errors import format_user_error
-            self.toast(format_user_error(exc))
+            self.refresh_joins()
+
+        self._run_background("add_join", payload, on_done)
 
     def _update_join(self, payload: dict[str, Any]) -> None:
         conn = self.current_connection()
         if not conn:
             return
-        try:
-            self.service.dispatch("update_join", {**payload, "connection_name": conn})
+
+        def on_done(_result: object) -> None:
             self.bus.emit(JOINS_CHANGED, {"instance": conn})
             self.toast(_i18n_t("toast.join_updated"))
-        except Exception as exc:
-            from dbaide.llm_errors import format_user_error
-            self.toast(format_user_error(exc))
+            self.refresh_joins()
+
+        self._run_background("update_join", {**payload, "connection_name": conn}, on_done)
 
     def _delete_join(self, join_id: str) -> None:
         conn = self.current_connection()
         if not conn:
             return
-        try:
-            self.service.dispatch("delete_join", {"connection_name": conn, "id": join_id})
+
+        def on_done(_result: object) -> None:
             self.bus.emit(JOINS_CHANGED, {"instance": conn})
             self.toast(_i18n_t("toast.join_deleted"))
-        except Exception as exc:
-            from dbaide.llm_errors import format_user_error
-            self.toast(format_user_error(exc))
+            self.refresh_joins()
+
+        self._run_background("delete_join", {"connection_name": conn, "id": join_id}, on_done)
 
     def open_sql(self, sql: str) -> None:
         self.tabbar.setCurrentIndex(1)
@@ -1211,14 +1213,13 @@ class MainWindow(QMainWindow):
         self._run_background(action, payload, done, on_error=fail)
 
     def _settings_delete_connection(self, dialog: SettingsDialog, name: str) -> None:
-        try:
-            self.service.dispatch("delete_connection", {"name": name})
+        def on_done(_result: object) -> None:
             if not sip.isdeleted(dialog):
                 dialog.remove_connection_entry(name)
             self.bus.emit(CONNECTIONS_CHANGED, {"instance": name})
             self.toast(_i18n_t("toast.conn_removed"))
-        except Exception as exc:
-            self.fail(exc)
+
+        self._run_background("delete_connection", {"name": name}, on_done)
 
     def _settings_test_connection(self, dialog: SettingsDialog, payload: dict[str, Any]) -> None:
         self._ensure_ui_state().set_settings_busy(dialog, "test", True, target="connection")
@@ -1252,14 +1253,13 @@ class MainWindow(QMainWindow):
         self._run_background("save_model", payload, on_done, on_error=on_fail)
 
     def _settings_delete_model(self, dialog: SettingsDialog, name: str) -> None:
-        try:
-            self.service.dispatch("delete_model", {"name": name})
+        def on_done(_result: object) -> None:
             if not sip.isdeleted(dialog):
                 dialog.remove_model_entry(name)
             self.bus.emit(MODELS_CHANGED, {"model": name})
             self.toast(_i18n_t("toast.model_removed"))
-        except Exception as exc:
-            self.fail(exc)
+
+        self._run_background("delete_model", {"name": name}, on_done)
 
     def _settings_test_model(self, dialog: SettingsDialog, payload: dict[str, Any]) -> None:
         self._ensure_ui_state().set_settings_busy(dialog, "test", True, target="model")
@@ -1409,32 +1409,40 @@ class MainWindow(QMainWindow):
         _instance, database, table, column = self._schema_path_parts(node)
         body = {"connection_name": conn, "scope": kind,
                 "database": database, "table": table, "column": column}
-        try:
-            res = self.service.dispatch("list_annotations", body)
-            records = res.get("annotations") or []
-            current = str(records[0].get("note")) if records else ""
-        except Exception:
-            current = ""
         qualified = ".".join(p for p in (database, table, column) if p) or conn
         label = f"{_i18n_t('notes.scope_' + kind)} · {qualified}"
+
+        def on_loaded(res: dict[str, Any]) -> None:
+            records = res.get("annotations") or []
+            current = str(records[0].get("note")) if records else ""
+            self._show_note_dialog(conn, kind, database, table, body, label, current)
+
+        def on_load_failed(_exc: object) -> None:
+            # Still let the user create a note even if loading existing failed.
+            self._show_note_dialog(conn, kind, database, table, body, label, "")
+
+        self._run_background("list_annotations", body, on_loaded, on_error=on_load_failed)
+
+    def _show_note_dialog(
+        self, conn: str, kind: str, database: str, table: str,
+        body: dict[str, Any], label: str, current: str,
+    ) -> None:
         dialog = NoteEditorDialog(self, target_label=label, note=current)
         if dialog.exec() != QDialog.DialogCode.Accepted:
             return
         text = dialog.value()
-        try:
-            if text:
-                self.service.dispatch("add_annotation", {**body, "note": text})
-                self.toast(_i18n_t("toast.note_saved"))
-            else:
-                self.service.dispatch("delete_annotation", body)
-                self.toast(_i18n_t("toast.note_deleted"))
-        except Exception as exc:
-            self.toast(_i18n_t("error.save_failed"))
-            return
-        # Refresh the affected document if it's open (a column note shows in its
-        # parent table's doc; db/table notes show in their own doc).
         doc_path = f"{conn}.{database}" if kind == "database" else f"{conn}.{database}.{table}"
-        self._refresh_doc_if_open(doc_path)
+
+        if text:
+            def on_saved(_r: object) -> None:
+                self.toast(_i18n_t("toast.note_saved"))
+                self._refresh_doc_if_open(doc_path)
+            self._run_background("add_annotation", {**body, "note": text}, on_saved)
+        else:
+            def on_deleted(_r: object) -> None:
+                self.toast(_i18n_t("toast.note_deleted"))
+                self._refresh_doc_if_open(doc_path)
+            self._run_background("delete_annotation", body, on_deleted)
 
     def _refresh_doc_if_open(self, path: str) -> None:
         if not path or path not in getattr(self.workbench, "_doc_tabs", {}):
@@ -1708,39 +1716,49 @@ class MainWindow(QMainWindow):
         conn = self.current_connection()
         if not conn or not session_id:
             return
-        try:
-            self.service.dispatch("rename_session", {
-                "connection_name": conn, "session_id": session_id, "title": title,
-            })
-        except Exception as exc:  # noqa: BLE001
+
+        def on_done(_result: object) -> None:
+            self._load_sessions(conn)
+
+        def on_error(_exc: object) -> None:
             self.toast(_i18n_t("error.rename_failed"))
-            return
-        self._load_sessions(conn)
+
+        self._run_background(
+            "rename_session",
+            {"connection_name": conn, "session_id": session_id, "title": title},
+            on_done, on_error=on_error,
+        )
 
     def delete_session(self, session_id: str) -> None:
         conn = self.current_connection()
         if not conn or not session_id:
             return
-        try:
-            self.service.dispatch("delete_session", {"connection_name": conn, "session_id": session_id})
-        except Exception as exc:  # noqa: BLE001
+
+        def on_done(_result: object) -> None:
+            # Drop the slot for the deleted session (cancel its run if any).
+            if self.ask_tab.has_slot(session_id):
+                worker = self._runs.pop(session_id, None)
+                if worker and not worker.is_cancelled:
+                    worker.cancel()
+                for d in (self._pending_resume, self._slot_question, self._slot_session, self._slot_trace, self._slot_connection):
+                    d.pop(session_id, None)
+                was_active = session_id == self._active_key
+                self.ask_tab.discard_slot(session_id)
+                if was_active:
+                    self._active_key = ""
+                    self.current_session_id = ""
+                    self.ask_tab.set_has_connection(bool(conn))
+                    self.conversation_controller.sync_work_ui()
+            self._load_sessions(conn)
+
+        def on_error(_exc: object) -> None:
             self.toast(_i18n_t("error.delete_failed"))
-            return
-        # Drop the slot for the deleted session (cancel its run if any).
-        if self.ask_tab.has_slot(session_id):
-            worker = self._runs.pop(session_id, None)
-            if worker and not worker.is_cancelled:
-                worker.cancel()
-            for d in (self._pending_resume, self._slot_question, self._slot_session, self._slot_trace, self._slot_connection):
-                d.pop(session_id, None)
-            was_active = session_id == self._active_key
-            self.ask_tab.discard_slot(session_id)
-            if was_active:
-                self._active_key = ""
-                self.current_session_id = ""
-                self.ask_tab.set_has_connection(bool(conn))
-                self.conversation_controller.sync_work_ui()
-        self._load_sessions(conn)
+
+        self._run_background(
+            "delete_session",
+            {"connection_name": conn, "session_id": session_id},
+            on_done, on_error=on_error,
+        )
 
     def _restore_status_badge(self, *, force: bool = False) -> None:
         if not force and self._assets_busy():

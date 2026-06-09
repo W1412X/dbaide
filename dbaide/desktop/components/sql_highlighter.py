@@ -70,21 +70,33 @@ class SqlHighlighter(QSyntaxHighlighter):
             while it.hasNext():
                 m = it.next()
                 self.setFormat(m.capturedStart(), m.capturedLength(), fmt)
+        # Collect string literal spans so line-comment markers inside strings
+        # (e.g. '--' in 'foo--bar') are not treated as comments.
+        string_spans: list[tuple[int, int]] = []
         for rx in self._string_rules:
             it = rx.globalMatch(text)
             while it.hasNext():
                 m = it.next()
                 self.setFormat(m.capturedStart(), m.capturedLength(), self._string_fmt)
+                string_spans.append((m.capturedStart(), m.capturedEnd()))
         dash = text.find("--")
-        if dash >= 0:
+        if dash >= 0 and not self._inside_string(dash, string_spans):
             self.setFormat(dash, len(text) - dash, self._comment_fmt)
         if self._dialect == "mysql":
             hash_at = text.find("#")
             if hash_at >= 0 and (hash_at == 0 or text[hash_at - 1].isspace()):
-                self.setFormat(hash_at, len(text) - hash_at, self._comment_fmt)
+                if not self._inside_string(hash_at, string_spans):
+                    self.setFormat(hash_at, len(text) - hash_at, self._comment_fmt)
         self._highlight_block_comments(text)
 
+    @staticmethod
+    def _inside_string(pos: int, spans: list[tuple[int, int]]) -> bool:
+        return any(s <= pos < e for s, e in spans)
+
     def _highlight_block_comments(self, text: str) -> None:
+        # Default to "not inside a block comment" so that Qt detects the state
+        # transition when a previously-comment block is edited back to normal code.
+        self.setCurrentBlockState(0)
         start = 0
         if self.previousBlockState() != 1:
             m = self._block_start.match(text)

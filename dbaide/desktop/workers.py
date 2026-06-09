@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import threading
 from typing import Any
 
 from PyQt6 import sip
@@ -17,6 +18,7 @@ class WorkerSignals(QObject):
 
 class ServiceWorker(QRunnable):
     _live: set["ServiceWorker"] = set()
+    _live_lock = threading.Lock()
 
     def __init__(self, service: DesktopService, action: str, payload: dict[str, Any]) -> None:
         super().__init__()
@@ -29,7 +31,8 @@ class ServiceWorker(QRunnable):
         self.payload = dict(payload)
         self.signals = WorkerSignals()
         self._cancelled = False
-        self._live.add(self)
+        with self._live_lock:
+            self._live.add(self)
 
     def cancel(self) -> None:
         self._cancelled = True
@@ -73,4 +76,5 @@ class ServiceWorker(QRunnable):
         except Exception as exc:
             self._safe_emit("failed", exc)
         finally:
-            self._live.discard(self)
+            with self._live_lock:
+                self._live.discard(self)

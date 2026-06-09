@@ -298,6 +298,8 @@ _STRINGS: dict[str, dict[str, str]] = {
     "btn.build": {"en": "Build", "zh": "构建"},
     "btn.new": {"en": "New", "zh": "新建"},
     "btn.create": {"en": "Create", "zh": "创建"},
+    "btn.copy": {"en": "Copy", "zh": "复制"},
+    "btn.close": {"en": "Close", "zh": "关闭"},
     "btn.reset_defaults": {"en": "Reset to defaults", "zh": "恢复默认"},
     # Status / toasts
     "status.ready": {"en": "Ready", "zh": "就绪"},

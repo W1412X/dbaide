@@ -134,8 +134,8 @@ class TaskManager(QObject):
         handle = self._tasks.pop(task_id, None)
         if handle is None:
             return
-        if emitted_action != handle.action:
-            return
+        # Deliver the result even on an unexpected action mismatch — dropping it
+        # would leave UI stuck in a "busy" state with no way to recover.
         callback(result)
 
     def _finish_failed(
