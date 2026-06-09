@@ -65,6 +65,7 @@ def _conn_payload(conn: ConnectionConfig, *, has_assets: bool) -> dict[str, Any]
         "port": conn.port,
         "user": conn.user,
         "password_env": conn.password_env,
+        "has_password": bool(conn.password or conn.password_env),
         "path": conn.path,
         "target": target,
         "load_profile": getattr(conn, "load_profile", "production"),
@@ -1643,7 +1644,7 @@ class DesktopService:
                         note = str(ann.get("note") or "")
                         if not note:
                             continue
-                        self.annotations.upsert(
+                        self.annotations.add(
                             instance,
                             scope=str(ann.get("scope") or "table"),
                             database=str(ann.get("database") or ""),

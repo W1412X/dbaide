@@ -34,6 +34,7 @@ class ResultTableWidget(QWidget):
         self._columns: list[str] = []
         self._rows: list[dict[str, Any]] = []
         self._table_name = "table"  # used by "Copy as INSERT"
+        self._dialect = "generic"
         self._cell_actions_provider = None  # optional (row, col) -> [(label, fn)]
         self._header_actions_provider = None  # optional (section) -> [(label, fn)]
         layout = QVBoxLayout(self)
@@ -221,9 +222,11 @@ class ResultTableWidget(QWidget):
         # Pretty-print JSON values (the popup replaces the old inline value viewer).
         CellValueDialog(column, _pretty_value(value), parent=self).exec()
 
-    def set_table_name(self, name: str) -> None:
+    def set_table_name(self, name: str, *, dialect: str = "") -> None:
         """Hint used by 'Copy as INSERT' (e.g. the browsed table's name)."""
         self._table_name = str(name or "table")
+        if dialect:
+            self._dialect = dialect
 
     def copy_csv(self) -> None:
         QApplication.clipboard().setText(export_csv(self._rows, self._columns))
@@ -235,7 +238,7 @@ class ResultTableWidget(QWidget):
         QApplication.clipboard().setText(export_markdown_table(self._rows, self._columns))
 
     def copy_insert(self) -> None:
-        QApplication.clipboard().setText(export_insert(self._rows, self._columns, table=self._table_name))
+        QApplication.clipboard().setText(export_insert(self._rows, self._columns, table=self._table_name, dialect=self._dialect))
 
     def save_csv(self) -> None:
         self._save_to_file(export_csv(self._rows, self._columns), "csv", "CSV (*.csv)")

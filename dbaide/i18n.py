@@ -703,8 +703,16 @@ _STRINGS: dict[str, dict[str, str]] = {
         "en": "Leave blank to keep existing key",
         "zh": "留空以保留现有密钥",
     },
+    "settings.api_key_saved": {
+        "en": "API key saved · leave blank to keep",
+        "zh": "API 密钥已保存 · 留空以保留",
+    },
     # ── Connection dialog ────────────────────────────────────────────────
     "conn.browse_title": {"en": "Select SQLite database", "zh": "选择 SQLite 数据库"},
+    "conn.password_saved": {
+        "en": "Password saved · leave blank to keep",
+        "zh": "密码已保存 · 留空以保留",
+    },
     "conn.load_profile_tooltip": {
         "en": "production: lowest DB load (light profiling, low concurrency, strict limits).\n"
               "staging: balanced. dev: highest concurrency and limits.",

@@ -239,3 +239,29 @@ class TestRoundTrip:
         assert result["models"] == 1
         assert "a" in svc2.cfg.connections()
         assert "b" in svc2.cfg.connections()
+
+    def test_full_export_with_annotations(self, tmp_path):
+        """Full export/import preserves per-connection annotations."""
+        svc1 = _make_service(tmp_path / "src")
+        svc1.cfg.upsert_connection(ConnectionConfig(name="db1", type="sqlite", path="/x.db"))
+        svc1.annotations.add("db1", scope="table", database="main",
+                             table="users", note="Core user table")
+        svc1.join_catalog.add("db1", {
+            "table": "orders", "column": "user_id",
+            "ref_table": "users", "ref_column": "id",
+        }, source="user", database="main", fingerprint="fp")
+
+        exported = svc1.export_all({})
+        assert "db1" in exported["annotations"]
+        assert "db1" in exported["joins"]
+
+        svc2 = _make_service(tmp_path / "dst")
+        svc2.import_connection({"data": exported})
+
+        anns = svc2.annotations._load("db1")
+        assert len(anns) == 1
+        assert anns[0]["note"] == "Core user table"
+
+        joins = svc2.join_catalog._load("db1")
+        assert len(joins) == 1
+        assert joins[0]["ref_table"] == "users"

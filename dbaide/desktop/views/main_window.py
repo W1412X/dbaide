@@ -1102,7 +1102,10 @@ class MainWindow(QMainWindow):
 
         def on_done(result: object) -> None:
             self._ensure_ui_state().set_settings_busy(dialog, "save", False, target="connection")
-            dialog._connections[payload["name"]] = dict(payload)
+            saved = dict(payload)
+            saved["has_password"] = bool(payload.get("password") or
+                                         dialog._connections.get(payload["name"], {}).get("has_password"))
+            dialog._connections[payload["name"]] = saved
             if payload.get("make_default"):
                 dialog._default_connection = payload["name"]
             dialog._reload_connection_list()
@@ -1242,7 +1245,10 @@ class MainWindow(QMainWindow):
 
         def on_done(_result: object) -> None:
             self._ensure_ui_state().set_settings_busy(dialog, "save", False, target="model")
-            dialog._models[payload["name"]] = dict(payload)
+            saved = dict(payload)
+            saved["has_api_key"] = bool(payload.get("api_key") or
+                                        dialog._models.get(payload["name"], {}).get("has_api_key"))
+            dialog._models[payload["name"]] = saved
             if payload.get("make_default"):
                 dialog._default_model = payload["name"]
             dialog._reload_model_list()
@@ -1580,6 +1586,7 @@ class MainWindow(QMainWindow):
                         "referenced_by": data.get("referenced_by") or [],
                     },
                     indexes=data.get("indexes") or [],
+                    dialect=self._dialect(),
                 )
                 return
             # Fall through: table with a malformed/short path → show as doc

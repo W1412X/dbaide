@@ -189,7 +189,7 @@ class DataBrowser(QWidget):
 
     # ── public API ────────────────────────────────────────────────────────────
 
-    def open_table(self, connection: str, database: str, table: str) -> None:
+    def open_table(self, connection: str, database: str, table: str, *, dialect: str = "generic") -> None:
         """Start browsing a table from page 1, no sort/filter."""
         self._conn, self._db, self._table = connection, database, table
         self._offset = 0
@@ -200,7 +200,7 @@ class DataBrowser(QWidget):
         self._filter.clear()
         self._filter.blockSignals(False)
         self._title.setText(f"{database + '.' if database else ''}{table}")
-        self.grid.set_table_name(table)
+        self.grid.set_table_name(table, dialect=dialect)
         self.stack.setCurrentIndex(1)
         self._reload()
 
@@ -258,7 +258,8 @@ class DataBrowser(QWidget):
             self._refresh.setIcon(svg_icon("refresh", color=Theme.TEXT_2, size=15))
         self._set_controls_enabled(not running)
 
-    def browse_filtered(self, connection: str, database: str, table: str, where: str) -> None:
+    def browse_filtered(self, connection: str, database: str, table: str, where: str,
+                        *, dialect: str = "generic") -> None:
         """Set the table identity and a WHERE filter (e.g. from FK navigation) and
         load from page 1 — used for lazy table docs that haven't browsed yet."""
         self._conn, self._db, self._table = connection, database, table
@@ -270,7 +271,7 @@ class DataBrowser(QWidget):
         self._filter.setText(self._where)
         self._filter.blockSignals(False)
         self._title.setText(f"{database + '.' if database else ''}{table}")
-        self.grid.set_table_name(table)
+        self.grid.set_table_name(table, dialect=dialect)
         self.stack.setCurrentIndex(1)
         self._reload()
 

@@ -42,7 +42,7 @@ class ConnectionForm(QWidget):
         self.name.setFixedHeight(26)
         self.type_select = Combo()
         self.type_select.setFixedHeight(26)
-        self.type_select.addItems(["sqlite", "mysql", "postgres"])
+        self.type_select.addItems(["sqlite", "mysql", "mariadb", "postgres"])
         self.type_select.setCurrentText(conn_type)
         self.path = QLineEdit()
         self.path.setFixedHeight(26)
@@ -119,6 +119,11 @@ class ConnectionForm(QWidget):
         self.database.setText(str(payload.get("database") or ""))
         self.user.setText(str(payload.get("user") or ""))
         self.password.clear()
+        if payload.get("has_password"):
+            from dbaide.i18n import t as _pt
+            self.password.setPlaceholderText(_pt("conn.password_saved"))
+        else:
+            self.password.setPlaceholderText("")
         self.session_timezone.setText(str(payload.get("session_timezone") or "UTC"))
         self.load_profile.setCurrentText(str(payload.get("load_profile") or "production"))
         self._sync_fields(self.type_select.currentText(), reset_port=port in (None, ""))
@@ -131,6 +136,7 @@ class ConnectionForm(QWidget):
         self.database.clear()
         self.user.clear()
         self.password.clear()
+        self.password.setPlaceholderText("")
         self.session_timezone.setText("UTC")
         self.load_profile.setCurrentText("production")
         self._sync_fields(conn_type, reset_port=True)

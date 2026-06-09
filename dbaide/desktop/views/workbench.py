@@ -200,7 +200,8 @@ class WorkbenchView(QWidget):
     def open_table(self, connection: str, database: str, table: str,
                    columns: list[dict[str, Any]],
                    relations: dict[str, list[dict[str, Any]]] | None = None,
-                   indexes: list[dict[str, Any]] | None = None) -> TableDocument:
+                   indexes: list[dict[str, Any]] | None = None,
+                   *, dialect: str = "generic") -> TableDocument:
         target_key = TableDocument.key(connection, database, table)
         for i in range(self.tabs.count()):
             w = self.tabs.widget(i)
@@ -208,7 +209,7 @@ class WorkbenchView(QWidget):
                 # Already open — just bring it forward, keeping the user's sub-tab.
                 self.tabs.setCurrentIndex(i)
                 return w
-        doc = TableDocument(connection, database, table)
+        doc = TableDocument(connection, database, table, dialect=dialect)
         doc.query_requested.connect(lambda payload, d=doc: self.browse_requested.emit(d, payload))
         doc.count_requested.connect(lambda payload, d=doc: self.count_requested.emit(d, payload))
         doc.ddl_requested.connect(lambda payload, d=doc: self.ddl_requested.emit(d, payload))

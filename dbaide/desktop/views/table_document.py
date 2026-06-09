@@ -24,12 +24,13 @@ class TableDocument(QWidget):
     navigate_table = pyqtSignal(str)  # bubbled from the Structure panel's FK links
     navigate_fk = pyqtSignal(str, str, object)  # (ref_table, ref_column, value)
 
-    def __init__(self, connection: str, database: str, table: str, parent=None) -> None:
+    def __init__(self, connection: str, database: str, table: str, *, dialect: str = "generic", parent=None) -> None:
         super().__init__(parent)
         from dbaide.i18n import t
         self.connection = connection
         self.database = database
         self.table = table
+        self._dialect = dialect
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
@@ -98,7 +99,7 @@ class TableDocument(QWidget):
         """Issue the first data query the first time the Data tab is opened."""
         if not self._data_loaded:
             self._data_loaded = True
-            self.data.open_table(self.connection, self.database, self.table)
+            self.data.open_table(self.connection, self.database, self.table, dialect=self._dialect)
 
     def focus_data(self) -> None:
         self.tabs.setCurrentIndex(self._data_index)
@@ -108,7 +109,7 @@ class TableDocument(QWidget):
         """Open the Data tab and load it filtered (used by FK navigation)."""
         self._data_loaded = True  # we load explicitly below; skip the lazy reload
         self.tabs.setCurrentIndex(self._data_index)
-        self.data.browse_filtered(self.connection, self.database, self.table, where)
+        self.data.browse_filtered(self.connection, self.database, self.table, where, dialect=self._dialect)
 
     def focus_structure(self) -> None:
         self.tabs.setCurrentIndex(self._structure_index)
