@@ -402,6 +402,67 @@ _STRINGS: dict[str, dict[str, str]] = {
         "en": "Model call failed. See the trace or export a debug bundle for details.",
         "zh": "模型调用失败。可查看轨迹或导出调试包获取详情。",
     },
+    # ── Non-LLM user-facing errors ────────────────────────────────────────
+    "error.connection": {
+        "en": "Could not connect to the database. Check the connection settings.",
+        "zh": "无法连接数据库。请检查连接配置。",
+    },
+    "error.permission": {
+        "en": "Permission denied. The database user may lack privileges for this operation.",
+        "zh": "权限不足。当前数据库用户可能没有执行此操作的权限。",
+    },
+    "error.timeout": {
+        "en": "The operation timed out. Try simplifying the query or increasing the timeout.",
+        "zh": "操作超时。请尝试简化查询或增大超时设置。",
+    },
+    "error.sql_syntax": {
+        "en": "SQL syntax error. Check the query and try again.",
+        "zh": "SQL 语法错误。请检查查询语句后重试。",
+    },
+    "error.sql_execution": {
+        "en": "Query failed: {detail}",
+        "zh": "查询失败：{detail}",
+    },
+    "error.table_not_found": {
+        "en": "Table or view not found. It may have been renamed or deleted.",
+        "zh": "表或视图不存在。可能已被重命名或删除。",
+    },
+    "error.column_not_found": {
+        "en": "Column not found. The schema may have changed — try syncing.",
+        "zh": "字段不存在。表结构可能已变更，请尝试同步。",
+    },
+    "error.bootstrap_failed": {
+        "en": "Failed to load connection data. Check your connection and try refreshing.",
+        "zh": "加载连接数据失败。请检查连接配置并尝试刷新。",
+    },
+    "error.operation_failed": {
+        "en": "Operation failed. Please try again.",
+        "zh": "操作失败，请重试。",
+    },
+    "error.save_failed": {
+        "en": "Could not save changes. Please try again.",
+        "zh": "保存失败，请重试。",
+    },
+    "error.rename_failed": {
+        "en": "Rename failed. Please try again.",
+        "zh": "重命名失败，请重试。",
+    },
+    "error.delete_failed": {
+        "en": "Delete failed. Please try again.",
+        "zh": "删除失败，请重试。",
+    },
+    "error.generic": {
+        "en": "Something went wrong. Please try again or export a debug bundle.",
+        "zh": "出了点问题。请重试或导出调试包。",
+    },
+    "error.turn.cancelled": {
+        "en": "Cancelled by user.",
+        "zh": "已被用户取消。",
+    },
+    "error.turn.error": {
+        "en": "**Error**: {message}",
+        "zh": "**错误**：{message}",
+    },
     # Sidebar
     "sidebar.filter": {"en": "Search schema…", "zh": "搜索结构…"},
     "sidebar.chats": {"en": "Chats", "zh": "对话"},

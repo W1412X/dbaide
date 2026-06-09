@@ -163,7 +163,10 @@ def test_settings_delete_and_default_wait_for_controller_success(qapp, monkeypat
         default_connection="local",
         default_model="default",
     )
-    monkeypatch.setattr(message_dialog, "confirm", lambda *a, **k: True)
+    # Patch the module-level name that settings.py imported, not just the
+    # source module, so the already-resolved ``dialog_confirm`` alias is replaced.
+    from dbaide.desktop.dialogs import settings as _settings_mod
+    monkeypatch.setattr(_settings_mod, "dialog_confirm", lambda *a, **k: True)
     deleted_connections: list[str] = []
     deleted_models: list[str] = []
     saved_connections: list[dict] = []
@@ -300,6 +303,11 @@ def test_turn_inline_trace_toggles(qapp):
     assert not block._trace_box.is_empty()
     assert block.status._expanded is True
     block._toggle_trace()                        # collapse
+    # The close animation (QPropertyAnimation, 180 ms) must finish before the
+    # box is hidden. Fast-forward it so we don't depend on wall-clock timing.
+    if block._trace_anim is not None:
+        block._trace_anim.setCurrentTime(block._trace_anim.duration())
+        qapp.processEvents()
     assert block._trace_box.isHidden() is True
     assert block.status._expanded is False
 

@@ -1,6 +1,6 @@
 from dbaide.config import CONFIG_VERSION, ConfigManager, migrate_config, sanitize_config_data
 from dbaide.core.errors import ErrorCode
-from dbaide.llm_errors import classify_llm_error, is_llm_related, user_message_for_error
+from dbaide.llm_errors import classify_llm_error, format_user_error, is_llm_related, user_message_for_error
 
 
 def test_migrate_legacy_config_adds_meta_version():
@@ -53,3 +53,57 @@ def test_classify_llm_rate_limit_retryable():
 def test_is_llm_related_heuristic():
     assert is_llm_related(RuntimeError("OpenAI API error")) is True
     assert is_llm_related(ValueError("table not found")) is False
+
+
+# ── format_user_error: unified user-facing error messages ─────────────
+
+
+def test_format_user_error_connection():
+    msg = format_user_error(ConnectionError("Connection refused"))
+    assert msg != "Connection refused"  # not the raw message
+    assert "connect" in msg.lower() or "连接" in msg
+
+
+def test_format_user_error_permission():
+    msg = format_user_error(PermissionError("Access denied"))
+    assert "permission" in msg.lower() or "权限" in msg
+
+
+def test_format_user_error_timeout():
+    msg = format_user_error(TimeoutError("deadline exceeded"))
+    assert "timeout" in msg.lower() or "timed out" in msg.lower() or "超时" in msg
+
+
+def test_format_user_error_syntax():
+    msg = format_user_error(Exception("syntax error at or near 'SELEC'"))
+    assert "syntax" in msg.lower() or "语法" in msg
+
+
+def test_format_user_error_no_such_table():
+    msg = format_user_error(Exception("no such table: orders_v2"))
+    assert "table" in msg.lower() or "表" in msg
+
+
+def test_format_user_error_no_such_column():
+    msg = format_user_error(Exception("Unknown column 'foo' in 'field list'"))
+    assert "column" in msg.lower() or "字段" in msg
+
+
+def test_format_user_error_llm_delegates():
+    """LLM-related errors should go through classify_llm_error."""
+    msg = format_user_error(RuntimeError("OpenAI API error: 429 rate limit"))
+    assert "rate" in msg.lower() or "限流" in msg
+
+
+def test_format_user_error_short_generic():
+    """Short unknown errors are wrapped in the sql_execution template."""
+    msg = format_user_error(RuntimeError("boom"))
+    assert "boom" in msg  # the detail is preserved
+
+
+def test_format_user_error_long_generic():
+    """Very long unknown errors get a generic catch-all."""
+    long_msg = "x" * 300
+    msg = format_user_error(RuntimeError(long_msg))
+    assert long_msg not in msg  # not the raw 300-char string
+    assert len(msg) < 200

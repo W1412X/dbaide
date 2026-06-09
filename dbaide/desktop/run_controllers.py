@@ -180,21 +180,23 @@ class OneOffActionController:
         stale_connection = bool(run_connection and run_connection != win.current_connection())
         if stale_connection and action not in ("execute_sql", "explain_sql"):
             return
+        from dbaide.llm_errors import format_user_error
+        friendly = format_user_error(exc)
         if action == "execute_sql":
             if sql_doc is not None:
-                sql_doc.show_error(str(exc))
+                sql_doc.show_error(friendly)
             win._record_query(sql_text, ok=False, connection=run_connection, database=run_database)
             if not stale_connection:
-                win.toast(str(exc))
+                win.toast(friendly)
             return
         if action == "explain_sql":
             if sql_doc is not None:
-                sql_doc.show_error(str(exc))
+                sql_doc.show_error(friendly)
             if not stale_connection:
-                win.toast(str(exc))
+                win.toast(friendly)
             return
         if action in ("browse_table", "count_table"):
-            win.toast(str(exc))
+            win.toast(friendly)
             return
         win.fail(exc, modal=action not in ("asset_markdown", "search_assets"))
 
@@ -281,7 +283,7 @@ class ConversationRunController:
         elif status == "cancelled":
             win._pending_resume.pop(key, None)
             if win.ask_tab.turn_open(key):
-                win.ask_tab.finish_turn_error(key, "**Cancelled**: Task stopped by user.")
+                win.ask_tab.finish_turn_error(key, _i18n_t("error.turn.cancelled"))
             win.toast(_i18n_t("toast.cancelled"))
         else:
             win._pending_resume.pop(key, None)
@@ -314,15 +316,13 @@ class ConversationRunController:
     def _user_error_message(self, exc: object) -> str:
         if isinstance(exc, CancelledError):
             return _i18n_t("toast.cancelled")
-        from dbaide.llm_errors import classify_llm_error, is_llm_related, user_message_for_error
-        if is_llm_related(exc):
-            return user_message_for_error(classify_llm_error(exc))
-        return str(exc)
+        from dbaide.llm_errors import format_user_error
+        return format_user_error(exc)
 
     def _format_turn_error(self, exc: object) -> str:
         if isinstance(exc, CancelledError):
-            return "**Cancelled**: Task stopped by user."
-        return f"**Error**: {self._user_error_message(exc)}"
+            return _i18n_t("error.turn.cancelled")
+        return _i18n_t("error.turn.error", message=self._user_error_message(exc))
 
     def bind_slot_to_session(self, temporary_key: str, session_id: str) -> None:
         self.win.ask_tab.remap(temporary_key, session_id)
@@ -347,7 +347,7 @@ class ConversationRunController:
         if key and any(k == key for k, _ in win._run_queue):
             win.run_state.remove_queued(key)
             if win.ask_tab.turn_open(key):
-                win.ask_tab.finish_turn_error(key, "**Cancelled**: Task stopped by user.")
+                win.ask_tab.finish_turn_error(key, _i18n_t("error.turn.cancelled"))
             self.sync_work_ui()
             return
         if win._oneoff_worker and not win._oneoff_worker.is_cancelled:

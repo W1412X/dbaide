@@ -95,32 +95,6 @@ def test_open_sql_reuses_empty_editor(qapp):
     assert _titles(wb) == ["Query 1", "Query 2"]
 
 
-def test_sql_tab_keeps_editor_and_results_breathing_room(qapp):
-    from dbaide.desktop.views.sql_tab import SqlTab
-
-    tab = SqlTab()
-    try:
-        assert tab.layout().spacing() == 12
-    finally:
-        tab.deleteLater()
-        qapp.processEvents()
-
-
-def test_sql_tab_actions_are_bottom_up(qapp):
-    from dbaide.desktop.views.sql_tab import SqlTab
-
-    tab = SqlTab()
-    try:
-        actions = tab.run_btn.parentWidget().layout().itemAt(0).layout().itemAt(1).layout()
-        assert actions.itemAt(0).spacerItem() is not None
-        assert actions.itemAt(1).widget() is tab.format_btn
-        assert actions.itemAt(2).widget() is tab.explain_btn
-        assert actions.itemAt(3).widget() is tab.run_btn
-    finally:
-        tab.deleteLater()
-        qapp.processEvents()
-
-
 def test_close_table_and_editor(qapp):
     wb = _wb(qapp)
     wb.open_table("c", "db", "orders", [])

@@ -394,9 +394,11 @@ class MainWindow(QMainWindow):
             self.fail(exc)
 
     def _on_bootstrap_failed(self, exc: object) -> None:
+        from dbaide.llm_errors import format_user_error
         self.conversation_controller.sync_work_ui()
-        self._ensure_ui_state().statusbar_message(f"Load failed: {exc}")
-        self.toast(str(exc))
+        msg = format_user_error(exc)
+        self._ensure_ui_state().statusbar_message(msg)
+        self.toast(msg)
 
     def _apply_bootstrap_ui(self) -> None:
         conns = self.bootstrap.get("connections") or []
@@ -544,7 +546,8 @@ class MainWindow(QMainWindow):
         )
 
     def _background_failed(self, exc: object) -> None:
-        self.toast(str(exc))
+        from dbaide.llm_errors import format_user_error
+        self.toast(format_user_error(exc))
 
     def _default_splitter_sizes(self) -> list[int]:
         return [280, 1100]
@@ -783,7 +786,8 @@ class MainWindow(QMainWindow):
             result = self.service.dispatch("list_joins", {"connection_name": conn})
             self.joins.load(result.get("joins") or [])
         except Exception as exc:
-            self.toast(str(exc))
+            from dbaide.llm_errors import format_user_error
+            self.toast(format_user_error(exc))
 
     def open_joins(self) -> None:
         """Open the on-demand Joins manager (relocated here from the old side panel)."""
@@ -812,7 +816,8 @@ class MainWindow(QMainWindow):
             self.bus.emit(JOINS_CHANGED, {"instance": conn})
             self.toast(_i18n_t("toast.join_saved"))
         except Exception as exc:
-            self.toast(str(exc))
+            from dbaide.llm_errors import format_user_error
+            self.toast(format_user_error(exc))
 
     def _update_join(self, payload: dict[str, Any]) -> None:
         conn = self.current_connection()
@@ -823,7 +828,8 @@ class MainWindow(QMainWindow):
             self.bus.emit(JOINS_CHANGED, {"instance": conn})
             self.toast(_i18n_t("toast.join_updated"))
         except Exception as exc:
-            self.toast(str(exc))
+            from dbaide.llm_errors import format_user_error
+            self.toast(format_user_error(exc))
 
     def _delete_join(self, join_id: str) -> None:
         conn = self.current_connection()
@@ -834,7 +840,8 @@ class MainWindow(QMainWindow):
             self.bus.emit(JOINS_CHANGED, {"instance": conn})
             self.toast(_i18n_t("toast.join_deleted"))
         except Exception as exc:
-            self.toast(str(exc))
+            from dbaide.llm_errors import format_user_error
+            self.toast(format_user_error(exc))
 
     def open_sql(self, sql: str) -> None:
         self.tabbar.setCurrentIndex(1)
@@ -1016,7 +1023,7 @@ class MainWindow(QMainWindow):
             set_tracing(bool(enabled))
             self.toast(_i18n_t("toast.debug_trace_on" if enabled else "toast.debug_trace_off"))
         except Exception as exc:  # noqa: BLE001
-            self.toast(str(exc))
+            self.toast(_i18n_t("error.save_failed"))
 
     def _change_stream_answers(self, enabled: bool) -> None:
         # Persisted to config; the backend reads it per request (next query streams or
@@ -1024,7 +1031,7 @@ class MainWindow(QMainWindow):
         try:
             self.service.cfg.set_stream_answers(bool(enabled))
         except Exception as exc:  # noqa: BLE001
-            self.toast(str(exc))
+            self.toast(_i18n_t("error.save_failed"))
 
     def _change_theme(self, theme: str) -> None:
         from dbaide.desktop.theme import current_theme_name
@@ -1420,7 +1427,7 @@ class MainWindow(QMainWindow):
                 self.service.dispatch("delete_annotation", body)
                 self.toast(_i18n_t("toast.note_deleted"))
         except Exception as exc:
-            self.toast(str(exc))
+            self.toast(_i18n_t("error.save_failed"))
             return
         # Refresh the affected document if it's open (a column note shows in its
         # parent table's doc; db/table notes show in their own doc).
@@ -1704,7 +1711,7 @@ class MainWindow(QMainWindow):
                 "connection_name": conn, "session_id": session_id, "title": title,
             })
         except Exception as exc:  # noqa: BLE001
-            self.toast(f"Rename failed: {exc}")
+            self.toast(_i18n_t("error.rename_failed"))
             return
         self._load_sessions(conn)
 
@@ -1715,7 +1722,7 @@ class MainWindow(QMainWindow):
         try:
             self.service.dispatch("delete_session", {"connection_name": conn, "session_id": session_id})
         except Exception as exc:  # noqa: BLE001
-            self.toast(f"Delete failed: {exc}")
+            self.toast(_i18n_t("error.delete_failed"))
             return
         # Drop the slot for the deleted session (cancel its run if any).
         if self.ask_tab.has_slot(session_id):
@@ -1784,16 +1791,18 @@ class MainWindow(QMainWindow):
         self._ensure_ui_state().toast(message)
 
     def fail(self, exc: object, *, modal: bool = True) -> None:
-        msg = f"**{type(exc).__name__}**: {exc}"
+        from dbaide.llm_errors import format_user_error
+        friendly = format_user_error(exc)
+        msg = _i18n_t("error.turn.error", message=friendly)
         key = self.conversation_controller.active_or_new_key()
         if self.ask_tab.turn_open(key):
             self.ask_tab.finish_turn_error(key, msg)
         else:
             self.ask_tab.append_note(key, _i18n_t("note.error"), msg)
         if modal:
-            dialog_warn(self, "DBAide", str(exc))
+            dialog_warn(self, "DBAide", friendly)
         else:
-            self.toast(str(exc))
+            self.toast(friendly)
 
 
 class DBAideDesktop:
