@@ -90,7 +90,7 @@ def _toml_key(name: str) -> str:
     model names that contain dots, spaces, or other characters must be quoted
     so ``[connections.my.server]`` becomes ``[connections."my.server"]``.
     """
-    if name and all(ch.isalnum() or ch in "_-" for ch in name):
+    if name and all(ch.isascii() and (ch.isalnum() or ch in "_-") for ch in name):
         return name
     return _toml_quote(name)
 

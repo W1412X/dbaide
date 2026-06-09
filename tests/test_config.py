@@ -1,6 +1,6 @@
 import pytest
 
-from dbaide.config import ConfigManager, _toml_quote
+from dbaide.config import ConfigManager, _toml_key, _toml_quote
 from dbaide.models import ConnectionConfig, ModelConfig
 
 
@@ -84,3 +84,51 @@ class TestConfigManager:
         cfg._data = {}
         cfg.reload()
         assert "test" in cfg.connections()
+
+    def test_unicode_connection_name_roundtrip(self, tmp_path):
+        """CJK and other non-ASCII names must be quoted in TOML keys (bare keys
+        only allow [A-Za-z0-9_-] per the TOML 1.0 spec, but Python's str.isalnum()
+        returns True for CJK).  Without quoting, the next reload would fail with a
+        parse error, and the user's entire config becomes unreadable."""
+        path = tmp_path / "config.toml"
+        cfg = ConfigManager(path=path)
+        cfg.upsert_connection(ConnectionConfig(name="数据库", type="sqlite", path="/tmp/cn.db"))
+        cfg.upsert_connection(ConnectionConfig(name="café", type="sqlite", path="/tmp/fr.db"))
+        cfg2 = ConfigManager(path=path)
+        assert "数据库" in cfg2.connections()
+        assert "café" in cfg2.connections()
+        assert cfg2.connections()["数据库"].path == "/tmp/cn.db"
+
+    def test_boolean_false_not_dropped(self, tmp_path):
+        """Values like False and 0 must not be skipped by the render-time filter
+        (``value in (None, '', {}, [])`` must NOT match False or 0)."""
+        path = tmp_path / "config.toml"
+        cfg = ConfigManager(path=path)
+        cfg.set_stream_answers(False)
+        cfg.set_debug_trace(False)
+        cfg2 = ConfigManager(path=path)
+        assert cfg2.stream_answers() is False
+        assert cfg2.debug_trace() is False
+
+
+class TestTomlKey:
+    def test_ascii_alnum(self):
+        assert _toml_key("myconn") == "myconn"
+
+    def test_with_hyphen_underscore(self):
+        assert _toml_key("my-conn_1") == "my-conn_1"
+
+    def test_dot_quoted(self):
+        assert _toml_key("my.server") == '"my.server"'
+
+    def test_space_quoted(self):
+        assert _toml_key("my server") == '"my server"'
+
+    def test_cjk_quoted(self):
+        assert _toml_key("数据库") == '"数据库"'
+
+    def test_accented_quoted(self):
+        assert _toml_key("café") == '"café"'
+
+    def test_empty_quoted(self):
+        assert _toml_key("") == '""'

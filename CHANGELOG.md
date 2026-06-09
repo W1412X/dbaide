@@ -51,6 +51,12 @@ All notable changes to DBAide are documented here. The format is loosely based o
   mid-write could truncate the file, silently destroying the session, workflow
   result, or query history. Writes now use `tempfile.mkstemp()` + `os.replace()`
   (the same pattern already used by `ConfigManager` and `AssetStore`).
+- **Unicode / CJK connection names produce invalid TOML** — `_toml_key()` used
+  Python's `str.isalnum()` to decide whether to quote, but `isalnum()` returns
+  `True` for CJK characters while TOML bare keys only allow `[A-Za-z0-9_-]`.
+  A connection named `数据库` generated a bare key that `tomllib` rejected on
+  reload, making the entire config unreadable. The check now requires
+  `ch.isascii()` so non-ASCII names are always quoted.
 
 ## [0.0.6] — 2026-06-08
 
