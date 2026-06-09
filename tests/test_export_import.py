@@ -55,22 +55,13 @@ class TestExportConnection:
         assert len(result["annotations"]) == 1
         assert result["annotations"][0]["note"] == "Main user table"
 
-    def test_export_excludes_password_by_default(self, tmp_path):
+    def test_export_includes_password(self, tmp_path):
         svc = _make_service(tmp_path)
         conn = ConnectionConfig(name="secret", type="mysql", host="localhost",
                                 password="hunter2", database="db")
         svc.cfg.upsert_connection(conn)
 
         result = svc.export_connection({"connection_name": "secret"})
-        assert "password" not in result["connection"]
-
-    def test_export_includes_password_when_requested(self, tmp_path):
-        svc = _make_service(tmp_path)
-        conn = ConnectionConfig(name="secret", type="mysql", host="localhost",
-                                password="hunter2", database="db")
-        svc.cfg.upsert_connection(conn)
-
-        result = svc.export_connection({"connection_name": "secret", "include_secrets": True})
         assert result["connection"]["password"] == "hunter2"
 
 
@@ -190,13 +181,13 @@ class TestExportAll:
         assert len(result["models"]) == 1
         assert result["models"][0]["name"] == "gpt4"
 
-    def test_export_all_excludes_secrets_by_default(self, tmp_path):
+    def test_export_all_includes_api_key(self, tmp_path):
         svc = _make_service(tmp_path)
         svc.cfg.upsert_model(ModelConfig(name="m1", provider="openai_compatible",
                                          api_key="sk-secret", model="gpt-4"))
 
         result = svc.export_all({})
-        assert "api_key" not in result["models"][0]
+        assert result["models"][0]["api_key"] == "sk-secret"
 
 
 class TestRoundTrip:

@@ -1412,7 +1412,6 @@ class DesktopService:
         """Export one connection's config + joins + annotations as a portable dict."""
         name = str(payload.get("connection_name") or payload.get("name") or "")
         conn = self.cfg.get_connection(name)
-        include_secrets = bool(payload.get("include_secrets", False))
 
         conn_dict: dict[str, Any] = {
             "name": conn.name,
@@ -1422,12 +1421,11 @@ class DesktopService:
             "port": conn.port,
             "user": conn.user,
             "password_env": conn.password_env,
+            "password": conn.password,
             "path": conn.path,
             "load_profile": conn.load_profile,
             "session_timezone": conn.session_timezone,
         }
-        if include_secrets and conn.password:
-            conn_dict["password"] = conn.password
         # Strip empty values for cleaner output.
         conn_dict = {k: v for k, v in conn_dict.items() if v not in (None, "", 0)}
         conn_dict.setdefault("name", conn.name)
@@ -1522,7 +1520,6 @@ class DesktopService:
 
     def export_all(self, payload: dict[str, Any]) -> dict[str, Any]:
         """Export all connections, models, joins, annotations and resource defaults."""
-        include_secrets = bool(payload.get("include_secrets", False))
         from datetime import datetime, timezone
 
         connections: list[dict[str, Any]] = []
@@ -1533,11 +1530,10 @@ class DesktopService:
             conn_dict: dict[str, Any] = {
                 "name": conn.name, "type": conn.type, "database": conn.database,
                 "host": conn.host, "port": conn.port, "user": conn.user,
-                "password_env": conn.password_env, "path": conn.path,
+                "password_env": conn.password_env, "password": conn.password,
+                "path": conn.path,
                 "load_profile": conn.load_profile, "session_timezone": conn.session_timezone,
             }
-            if include_secrets and conn.password:
-                conn_dict["password"] = conn.password
             conn_dict = {k: v for k, v in conn_dict.items() if v not in (None, "", 0)}
             conn_dict.setdefault("name", conn.name)
             conn_dict.setdefault("type", conn.type)
@@ -1555,10 +1551,9 @@ class DesktopService:
             m_dict: dict[str, Any] = {
                 "name": model.name, "provider": model.provider,
                 "base_url": model.base_url, "api_key_env": model.api_key_env,
+                "api_key": model.api_key,
                 "model": model.model, "timeout_seconds": model.timeout_seconds,
             }
-            if include_secrets and model.api_key:
-                m_dict["api_key"] = model.api_key
             m_dict = {k: v for k, v in m_dict.items() if v not in (None, "", 0)}
             m_dict.setdefault("name", name)
             models.append(m_dict)
