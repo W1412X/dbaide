@@ -83,6 +83,18 @@ def sanitize_config_data(data: dict[str, Any]) -> dict[str, Any]:
     return clean
 
 
+def _toml_key(name: str) -> str:
+    """Quote a TOML key/table-path segment if it contains special characters.
+
+    A bare key in TOML may only contain ``[A-Za-z0-9_-]``.  Connection and
+    model names that contain dots, spaces, or other characters must be quoted
+    so ``[connections.my.server]`` becomes ``[connections."my.server"]``.
+    """
+    if name and all(ch.isalnum() or ch in "_-" for ch in name):
+        return name
+    return _toml_quote(name)
+
+
 def _toml_quote(value: str) -> str:
     # Escape per the TOML basic-string spec. Without escaping control characters
     # (newline/tab/etc.) a value such as a pasted password produces invalid TOML,
@@ -113,6 +125,7 @@ class ConfigManager:
         self.reload()
 
     def reload(self) -> None:
+        parse_failed = False
         if self.path.exists():
             try:
                 with self.path.open("rb") as fh:
@@ -120,18 +133,31 @@ class ConfigManager:
             except tomllib.TOMLDecodeError as exc:
                 logger.warning("failed to parse config %s: %s", self.path, exc)
                 self._data = {"connections": {}, "models": {}}
+                parse_failed = True
             except OSError as exc:
                 logger.warning("failed to read config %s: %s", self.path, exc)
                 self._data = {"connections": {}, "models": {}}
+                parse_failed = True
         else:
             self._data = {"connections": {}, "models": {}}
+        # Previous versions of _render_toml placed default_connection /
+        # default_model after the [meta] header, so TOML scoping absorbed
+        # them into the meta dict.  Pull them back to the root on reload.
+        meta = self._data.get("meta")
+        if isinstance(meta, dict):
+            for stale in ("default_connection", "default_model"):
+                if stale in meta:
+                    self._data.setdefault(stale, meta.pop(stale))
         self._data, migrated = migrate_config(self._data)
         if migrated:
             logger.info("migrated config to version %s", CONFIG_VERSION)
-            try:
-                self.save()
-            except OSError as exc:
-                logger.warning("failed to persist migrated config: %s", exc)
+            # Do NOT save when the config file failed to parse — that would
+            # overwrite the user's (possibly recoverable) config with empty data.
+            if not parse_failed:
+                try:
+                    self.save()
+                except OSError as exc:
+                    logger.warning("failed to persist migrated config: %s", exc)
 
     def config_version(self) -> int:
         return _config_version(self._data)
@@ -344,6 +370,14 @@ class ConfigManager:
 
     def _render_toml(self, data: dict[str, Any]) -> str:
         lines: list[str] = []
+        # Root-level bare keys MUST come before any [table] header — in TOML,
+        # keys after a header belong to that table until the next header.
+        if data.get("default_connection"):
+            lines.append(f"default_connection = {_toml_quote(str(data['default_connection']))}")
+        if data.get("default_model"):
+            lines.append(f"default_model = {_toml_quote(str(data['default_model']))}")
+        if lines:
+            lines.append("")
         meta = data.get("meta") or {}
         if isinstance(meta, dict) and meta:
             lines.append("[meta]")
@@ -351,12 +385,6 @@ class ConfigManager:
                 if value in (None, "", {}, []):
                     continue
                 lines.append(f"{key} = {self._format_value(value)}")
-            lines.append("")
-        if data.get("default_connection"):
-            lines.append(f"default_connection = {_toml_quote(str(data['default_connection']))}")
-            lines.append("")
-        if data.get("default_model"):
-            lines.append(f"default_model = {_toml_quote(str(data['default_model']))}")
             lines.append("")
         for table in ("ui", "resource_defaults"):
             values = data.get(table) or {}
@@ -370,7 +398,7 @@ class ConfigManager:
         for section in ("connections", "models"):
             groups = data.get(section) or {}
             for name, values in groups.items():
-                lines.append(f"[{section}.{name}]")
+                lines.append(f"[{section}.{_toml_key(name)}]")
                 for key, value in (values or {}).items():
                     if value in (None, "", {}, []):
                         continue

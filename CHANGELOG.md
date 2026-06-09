@@ -8,6 +8,20 @@ All notable changes to DBAide are documented here. The format is loosely based o
 
 ### Fixed
 
+- **Config file corruption on save→reload→save cycle** — `_render_toml` placed
+  `default_connection` and `default_model` after the `[meta]` table header, so
+  TOML scoping absorbed them into `meta` on reload. A subsequent save wrote them
+  twice under `[meta]`, producing `Cannot overwrite a value` on the next load.
+  Root-level keys now render before any `[table]` header. The reload path also
+  recovers keys that were previously absorbed into `meta`.
+- **Config wipe on parse failure** — when `config.toml` had a TOML syntax error,
+  `reload()` fell back to an empty config, migrated it, and saved — overwriting
+  the user's (possibly recoverable) file with empty data. The save is now skipped
+  when parsing fails.
+- **Connection names with dots produce invalid TOML** — a connection named
+  `my.server` generated `[connections.my.server]` (nested tables) instead of
+  `[connections."my.server"]`. Names are now quoted when they contain dots, spaces,
+  or other TOML-special characters.
 - **Streaming text loss on RuntimeError recovery** — when the answer widget was
   destroyed mid-stream (PyQt RuntimeError), recreating it reset the accumulated
   text, losing all chunks received so far. The unnecessary reset is removed;
