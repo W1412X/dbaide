@@ -14,6 +14,14 @@ from typing import Any
 logger = logging.getLogger("dbaide.join_catalog")
 
 USER_JOIN_CONFIDENCE = 0.99
+
+
+def _safe_float(value: object, default: float = 0.0) -> float:
+    """Coerce *value* to float, returning *default* on failure."""
+    try:
+        return float(value or default)
+    except (TypeError, ValueError):
+        return default
 DEFAULT_JOIN_DIR = Path.home() / ".dbaide" / "joins"
 
 
@@ -41,7 +49,7 @@ def relation_to_catalog_record(
     fingerprint: str = "",
 ) -> dict[str, Any]:
     now = _utc_now()
-    conf = float(rel.get("confidence") or 0.0)
+    conf = _safe_float(rel.get("confidence"))
     if source == "user":
         conf = USER_JOIN_CONFIDENCE
     return {
@@ -73,7 +81,7 @@ def catalog_record_to_relation(record: dict[str, Any]) -> dict[str, Any]:
         "ref_table": record.get("ref_table"),
         "ref_column": record.get("ref_column"),
         "source": record.get("source") or "agent",
-        "confidence": float(record.get("confidence") or 0.0),
+        "confidence": _safe_float(record.get("confidence")),
         "join_type": record.get("join_type") or "",
         "reason": record.get("reason") or "",
         "validation": dict(record.get("validation") or {}),
@@ -130,7 +138,7 @@ class JoinCatalogStore:
                 continue
             if database and str(rec.get("database") or "") not in {"", database}:
                 continue
-            if float(rec.get("confidence") or 0) < float(min_confidence):
+            if _safe_float(rec.get("confidence")) < float(min_confidence):
                 continue
             if ep_key:
                 key = relation_endpoint_key(
@@ -147,7 +155,7 @@ class JoinCatalogStore:
                 if lt not in table_set and rt not in table_set:
                     continue
             out.append(dict(rec))
-        out.sort(key=lambda r: float(r.get("confidence") or 0), reverse=True)
+        out.sort(key=lambda r: _safe_float(r.get("confidence")), reverse=True)
         return out
 
     def relations_for_tables(
@@ -178,7 +186,7 @@ class JoinCatalogStore:
                 continue
             seen.add(key)
             relations.append(catalog_record_to_relation(rec))
-        relations.sort(key=lambda r: float(r.get("confidence") or 0), reverse=True)
+        relations.sort(key=lambda r: _safe_float(r.get("confidence")), reverse=True)
         return relations
 
     def add(
@@ -217,7 +225,7 @@ class JoinCatalogStore:
                     record["source"] = "user"
                 elif str(existing.get("source") or "") == "user":
                     record["source"] = "user"
-                    record["confidence"] = max(float(existing.get("confidence") or 0), float(record["confidence"]))
+                    record["confidence"] = max(_safe_float(existing.get("confidence")), _safe_float(record.get("confidence")))
                 records[index] = record
                 replaced = True
                 break
@@ -238,7 +246,7 @@ class JoinCatalogStore:
                 if key in fields and fields[key] is not None:
                     updated[key] = str(fields[key]).strip()
             if "confidence" in fields and fields["confidence"] is not None:
-                updated["confidence"] = round(float(fields["confidence"]), 3)
+                updated["confidence"] = round(_safe_float(fields["confidence"]), 3)
             if str(updated.get("source") or "") == "user":
                 updated["confidence"] = USER_JOIN_CONFIDENCE
             updated["updated_at"] = _utc_now()
@@ -351,7 +359,7 @@ def merge_relation_layers(*layers: list[dict[str, Any]]) -> list[dict[str, Any]]
                 continue
             seen.add(key)
             merged.append(dict(rel))
-    merged.sort(key=lambda r: float(r.get("confidence") or 0), reverse=True)
+    merged.sort(key=lambda r: _safe_float(r.get("confidence")), reverse=True)
     return merged
 
 

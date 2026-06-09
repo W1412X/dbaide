@@ -131,5 +131,9 @@ def create_desktop_debug_bundle(
     if output_dir is None:
         output_dir = Path.home() / ".dbaide" / "debug"
     conn = str((context or {}).get("connection_name") or "desktop")
-    filename = f"dbaide-debug-{conn}-{int(time.time())}.zip"
+    # Sanitise: connection names are user-chosen and may contain path
+    # separators ('a/b') or traversal ('../x'), which would place the zip
+    # outside the intended output directory.
+    safe_conn = "".join(c if c.isalnum() or c in "-_." else "_" for c in conn) or "desktop"
+    filename = f"dbaide-debug-{safe_conn}-{int(time.time())}.zip"
     return bundle.save(output_dir / filename)

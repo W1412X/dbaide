@@ -5,6 +5,13 @@ from typing import Any
 
 logger = logging.getLogger("dbaide.desktop.service")
 
+
+def _safe_float(value: object, default: float = 0.0) -> float:
+    try:
+        return float(value or default)
+    except (TypeError, ValueError):
+        return default
+
 from dbaide.adapters import build_adapter
 from dbaide.assets import AssetBuilder, AssetSearch, AssetStore
 from dbaide.joins import JoinCatalogStore
@@ -1260,7 +1267,7 @@ class DesktopService:
             conn.name,
             database=database,
             tables=table_list,
-            min_confidence=float(payload.get("min_confidence") or 0.0),
+            min_confidence=_safe_float(payload.get("min_confidence")),
             endpoint=endpoint,
             fingerprint=connection_fingerprint(conn),
         )

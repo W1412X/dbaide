@@ -27,6 +27,19 @@ CONFIDENCE_VALIDATED = 0.35
 CONFIDENCE_DROP_SEMANTIC = 0.18
 
 
+def _safe_confidence(value: object) -> float:
+    """Coerce a confidence value to float, returning 0.0 on failure.
+
+    LLM output sometimes produces non-numeric strings like ``"high"``
+    instead of a number.  An unguarded ``float()`` would crash the whole
+    join-validation or SQL-generation step.
+    """
+    try:
+        return float(value or 0)
+    except (TypeError, ValueError):
+        return 0.0
+
+
 def normalize_type_name(data_type: str) -> str:
     """Strip length/precision for catalog comparison only (not column-name rules)."""
     text = str(data_type or "").strip().lower()
@@ -126,11 +139,11 @@ class JoinSampleValidator:
                 progress=progress,
                 parent=parent,
             )
-            conf = float(scored.get("confidence") or 0)
+            conf = _safe_confidence(scored.get("confidence"))
             if drop_invalid_semantic and scored.get("source") == "semantic" and conf < CONFIDENCE_DROP_SEMANTIC:
                 continue
             out.append(scored)
-        out.sort(key=lambda r: float(r.get("confidence") or 0), reverse=True)
+        out.sort(key=lambda r: _safe_confidence(r.get("confidence")), reverse=True)
         return out
 
     def validate_one(
@@ -174,7 +187,7 @@ class JoinSampleValidator:
             }
             return item
 
-        llm_conf = float(item.get("confidence") or 0.0)
+        llm_conf = _safe_confidence(item.get("confidence"))
 
         # One stable node per relation: the "sample check" and "confidence" events
         # update the same tree node, and distinct relations render as siblings.

@@ -90,3 +90,59 @@ def test_connection_pool_caps_concurrent_physical_connections():
 
     assert acquired == [0, 0]
     assert len(created) == 1
+
+
+def test_connection_pool_validator_exception_closes_once():
+    """When the validator raises on re-acquire from idle, the connection must
+    be closed exactly once (not double-closed by both ``_valid`` and the
+    caller in ``acquire``)."""
+    reset_registry()
+    close_count = 0
+
+    class TrackingConn:
+        def __init__(self):
+            self.closed = False
+
+        def close(self):
+            nonlocal close_count
+            if self.closed:
+                raise RuntimeError("double close!")
+            self.closed = True
+            close_count += 1
+
+        def rollback(self):
+            pass
+
+    created = []
+
+    def factory():
+        conn = TrackingConn()
+        created.append(conn)
+        return conn
+
+    call_count = 0
+
+    def bad_validator(_conn):
+        nonlocal call_count
+        call_count += 1
+        # First two calls succeed (release + acquire-from-idle), third raises
+        if call_count >= 3:
+            raise RuntimeError("validator boom")
+        return True
+
+    pool = for_key(PoolKey("shop", "mysql", "main_vc"), max_size=2, factory=factory)
+    pool._validator = bad_validator
+
+    # Round 1: acquire from factory (no validator), release (validator ok → idle)
+    with pool.acquire() as conn:
+        pass
+    assert call_count == 1  # release validated
+
+    # Round 2: acquire from idle (validator ok), release (validator raises)
+    with pool.acquire() as conn:
+        pass
+    assert call_count == 3  # acquire validated (2), release raised (3)
+
+    # The connection should be closed exactly once (not double-closed)
+    assert created[0].closed is True
+    assert close_count == 1

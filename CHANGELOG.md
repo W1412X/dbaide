@@ -57,6 +57,24 @@ All notable changes to DBAide are documented here. The format is loosely based o
   A connection named `数据库` generated a bare key that `tomllib` rejected on
   reload, making the entire config unreadable. The check now requires
   `ch.isascii()` so non-ASCII names are always quoted.
+- **Path traversal in desktop debug bundle filename** — `connection_name` from
+  the running session was used unsanitised in the debug ZIP filename. A name
+  containing `/` or `..` could place the bundle outside `~/.dbaide/debug/`.
+  The name is now collapsed to filesystem-safe characters before building the
+  filename.
+- **Double-close of physical connection when pool validator raises** — when a
+  connection validator threw an exception, `_valid()` closed the connection
+  internally and then the caller (`acquire`/`release`) closed it again. The
+  second close was swallowed by `try/except` but violated the exactly-once
+  contract. `_valid()` now only returns False on exception; callers handle
+  closing.
+- **Unguarded `float()` on confidence values crashes join pipeline** — several
+  sites in `sql_writer.py`, `join_validation.py`, `joins/catalog.py`,
+  `joins_tab.py`, and `service.py` called `float(confidence)` on LLM-produced
+  or stored values without try/except. A non-numeric string like `"high"`
+  raised `ValueError`, crashing the entire SQL generation or join validation
+  step. All sites now use a `_safe_confidence` / `_safe_float` helper that
+  returns `0.0` on failure.
 
 ## [0.0.6] — 2026-06-08
 

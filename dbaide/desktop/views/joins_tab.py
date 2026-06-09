@@ -114,7 +114,10 @@ class JoinsTab(QWidget):
             self.list.addItem(item)
             return
         for rec in records:
-            conf = float(rec.get("confidence") or 0)
+            try:
+                conf = float(rec.get("confidence") or 0)
+            except (TypeError, ValueError):
+                conf = 0.0
             source = str(rec.get("source") or "?")
             line = (
                 f"[{conf:.0%} · {source}] "

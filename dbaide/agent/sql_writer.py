@@ -4,6 +4,7 @@ import logging
 from dataclasses import dataclass
 from typing import Any
 
+from dbaide.agent.join_validation import _safe_confidence
 from dbaide.agent.progressive_schema import ModelRequiredError
 from dbaide.i18n import answer_language_directive
 from dbaide.llm import LLMClient, LLMMessage, NullLLMClient
@@ -307,7 +308,7 @@ class SQLWriter:
     def _format_relations(context: dict) -> str:
         relations = sorted(
             list(context.get("foreign_keys") or []),
-            key=lambda r: float(r.get("confidence") or 0),
+            key=lambda r: _safe_confidence(r.get("confidence")),
             reverse=True,
         )
         if not relations:

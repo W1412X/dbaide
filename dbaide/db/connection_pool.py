@@ -118,10 +118,12 @@ class ConnectionPool:
             self._close_physical(conn)
 
     def _valid(self, conn: object) -> bool:
+        """Check whether *conn* is still usable.  Returns False on validator
+        exception — callers are responsible for closing invalid connections
+        (avoids double-close when both ``_valid`` and the caller close)."""
         try:
             return bool(self._validator(conn))
         except Exception:
-            self._close_physical(conn)
             return False
 
     @staticmethod
