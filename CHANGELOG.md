@@ -46,6 +46,11 @@ All notable changes to DBAide are documented here. The format is loosely based o
 - **Join editor missing required-field validation** — `_edit()` in the joins tab
   lacked the same required-field check that `_add()` had. Both now validate that
   all four endpoint fields are populated.
+- **Non-atomic file writes in session / workflow / query-history stores** — all
+  three stores used `path.write_text()` which is not atomic: a process crash
+  mid-write could truncate the file, silently destroying the session, workflow
+  result, or query history. Writes now use `tempfile.mkstemp()` + `os.replace()`
+  (the same pattern already used by `ConfigManager` and `AssetStore`).
 
 ## [0.0.6] — 2026-06-08
 

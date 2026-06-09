@@ -14,6 +14,8 @@ from __future__ import annotations
 
 import json
 import logging
+import os
+import tempfile
 import time
 import uuid
 from pathlib import Path
@@ -158,7 +160,20 @@ class ChatSessionStore:
         conn_dir = self._conn_dir(session["connection_name"])
         conn_dir.mkdir(parents=True, exist_ok=True)
         path = conn_dir / f"{session['session_id']}.json"
-        path.write_text(json.dumps(session, ensure_ascii=False, indent=2, default=str), encoding="utf-8")
+        content = json.dumps(session, ensure_ascii=False, indent=2, default=str)
+        # Atomic write: temp file + rename so a crash mid-write cannot corrupt
+        # the session file (path.write_text is not atomic on most filesystems).
+        fd, tmp = tempfile.mkstemp(dir=str(conn_dir), suffix=".tmp")
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8") as fh:
+                fh.write(content)
+            os.replace(tmp, str(path))
+        except Exception:
+            try:
+                os.unlink(tmp)
+            except OSError:
+                pass
+            raise
         return path
 
     def create(self, connection_name: str, title: str = "") -> dict[str, Any]:

@@ -3,6 +3,8 @@ from __future__ import annotations
 
 import json
 import logging
+import os
+import tempfile
 from pathlib import Path
 from typing import Any
 
@@ -53,7 +55,20 @@ class WorkflowHistoryStore:
 
         path = conn_dir / f"{_safe_name(result.workflow_id)}.json"
         data = result.to_dict()
-        path.write_text(json.dumps(data, ensure_ascii=False, indent=2, default=str), encoding="utf-8")
+        content = json.dumps(data, ensure_ascii=False, indent=2, default=str)
+        # Atomic write: temp file + rename so a crash mid-write cannot truncate
+        # the workflow result file.
+        fd, tmp = tempfile.mkstemp(dir=str(conn_dir), suffix=".tmp")
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8") as fh:
+                fh.write(content)
+            os.replace(tmp, str(path))
+        except Exception:
+            try:
+                os.unlink(tmp)
+            except OSError:
+                pass
+            raise
         logger.debug("saved workflow %s to %s", result.workflow_id, path)
         return path
 

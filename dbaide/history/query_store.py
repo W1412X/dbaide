@@ -10,6 +10,8 @@ from __future__ import annotations
 
 import json
 import logging
+import os
+import tempfile
 import time
 from pathlib import Path
 from typing import Any
@@ -100,6 +102,20 @@ class QueryHistoryStore:
         try:
             path.parent.mkdir(parents=True, exist_ok=True)
             body = "\n".join(json.dumps(e, ensure_ascii=False, default=str) for e in entries)
-            path.write_text(body + ("\n" if body else ""), encoding="utf-8")
+            content = body + ("\n" if body else "")
+            # Atomic write: temp file + rename so a crash mid-write cannot
+            # truncate the JSONL history file (losing all entries past the
+            # interrupted line).
+            fd, tmp = tempfile.mkstemp(dir=str(path.parent), suffix=".tmp")
+            try:
+                with os.fdopen(fd, "w", encoding="utf-8") as fh:
+                    fh.write(content)
+                os.replace(tmp, str(path))
+            except Exception:
+                try:
+                    os.unlink(tmp)
+                except OSError:
+                    pass
+                raise
         except OSError as exc:  # noqa: BLE001
             logger.warning("failed to write query history %s: %s", path, exc)
