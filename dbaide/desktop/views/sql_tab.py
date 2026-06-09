@@ -198,7 +198,7 @@ class SqlTab(QWidget):
             elapsed_ms=float(payload.get("elapsed_ms") or 0),
         )
         elapsed = float(payload.get("elapsed_ms") or 0)
-        msg = f"Executed in {elapsed:.0f}ms"
+        msg = t("sql.executed_in", ms=f"{elapsed:.0f}")
         if truncated:
             msg += f"\n\n{t('sql.result_truncated')}"
         self.messages.setPlainText(msg)

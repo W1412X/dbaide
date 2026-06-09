@@ -29,8 +29,9 @@ from dbaide.desktop.theme import app_style, Theme
 class JoinEditorDialog(QDialog):
     def __init__(self, parent=None, *, initial: dict[str, Any] | None = None) -> None:
         super().__init__(parent)
+        from dbaide.i18n import t
         self.setStyleSheet(app_style())
-        self.setWindowTitle("Edit Join" if initial else "Add Join")
+        self.setWindowTitle(t("join.edit_title") if initial else t("join.add_title"))
         layout = QFormLayout(self)
         configure_form(layout)
         initial = initial or {}
@@ -41,12 +42,12 @@ class JoinEditorDialog(QDialog):
         self.database = QLineEdit(str(initial.get("database") or ""))
         self.reason = QLineEdit(str(initial.get("reason") or ""))
         for label, widget in (
-            ("Left table", self.table),
-            ("Left column", self.column),
-            ("Right table", self.ref_table),
-            ("Right column", self.ref_column),
-            ("Database (optional)", self.database),
-            ("Note (optional)", self.reason),
+            (t("join.left_table"), self.table),
+            (t("join.left_column"), self.column),
+            (t("join.right_table"), self.ref_table),
+            (t("join.right_column"), self.ref_column),
+            (t("join.database"), self.database),
+            (t("join.note"), self.reason),
         ):
             layout.addRow(form_label(label), widget)
         buttons = QDialogButtonBox(
@@ -81,18 +82,20 @@ class JoinsTab(QWidget):
 
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
+        from dbaide.i18n import t
+        self._t = t
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(6)
-        hint = QLabel("User joins (0.99) · Agent-saved candidates · sorted by confidence")
+        hint = QLabel(t("join.hint"))
         hint.setWordWrap(True)
         hint.setStyleSheet(f"color: {Theme.MUTED}; font-size: 11px;")
         layout.addWidget(hint)
         row = QHBoxLayout()
-        self.btn_add = compact_button("Add", icon=svg_icon("plus", color=Theme.TEXT_2, size=14), width=76)
-        self.btn_edit = compact_button("Edit", icon=svg_icon("pencil", color=Theme.TEXT_2, size=14), width=76)
-        self.btn_delete = compact_button("Delete", icon=svg_icon("trash", color=Theme.TEXT_2, size=14), width=86)
-        self.btn_refresh = compact_button("Refresh", icon=svg_icon("refresh", color=Theme.TEXT_2, size=14), width=92)
+        self.btn_add = compact_button(t("join.add"), icon=svg_icon("plus", color=Theme.TEXT_2, size=14), width=76)
+        self.btn_edit = compact_button(t("join.edit"), icon=svg_icon("pencil", color=Theme.TEXT_2, size=14), width=76)
+        self.btn_delete = compact_button(t("join.delete"), icon=svg_icon("trash", color=Theme.TEXT_2, size=14), width=86)
+        self.btn_refresh = compact_button(t("join.refresh"), icon=svg_icon("refresh", color=Theme.TEXT_2, size=14), width=92)
         for btn in (self.btn_add, self.btn_edit, self.btn_delete, self.btn_refresh):
             row.addWidget(btn)
         row.addStretch(1)
@@ -109,7 +112,7 @@ class JoinsTab(QWidget):
         self._records = list(records)
         self.list.clear()
         if not records:
-            item = QListWidgetItem("No saved joins. Add one or run a multi-table Ask query.")
+            item = QListWidgetItem(self._t("join.empty"))
             item.setFlags(Qt.ItemFlag.NoItemFlags)
             self.list.addItem(item)
             return
@@ -149,7 +152,7 @@ class JoinsTab(QWidget):
             return
         payload = dialog.payload()
         if not all(payload.get(k) for k in ("table", "column", "ref_table", "ref_column")):
-            dialog_warn(self, "Join", "All four endpoint fields are required.")
+            dialog_warn(self, self._t("join.title"), self._t("join.fields_required"))
             return
         payload["source"] = "user"
         self.add_requested.emit(payload)
@@ -157,14 +160,14 @@ class JoinsTab(QWidget):
     def _edit(self) -> None:
         rec = self._selected_record()
         if not rec:
-            dialog_alert(self, "Join", "Select a join to edit.")
+            dialog_alert(self, self._t("join.title"), self._t("join.select_to_edit"))
             return
         dialog = JoinEditorDialog(self, initial=rec)
         if dialog.exec() != QDialog.DialogCode.Accepted:
             return
         payload = dialog.payload()
         if not all(payload.get(k) for k in ("table", "column", "ref_table", "ref_column")):
-            dialog_warn(self, "Join", "All four endpoint fields are required.")
+            dialog_warn(self, self._t("join.title"), self._t("join.fields_required"))
             return
         payload["id"] = rec.get("id")
         self.update_requested.emit(payload)
@@ -172,8 +175,8 @@ class JoinsTab(QWidget):
     def _delete(self) -> None:
         join_id = self._selected_id()
         if not join_id:
-            dialog_alert(self, "Join", "Select a join to delete.")
+            dialog_alert(self, self._t("join.title"), self._t("join.select_to_delete"))
             return
-        if not dialog_confirm(self, "Delete join", "Remove this saved join?"):
+        if not dialog_confirm(self, self._t("join.delete_title"), self._t("join.confirm_delete")):
             return
         self.delete_requested.emit(join_id)

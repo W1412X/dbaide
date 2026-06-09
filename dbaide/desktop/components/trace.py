@@ -170,12 +170,18 @@ class InlineTrace(QFrame):
             return
         QApplication.clipboard().setText(text)
         self._copy_btn.setIcon(svg_icon("check", color=Theme.GREEN, size=_TRACE_ACTION_ICON_SIZE))
-        QTimer.singleShot(
-            1200,
-            lambda: self._copy_btn.setIcon(
-                svg_icon("copy", color=Theme.TEXT_2, size=_TRACE_ACTION_ICON_SIZE)
-            ),
-        )
+
+        def _restore_icon() -> None:
+            try:
+                from PyQt6 import sip
+                if not sip.isdeleted(self._copy_btn):
+                    self._copy_btn.setIcon(
+                        svg_icon("copy", color=Theme.TEXT_2, size=_TRACE_ACTION_ICON_SIZE)
+                    )
+            except RuntimeError:
+                pass
+
+        QTimer.singleShot(1200, _restore_icon)
 
     def _render(self) -> None:
         self._tree.clear()

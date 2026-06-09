@@ -67,7 +67,8 @@ class AskTab(QWidget):
             self._views[key] = view
             self.stack.addWidget(view)
             if self._has_conn and not self._hint_shown:
-                view.append_hint("Ask about your schema or data in natural language.")
+                from dbaide.i18n import t as _t
+                view.append_hint(_t("ask.hint"))
         return view
 
     def has_slot(self, key: str) -> bool:
@@ -216,10 +217,11 @@ class AskTab(QWidget):
         view.complete_turn(answer=f"**{title}**\n\n{body}", ok=True)
 
     def append_search_hits(self, key: str, query: str, hits: list[dict[str, Any]]) -> None:
+        from dbaide.i18n import t as _t
         if not hits:
-            body = f"No matches for `{query}`. Try building assets or asking in natural language."
+            body = _t("ask.search_no_results", query=query)
         else:
-            lines = [f"Found {len(hits)} matches for `{query}`:", ""]
+            lines = [_t("ask.search_results", n=len(hits), query=query), ""]
             for hit in hits:
                 lines.append(f"- **{hit.get('path')}** ({hit.get('kind')}, score {hit.get('score', 0):.1f})")
                 if hit.get("summary"):
@@ -270,6 +272,14 @@ class AskTab(QWidget):
         from dbaide.desktop.components.base import ghost_action_button
         from dbaide.desktop.components.icons import svg_icon
         from dbaide.desktop.theme import Theme
+        from dbaide.i18n import t as _t
+
+        try:
+            import sip as _sip
+            _is_deleted = _sip.isdeleted
+        except ImportError:
+            from PyQt6 import sip as _sip
+            _is_deleted = _sip.isdeleted
 
         def _copy_btn(label: str, payload: str) -> QWidget:
             btn = ghost_action_button(
@@ -278,12 +288,18 @@ class AskTab(QWidget):
 
             def _do() -> None:
                 QApplication.clipboard().setText(payload)
-                btn.setText("Copied")
+                btn.setText(_t("ask.copied"))
                 btn.setIcon(svg_icon("check", color=Theme.GREEN, size=14))
-                QTimer.singleShot(
-                    1200,
-                    lambda: (btn.setText(label), btn.setIcon(svg_icon("copy", color=Theme.MUTED, size=14))),
-                )
+
+                def _restore() -> None:
+                    try:
+                        if not _is_deleted(btn):
+                            btn.setText(label)
+                            btn.setIcon(svg_icon("copy", color=Theme.MUTED, size=14))
+                    except RuntimeError:
+                        pass
+
+                QTimer.singleShot(1200, _restore)
 
             btn.clicked.connect(_do)
             return btn
@@ -292,14 +308,14 @@ class AskTab(QWidget):
         row = QHBoxLayout(bar)
         row.setContentsMargins(0, 2, 0, 0)
         row.setSpacing(2)
-        row.addWidget(_copy_btn("Copy SQL", sql))
+        row.addWidget(_copy_btn(_t("ask.copy_sql"), sql))
         open_btn = ghost_action_button(
-            "Open in SQL", icon=svg_icon("external-link", color=Theme.MUTED, size=14),
-            tooltip="Open this query in the SQL tab",
+            _t("ask.open_in_sql"), icon=svg_icon("external-link", color=Theme.MUTED, size=14),
+            tooltip=_t("ask.open_in_sql_tooltip"),
         )
         open_btn.clicked.connect(lambda: self.open_sql.emit(sql))
         row.addWidget(open_btn)
         if cli_command:
-            row.addWidget(_copy_btn("Copy CLI", str(cli_command)))
+            row.addWidget(_copy_btn(_t("ask.copy_cli"), str(cli_command)))
         row.addStretch(1)
         return bar

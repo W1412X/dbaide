@@ -773,9 +773,11 @@ class MainWindow(QMainWindow):
             return
         self.schema_rows = []
         self._ensure_ui_state().schema_error(message)
-        self.toast(f"Schema load failed: {message}")
+        from dbaide.i18n import t as _i18n_t
+        msg = _i18n_t("schema.load_failed", error=message)
+        self.toast(msg)
         self.conversation_controller.sync_work_ui()
-        self._ensure_ui_state().statusbar_message(f"Schema load failed: {message}")
+        self._ensure_ui_state().statusbar_message(msg)
 
     def refresh_joins(self) -> None:
         conn = self.current_connection()

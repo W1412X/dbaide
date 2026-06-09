@@ -17,7 +17,8 @@ class JoinsDialog(QDialog):
 
     def __init__(self, joins: JoinsTab, *, parent=None) -> None:
         super().__init__(parent)
-        self.setWindowTitle("Saved Joins")
+        from dbaide.i18n import t
+        self.setWindowTitle(t("menu.joins").rstrip("…"))
         self.setModal(False)
         self.resize(560, 520)
         self.setMinimumSize(440, 360)

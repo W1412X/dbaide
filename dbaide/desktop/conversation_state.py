@@ -10,13 +10,13 @@ class ThinkingUiState:
 
     running: bool = False
     waiting: bool = False
-    phase: str = "Thinking..."
+    phase: str = ""
     ok: bool = True
     step_count: int = 0
     events: list[dict[str, Any]] = field(default_factory=list)
     expanded: bool = False
 
-    def start(self, phase: str = "Thinking...") -> None:
+    def start(self, phase: str = "") -> None:
         self.running = True
         self.waiting = False
         if phase:
@@ -29,7 +29,7 @@ class ThinkingUiState:
         self.waiting = False
         self.phase = phase if len(phase) <= 60 else phase[:59] + "..."
 
-    def set_waiting(self, text: str = "Waiting for your reply...") -> None:
+    def set_waiting(self, text: str = "") -> None:
         self.running = False
         self.waiting = True
         self.phase = text

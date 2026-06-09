@@ -63,17 +63,12 @@ class ConnectionForm(QWidget):
         self.load_profile = Combo()
         self.load_profile.setFixedHeight(26)
         self.load_profile.addItems(["production", "staging", "dev"])
-        self.load_profile.setToolTip(
-            "production: lowest DB load (light profiling, low concurrency, strict limits).\n"
-            "staging: balanced. dev: highest concurrency and limits."
-        )
+        from dbaide.i18n import t as _ct
+        self.load_profile.setToolTip(_ct("conn.load_profile_tooltip"))
         self.session_timezone = QLineEdit("UTC")
         self.session_timezone.setFixedHeight(26)
         self.session_timezone.setPlaceholderText("UTC, +00:00, +08:00")
-        self.session_timezone.setToolTip(
-            "Session time zone applied after connecting. MySQL accepts offsets like +00:00; "
-            "PostgreSQL also accepts names like UTC."
-        )
+        self.session_timezone.setToolTip(_ct("conn.timezone_tooltip"))
 
         from dbaide.i18n import t
         browse = compact_button(t("conn.browse"), width=88)
@@ -152,7 +147,8 @@ class ConnectionForm(QWidget):
                     item.widget().setVisible(visible)
 
     def _browse(self) -> None:
-        path, _ = QFileDialog.getOpenFileName(self, "Select SQLite database")
+        from dbaide.i18n import t
+        path, _ = QFileDialog.getOpenFileName(self, t("conn.browse_title"))
         if path:
             self.path.setText(path)
             if not self.name.text().strip():

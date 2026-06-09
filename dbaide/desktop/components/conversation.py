@@ -183,7 +183,7 @@ class _ThinkingIndicator(QFrame):
         self.setObjectName("thinkingIndicator")
         self.setCursor(Qt.CursorShape.PointingHandCursor)
         self.setSizePolicy(QSizePolicy.Policy.Minimum, QSizePolicy.Policy.Fixed)
-        self._state = ThinkingUiState(phase="Thinking...")
+        self._state = ThinkingUiState()
         self._busy = BusyAnimator(self._tick)
         self._hover = False
         self._tone = Theme.MUTED
@@ -221,7 +221,10 @@ class _ThinkingIndicator(QFrame):
 
     # ── state transitions ──────────────────────────────────────────────────--
 
-    def start(self, phase: str = "Thinking…") -> None:
+    def start(self, phase: str = "") -> None:
+        if not phase:
+            from dbaide.i18n import t
+            phase = t("status.thinking")
         self._state.start(phase)
         if not self._busy.active:
             self._busy.start()
@@ -235,7 +238,10 @@ class _ThinkingIndicator(QFrame):
             self._busy.start()
         self._sync()
 
-    def set_waiting(self, text: str = "Waiting for your reply…") -> None:
+    def set_waiting(self, text: str = "") -> None:
+        if not text:
+            from dbaide.i18n import t
+            text = t("status.waiting_reply")
         self._state.set_waiting(text)
         self._busy.stop()
         self._sync()
@@ -953,7 +959,7 @@ class ConversationView(QScrollArea):
         # placeholder=True: a live run → spin immediately. placeholder=False: a
         # restored turn → stays idle until complete_turn sets its "view trace" link.
         if placeholder:
-            turn.status.start("Thinking…")
+            turn.status.start()
         self._scroll_bottom()
 
     def append_trace(self, message: str, *, kind: str = "", detail: str = "") -> None:
@@ -1081,7 +1087,7 @@ class ConversationView(QScrollArea):
             turn.append_content(actions_widget)
         notes: list[str] = []
         if warnings:
-            notes.append("**Warnings**\n" + "\n".join(f"- {w}" for w in warnings))
+            notes.append(f"**{self._tr('conversation.warnings')}**\n" + "\n".join(f"- {w}" for w in warnings))
         if errors:
             lines = []
             for err in errors:
@@ -1089,7 +1095,7 @@ class ConversationView(QScrollArea):
                     lines.append(f"- [{err.get('stage', '')}] {err.get('message', '')}")
                 else:
                     lines.append(f"- {err}")
-            notes.append("**Notes**\n" + "\n".join(lines))
+            notes.append(f"**{self._tr('conversation.notes')}**\n" + "\n".join(lines))
         if notes:
             turn.append_content(_MarkdownBlock("\n\n".join(notes), boxed=True))
 

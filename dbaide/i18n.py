@@ -615,6 +615,105 @@ _STRINGS: dict[str, dict[str, str]] = {
     "result.export_title": {"en": "Export results", "zh": "导出结果"},
     "result.autofit_column": {"en": "Auto-fit column", "zh": "自适应列宽"},
     "result.autofit_all": {"en": "Auto-fit all columns", "zh": "自适应所有列宽"},
+    "result.showing": {
+        "en": "Showing {shown} of {total} rows{suffix}{elapsed}",
+        "zh": "显示 {shown} / {total} 行{suffix}{elapsed}",
+    },
+    "result.truncated_suffix": {"en": " · truncated", "zh": " · 已截断"},
+    "result.no_results": {"en": "No results", "zh": "无结果"},
+    "result.value_title": {"en": "Value", "zh": "值"},
+    # ── Topbar status badge ──────────────────────────────────────────────
+    "topbar.status.ready": {"en": "Ready", "zh": "就绪"},
+    "topbar.status.no_assets": {"en": "No assets", "zh": "无资产"},
+    "topbar.status.building": {"en": "Building", "zh": "构建中"},
+    "topbar.status.idle": {"en": "Idle", "zh": "空闲"},
+    # ── Ask tab / conversation actions ───────────────────────────────────
+    "ask.hint": {
+        "en": "Ask about your schema or data in natural language.",
+        "zh": "用自然语言提问你的库结构或数据。",
+    },
+    "ask.search_no_results": {
+        "en": "No matches for `{query}`. Try building assets or asking in natural language.",
+        "zh": "未找到与 `{query}` 匹配的内容。请尝试构建资产或用自然语言提问。",
+    },
+    "ask.search_results": {"en": "Found {n} matches for `{query}`:", "zh": "找到 {n} 条与 `{query}` 匹配的结果："},
+    "ask.copied": {"en": "Copied", "zh": "已复制"},
+    "ask.copy_sql": {"en": "Copy SQL", "zh": "复制 SQL"},
+    "ask.open_in_sql": {"en": "Open in SQL", "zh": "在 SQL 中打开"},
+    "ask.open_in_sql_tooltip": {"en": "Open this query in the SQL tab", "zh": "在 SQL 标签页中打开此查询"},
+    "ask.copy_cli": {"en": "Copy CLI", "zh": "复制 CLI"},
+    # ── Conversation inline labels ───────────────────────────────────────
+    "conversation.warnings": {"en": "Warnings", "zh": "警告"},
+    "conversation.notes": {"en": "Notes", "zh": "备注"},
+    "status.thinking": {"en": "Thinking…", "zh": "思考中…"},
+    "status.waiting_reply": {"en": "Waiting for your reply…", "zh": "等待你的回复…"},
+    # ── SQL tab messages ─────────────────────────────────────────────────
+    "sql.executed_in": {"en": "Executed in {ms}ms", "zh": "执行耗时 {ms}ms"},
+    # ── Build stats toast ────────────────────────────────────────────────
+    "toast.build_dryrun": {"en": "≈{n} queries (dry-run)", "zh": "≈{n} 条查询（模拟运行）"},
+    "toast.build_stats": {
+        "en": " · {queries} queries · peak {peak}",
+        "zh": " · {queries} 条查询 · 峰值 {peak}",
+    },
+    # ── Composer fallback ────────────────────────────────────────────────
+    "composer.no_model": {"en": "No model", "zh": "无模型"},
+    "composer.remove": {"en": "Remove", "zh": "移除"},
+    # ── Settings busy / test status ──────────────────────────────────────
+    "settings.saving_conn": {"en": "Saving connection…", "zh": "正在保存连接…"},
+    "settings.saving_model": {"en": "Saving model…", "zh": "正在保存模型…"},
+    "settings.testing_conn": {"en": "Testing connection…", "zh": "正在测试连接…"},
+    "settings.testing_model": {"en": "Testing model…", "zh": "正在测试模型…"},
+    "settings.test_ok": {"en": "OK", "zh": "成功"},
+    "settings.test_failed": {"en": "Failed", "zh": "失败"},
+    "settings.api_key_placeholder": {
+        "en": "Leave blank to keep existing key",
+        "zh": "留空以保留现有密钥",
+    },
+    # ── Connection dialog ────────────────────────────────────────────────
+    "conn.browse_title": {"en": "Select SQLite database", "zh": "选择 SQLite 数据库"},
+    "conn.load_profile_tooltip": {
+        "en": "production: lowest DB load (light profiling, low concurrency, strict limits).\n"
+              "staging: balanced. dev: highest concurrency and limits.",
+        "zh": "production：最低数据库负载（轻量画像、低并发、严格限制）。\n"
+              "staging：平衡。dev：最高并发和限制。",
+    },
+    "conn.timezone_tooltip": {
+        "en": "Session time zone applied after connecting. MySQL accepts offsets like +00:00; "
+              "PostgreSQL also accepts names like UTC.",
+        "zh": "连接后应用的会话时区。MySQL 接受如 +00:00 的偏移量；PostgreSQL 还接受如 UTC 的名称。",
+    },
+    # ── Build dialog ─────────────────────────────────────────────────────
+    "build.db_built": {"en": "{name}  ·  built", "zh": "{name}  ·  已构建"},
+    # ── Joins feature ────────────────────────────────────────────────────
+    "join.edit_title": {"en": "Edit Join", "zh": "编辑关联"},
+    "join.add_title": {"en": "Add Join", "zh": "添加关联"},
+    "join.left_table": {"en": "Left table", "zh": "左表"},
+    "join.left_column": {"en": "Left column", "zh": "左列"},
+    "join.right_table": {"en": "Right table", "zh": "右表"},
+    "join.right_column": {"en": "Right column", "zh": "右列"},
+    "join.database": {"en": "Database (optional)", "zh": "数据库（可选）"},
+    "join.note": {"en": "Note (optional)", "zh": "备注（可选）"},
+    "join.hint": {
+        "en": "User joins (0.99) · Agent-saved candidates · sorted by confidence",
+        "zh": "用户定义关联 (0.99) · 智能体保存的候选 · 按置信度排序",
+    },
+    "join.add": {"en": "Add", "zh": "添加"},
+    "join.edit": {"en": "Edit", "zh": "编辑"},
+    "join.delete": {"en": "Delete", "zh": "删除"},
+    "join.refresh": {"en": "Refresh", "zh": "刷新"},
+    "join.empty": {
+        "en": "No saved joins. Add one or run a multi-table Ask query.",
+        "zh": "尚无已保存的关联。可手动添加，或运行多表提问自动发现。",
+    },
+    "join.fields_required": {
+        "en": "All four endpoint fields are required.",
+        "zh": "四个端点字段均为必填。",
+    },
+    "join.select_to_edit": {"en": "Select a join to edit.", "zh": "请选择要编辑的关联。"},
+    "join.select_to_delete": {"en": "Select a join to delete.", "zh": "请选择要删除的关联。"},
+    "join.confirm_delete": {"en": "Remove this saved join?", "zh": "删除此已保存的关联？"},
+    "join.title": {"en": "Join", "zh": "关联"},
+    "join.delete_title": {"en": "Delete join", "zh": "删除关联"},
 }
 
 _current = DEFAULT_LANGUAGE

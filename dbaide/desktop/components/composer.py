@@ -156,7 +156,8 @@ class ComposerWidget(Panel):
             name = str(entry.get("name") or "default")
             options.append((_model_label(entry), name))
         if not options:
-            options = [("No model", "default")]
+            from dbaide.i18n import t
+            options = [(t("composer.no_model"), "default")]
         self.model_select.set_options(options)
         active = default or (options[0][1] if options else "default")
         self.model_select.set_value(active)
@@ -279,7 +280,8 @@ class _ContextChip(QWidget):
         close.setIconSize(QSize(12, 12))
         close.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonIconOnly)
         close.setCursor(Qt.CursorShape.PointingHandCursor)
-        close.setToolTip("Remove")
+        from dbaide.i18n import t as _ct
+        close.setToolTip(_ct("composer.remove"))
         close.setFixedSize(18, 18)
         close.clicked.connect(lambda: self.removed.emit(self._path))
         lay.addWidget(close)

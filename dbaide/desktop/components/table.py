@@ -188,10 +188,12 @@ class ResultTableWidget(QWidget):
                     item.setToolTip(_full_text(value))  # full value on hover
                 self.table.setItem(r_idx, c_idx, item)
         self._fit_columns()
+        from dbaide.i18n import t as _t
         total = row_count or len(self._rows)
-        suffix = " · truncated" if truncated else ""
+        suffix = _t("result.truncated_suffix") if truncated else ""
         elapsed = f" · {elapsed_ms:.0f}ms" if elapsed_ms else ""
-        self.meta.setText(f"Showing {len(self._rows)} of {total} rows{suffix}{elapsed}")
+        self.meta.setText(_t("result.showing", shown=len(self._rows), total=total,
+                             suffix=suffix, elapsed=elapsed))
 
     def _fit_columns(self) -> None:
         """Snug, content-sized columns. The first text column gets a Stretch resize
@@ -335,7 +337,8 @@ class ResultTableWidget(QWidget):
     def clear(self) -> None:
         self.table.setRowCount(0)
         self.table.setColumnCount(0)
-        self.meta.setText("No results")
+        from dbaide.i18n import t as _t
+        self.meta.setText(_t("result.no_results"))
 
 
 class CellValueDialog(QDialog):
@@ -343,7 +346,8 @@ class CellValueDialog(QDialog):
 
     def __init__(self, column: str, value: str, *, parent=None) -> None:
         super().__init__(parent)
-        self.setWindowTitle(column or "Value")
+        from dbaide.i18n import t as _t
+        self.setWindowTitle(column or _t("result.value_title"))
         self.resize(560, 360)
         self.setStyleSheet(f"QDialog {{ background: {Theme.BG}; }}")
         layout = QVBoxLayout(self)

@@ -70,7 +70,7 @@ class BuildAssetsDialog(QDialog):
                 continue
             label = name
             if entry.get("has_assets"):
-                label = f"{name}  ·  built"
+                label = t("build.db_built", name=name)
             box = QCheckBox(label)
             box.setChecked(True)
             box.setProperty("db_name", name)

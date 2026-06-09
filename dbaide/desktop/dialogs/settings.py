@@ -72,7 +72,7 @@ class ModelForm(QWidget):
         self.base_url.setFixedHeight(26)
         self.api_key = QLineEdit()
         self.api_key.setFixedHeight(26)
-        self.api_key.setPlaceholderText("Leave blank to keep existing key")
+        self.api_key.setPlaceholderText(_pt("settings.api_key_placeholder"))
         self.api_key.setEchoMode(QLineEdit.EchoMode.Password)
         self.model_id = QLineEdit()
         self.model_id.setFixedHeight(26)
@@ -714,7 +714,7 @@ class SettingsDialog(QDialog):
             key = self._selected_list_key(self.conn_list)
             self.conn_more.setEnabled((not busy) and bool(key) and key != _NEW_CONNECTION_ID)
             if busy:
-                self.conn_test_status.setText("Saving connection…")
+                self.conn_test_status.setText(_pt("settings.saving_conn"))
                 self.conn_test_status.setStyleSheet(f"color:{Theme.MUTED}; font-size:12px;")
         else:
             self.save_model_btn.setEnabled(not busy)
@@ -723,7 +723,7 @@ class SettingsDialog(QDialog):
             key = self._selected_list_key(self.model_list)
             self.model_more.setEnabled((not busy) and bool(key) and key != _NEW_MODEL_ID)
             if busy:
-                self.model_test_status.setText("Saving model…")
+                self.model_test_status.setText(_pt("settings.saving_model"))
                 self.model_test_status.setStyleSheet(f"color:{Theme.MUTED}; font-size:12px;")
 
     def set_test_busy(self, busy: bool, *, target: str = "connection") -> None:
@@ -731,19 +731,19 @@ class SettingsDialog(QDialog):
             self.test_conn_btn.setEnabled(not busy)
             self.save_conn_btn.setEnabled(not busy)
             if busy:
-                self.conn_test_status.setText("Testing connection…")
+                self.conn_test_status.setText(_pt("settings.testing_conn"))
                 self.conn_test_status.setStyleSheet(f"color:{Theme.MUTED}; font-size:12px;")
         else:
             self.test_model_btn.setEnabled(not busy)
             self.save_model_btn.setEnabled(not busy)
             if busy:
-                self.model_test_status.setText("Testing model…")
+                self.model_test_status.setText(_pt("settings.testing_model"))
                 self.model_test_status.setStyleSheet(f"color:{Theme.MUTED}; font-size:12px;")
 
     def show_test_result(self, ok: bool, message: str, *, target: str = "connection") -> None:
         label = self.conn_test_status if target == "connection" else self.model_test_status
         color = Theme.GREEN if ok else Theme.RED
-        prefix = "OK" if ok else "Failed"
+        prefix = _pt("settings.test_ok") if ok else _pt("settings.test_failed")
         label.setStyleSheet(f"color:{color}; font-size:12px;")
         label.setText(f"{prefix}: {message}")
         if not ok:

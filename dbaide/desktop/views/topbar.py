@@ -190,12 +190,13 @@ class TopBar(QWidget):
         self.connection.blockSignals(False)
 
     def set_asset_status(self, status: str) -> None:
+        from dbaide.i18n import t
         mapping = {
-            "ready": ("Ready", "ready"),
-            "missing": ("No assets", "missing"),
-            "building": ("Building", "building"),
+            "ready": (t("topbar.status.ready"), "ready"),
+            "missing": (t("topbar.status.no_assets"), "missing"),
+            "building": (t("topbar.status.building"), "building"),
         }
-        text, state = mapping.get(status, ("Idle", "idle"))
+        text, state = mapping.get(status, (t("topbar.status.idle"), "idle"))
         self.status.set_state(text, state)
 
     def set_global_status(self, text: str, state: str = "idle") -> None:

@@ -93,11 +93,13 @@ class OneOffActionController:
                 win.bus.emit(ASSETS_CHANGED, {"instance": win.current_connection()})
             win.switch_tab("Chat")
             if stats.get("estimated_queries"):
-                win.toast(f"≈{stats.get('estimated_queries')} queries (dry-run)")
+                win.toast(_i18n_t("toast.build_dryrun", n=stats.get('estimated_queries')))
             else:
                 win.toast(
                     _i18n_t("toast.assets_built")
-                    + f" · {stats.get('total_queries', 0)} queries · peak {stats.get('peak_inflight', 0)}"
+                    + _i18n_t("toast.build_stats",
+                              queries=stats.get('total_queries', 0),
+                              peak=stats.get('peak_inflight', 0))
                 )
             return
         if action == "search_assets":
