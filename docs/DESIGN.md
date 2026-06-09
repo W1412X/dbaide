@@ -585,6 +585,39 @@ Chips appear above the toolbar and can be individually removed.
 
 ---
 
+## Connection Import / Export
+
+DBAide supports exporting and importing connection configurations, including
+credentials, joins, and annotations — for backup, migration, or team sharing.
+
+### Export formats
+
+| Format | Scope | Trigger |
+|--------|-------|---------|
+| **Single connection** | One `ConnectionConfig` + its joins + its annotations | Settings → More → Export |
+| **Full export** | All connections + all models + resource defaults + all joins + all annotations | Settings → More → Export All |
+
+Both formats are JSON with a `dbaide_export` envelope (`version`, `type`, `exported_at`).
+Passwords and API keys are included in plaintext — the user explicitly opted out of
+redaction.
+
+### Import flow
+
+```mermaid
+flowchart LR
+    FILE["JSON file"] --> VAL["Validate envelope<br/>type: connection | full"]
+    VAL -->|connection| MERGE1["Upsert connection<br/>Merge joins (dedup by endpoint)<br/>Merge annotations (upsert by scope)"]
+    VAL -->|full| MERGE2["Upsert all connections<br/>Upsert all models<br/>Merge all joins + annotations<br/>Set resource_defaults"]
+    MERGE1 --> RELOAD["config.reload()<br/>Refresh UI"]
+    MERGE2 --> RELOAD
+```
+
+Join deduplication uses `relation_endpoint_key(table, column, ref_table, ref_column)`.
+Annotations merge by scope + database + table + column (upsert semantics via
+`AnnotationStore.add()`).
+
+---
+
 ## Extensibility
 
 **Add a database adapter**

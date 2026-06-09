@@ -113,6 +113,16 @@ Creates a ZIP under `~/.dbaide/debug/` containing:
 
 Attach the ZIP when reporting issues internally.
 
+## Sharing connections across machines
+
+**Settings → Connections → More → Export All** saves every connection and model
+(including passwords and API keys) to a JSON file. Import it on another machine
+with **Settings → Connections → Import**. Joins and annotations merge
+automatically.
+
+For a single connection, use **Export** (under More) to share just that connection
+and its associated joins and annotations.
+
 ## Backups
 
 Back up before major upgrades:
@@ -120,6 +130,8 @@ Back up before major upgrades:
 ```bash
 tar czf dbaide-backup-$(date +%Y%m%d).tar.gz ~/.dbaide/config.toml ~/.dbaide/assets ~/.dbaide/joins
 ```
+
+Or use **Export All** to get a portable JSON backup of all connections and models.
 
 Query logs and chat sessions are optional; they can be large.
 

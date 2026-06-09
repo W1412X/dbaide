@@ -24,6 +24,7 @@ see [docs/TEAM.md](docs/TEAM.md).
   - `dialogs/` — settings, connection, joins, build assets, note editor.
 - `dbaide/adapters/` — SQLite / MySQL / PostgreSQL.
 - `dbaide/annotations/` — schema annotations (business notes on tables/columns).
+- `dbaide/joins/` — join catalog (user-saved + agent-discovered edges, per connection).
 - `dbaide/history/` — chat sessions, query history, debug bundles.
 - `tests/` — pytest suite (GUI tests render off-screen).
 

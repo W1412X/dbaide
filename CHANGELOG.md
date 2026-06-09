@@ -6,8 +6,46 @@ All notable changes to DBAide are documented here. The format is loosely based o
 
 ## [Unreleased]
 
+### Added
+
+- **Connection & model import/export** — export a single connection (with joins,
+  annotations, and credentials) or all connections + models as a JSON file;
+  re-import on any machine. **Settings → Connections → More → Export / Export All**,
+  and **Import** in the connection list. Passwords and API keys are exported
+  unconditionally (no redaction).
+- **MariaDB connection type** — the type selector and CLI now accept `mariadb`
+  alongside `mysql`. Both route to the MySQL adapter; MariaDB-specific backslash
+  and dialect handling applies.
+
+### Changed
+
+- **Settings dialog layout** — New / Import buttons are now in the list column
+  (below the connection or model list), while Save / Test / More remain in the
+  form column. This matches the expected mental model: list-level actions near
+  the list, form-level actions near the form.
+- **Password / API key saved placeholders** — when editing a connection or model
+  that already has a credential stored, the password or API key field shows a
+  placeholder ("Password saved · leave blank to keep") so users know the
+  credential is stored and won't be cleared on save.
+- **CSV NULL rendering** — NULL values now appear as literal `NULL` in CSV export
+  instead of empty cells, so they are distinguishable from empty strings.
+
 ### Fixed
 
+- **`annotations.add()` crash on full import** — the full-import path called the
+  non-existent `annotations.upsert()` method, causing an `AttributeError` whenever
+  a full import included annotations. Fixed to use `annotations.add()`.
+- **Backslash escaping in SQL INSERT export** — trailing backslashes in string
+  values only had backslash doubling for MySQL/MariaDB, leaving other dialects
+  with broken SQL (the `\` escaped the closing quote). Backslashes are now doubled
+  for all dialects.
+- **XSS in Markdown HTML sanitizer** — unquoted HTML event handlers
+  (`onerror=alert(1)`) bypassed the sanitization regex. The regex now handles
+  both quoted and unquoted attribute values.
+- **Dialect-aware INSERT export in data browser** — "Copy as INSERT" in the
+  data browser now receives the current connection's SQL dialect (MySQL, PostgreSQL,
+  SQLite) through the full view chain, so backslash and identifier quoting match
+  the target database.
 - **Config file corruption on save→reload→save cycle** — `_render_toml` placed
   `default_connection` and `default_model` after the `[meta]` table header, so
   TOML scoping absorbed them into `meta` on reload. A subsequent save wrote them

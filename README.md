@@ -10,7 +10,7 @@ a CLI **and** a polished desktop app that share the same Python core.
 
 [![Python](https://img.shields.io/badge/python-3.11%2B-3776AB?logo=python&logoColor=white)](https://www.python.org/)
 [![Desktop](https://img.shields.io/badge/desktop-PyQt6-41CD52)](https://pypi.org/project/PyQt6/)
-[![Databases](https://img.shields.io/badge/db-SQLite%20·%20MySQL%20·%20PostgreSQL-336791)](#connect-a-database)
+[![Databases](https://img.shields.io/badge/db-SQLite%20·%20MySQL%20·%20MariaDB%20·%20PostgreSQL-336791)](#connect-a-database)
 [![License](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 
 <img src="docs/images/social-preview.png" alt="DBAide — ask your database in plain language" width="900">
@@ -107,6 +107,14 @@ workspace, all read-only and routed through the same guardrails as the agent:
 
 Right-click a table in the schema tree to open it, or to **Generate SQL**
 (`SELECT` / `COUNT` / `INSERT` / `UPDATE` templates).
+
+### Import / Export connections
+
+**Settings → Connections → More → Export** saves a single connection (including
+joins, annotations, and credentials) as a JSON file. **Export All** saves every
+connection and model. **Import** reads either format and merges into the current
+config — existing connections are overwritten if confirmed, joins and annotations
+are merged.
 
 ### CLI
 
@@ -223,6 +231,7 @@ dbaide/
   validation/         deterministic SQL guards (SchemaGuard, CTE parser)
   rendering/          safe Markdown (mistune) + sanitization
   annotations/        schema annotations (business notes)
+  joins/              join catalog (user-saved + agent-discovered edges)
   history/            chat sessions, query history, debug bundles
   desktop/            PyQt6 app
     views/            main window, sidebar, topbar, workbench, ask tab, SQL tab
