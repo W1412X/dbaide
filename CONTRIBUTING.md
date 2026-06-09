@@ -23,6 +23,7 @@ see [docs/TEAM.md](docs/TEAM.md).
   - `components/` — composer, conversation view, session list, SQL editor, data table.
   - `dialogs/` — settings, connection, joins, build assets, note editor.
 - `dbaide/adapters/` — SQLite / MySQL / PostgreSQL.
+- `dbaide/annotations/` — schema annotations (business notes on tables/columns).
 - `dbaide/history/` — chat sessions, query history, debug bundles.
 - `tests/` — pytest suite (GUI tests render off-screen).
 

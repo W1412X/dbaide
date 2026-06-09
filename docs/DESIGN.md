@@ -410,8 +410,11 @@ Assets
 Joins
   JoinCatalogStore (user + agent-saved edges)
 
+Annotations
+  AnnotationStore (business notes on tables/columns, per connection)
+
 Validation
-  deterministic SQL guards (single statement, read-only, LIMIT, EXPLAIN)
+  deterministic SQL guards (single statement, read-only, LIMIT, EXPLAIN, dialect-aware string parsing)
 
 Adapters
   database-specific metadata, EXPLAIN, read-only execute
@@ -431,6 +434,8 @@ Adapters are the only layer that knows driver details.
 - `EXPLAIN` preflight where supported.
 - Read-only execution mode where the driver supports it.
 - Result explanation based on **actual returned rows**, not fabrication.
+- **Dialect-aware SQL parsing** — string literal stripping uses MySQL backslash
+  escaping only for MySQL/MariaDB; standard SQL quoting for PostgreSQL/SQLite.
 
 ### Execution mode
 

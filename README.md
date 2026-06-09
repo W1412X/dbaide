@@ -44,7 +44,8 @@ number. DBAide is built on the opposite principle:
 - 🔌 **Works offline-ish.** No LLM configured? It falls back to deterministic heuristics
   for inspection, profiling, guardrails and simple queries.
 
-Supports **SQLite, MySQL/MariaDB, and PostgreSQL**, in **English and 简体中文**.
+Supports **SQLite, MySQL/MariaDB, and PostgreSQL**, in **English and 简体中文**, with
+**dark and light themes**.
 
 ## Screenshots
 
@@ -173,6 +174,7 @@ timeout_seconds = 60
 
 [ui]
 language = "en"   # or "zh"
+theme = "dark"    # or "light"
 
 [resource_defaults]
 # Override per-knob limits; see docs/DESIGN.md for all knobs
@@ -220,6 +222,7 @@ dbaide/
   db/                 connection pool, resource policy, query budget
   validation/         deterministic SQL guards (SchemaGuard, CTE parser)
   rendering/          safe Markdown (mistune) + sanitization
+  annotations/        schema annotations (business notes)
   history/            chat sessions, query history, debug bundles
   desktop/            PyQt6 app
     views/            main window, sidebar, topbar, workbench, ask tab, SQL tab
@@ -236,13 +239,15 @@ All local state lives under `~/.dbaide/`:
 
 | Path | Purpose |
 |------|---------|
-| `config.toml` | Connections, models, UI language, resource limits |
+| `config.toml` | Connections, models, UI language/theme, resource limits |
 | `assets/instances/{conn}/` | Offline schema documents |
 | `joins/instances/{conn}/` | User-saved and agent-discovered join catalog |
+| `annotations/{conn}/` | Schema annotations (business notes on tables/columns) |
 | `logs/dbaide.log` | Rotating application log |
 | `logs/queries/{conn}.jsonl` | SQL audit log (every executed statement) |
 | `query_history/{conn}.jsonl` | Workbench SQL editor history |
 | `sessions/{conn}/` | Chat session memory (per-turn Q/A/trace) |
+| `debug/` | Exported debug bundles (ZIP) for support |
 
 ## Development
 

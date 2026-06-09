@@ -14,6 +14,7 @@ All local state lives under `~/.dbaide/`:
 | `logs/queries/{connection}.jsonl` | Audit log of executed SQL |
 | `assets/instances/{connection}/` | Offline schema/catalog documents |
 | `joins/instances/{connection}/` | User-saved and agent-discovered join catalog |
+| `annotations/{connection}/` | Schema annotations (business notes on tables/columns) |
 | `sessions/{connection}/` | Chat session memory (per-turn Q/A/trace) |
 | `query_history/{connection}.jsonl` | Workbench SQL editor history |
 | `debug/` | Exported debug bundles (ZIP) |
