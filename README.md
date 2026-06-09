@@ -49,9 +49,13 @@ Supports **SQLite, MySQL/MariaDB, and PostgreSQL**, in **English and 简体中�
 
 ## Screenshots
 
-| Ask — answer · trace · schema | SQL workspace | Resources & safety |
-| --- | --- | --- |
-| <img src="docs/images/ask.png" width="280"> | <img src="docs/images/sql.png" width="280"> | <img src="docs/images/settings-resources.png" width="280"> |
+| Ask — answer · trace · schema | SQL workspace |
+| --- | --- |
+| <img src="docs/images/ask.png" width="420"> | <img src="docs/images/sql.png" width="420"> |
+
+| Connections · import/export | Resources & safety |
+| --- | --- |
+| <img src="docs/images/settings-connections.png" width="420"> | <img src="docs/images/settings-resources.png" width="420"> |
 
 ## Install
 

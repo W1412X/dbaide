@@ -70,7 +70,7 @@ def compose(shot: QPixmap) -> QPixmap:
     bullets = [
         "Agentic discovery & safe read-only SQL",
         "Asks before it guesses — no wrong numbers",
-        "SQLite · MySQL · PostgreSQL · EN / 中文",
+        "SQLite · MySQL · MariaDB · PostgreSQL · EN / 中文",
     ]
     y = 360
     for b in bullets:
