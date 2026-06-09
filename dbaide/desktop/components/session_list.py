@@ -189,7 +189,7 @@ class SessionList(QWidget):
         self._pending: list[dict[str, Any]] = []
         self._sessions: list[dict[str, Any]] = []
         from dbaide.desktop.components.spinner import BusyAnimator
-        self._busy = BusyAnimator(self._tick_spinners)
+        self._busy = BusyAnimator(self._tick_spinners, parent=self)
 
     def set_running(self, ids: set[str]) -> None:
         """Mark which session ids are currently running (spinner on their rows)."""

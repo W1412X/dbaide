@@ -182,7 +182,8 @@ class DataBrowser(QWidget):
         # While a page is loading, the Refresh icon spins and the range reads
         # "Loading…" — a quiet, friendly sign that the DB is being queried.
         self._busy = BusyAnimator(
-            lambda: self._refresh.setIcon(spinner_icon(self._busy.angle, color=Theme.TEXT_2, size=15))
+            lambda: self._refresh.setIcon(spinner_icon(self._busy.angle, color=Theme.TEXT_2, size=15)),
+            parent=self,
         )
         self._set_controls_enabled(True)
 

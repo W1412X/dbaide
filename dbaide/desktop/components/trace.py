@@ -118,7 +118,7 @@ class InlineTrace(QFrame):
         # Running rows show a spinning circle (instead of a static ▶) until they
         # resolve. We update just those rows' glyph on each tick — no full re-render.
         self._running_items: list[QTreeWidgetItem] = []
-        self._busy = BusyAnimator(self._on_spin)
+        self._busy = BusyAnimator(self._on_spin, parent=self)
         # Live builds can fire many events per second; coalesce re-renders so the
         # tree stays smooth instead of rebuilding on every single event.
         self._render_timer = QTimer(self)
@@ -475,6 +475,12 @@ class TraceDetailPanel(QFrame):
             QTimer.singleShot(1200, self._restore_copy_raw_button)
 
     def _restore_copy_raw_button(self) -> None:
+        try:
+            from PyQt6 import sip
+            if sip.isdeleted(self._copy_raw):
+                return
+        except RuntimeError:
+            return
         self._copy_raw.setText(_copy_raw_label())
         self._copy_raw.setIcon(svg_icon("copy", color=Theme.TEXT_2, size=14))
 

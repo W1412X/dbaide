@@ -107,7 +107,7 @@ class ComposerWidget(Panel):
         outer.addLayout(footer)
         # While running, the action button shows a spinning ring so it reads as a
         # live "stop" (icon, so the label never clips).
-        self._busy = BusyAnimator(self._on_spin)
+        self._busy = BusyAnimator(self._on_spin, parent=self)
 
     def _apply_container_style(self) -> None:
         border = Theme.FOCUS if self._focused else Theme.BORDER

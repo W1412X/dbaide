@@ -184,7 +184,7 @@ class _ThinkingIndicator(QFrame):
         self.setCursor(Qt.CursorShape.PointingHandCursor)
         self.setSizePolicy(QSizePolicy.Policy.Minimum, QSizePolicy.Policy.Fixed)
         self._state = ThinkingUiState()
-        self._busy = BusyAnimator(self._tick)
+        self._busy = BusyAnimator(self._tick, parent=self)
         self._hover = False
         self._tone = Theme.MUTED
 

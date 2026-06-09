@@ -76,7 +76,8 @@ class SqlTab(QWidget):
         self._splitter.addWidget(editor_wrap)
 
         self._busy = BusyAnimator(
-            lambda: self.run_btn.setIcon(spinner_icon(self._busy.angle, color=Theme.ACCENT_TEXT, size=15))
+            lambda: self.run_btn.setIcon(spinner_icon(self._busy.angle, color=Theme.ACCENT_TEXT, size=15)),
+            parent=self,
         )
 
         self.tabs = QTabWidget()
