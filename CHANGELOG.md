@@ -68,6 +68,15 @@ All notable changes to DBAide are documented here. The format is loosely based o
   second close was swallowed by `try/except` but violated the exactly-once
   contract. `_valid()` now only returns False on exception; callers handle
   closing.
+- **SQL string parser ignores dialect for backslash escaping** — both
+  `_strip_strings_and_comments` (security validation) and `_sql_top_level`
+  (LIMIT detection) treated backslash as a string escape in all dialects.
+  Standard SQL (PostgreSQL, SQLite) does NOT use backslash escaping — only
+  MySQL does. A string literal ending with `\` caused the parser to lose track
+  of quote boundaries, potentially hiding forbidden keywords from the SQL guard
+  or missing an existing LIMIT clause. Both parsers, plus `outer_limit_value`
+  and `append_limit`, now accept a `dialect` parameter and only apply backslash
+  escaping for MySQL/MariaDB.
 - **Unguarded `float()` on confidence values crashes join pipeline** — several
   sites in `sql_writer.py`, `join_validation.py`, `joins/catalog.py`,
   `joins_tab.py`, and `service.py` called `float(confidence)` on LLM-produced

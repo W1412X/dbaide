@@ -192,7 +192,7 @@ class PostgresAdapter(DatabaseAdapter):
 
     def _execute_readonly_impl(self, sql: str, *, database: str = "", limit: int | None = None,
                                timeout_seconds: int = 10) -> QueryResult:
-        bounded = append_limit(sql, limit)
+        bounded = append_limit(sql, limit, dialect=self.dialect)
         start = time.perf_counter()
         conn = self._connect(database if database and "." not in database else "")
         try:

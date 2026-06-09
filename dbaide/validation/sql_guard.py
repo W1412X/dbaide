@@ -85,7 +85,7 @@ class SQLGuard:
             issues.append(ValidationIssue("READONLY_ONLY", "Only SELECT/WITH/EXPLAIN statements are allowed"))
 
         # Check: forbidden keywords
-        stripped = _strip_strings_and_comments(normalized).lower()
+        stripped = _strip_strings_and_comments(normalized, dialect=self.dialect).lower()
         for keyword in FORBIDDEN_KEYWORDS:
             if re.search(rf"\b{keyword}\b", stripped):
                 issues.append(ValidationIssue("FORBIDDEN_KEYWORD", f"Forbidden keyword: {keyword.upper()}"))
@@ -97,7 +97,7 @@ class SQLGuard:
 
         issues.extend(self._dialect_issues(stripped))
 
-        explicit_limit = _explicit_limit(stripped)
+        explicit_limit = _explicit_limit(stripped, dialect=self.dialect)
 
         if not issues and first in {"select", "with"}:
             # SELECT * without WHERE is forced to a small bound regardless of add_limit.
@@ -143,7 +143,7 @@ class SQLGuard:
             )
 
         normalized = result.normalized_sql
-        stripped = _strip_strings_and_comments(normalized).lower()
+        stripped = _strip_strings_and_comments(normalized, dialect=self.dialect).lower()
 
         # Check: schema validation
         if known_tables:
@@ -176,7 +176,7 @@ class SQLGuard:
 
         # Check: large limit. This used to be a hard cap; now it asks for user
         # confirmation so a deliberate large export/query is still possible.
-        limit_val = _explicit_limit(stripped)
+        limit_val = _explicit_limit(stripped, dialect=self.dialect)
         if limit_val is not None and limit_val > self.max_row_limit:
             warnings.append(
                 f"LIMIT {limit_val} exceeds the configured confirmation threshold ({self.max_row_limit})"
@@ -214,7 +214,7 @@ class SQLGuard:
         """Ensure the SQL has a *top-level* LIMIT clause (subquery/CTE limits don't count)."""
         from dbaide.adapters.base import outer_limit_value
         stripped = sql.strip().rstrip(";")
-        if outer_limit_value(stripped) is not None:
+        if outer_limit_value(stripped, dialect=self.dialect) is not None:
             return stripped
         return f"{stripped} LIMIT {int(limit)}"
 
@@ -223,7 +223,7 @@ class SQLGuard:
         return match.group(0).lower() if match else ""
 
     def _has_multiple_statements(self, sql: str) -> bool:
-        stripped = _strip_strings_and_comments(sql)
+        stripped = _strip_strings_and_comments(sql, dialect=self.dialect)
         # Drop trailing semicolons AND whitespace so harmless trailing empty
         # statements ("SELECT 1 ; ;") aren't misread as multiple statements.
         core = re.sub(r"[\s;]+$", "", stripped)
@@ -254,11 +254,11 @@ class SQLGuard:
 # Helper functions
 # ─────────────────────────────────────────────────────────────────────────────
 
-def _explicit_limit(sql: str) -> int | None:
-    """Top-level LIMIT row-count if present. Delegates to the dialect-agnostic
+def _explicit_limit(sql: str, *, dialect: str = "generic") -> int | None:
+    """Top-level LIMIT row-count if present. Delegates to the dialect-aware
     parser so subquery/CTE/string LIMITs and ``LIMIT offset, count`` are handled."""
     from dbaide.adapters.base import outer_limit_value
-    return outer_limit_value(sql)
+    return outer_limit_value(sql, dialect=dialect)
 
 
 def _is_unfiltered_star(stripped_lower_sql: str) -> bool:
@@ -291,15 +291,20 @@ def _strip_leading_comments(sql: str) -> str:
         return text
 
 
-def _strip_strings_and_comments(sql: str) -> str:
+def _strip_strings_and_comments(sql: str, *, dialect: str = "generic") -> str:
     out: list[str] = []
     i = 0
     quote = ""
+    # Only MySQL/MariaDB treats backslash as a string escape character.
+    # Standard SQL (PostgreSQL, SQLite, etc.) uses '' for escaping and
+    # backslash is a literal character.  Treating it as an escape in
+    # non-MySQL dialects makes the parser lose track of quote boundaries.
+    backslash_escapes = dialect in ("mysql", "mariadb")
     while i < len(sql):
         ch = sql[i]
         nxt = sql[i + 1] if i + 1 < len(sql) else ""
         if quote:
-            if ch == "\\":
+            if backslash_escapes and ch == "\\":
                 i += 2
                 continue
             if ch == quote:

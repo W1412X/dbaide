@@ -135,7 +135,7 @@ class SQLiteAdapter(DatabaseAdapter):
         return super().get_table_ddl(table, database=database)
 
     def _execute_readonly_impl(self, sql: str, *, database: str = "", limit: int | None = None, timeout_seconds: int = 10) -> QueryResult:
-        bounded_sql = append_limit(sql, limit)
+        bounded_sql = append_limit(sql, limit, dialect=self.dialect)
         start = time.perf_counter()
         with self._guarded_conn(timeout_seconds) as conn:
             rows = [dict(row) for row in conn.execute(bounded_sql).fetchall()]
