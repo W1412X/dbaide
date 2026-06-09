@@ -160,13 +160,14 @@ class StructurePanel(QWidget):
         self._ddl_label.setText(self._t("structure.ddl_real"))
 
     def _indexes_text(self, indexes: list[dict[str, Any]]) -> str:
+        from html import escape as _esc
         # Skip the primary-key index (already shown in the Key column).
         items = []
         for ix in indexes:
             if ix.get("primary"):
                 continue
-            cols = ", ".join(ix.get("columns") or [])
-            label = f"{ix.get('name', '')} ({cols})"
+            cols = ", ".join(_esc(c) for c in (ix.get("columns") or []))
+            label = f"{_esc(ix.get('name', ''))} ({cols})"
             if ix.get("unique"):
                 label += " UNIQUE"
             items.append(label)
@@ -177,6 +178,7 @@ class StructurePanel(QWidget):
     # ── relations rendering ──────────────────────────────────────────────────--
 
     def _relations_html(self, relations: dict[str, list[dict[str, Any]]]) -> str:
+        from html import escape as _esc
         t = self._t
         outgoing = relations.get("foreign_keys") or []
         incoming = relations.get("referenced_by") or []
@@ -185,13 +187,13 @@ class StructurePanel(QWidget):
         parts: list[str] = []
         if outgoing:
             items = ", ".join(
-                f"{fk.get('column', '')} → {self._link(fk.get('ref_table', ''))}.{fk.get('ref_column', '')}"
+                f"{_esc(fk.get('column', ''))} → {self._link(fk.get('ref_table', ''))}.{_esc(fk.get('ref_column', ''))}"
                 for fk in outgoing
             )
             parts.append(f"<b>{t('structure.references')}</b> {items}")
         if incoming:
             items = ", ".join(
-                f"{self._link(fk.get('table', ''))}.{fk.get('column', '')}"
+                f"{self._link(fk.get('table', ''))}.{_esc(fk.get('column', ''))}"
                 for fk in incoming
             )
             parts.append(f"<b>{t('structure.referenced_by')}</b> {items}")
@@ -199,10 +201,11 @@ class StructurePanel(QWidget):
 
     @staticmethod
     def _link(table: str) -> str:
+        from html import escape as _esc
         table = str(table or "")
         if not table:
             return ""
-        return f'<a href="{table}">{table}</a>'
+        return f'<a href="{_esc(table, quote=True)}">{_esc(table)}</a>'
 
     def _on_link(self, href: str) -> None:
         if href:

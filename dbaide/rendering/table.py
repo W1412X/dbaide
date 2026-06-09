@@ -18,14 +18,20 @@ def export_json(rows: list[dict[str, Any]], columns: list[str] | None = None) ->
     return json.dumps(data, ensure_ascii=False, indent=2, default=str)
 
 
-def _sql_literal(value: Any) -> str:
+def _sql_literal(value: Any, *, dialect: str = "generic") -> str:
     if value is None:
         return "NULL"
     if isinstance(value, bool):
         return "TRUE" if value else "FALSE"
     if isinstance(value, (int, float)):
         return str(value)
-    return "'" + str(value).replace("'", "''") + "'"
+    s = str(value).replace("'", "''")
+    # MySQL/MariaDB treat backslash as an escape character by default
+    # (unless NO_BACKSLASH_ESCAPES is set), so a trailing \ would break
+    # the literal.  Doubling backslashes is harmless on other dialects.
+    if dialect in ("mysql", "mariadb"):
+        s = s.replace("\\", "\\\\")
+    return "'" + s + "'"
 
 
 def export_insert(rows: list[dict[str, Any]], columns: list[str] | None = None,
@@ -37,7 +43,7 @@ def export_insert(rows: list[dict[str, Any]], columns: list[str] | None = None,
     table_name = quote_identifier(table, dialect)
     col_list = ", ".join(quote_identifier(col, dialect) for col in cols)
     return "\n".join(
-        f"INSERT INTO {table_name} ({col_list}) VALUES (" + ", ".join(_sql_literal(row.get(c)) for c in cols) + ");"
+        f"INSERT INTO {table_name} ({col_list}) VALUES (" + ", ".join(_sql_literal(row.get(c), dialect=dialect) for c in cols) + ");"
         for row in rows
     )
 
