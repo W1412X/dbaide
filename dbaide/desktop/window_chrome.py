@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING
 
 from PyQt6.QtCore import QMargins, QMarginsF, Qt, QTimer
 from PyQt6.QtGui import QColor, QPalette
-from PyQt6.QtWidgets import QDialog, QLayout, QMainWindow, QWidget
+from PyQt6.QtWidgets import QDialog, QLayout, QWidget
 
 from dbaide.desktop.theme import Theme
 
@@ -19,7 +19,14 @@ _TOPBAR_HPAD = 12
 
 
 def supports_integrated_title_bar() -> bool:
-    """Qt 6.9+ expanded client area (macOS, Windows; best-effort on Linux)."""
+    """Integrated title bar — macOS only.
+
+    On Windows, ``ExpandedClientAreaHint`` + DWM caption tint draws the system
+    title strip and client content on top of each other (visible ghosting). Linux
+    support is still incomplete in Qt 6.9, so keep the native caption there too.
+    """
+    if sys.platform != "darwin":
+        return False
     return hasattr(Qt.WindowType, "ExpandedClientAreaHint") and hasattr(
         Qt.WindowType, "NoTitleBarBackgroundHint"
     )
@@ -45,21 +52,19 @@ def topbar_layout_margins(
 
 
 def apply_window_background(window: QWidget) -> None:
-    """Paint the full native window surface with the active theme (fixes light side gutters)."""
+    """Paint the top-level window with the active theme background."""
     window.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
     window.setAutoFillBackground(True)
-    if sys.platform == "win32":
-        window.setAttribute(Qt.WidgetAttribute.WA_OpaquePaintEvent, True)
     pal = window.palette()
     bg = QColor(Theme.BG)
     pal.setColor(QPalette.ColorRole.Window, bg)
     pal.setColor(QPalette.ColorRole.Base, bg)
     window.setPalette(pal)
-    _apply_windows_dwm_colors(window, bg)
+    _apply_windows_dwm_border(window, bg)
 
 
-def _apply_windows_dwm_colors(window: QWidget, bg: QColor) -> None:
-    """Match Win10/11 outer border and caption strip to the app background."""
+def _apply_windows_dwm_border(window: QWidget, bg: QColor) -> None:
+    """Tint the outer Win10/11 frame only — never the caption (causes ghosting)."""
     if sys.platform != "win32":
         return
     wid = int(window.winId() or 0)
@@ -69,23 +74,13 @@ def _apply_windows_dwm_colors(window: QWidget, bg: QColor) -> None:
         import ctypes
         from ctypes import wintypes
 
-        # COLORREF 0x00BBGGRR
-        def _cref(c: QColor) -> wintypes.DWORD:
-            return wintypes.DWORD((c.blue() << 16) | (c.green() << 8) | c.red())
-
-        dwm = ctypes.windll.dwmapi
-        for attr, color in (
-            (34, bg),           # DWMWA_BORDER_COLOR
-            (35, bg),           # DWMWA_CAPTION_COLOR
-            (36, QColor(Theme.TEXT)),  # DWMWA_TEXT_COLOR
-        ):
-            cref = _cref(color)
-            dwm.DwmSetWindowAttribute(
-                wintypes.HWND(wid),
-                wintypes.DWORD(attr),
-                ctypes.byref(cref),
-                ctypes.sizeof(cref),
-            )
+        colorref = wintypes.DWORD((bg.blue() << 16) | (bg.green() << 8) | bg.red())
+        ctypes.windll.dwmapi.DwmSetWindowAttribute(
+            wintypes.HWND(wid),
+            wintypes.DWORD(34),  # DWMWA_BORDER_COLOR
+            ctypes.byref(colorref),
+            ctypes.sizeof(colorref),
+        )
     except Exception:
         return
 
@@ -126,27 +121,6 @@ def sync_layout_safe_area(window: QWidget, layout: QLayout) -> None:
     )
 
 
-def sync_central_widget_edges(window: QMainWindow) -> None:
-    """Cancel horizontal safe-area gutter on Windows so content is edge-to-edge."""
-    if sys.platform != "win32" or not supports_integrated_title_bar():
-        return
-    central = window.centralWidget()
-    if central is None:
-        return
-    layout = central.layout()
-    if layout is None:
-        return
-    handle = window.windowHandle()
-    if handle is None:
-        return
-    safe = handle.safeAreaMargins()
-    sl, sr = int(safe.left()), int(safe.right())
-    if sl == 0 and sr == 0:
-        return
-    left, top, right, bottom = _base_layout_margins(layout)
-    layout.setContentsMargins(left - sl, top, right - sr, bottom)
-
-
 def sync_topbar_safe_area(window: QWidget, topbar: TopBar) -> None:
     handle = window.windowHandle()
     if handle is None:
@@ -167,9 +141,6 @@ def install_top_level_chrome(
         return
 
     def _sync() -> None:
-        apply_window_background(window)
-        if isinstance(window, QMainWindow):
-            sync_central_widget_edges(window)
         if topbar is not None:
             sync_topbar_safe_area(window, topbar)
         elif layout is not None:
@@ -181,10 +152,6 @@ def install_top_level_chrome(
         return
     if layout is not None:
         _base_layout_margins(layout)
-    if isinstance(window, QMainWindow):
-        central = window.centralWidget()
-        if central is not None and central.layout() is not None:
-            _base_layout_margins(central.layout())
     handle.safeAreaMarginsChanged.connect(_sync)
     _sync()
 
@@ -202,4 +169,5 @@ class ChromeDialog(QDialog):
         super().showEvent(event)
         if not self._chrome_installed:
             self._chrome_installed = True
+            apply_window_background(self)
             install_top_level_chrome(self, layout=self.layout())

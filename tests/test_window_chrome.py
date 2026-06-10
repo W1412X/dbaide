@@ -17,3 +17,10 @@ def test_topbar_layout_margins_with_safe_area():
 
 def test_supports_integrated_title_bar_is_bool():
     assert isinstance(supports_integrated_title_bar(), bool)
+
+
+def test_integrated_title_bar_disabled_off_macos(monkeypatch):
+    monkeypatch.setattr("dbaide.desktop.window_chrome.sys.platform", "win32")
+    assert supports_integrated_title_bar() is False
+    monkeypatch.setattr("dbaide.desktop.window_chrome.sys.platform", "linux")
+    assert supports_integrated_title_bar() is False

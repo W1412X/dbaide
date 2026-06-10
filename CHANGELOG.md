@@ -6,6 +6,16 @@ All notable changes to DBAide are documented here. The format is loosely based o
 
 ## [Unreleased]
 
+## [0.1.2] — 2026-06-11
+
+### Fixed
+
+- **Windows title-bar ghosting** — disable expanded client area and DWM caption
+  tint on Windows/Linux (macOS only); dialogs and main TopBar no longer double-draw
+  over the system caption strip.
+- **Windows DWM** — border colour only; caption/text colours removed to prevent
+  overlap artefacts on small dialogs.
+
 ## [0.1.1] — 2026-06-11
 
 ### Added
@@ -372,7 +382,8 @@ and a PyQt6 desktop app, sharing one Python core.
   drag-to-Applications)**, **Windows (`.msi` wizard)**, and **Linux (`.tar.gz`)** —
   pushing a `v*` tag cuts a GitHub Release automatically.
 
-[Unreleased]: https://github.com/W1412X/dbaide/compare/v0.1.1...HEAD
+[Unreleased]: https://github.com/W1412X/dbaide/compare/v0.1.2...HEAD
+[0.1.2]: https://github.com/W1412X/dbaide/compare/v0.1.1...v0.1.2
 [0.1.1]: https://github.com/W1412X/dbaide/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/W1412X/dbaide/compare/v0.0.9...v0.1.0
 [0.0.9]: https://github.com/W1412X/dbaide/compare/v0.0.8...v0.0.9

@@ -104,6 +104,11 @@ class MainWindow(QMainWindow):
 
     def showEvent(self, event) -> None:  # noqa: N802
         super().showEvent(event)
+        if not getattr(self, "_bg_finalized", False):
+            self._bg_finalized = True
+            from dbaide.desktop.window_chrome import apply_window_background
+
+            apply_window_background(self)
         if getattr(self, "_integrated_title_bar", False) and not getattr(self, "_chrome_installed", False):
             self._chrome_installed = True
             from dbaide.desktop.window_chrome import install_top_level_chrome
