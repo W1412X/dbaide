@@ -67,9 +67,13 @@ jobs:
           xvfb-run -a timeout 30 dist/DBAide/DBAide >smoke.log 2>&1
           code=$?
           echo "--- app output ---"; cat smoke.log; echo "--- exit: $code ---"
-          # 0 = launched and exited cleanly; 124 = still running when timeout killed
-          # it. Both mean it started without a missing-module / plugin crash.
-          if [ "$code" = "0" ] || [ "$code" = "124" ]; then echo "✓ healthy"; exit 0; fi
+          # 124 = still running when timeout killed it (healthy).
+          if [ "$code" = "124" ]; then echo "✓ healthy"; exit 0; fi
+          # 0 within 30s means the process exited early — broken bundle.
+          if [ "$code" = "0" ]; then
+            echo "✗ exited immediately (likely missing entry-point / import crash)"
+            exit 1
+          fi
           echo "✗ startup crash (exit $code)"; exit 1
 
       # macOS → a .dmg containing DBAide.app + an Applications symlink, so users

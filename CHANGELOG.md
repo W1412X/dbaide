@@ -6,6 +6,17 @@ All notable changes to DBAide are documented here. The format is loosely based o
 
 ## [Unreleased]
 
+## [0.0.8] — 2026-06-10
+
+### Fixed
+
+- **Desktop release builds exit immediately on launch** — the PyInstaller entry
+  script (`launcher.py`) defined `main()` but never called it, so macOS, Windows,
+  and Linux bundles started and quit silently (`console=False`). Added the
+  standard `if __name__ == "__main__"` guard.
+- **Linux release smoke test false positive** — CI treated an instant exit (code 0)
+  as a healthy launch; only a process still running at timeout (124) passes now.
+
 ## [0.0.7] — 2026-06-09
 
 ### Added
