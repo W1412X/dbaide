@@ -87,6 +87,9 @@ class MainWindow(QMainWindow):
         self.setMinimumSize(1000, 720)
         self.setStyleSheet(app_style())
         self._build()
+        from dbaide.desktop.platform_ui import apply_window_chrome_flags
+
+        self._integrated_title_bar = apply_window_chrome_flags(self)
         self.ui_state = UiStateBinder(self)
         self._install_shortcuts()
         self._wire_bus()
@@ -98,6 +101,14 @@ class MainWindow(QMainWindow):
         # fire on already-destroyed widgets.
         self.tasks.pool.waitForDone(2000)
         super().closeEvent(event)
+
+    def showEvent(self, event) -> None:  # noqa: N802
+        super().showEvent(event)
+        if getattr(self, "_integrated_title_bar", False) and not getattr(self, "_chrome_installed", False):
+            self._chrome_installed = True
+            from dbaide.desktop.platform_ui import install_window_chrome
+
+            install_window_chrome(self, self.topbar)
 
     def _ensure_run_state(self) -> ConversationRunState:
         if "run_state" not in self.__dict__:

@@ -131,11 +131,14 @@ class TopBar(QWidget):
 
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
-        self.setFixedHeight(42)
+        self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
+        self._content_height = 42
+        self.setFixedHeight(self._content_height)
         self.setStyleSheet(f"background:{Theme.BG}; border:none;")
         row = QHBoxLayout(self)
         row.setContentsMargins(12, 0, 12, 0)
         row.setSpacing(6)
+        self._row = row
 
         from dbaide.desktop.components.icons import app_logo_pixmap
         logo_pm = app_logo_pixmap(20)
@@ -186,6 +189,11 @@ class TopBar(QWidget):
         self.menu.add_separator()
         self.menu.add_action(t("topbar.settings") + "…", self.settings.emit)
         row.addWidget(self.menu)
+
+    def apply_safe_area(self, left: int, top: int, right: int, bottom: int, height: int) -> None:
+        """Push header controls below / beside native window chrome (Qt 6.9 safe areas)."""
+        self.setFixedHeight(max(self._content_height, height))
+        self._row.setContentsMargins(left, top, right, bottom)
 
     def _emit_connection(self, value: str) -> None:
         self.connection_changed.emit(str(value or ""))

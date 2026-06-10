@@ -6,6 +6,20 @@ All notable changes to DBAide are documented here. The format is loosely based o
 
 ## [Unreleased]
 
+## [0.1.0] — 2026-06-11
+
+### Added
+
+- **Integrated native title bar (macOS / Windows)** — Qt 6.9 expanded client area
+  blends the app header with the system window chrome while keeping native close,
+  minimize, and maximize controls.
+
+### Fixed
+
+- **Oversized gap under the title bar** — safe-area top inset was applied twice
+  (once by Qt on the central widget, once in TopBar); header content now sits
+  directly below the traffic lights / caption buttons.
+
 ## [0.0.9] — 2026-06-11
 
 ### Added
@@ -342,7 +356,8 @@ and a PyQt6 desktop app, sharing one Python core.
   drag-to-Applications)**, **Windows (`.msi` wizard)**, and **Linux (`.tar.gz`)** —
   pushing a `v*` tag cuts a GitHub Release automatically.
 
-[Unreleased]: https://github.com/W1412X/dbaide/compare/v0.0.9...HEAD
+[Unreleased]: https://github.com/W1412X/dbaide/compare/v0.1.0...HEAD
+[0.1.0]: https://github.com/W1412X/dbaide/compare/v0.0.9...v0.1.0
 [0.0.9]: https://github.com/W1412X/dbaide/compare/v0.0.8...v0.0.9
 [0.0.8]: https://github.com/W1412X/dbaide/compare/v0.0.7...v0.0.8
 [0.0.7]: https://github.com/W1412X/dbaide/compare/v0.0.6...v0.0.7
@@ -350,5 +365,4 @@ and a PyQt6 desktop app, sharing one Python core.
 [0.0.5]: https://github.com/W1412X/dbaide/compare/v0.0.4...v0.0.5
 [0.0.4]: https://github.com/W1412X/dbaide/compare/v0.0.3...v0.0.4
 [0.0.3]: https://github.com/W1412X/dbaide/compare/v0.0.2...v0.0.3
-[0.0.2]: https://github.com/W1412X/dbaide/compare/v0.1.0...v0.0.2
-[0.1.0]: https://github.com/W1412X/dbaide/releases/tag/v0.1.0
+[0.0.2]: https://github.com/W1412X/dbaide/releases/tag/v0.0.2
