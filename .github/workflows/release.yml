@@ -107,10 +107,26 @@ jobs:
 
       - name: Package (Linux → .tar.gz)
         if: runner.os == 'Linux'
-        working-directory: dist
-        run: tar -czf "${{ matrix.artifact }}.tar.gz" DBAide
+        run: |
+          cp packaging/linux/dbaide.desktop dist/DBAide/
+          cd dist
+          tar -czf "${{ matrix.artifact }}.tar.gz" DBAide
 
       # Windows → an MSI installer wizard (WiX v4 auto-harvests the PyInstaller folder).
+      - name: Smoke test (Windows — does it launch?)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $exe = "dist\DBAide\DBAide.exe"
+          if (-not (Test-Path $exe)) { throw "missing $exe" }
+          $p = Start-Process -FilePath $exe -PassThru
+          Start-Sleep -Seconds 4
+          if ($p.HasExited) {
+            Write-Error "DBAide exited early with code $($p.ExitCode)"
+          }
+          Stop-Process -Id $p.Id -Force
+          Write-Host "✓ healthy"
+
       - name: Package (Windows → .msi)
         if: runner.os == 'Windows'
         shell: pwsh

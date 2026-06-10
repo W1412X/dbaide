@@ -48,8 +48,9 @@ class _LightTheme:
     PANEL = "#f1f3f5"
     PANEL_2 = "#e9ecef"
     PANEL_3 = "#dee2e6"
-    BORDER = "#dee2e6"
-    BORDER_SOFT = "#e9ecef"
+    # Slightly darker than panel fills — visible but not heavy (between old invisible & prior fix).
+    BORDER = "#c9cfd6"
+    BORDER_SOFT = "#d8dde3"
     TEXT = "#1a1a2e"
     TEXT_2 = "#495057"
     MUTED = "#868e96"
@@ -684,6 +685,27 @@ QCheckBox::indicator:disabled, QRadioButton::indicator:disabled {{
     border-color: {T.BORDER_SOFT};
 }}
 """
+
+
+def combo_popup_stylesheet() -> str:
+    """List popup for ``Combo`` — opaque, rounded; matches global QComboBox item view rules."""
+    T = Theme
+    return f"""
+    QAbstractItemView {{
+        background-color: {T.PANEL};
+        color: {T.TEXT};
+        selection-background-color: {T.PANEL_3};
+        border: 1px solid {T.BORDER};
+        border-radius: {T.RADIUS_MD}px;
+        padding: 4px;
+        outline: none;
+    }}
+    QAbstractItemView::item {{
+        min-height: 28px;
+        padding: 4px 10px;
+        border-radius: 4px;
+    }}
+    """
 
 
 def menu_stylesheet() -> str:

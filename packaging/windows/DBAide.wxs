@@ -3,6 +3,7 @@
   WiX v4 installer for DBAide. Auto-harvests the PyInstaller folder
   (dist\DBAide) via <Files>, installs into "Program Files\DBAide", adds a Start
   Menu shortcut, and shows the standard InstallDir wizard UI.
+  Also creates a desktop shortcut on the user's Desktop folder.
 
   The __DBAIDE_VERSION__ token is replaced with the real version in CI before
   building (avoids WiX preprocessor-variable ambiguity). See release.yml.
@@ -24,6 +25,7 @@
       <Directory Id="INSTALLFOLDER" Name="DBAide" />
     </StandardDirectory>
     <StandardDirectory Id="ProgramMenuFolder" />
+    <StandardDirectory Id="DesktopFolder" />
 
     <Feature Id="Main" Title="DBAide" Level="1">
       <!-- Harvest the entire PyInstaller output into the install folder. -->
@@ -38,6 +40,16 @@
         <RemoveFolder Id="CleanupShortcut" On="uninstall" />
         <RegistryValue Root="HKCU" Key="Software\DBAide"
                        Name="installed" Type="integer" Value="1" KeyPath="yes" />
+      </Component>
+
+      <!-- Desktop shortcut (Windows installs traditionally expect one). -->
+      <Component Id="DesktopShortcut" Directory="DesktopFolder" Guid="*">
+        <Shortcut Id="DBAideDesktopShortcut"
+                  Name="DBAide"
+                  Target="[INSTALLFOLDER]DBAide.exe"
+                  WorkingDirectory="INSTALLFOLDER" />
+        <RegistryValue Root="HKCU" Key="Software\DBAide"
+                       Name="desktop_shortcut" Type="integer" Value="1" KeyPath="yes" />
       </Component>
     </Feature>
 

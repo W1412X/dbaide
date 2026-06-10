@@ -145,17 +145,25 @@ def configure_readonly_text_view(view: QTextEdit) -> None:
 
 
 class Combo(QComboBox):
-    """QComboBox whose dropdown popup is frameless + translucent, so its rounded
-    corners don't reveal the popup window's dark backing and macOS doesn't draw a
-    heavy native shadow (both read as a dark border/shadow, esp. in light mode)."""
+    """QComboBox with an opaque frameless dropdown (same approach as ``QMenu`` popups)."""
 
     def showPopup(self) -> None:  # noqa: N802
         super().showPopup()
-        container = self.view().window()
-        if container is not None and not container.testAttribute(
-            Qt.WidgetAttribute.WA_TranslucentBackground
-        ):
-            container.setWindowFlag(Qt.WindowType.FramelessWindowHint, True)
-            container.setWindowFlag(Qt.WindowType.NoDropShadowWindowHint, True)
-            container.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
-            container.show()  # re-show once after the flag change (first open only)
+        self._style_popup()
+
+    def _style_popup(self) -> None:
+        from dbaide.desktop.theme import combo_popup_stylesheet
+
+        view = self.view()
+        container = view.window() if view is not None else None
+        if container is None:
+            return
+        css = combo_popup_stylesheet()
+        container.setWindowFlag(Qt.WindowType.FramelessWindowHint, True)
+        container.setWindowFlag(Qt.WindowType.NoDropShadowWindowHint, True)
+        container.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, False)
+        container.setAutoFillBackground(True)
+        container.setStyleSheet(f"background-color: {Theme.PANEL};")
+        view.setStyleSheet(css)
+        container.update()
+        container.show()

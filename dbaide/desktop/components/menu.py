@@ -6,6 +6,7 @@ from PyQt6.QtWidgets import QMenu, QSizePolicy, QToolButton
 
 from dbaide.desktop.components.icons import svg_icon
 from dbaide.desktop.theme import Theme, menu_stylesheet
+from dbaide.desktop.platform_ui import configure_chrome_button, escape_mnemonic
 
 
 def _apply_menu_style(menu: QMenu) -> None:
@@ -60,6 +61,7 @@ class MenuButton(QToolButton):
         _style_menu(self._menu)
         self.setMenu(self._menu)
         self.setCursor(Qt.CursorShape.PointingHandCursor)
+        configure_chrome_button(self)
         self.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Fixed)
         if max_width and not icon_only:
             self.setMaximumWidth(max_width)
@@ -117,7 +119,7 @@ class MenuButton(QToolButton):
         if self._icon_only:
             return
         self._full_text = text
-        super().setText(self._elided(text))
+        super().setText(self._elided(escape_mnemonic(text)))
 
     def resizeEvent(self, event) -> None:
         super().resizeEvent(event)
@@ -165,6 +167,7 @@ class PillSelect(QToolButton):
         self._menu.aboutToShow.connect(self._on_menu_show)
         self._menu.aboutToHide.connect(self._on_menu_hide)
         self.setMenu(self._menu)
+        configure_chrome_button(self)
         self.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextBesideIcon)
         self.setLayoutDirection(Qt.LayoutDirection.RightToLeft)
         self.setIcon(svg_icon("chevron-down", color=Theme.TEXT_2, size=12))
@@ -288,6 +291,6 @@ class PillSelect(QToolButton):
         natural = fm.horizontalAdvance(label) + icon_pad + h_pad
         width = min(max(natural, 72), self._max_width)
         self.setFixedWidth(width)
-        text = fm.elidedText(label, Qt.TextElideMode.ElideRight, width - icon_pad - 4)
+        text = fm.elidedText(escape_mnemonic(label), Qt.TextElideMode.ElideRight, width - icon_pad - 4)
         self.setText(text)
         self.setToolTip(self._tooltips.get(self._value, label))

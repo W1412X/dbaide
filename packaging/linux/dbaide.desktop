@@ -1,0 +1,8 @@
+[Desktop Entry]
+Version=1.0
+Type=Application
+Name=DBAide
+Comment=AI database assistant
+Exec=DBAide/DBAide
+Terminal=false
+Categories=Development;Database;

@@ -14,6 +14,7 @@ from PyQt6.QtWidgets import (
 from dbaide.desktop.components.base import StatusBadge
 from dbaide.desktop.components.icons import more_icon
 from dbaide.desktop.components.menu import MenuButton, PillSelect
+from dbaide.desktop.platform_ui import configure_chrome_button, label_for_chrome_button
 from dbaide.desktop.theme import Theme
 
 
@@ -41,11 +42,16 @@ class ModeSwitch(QWidget):
         btn.setAutoRaise(True)
         btn.setIcon(icon)
         btn.setIconSize(QSize(14, 14))
-        btn.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextBesideIcon)
         btn.setCursor(Qt.CursorShape.PointingHandCursor)
         btn.setFixedHeight(26)
+        configure_chrome_button(btn)
+        label = label_for_chrome_button(text, icon_only=not bool(text))
+        if label:
+            btn.setText(label)
+            btn.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextBesideIcon)
+        else:
+            btn.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonIconOnly)
         if text:
-            btn.setText(text)
             btn.setToolTip(text)
         btn.clicked.connect(lambda _checked=False, i=index: self.setCurrentIndex(i))
         self._buttons.append(btn)
@@ -56,7 +62,10 @@ class ModeSwitch(QWidget):
         return index
 
     def _resize(self) -> None:
-        total = max(148, sum(max(72, btn.sizeHint().width() + 8) for btn in self._buttons))
+        if label_for_chrome_button("x", icon_only=False):
+            total = max(148, sum(max(72, btn.sizeHint().width() + 8) for btn in self._buttons))
+        else:
+            total = max(72, sum(btn.sizeHint().width() + 8 for btn in self._buttons))
         self.setFixedWidth(total)
 
     def setTabToolTip(self, index: int, text: str) -> None:  # noqa: N802
@@ -152,6 +161,7 @@ class TopBar(QWidget):
         # drop-down subcontrol box that showed black corners on macOS.
         self.connection = PillSelect(t("topbar.connection"), max_width=240, soft=True)
         self.connection.value_changed.connect(self._emit_connection)
+        configure_chrome_button(self.connection)
         row.addWidget(self.connection)
 
         row.addStretch(1)
@@ -165,6 +175,7 @@ class TopBar(QWidget):
         self.menu = MenuButton(
             icon=more_icon(color=Theme.TEXT_2), tooltip=t("topbar.settings"), icon_only=True
         )
+        configure_chrome_button(self.menu)
         self.menu.add_action(t("topbar.build"), self.build_assets.emit)
         self.menu.add_action(t("menu.sync_schema"), self.sync_schema_requested.emit)
         self.menu.add_action(t("topbar.refresh"), self.refresh.emit)

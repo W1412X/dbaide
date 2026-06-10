@@ -6,6 +6,25 @@ All notable changes to DBAide are documented here. The format is loosely based o
 
 ## [Unreleased]
 
+## [0.0.9] — 2026-06-11
+
+### Added
+
+- **README.zh-CN.md** — full Simplified Chinese readme; install instructions (incl.
+  macOS Privacy & Security) moved to the top of both readmes.
+- **Windows desktop shortcut** — MSI installer now places a shortcut on the Desktop.
+- **Linux `.desktop` file** — bundled in the `.tar.gz` for manual menu integration.
+- **Windows release smoke test** — CI verifies the frozen EXE stays running.
+
+### Fixed
+
+- **Windows/Linux letter keys hijacked by toolbar** — mode-switch and chrome buttons
+  no longer steal Alt+letter mnemonics; composer refocuses after Alt on Windows/Linux.
+- **Light theme faint borders** — retuned `BORDER` / `BORDER_SOFT` tokens for visible
+  but not heavy edges.
+- **Combo dropdown black corners** — opaque popup styling (same approach as menus);
+  `BuildAssetsDialog` uses the shared `Combo` widget.
+
 ## [0.0.8] — 2026-06-10
 
 ### Fixed
@@ -323,7 +342,9 @@ and a PyQt6 desktop app, sharing one Python core.
   drag-to-Applications)**, **Windows (`.msi` wizard)**, and **Linux (`.tar.gz`)** —
   pushing a `v*` tag cuts a GitHub Release automatically.
 
-[Unreleased]: https://github.com/W1412X/dbaide/compare/v0.0.7...HEAD
+[Unreleased]: https://github.com/W1412X/dbaide/compare/v0.0.9...HEAD
+[0.0.9]: https://github.com/W1412X/dbaide/compare/v0.0.8...v0.0.9
+[0.0.8]: https://github.com/W1412X/dbaide/compare/v0.0.7...v0.0.8
 [0.0.7]: https://github.com/W1412X/dbaide/compare/v0.0.6...v0.0.7
 [0.0.6]: https://github.com/W1412X/dbaide/compare/v0.0.5...v0.0.6
 [0.0.5]: https://github.com/W1412X/dbaide/compare/v0.0.4...v0.0.5

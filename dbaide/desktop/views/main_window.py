@@ -4,15 +4,18 @@ import sys
 from typing import Any, Callable
 
 from PyQt6 import sip
-from PyQt6.QtCore import Qt, QSettings
+from PyQt6.QtCore import Qt, QSettings, QTimer, QEvent
 from PyQt6.QtGui import QIcon, QKeySequence, QShortcut
 from PyQt6.QtWidgets import (
     QApplication,
     QDialog,
+    QLineEdit,
     QMainWindow,
+    QPlainTextEdit,
     QSplitter,
     QStackedWidget,
     QStatusBar,
+    QTextEdit,
     QVBoxLayout,
     QWidget,
 )
@@ -218,7 +221,9 @@ class MainWindow(QMainWindow):
     def _install_shortcuts(self) -> None:
         """Global accelerators (⌘ on macOS maps from Ctrl in QKeySequence)."""
         def sc(seq: str, fn) -> None:
-            QShortcut(QKeySequence(seq), self).activated.connect(fn)
+            shortcut = QShortcut(QKeySequence(seq), self)
+            shortcut.setContext(Qt.ShortcutContext.WidgetWithChildrenShortcut)
+            shortcut.activated.connect(fn)
         sc("Ctrl+1", lambda: self.tabbar.setCurrentIndex(0))   # Assistant
         sc("Ctrl+2", lambda: self.tabbar.setCurrentIndex(1))   # Workbench
         sc("Ctrl+T", self._shortcut_new_query)                 # new SQL editor
@@ -383,6 +388,25 @@ class MainWindow(QMainWindow):
         # Land focus in the composer so the cursor is ready to type on launch
         # (and the topbar selectors don't show a stray focus ring at rest).
         self.composer.input.setFocus()
+
+    def event(self, event) -> bool:  # noqa: N802 (Qt signature)
+        """On Windows/Linux, Alt+letter toolbar mnemonics can swallow keys after Alt is
+        pressed; return focus to the composer once Alt is released."""
+        if sys.platform in ("win32", "linux"):
+            if event.type() == QEvent.Type.KeyRelease and event.key() in (
+                Qt.Key.Key_Alt, Qt.Key.Key_AltGr,
+            ):
+                fw = QApplication.focusWidget()
+                if fw is not None and not isinstance(fw, (QLineEdit, QPlainTextEdit, QTextEdit)):
+                    QTimer.singleShot(0, self.composer.input.setFocus)
+            elif event.type() == QEvent.Type.ShortcutOverride:
+                fw = QApplication.focusWidget()
+                if isinstance(fw, (QLineEdit, QPlainTextEdit, QTextEdit)):
+                    if event.modifiers() == Qt.KeyboardModifier.NoModifier and event.key() not in (
+                        Qt.Key.Key_Shift, Qt.Key.Key_Control, Qt.Key.Key_Alt, Qt.Key.Key_Meta,
+                    ):
+                        event.accept()
+        return super().event(event)
 
     def refresh_all(self) -> None:
         self._ensure_ui_state().statusbar_message("Loading…")
@@ -1947,6 +1971,8 @@ class DBAideDesktop:
 
     def run(self) -> None:
         app = QApplication.instance() or QApplication(sys.argv)
+        from dbaide.desktop.platform_ui import configure_application
+        configure_application(app)
         app.setApplicationName("DBAide")
         icon = _app_icon()
         if icon is not None:

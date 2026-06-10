@@ -5,7 +5,6 @@ from __future__ import annotations
 from PyQt6.QtCore import Qt
 from PyQt6.QtWidgets import (
     QCheckBox,
-    QComboBox,
     QDialog,
     QFormLayout,
     QFrame,
@@ -18,6 +17,7 @@ from PyQt6.QtWidgets import (
 )
 
 from dbaide.desktop.components.base import compact_button
+from dbaide.desktop.components.inputs import Combo
 from dbaide.desktop.theme import Theme
 
 
@@ -100,7 +100,7 @@ class BuildAssetsDialog(QDialog):
         options = QFormLayout()
         options.setSpacing(8)
 
-        self._profile = QComboBox()
+        self._profile = Combo()
         self._profile.addItems(["none", "light", "auto", "all"])
         idx = max(0, self._profile.findText(str(default_profile_mode or "light")))
         self._profile.setCurrentIndex(idx)

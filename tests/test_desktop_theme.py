@@ -35,3 +35,17 @@ def test_panel_tabs_are_generated_from_active_theme():
         assert light != dark
     finally:
         set_theme("dark")
+
+
+def test_light_borders_contrast_with_panel_fills():
+    """Light-mode borders must not match panel background tokens (were invisible)."""
+    try:
+        set_theme("light")
+        assert Theme.BORDER != Theme.PANEL_2
+        assert Theme.BORDER != Theme.PANEL_3
+        assert Theme.BORDER_SOFT != Theme.PANEL_2
+        style = app_style()
+        assert Theme.BORDER in style
+        assert Theme.BORDER_SOFT in style
+    finally:
+        set_theme("dark")

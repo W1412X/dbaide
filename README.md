@@ -4,6 +4,8 @@
 
 **A local-first AI database assistant — ask your data in plain language, safely.**
 
+[English](README.md) · [简体中文](README.zh-CN.md)
+
 DBAide connects to your databases, discovers schema progressively, refuses to guess
 ambiguous business meaning, writes safe read-only SQL, and explains the results — as
 a CLI **and** a polished desktop app that share the same Python core.
@@ -16,6 +18,63 @@ a CLI **and** a polished desktop app that share the same Python core.
 <img src="docs/images/social-preview.png" alt="DBAide — ask your database in plain language" width="900">
 
 </div>
+
+---
+
+## Install
+
+### Desktop app (recommended)
+
+Download the latest installer for your platform from
+**[GitHub Releases](https://github.com/W1412X/dbaide/releases)**:
+
+| Platform | File | What to do |
+|----------|------|------------|
+| **macOS** (Apple Silicon) | `DBAide-macOS-arm64.dmg` | Open the DMG → drag **DBAide** into **Applications** → see [macOS first launch](#macos-first-launch-allow-the-app) below |
+| **Windows** | `DBAide-Windows-x86_64.msi` | Run the installer → launch from the **Desktop** or **Start Menu** shortcut |
+| **Linux** | `DBAide-Linux-x86_64.tar.gz` | Extract, then run `./DBAide/DBAide` (optional: copy `DBAide/dbaide.desktop` into `~/.local/share/applications/`) |
+
+No Python required for these builds.
+
+#### macOS first launch: allow the app
+
+DBAide is **ad-hoc signed** (not Apple-notarized). On first open, macOS may block it or
+show no window until you explicitly allow it:
+
+1. Install: open the `.dmg` and drag **DBAide** into **Applications**.
+2. Try to open **DBAide** once (double-click in Applications).
+3. If macOS says the app **cannot be opened** because the developer cannot be verified:
+   - Open **System Settings → Privacy & Security**.
+   - Scroll down — you should see **"DBAide" was blocked from use** (or similar).
+   - Click **Open Anyway**, then confirm **Open**.
+   - **Or:** **right-click** (Control-click) **DBAide → Open**, click **Open** in the
+     dialog (this bypass is only needed the **first** time).
+4. Launch **DBAide** again normally.
+
+> **Tip:** To verify the app is running, you can also start it from Terminal:
+> `/Applications/DBAide.app/Contents/MacOS/DBAide` — a healthy launch keeps the
+> process running and shows the window.
+
+Use a recent release (**v0.0.8+**); older desktop builds had a startup bug that exited
+immediately with no error dialog.
+
+### From source (CLI + desktop)
+
+Requires **Python 3.11+**.
+
+```bash
+git clone https://github.com/W1412X/dbaide.git
+cd dbaide
+
+# Desktop app + CLI
+pip install -e ".[gui]"
+
+# CLI only
+pip install -e .
+```
+
+SQLite needs no extra drivers; MySQL/PostgreSQL drivers ship with the core install.
+Then run `dbaide-gui` (desktop) or `dbaide` (CLI).
 
 ---
 
@@ -57,23 +116,12 @@ Supports **SQLite, MySQL/MariaDB, and PostgreSQL**, in **English and 简体中�
 | --- | --- |
 | <img src="docs/images/settings-connections.png" width="420"> | <img src="docs/images/settings-resources.png" width="420"> |
 
-## Install
-
-Requires **Python 3.11+**.
-
-```bash
-# Desktop app + CLI
-pip install -e ".[gui]"
-
-# CLI only
-pip install -e .
-```
-
-SQLite needs no extra drivers; MySQL/PostgreSQL drivers ship with the core install.
-
 ## Quickstart
 
 ### Desktop
+
+After [installing](#install) the release build, open **DBAide** from Applications /
+Start Menu, or from source:
 
 ```bash
 dbaide-gui
