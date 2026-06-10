@@ -24,9 +24,10 @@ from dbaide.desktop.components.base import compact_button
 from dbaide.desktop.components.icons import svg_icon
 from dbaide.desktop.components.inputs import configure_form, form_label
 from dbaide.desktop.theme import app_style, Theme
+from dbaide.desktop.window_chrome import ChromeDialog
 
 
-class JoinEditorDialog(QDialog):
+class JoinEditorDialog(ChromeDialog):
     def __init__(self, parent=None, *, initial: dict[str, Any] | None = None) -> None:
         super().__init__(parent)
         from dbaide.i18n import t

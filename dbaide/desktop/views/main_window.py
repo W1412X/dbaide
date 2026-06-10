@@ -87,9 +87,9 @@ class MainWindow(QMainWindow):
         self.setMinimumSize(1000, 720)
         self.setStyleSheet(app_style())
         self._build()
-        from dbaide.desktop.platform_ui import apply_window_chrome_flags
+        from dbaide.desktop.window_chrome import prepare_top_level_window
 
-        self._integrated_title_bar = apply_window_chrome_flags(self)
+        self._integrated_title_bar = prepare_top_level_window(self, clear_title=True)
         self.ui_state = UiStateBinder(self)
         self._install_shortcuts()
         self._wire_bus()
@@ -106,9 +106,9 @@ class MainWindow(QMainWindow):
         super().showEvent(event)
         if getattr(self, "_integrated_title_bar", False) and not getattr(self, "_chrome_installed", False):
             self._chrome_installed = True
-            from dbaide.desktop.platform_ui import install_window_chrome
+            from dbaide.desktop.window_chrome import install_top_level_chrome
 
-            install_window_chrome(self, self.topbar)
+            install_top_level_chrome(self, topbar=self.topbar)
 
     def _ensure_run_state(self) -> ConversationRunState:
         if "run_state" not in self.__dict__:
@@ -282,6 +282,8 @@ class MainWindow(QMainWindow):
     def _build(self) -> None:
         root = QWidget()
         root.setObjectName("root")
+        root.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
+        root.setAutoFillBackground(True)
         layout = QVBoxLayout(root)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(0)

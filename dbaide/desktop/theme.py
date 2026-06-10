@@ -217,12 +217,8 @@ def app_style() -> str:
     font-size: 13px;
     outline: none;  /* kill the native focus ring/box that reads as an extra border */
 }}
-QMainWindow, QWidget#root {{
-    background: {T.BG};
-}}
-QDialog {{
-    background: {T.BG};
-    color: {T.TEXT};
+QMainWindow, QWidget#root, QDialog {{
+    background-color: {T.BG};
 }}
 QFrame[panel="true"] {{
     background: {T.SURFACE};

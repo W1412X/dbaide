@@ -6,6 +6,22 @@ All notable changes to DBAide are documented here. The format is loosely based o
 
 ## [Unreleased]
 
+## [0.1.1] — 2026-06-11
+
+### Added
+
+- **`window_chrome` module** — shared native title-bar integration for the main
+  window and every dialog (`ChromeDialog` base class).
+
+### Fixed
+
+- **Windows side gutters** — themed window palette, DWM border/caption colours, and
+  horizontal safe-area cancellation so content is edge-to-edge.
+- **Dialog title bars inconsistent with main window** — settings, connections, build
+  assets, joins, alerts, and other popups now use the same integrated chrome.
+- **Linux / future Qt** — expanded client area enabled whenever the Qt 6.9 API is
+  available; all platforms still get themed window backgrounds.
+
 ## [0.1.0] — 2026-06-11
 
 ### Added
@@ -356,7 +372,8 @@ and a PyQt6 desktop app, sharing one Python core.
   drag-to-Applications)**, **Windows (`.msi` wizard)**, and **Linux (`.tar.gz`)** —
   pushing a `v*` tag cuts a GitHub Release automatically.
 
-[Unreleased]: https://github.com/W1412X/dbaide/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/W1412X/dbaide/compare/v0.1.1...HEAD
+[0.1.1]: https://github.com/W1412X/dbaide/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/W1412X/dbaide/compare/v0.0.9...v0.1.0
 [0.0.9]: https://github.com/W1412X/dbaide/compare/v0.0.8...v0.0.9
 [0.0.8]: https://github.com/W1412X/dbaide/compare/v0.0.7...v0.0.8

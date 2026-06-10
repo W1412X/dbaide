@@ -7,7 +7,6 @@ from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QColor, QFont
 from PyQt6.QtWidgets import (
     QApplication,
-    QDialog,
     QDialogButtonBox,
     QHBoxLayout,
     QHeaderView,
@@ -344,7 +343,11 @@ class ResultTableWidget(QWidget):
         self.meta.setText(_t("result.no_results"))
 
 
-class CellValueDialog(QDialog):
+from dbaide.desktop.theme import Theme
+from dbaide.desktop.window_chrome import ChromeDialog
+
+
+class CellValueDialog(ChromeDialog):
     """Shows a single cell's full, untruncated value with a copy action."""
 
     def __init__(self, column: str, value: str, *, parent=None) -> None:

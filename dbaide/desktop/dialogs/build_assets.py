@@ -5,7 +5,6 @@ from __future__ import annotations
 from PyQt6.QtCore import Qt
 from PyQt6.QtWidgets import (
     QCheckBox,
-    QDialog,
     QFormLayout,
     QFrame,
     QHBoxLayout,
@@ -21,7 +20,10 @@ from dbaide.desktop.components.inputs import Combo
 from dbaide.desktop.theme import Theme
 
 
-class BuildAssetsDialog(QDialog):
+from dbaide.desktop.window_chrome import ChromeDialog
+
+
+class BuildAssetsDialog(ChromeDialog):
     def __init__(
         self,
         *,

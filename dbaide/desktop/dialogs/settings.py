@@ -126,7 +126,10 @@ class ModelForm(QWidget):
         return payload
 
 
-class SettingsDialog(QDialog):
+from dbaide.desktop.window_chrome import ChromeDialog
+
+
+class SettingsDialog(ChromeDialog):
     connection_saved = pyqtSignal(dict)
     connection_deleted = pyqtSignal(str)
     connection_test = pyqtSignal(dict)

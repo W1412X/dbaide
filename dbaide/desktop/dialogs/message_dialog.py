@@ -7,9 +7,10 @@ from PyQt6.QtWidgets import QDialog, QHBoxLayout, QLabel, QVBoxLayout, QWidget
 
 from dbaide.desktop.components.base import compact_button
 from dbaide.desktop.theme import Theme, app_style
+from dbaide.desktop.window_chrome import ChromeDialog
 
 
-class MessageDialog(QDialog):
+class MessageDialog(ChromeDialog):
     """Simple modal with title, body, and one or two action buttons."""
 
     def __init__(

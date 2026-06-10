@@ -3,13 +3,16 @@
 from __future__ import annotations
 
 from PyQt6.QtCore import pyqtSignal
-from PyQt6.QtWidgets import QDialog, QVBoxLayout
+from PyQt6.QtWidgets import QVBoxLayout
 
 from dbaide.desktop.theme import Theme
 from dbaide.desktop.views.joins_tab import JoinsTab
 
 
-class JoinsDialog(QDialog):
+from dbaide.desktop.window_chrome import ChromeDialog
+
+
+class JoinsDialog(ChromeDialog):
     refresh_requested = pyqtSignal()
     add_requested = pyqtSignal(dict)
     update_requested = pyqtSignal(dict)

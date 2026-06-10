@@ -6,7 +6,6 @@ in); the user only edits the note text. Clearing the text removes the note."""
 from __future__ import annotations
 
 from PyQt6.QtWidgets import (
-    QDialog,
     QDialogButtonBox,
     QLabel,
     QPlainTextEdit,
@@ -15,10 +14,11 @@ from PyQt6.QtWidgets import (
 
 from dbaide.desktop.components.icons import svg_icon
 from dbaide.desktop.theme import app_style, Theme
+from dbaide.desktop.window_chrome import ChromeDialog
 from dbaide.i18n import t as _t
 
 
-class NoteEditorDialog(QDialog):
+class NoteEditorDialog(ChromeDialog):
     def __init__(self, parent=None, *, target_label: str = "", note: str = "") -> None:
         super().__init__(parent)
         self.setStyleSheet(app_style())

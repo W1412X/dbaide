@@ -193,10 +193,12 @@ class ConnectionForm(QWidget):
         return bool(self.name.text().strip())
 
 
-from PyQt6.QtWidgets import QDialog  # noqa: E402
+from PyQt6.QtWidgets import QVBoxLayout  # noqa: E402
+
+from dbaide.desktop.window_chrome import ChromeDialog
 
 
-class ConnectionDialog(QDialog):
+class ConnectionDialog(ChromeDialog):
     def __init__(self, parent=None, *, conn_type: str = "sqlite") -> None:
         super().__init__(parent)
         from dbaide.i18n import t
