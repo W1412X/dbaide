@@ -2132,8 +2132,11 @@ class DBAideDesktop:
 
 
 def _app_icon() -> "QIcon | None":
-    """Window/app icon rendered from the shared SVG icon set."""
-    from dbaide.desktop.components.icons import svg_icon
-    from dbaide.desktop.theme import Theme
+    """The bundled app icon (dev tree and PyInstaller datas use the same relative
+    path); returns None rather than failing startup if it is missing."""
+    from pathlib import Path
 
-    return svg_icon("database", color=Theme.TEXT_2, size=24, width=1.8)
+    path = Path(__file__).resolve().parents[1] / "assets" / "app_icon.png"
+    if path.exists():
+        return QIcon(str(path))
+    return None
