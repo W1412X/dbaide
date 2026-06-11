@@ -6,6 +6,13 @@ All notable changes to DBAide are documented here. The format is loosely based o
 
 ## [Unreleased]
 
+## [0.1.6] — 2026-06-11
+
+### Fixed
+
+- **Linux CI build** — correct Ubuntu package name `libxcb-xkb1` (was invalid
+  `libxcb-xkb0`); centralise xcb apt deps in `packaging/linux/apt-xcb-deps.txt`.
+
 ## [0.1.5] — 2026-06-11
 
 ### Fixed
@@ -425,7 +432,8 @@ and a PyQt6 desktop app, sharing one Python core.
   drag-to-Applications)**, **Windows (`.msi` wizard)**, and **Linux (`.tar.gz`)** —
   pushing a `v*` tag cuts a GitHub Release automatically.
 
-[Unreleased]: https://github.com/W1412X/dbaide/compare/v0.1.5...HEAD
+[Unreleased]: https://github.com/W1412X/dbaide/compare/v0.1.6...HEAD
+[0.1.6]: https://github.com/W1412X/dbaide/compare/v0.1.5...v0.1.6
 [0.1.5]: https://github.com/W1412X/dbaide/compare/v0.1.4...v0.1.5
 [0.1.4]: https://github.com/W1412X/dbaide/compare/v0.1.3...v0.1.4
 [0.1.3]: https://github.com/W1412X/dbaide/compare/v0.1.2...v0.1.3
