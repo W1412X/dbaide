@@ -50,7 +50,12 @@ class ResultTableWidget(QWidget):
         toolbar.addStretch(1)
         # Double-clicking a cell opens its full value in a dialog, so the old inline
         # value-viewer toggle is gone — only the Export menu remains here.
-        self.export_menu = MenuButton(t("result.export"), max_width=96)
+        self.export_menu = MenuButton(
+            t("result.export"),
+            max_width=104,
+            icon=svg_icon("download", color=Theme.TEXT_2, size=15),
+            filled=True,
+        )
         self.export_menu.add_action(t("result.copy_csv"), self.copy_csv)
         self.export_menu.add_action(t("result.copy_json"), self.copy_json)
         self.export_menu.add_action(t("result.copy_markdown"), self.copy_markdown)

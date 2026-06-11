@@ -684,6 +684,7 @@ class _ClarificationStepper(QFrame):
         self._back.setVisible(self._idx > 0)
         last = self._idx == total - 1
         self._next.setText(self._t("clarify.finish") if last else self._t("clarify.next"))
+        self._next.setIcon(svg_icon("check" if last else "chevron-right", color=Theme.ACCENT, size=14))
         self._input.setFocus()
 
     def _record_current(self, value: str) -> None:

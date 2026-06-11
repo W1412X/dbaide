@@ -112,7 +112,7 @@ class ModeSwitch(QWidget):
             }}
             QToolButton#modeSwitchButton:checked {{
                 background: {Theme.PANEL_2};
-                border: 1px solid {Theme.BORDER};
+                border: 1px solid transparent;
                 color: {Theme.TEXT};
             }}
             """

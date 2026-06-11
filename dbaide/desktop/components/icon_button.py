@@ -10,8 +10,7 @@ from dbaide.desktop.theme import Theme
 
 
 class IconToolButton(QToolButton):
-    """Square soft icon button — a subtle but visible fill (no border) carries the
-    button shape, so it reads as a control rather than an invisible hotspot."""
+    """Compact icon-only action with a quiet hover surface."""
 
     def __init__(self, icon: QIcon, tooltip: str, *, parent=None) -> None:
         super().__init__(parent)
@@ -26,21 +25,20 @@ class IconToolButton(QToolButton):
         self._apply_style()
 
     def _apply_style(self) -> None:
-        # Visible soft fill (not transparent), no border; brightens on hover.
         self.setStyleSheet(
             f"""
             QToolButton {{
-                background: {Theme.PANEL_2};
+                background: transparent;
                 border: none;
-                border-radius: 7px;
+                border-radius: 6px;
                 padding: 0;
                 margin: 0;
             }}
             QToolButton:hover {{
-                background: {Theme.PANEL_3};
+                background: {Theme.PANEL_2};
             }}
             QToolButton:pressed {{
-                background: {Theme.BORDER};
+                background: {Theme.PANEL_3};
             }}
             """
         )

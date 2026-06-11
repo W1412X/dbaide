@@ -38,6 +38,8 @@ _GLYPHS: dict[str, str] = {
     "send": '<path d="M22 2 11 13"/><path d="M22 2 15 22l-4-9-9-4Z"/>',
     "arrow-up": '<path d="m5 12 7-7 7 7"/><path d="M12 19V5"/>',
     "arrow-down": '<path d="M12 5v14"/><path d="m19 12-7 7-7-7"/>',
+    "download": '<path d="M12 3v12"/><path d="m7 10 5 5 5-5"/><path d="M5 21h14"/>',
+    "upload": '<path d="M12 21V9"/><path d="m17 14-5-5-5 5"/><path d="M5 3h14"/>',
     "search": '<circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/>',
     "chevron-down": '<path d="m6 9 6 6 6-6"/>',
     "chevron-up": '<path d="m18 15-6-6-6 6"/>',
@@ -129,21 +131,8 @@ def plus_icon(*, color: str = Theme.MUTED, size: int = 18) -> QIcon:
 
 
 def app_logo_pixmap(size: int = 22) -> "QPixmap | None":
-    """The DBAide app icon as a crisp HiDPI pixmap (None if the asset is missing).
-    Shared by the window icon and the header wordmark so the brand stays consistent."""
-    from pathlib import Path
-
-    path = Path(__file__).resolve().parents[1] / "assets" / "app_icon.png"
-    if not path.exists():
-        return None
-    screen = QGuiApplication.primaryScreen()
-    ratio = screen.devicePixelRatio() if screen else 1.0
-    pm = QPixmap(str(path)).scaled(
-        int(size * ratio), int(size * ratio),
-        Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation,
-    )
-    pm.setDevicePixelRatio(ratio)
-    return pm
+    """DBAide logo rendered from the same SVG icon pipeline as the rest of the UI."""
+    return svg_pixmap("database", color=Theme.TEXT_2, size=size, width=1.8)
 
 
 ICON_SIZE = QSize(16, 16)

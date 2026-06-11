@@ -6,6 +6,7 @@ from PyQt6.QtWidgets import QFrame, QLabel, QPushButton, QSizePolicy
 
 
 from dbaide.desktop.theme import Theme
+from dbaide.desktop.components.icons import svg_icon
 
 
 def ghost_action_button(
@@ -43,6 +44,45 @@ def ghost_action_button(
     return btn
 
 
+def _button_icon_for_text(text: str, *, primary: bool = False) -> QIcon | None:
+    label = str(text or "").strip().lower()
+    if not label:
+        return None
+    icon_name = ""
+    checks: list[tuple[tuple[str, ...], str]] = [
+        (("保存", "save"), "save"),
+        (("测试", "test"), "play"),
+        (("新建", "new"), "plus"),
+        (("导入", "import"), "upload"),
+        (("更多", "more"), "more-horizontal"),
+        (("重置", "reset"), "refresh"),
+        (("取消", "cancel"), "x"),
+        (("关闭", "close"), "x"),
+        (("复制", "copy"), "copy"),
+        (("构建", "build"), "database"),
+        (("全选", "select all"), "check"),
+        (("全不选", "select none", "none"), "x"),
+        (("返回", "back"), "chevron-left"),
+        (("设置", "settings"), "settings"),
+        (("浏览", "browse"), "search"),
+        (("发送", "send"), "arrow-up"),
+        (("下一", "next"), "chevron-right"),
+        (("清空", "clear"), "trash"),
+        (("删除", "delete", "remove"), "trash"),
+        (("编辑", "edit"), "pencil"),
+        (("刷新", "refresh"), "refresh"),
+        (("打开", "open"), "external-link"),
+    ]
+    for needles, candidate in checks:
+        if any(needle in label for needle in needles):
+            icon_name = candidate
+            break
+    if not icon_name:
+        return None
+    color = Theme.ACCENT if primary else Theme.TEXT_2
+    return svg_icon(icon_name, color=color, size=14)
+
+
 def compact_button(
     text: str,
     *,
@@ -58,6 +98,8 @@ def compact_button(
     btn.setDefault(False)
     btn.setFixedHeight(26)
     btn.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
+    if icon is None:
+        icon = _button_icon_for_text(text, primary=primary)
     if icon is not None:
         btn.setIcon(icon)
         btn.setIconSize(QSize(14, 14))

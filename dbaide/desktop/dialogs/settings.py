@@ -19,6 +19,7 @@ from PyQt6.QtWidgets import (
 
 from dbaide.desktop.dialogs.message_dialog import confirm as dialog_confirm, warn as dialog_warn
 from dbaide.desktop.components.base import compact_button
+from dbaide.desktop.components.icons import more_icon
 from dbaide.desktop.components.inputs import Combo, FORM_INNER_LABEL_RULES, configure_form, form_label
 from dbaide.desktop.components.menu import MenuButton
 from dbaide.desktop.dialogs.connection import ConnectionForm
@@ -205,7 +206,7 @@ class SettingsDialog(ChromeDialog):
         nav_layout.setContentsMargins(8, 12, 8, 12)
         nav_layout.setSpacing(4)
         # Compact, flat back action — a boxed 120px button read as oversized chrome.
-        back = compact_button(_t("settings.back"))
+        back = compact_button(_t("settings.back").replace("←", "").strip())
         back.setStyleSheet(
             f"QPushButton {{ background: transparent; color: {Theme.MUTED};"
             f" border: none; border-radius: 8px; text-align: left; padding: 0 10px; }}"
@@ -517,7 +518,12 @@ class SettingsDialog(ChromeDialog):
         self.save_conn_btn.clicked.connect(self._save_connection)
         self.test_conn_btn = compact_button(_pt("btn.test"), width=72)
         self.test_conn_btn.clicked.connect(self._test_connection)
-        self.conn_more = MenuButton(_pt("settings.more"), max_width=88)
+        self.conn_more = MenuButton(
+            _pt("settings.more"),
+            max_width=92,
+            icon=more_icon(color=Theme.TEXT_2, size=15),
+            filled=True,
+        )
         self.conn_more.add_action(_pt("settings.set_default"), self._set_default_connection)
         self.conn_more.add_action(_pt("settings.export_conn"), self._export_connection)
         self.conn_more.add_separator()
@@ -537,7 +543,12 @@ class SettingsDialog(ChromeDialog):
         self.save_model_btn.clicked.connect(self._save_model)
         self.test_model_btn = compact_button(_pt("btn.test"), width=72)
         self.test_model_btn.clicked.connect(self._test_model)
-        self.model_more = MenuButton(_pt("settings.more"), max_width=88)
+        self.model_more = MenuButton(
+            _pt("settings.more"),
+            max_width=92,
+            icon=more_icon(color=Theme.TEXT_2, size=15),
+            filled=True,
+        )
         self.model_more.add_action(_pt("settings.set_default"), self._set_default_model)
         self.model_more.add_action(_pt("settings.remove"), self._remove_model)
         actions.addStretch(1)

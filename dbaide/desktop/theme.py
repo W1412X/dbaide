@@ -237,43 +237,46 @@ QLabel[muted="true"] {{
     padding-left: 2px;
 }}
 QPushButton {{
-    background: {T.PANEL_2};
+    background: transparent;
     color: {T.TEXT_2};
-    border: 1px solid {T.BORDER};
-    border-radius: 9px;
+    border: 1px solid transparent;
+    border-radius: 6px;
     padding: 0px 10px;
     min-height: 26px;
     max-height: 26px;
 }}
 QPushButton:hover {{
-    background: {T.PANEL_3};
+    background: {T.PANEL_2};
     color: {T.TEXT};
+}}
+QPushButton:pressed {{
+    background: {T.PANEL_3};
 }}
 QPushButton:disabled {{
     color: {T.MUTED_2};
-    background: {T.PANEL};
+    background: transparent;
 }}
 QPushButton[primary="true"] {{
-    background: {T.ACCENT};
-    color: {T.ACCENT_TEXT};
-    border: 1px solid {T.ACCENT};
+    background: transparent;
+    color: {T.ACCENT};
+    border: 1px solid transparent;
     font-weight: 600;
     padding: 0px 10px;
     min-height: 26px;
     max-height: 26px;
 }}
 QPushButton[primary="true"]:hover {{
-    background: {T.ACCENT_HOVER};
-    border: 1px solid {T.ACCENT_HOVER};
-    color: {T.ACCENT_TEXT};
+    background: {T.PANEL_2};
+    border: 1px solid transparent;
+    color: {T.ACCENT_HOVER};
 }}
 QPushButton[primary="true"]:disabled {{
-    background: {T.PANEL_2};
+    background: transparent;
     color: {T.MUTED_2};
-    border: 1px solid {T.BORDER};
+    border: 1px solid transparent;
 }}
 QPushButton:focus-visible, QToolButton:focus-visible {{
-    border: 1px solid {T.FOCUS};
+    border: 1px solid {T.BORDER_SOFT};
 }}
 QToolButton#modeSwitchButton:focus-visible {{
     border: 1px solid {T.FOCUS};
@@ -531,17 +534,20 @@ QAbstractScrollArea::corner {{
     background: transparent;
 }}
 QToolButton {{
-    background: {T.PANEL_2};
+    background: transparent;
     color: {T.TEXT_2};
-    border: 1px solid {T.BORDER};
-    border-radius: 9px;
+    border: 1px solid transparent;
+    border-radius: 6px;
     padding: 0px 10px;
     min-height: 26px;
     max-height: 26px;
 }}
 QToolButton:hover {{
-    background: {T.PANEL_3};
+    background: {T.PANEL_2};
     color: {T.TEXT};
+}}
+QToolButton:pressed {{
+    background: {T.PANEL_3};
 }}
 QTabBar[segmented="true"]::tab {{
     background: {T.PANEL};
@@ -771,4 +777,3 @@ def workbench_tab_stylesheet(*, bordered_pane: bool = False) -> str:
         f"QTabWidget::tab-bar {{ background: {T.SURFACE}; }}"
         f"QTabWidget::pane {{ {pane} }}"
     )
-

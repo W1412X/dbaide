@@ -99,7 +99,7 @@ class ComposerWidget(Panel):
         # Compact icon button (arrow-up to send; spinner while running) — smaller and
         # cleaner than a text button, matching the modern composer style.
         self.action_btn = compact_button("", primary=True, width=38)
-        self.action_btn.setIcon(svg_icon("arrow-up", color="#ffffff", size=18))
+        self.action_btn.setIcon(svg_icon("arrow-up", color=Theme.ACCENT, size=18))
         self.action_btn.setIconSize(QSize(18, 18))
         self.action_btn.setToolTip(t("composer.send"))
         self.action_btn.clicked.connect(self._on_action)
@@ -170,14 +170,14 @@ class ComposerWidget(Panel):
             self._busy.start()  # _on_spin paints the rotating ring icon
         else:
             self._busy.stop()
-            self.action_btn.setIcon(svg_icon("arrow-up", color="#ffffff", size=18))
+            self.action_btn.setIcon(svg_icon("arrow-up", color=Theme.ACCENT, size=18))
             self.action_btn.setToolTip(t("composer.send"))
         self.input.setEnabled(not running)
         self.model_select.setEnabled(not running)
         self.attach_btn.setEnabled(not running)
 
     def _on_spin(self) -> None:
-        self.action_btn.setIcon(spinner_icon(self._busy.angle, color="#ffffff"))
+        self.action_btn.setIcon(spinner_icon(self._busy.angle, color=Theme.ACCENT))
 
     def set_placeholder(self, text: str) -> None:
         self.input.setPlaceholderText(text)

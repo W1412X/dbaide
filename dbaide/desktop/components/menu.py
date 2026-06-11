@@ -39,11 +39,13 @@ class MenuButton(QToolButton):
         icon: QIcon | None = None,
         tooltip: str = "",
         icon_only: bool = False,
+        filled: bool = False,
     ) -> None:
         super().__init__(parent)
         self._full_text = text
         self._max_width = max_width
         self._icon_only = icon_only
+        self._filled = filled
         if icon_only and icon is not None:
             self.setIcon(icon)
             self.setIconSize(QSize(16, 16))
@@ -54,8 +56,15 @@ class MenuButton(QToolButton):
                 self.setToolTip(tooltip)
         else:
             self.setText(text)
-            self.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextOnly)
-            self.setFixedHeight(26)
+            if icon is not None:
+                self.setIcon(icon)
+                self.setIconSize(QSize(15, 15))
+                self.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextBesideIcon)
+            else:
+                self.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextOnly)
+            self.setFixedHeight(30 if filled else 26)
+            if tooltip:
+                self.setToolTip(tooltip)
         self.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
         self._menu = QMenu(self)
         _style_menu(self._menu)
@@ -69,20 +78,19 @@ class MenuButton(QToolButton):
 
     def _apply_style(self, *, pill: bool, icon_only: bool = False) -> None:
         if icon_only:
-            # Visible soft fill (not transparent), no border — reads as a button.
             self.setStyleSheet(
                 f"""
                 QToolButton {{
-                    background: {Theme.PANEL_2};
+                    background: transparent;
                     border: none;
-                    border-radius: 9px;
+                    border-radius: 6px;
                     padding: 0;
                 }}
                 QToolButton:hover {{
-                    background: {Theme.PANEL_3};
+                    background: {Theme.PANEL_2};
                 }}
                 QToolButton:pressed {{
-                    background: {Theme.BORDER};
+                    background: {Theme.PANEL_3};
                 }}
                 QToolButton::menu-indicator {{
                     image: none;
@@ -91,9 +99,9 @@ class MenuButton(QToolButton):
                 """
             )
             return
-        radius = 16 if pill else 8
-        bg = "transparent" if pill else Theme.PANEL_2
-        border = Theme.BORDER_SOFT if pill else Theme.BORDER
+        radius = 12 if self._filled else 6
+        bg = Theme.PANEL_2 if self._filled else "transparent"
+        border = "transparent"
         self.setStyleSheet(
             f"""
             QToolButton {{
@@ -101,12 +109,16 @@ class MenuButton(QToolButton):
                 color: {Theme.TEXT_2};
                 border: 1px solid {border};
                 border-radius: {radius}px;
-                padding: 0px 12px;
-                font-size: 12px;
+                padding: 0px {14 if self._filled else 12}px;
+                font-size: {13 if self._filled else 12}px;
+                font-weight: {650 if self._filled else 500};
             }}
             QToolButton:hover {{
-                background: {Theme.PANEL_2};
+                background: {Theme.PANEL_3 if self._filled else Theme.PANEL_2};
                 color: {Theme.TEXT};
+            }}
+            QToolButton:pressed {{
+                background: {Theme.BORDER if self._filled else Theme.PANEL_3};
             }}
             QToolButton::menu-indicator {{
                 image: none;
@@ -191,25 +203,24 @@ class PillSelect(QToolButton):
         radius = Theme.RADIUS_MD
         if self._soft:
             open_bg = Theme.PANEL_2
-            open_border = Theme.BORDER
             self.setStyleSheet(
                 f"""
                 QToolButton {{
                     background: {open_bg if open_menu else "transparent"};
                     color: {Theme.TEXT if open_menu else Theme.TEXT_2};
-                    border: 1px solid {open_border if open_menu else Theme.BORDER_SOFT};
-                    border-radius: {radius}px;
+                    border: 1px solid transparent;
+                    border-radius: 6px;
                     padding: 0px 8px 0px 10px;
                     font-size: 12px;
                 }}
                 QToolButton:hover {{
                     background: {Theme.PANEL_2};
-                    border: 1px solid {Theme.BORDER};
+                    border: 1px solid transparent;
                     color: {Theme.TEXT};
                 }}
                 QToolButton:focus {{
                     outline: none;
-                    border: 1px solid {Theme.BORDER};
+                    border: 1px solid {Theme.BORDER_SOFT};
                 }}
                 QToolButton::menu-indicator {{
                     image: none;
@@ -218,20 +229,23 @@ class PillSelect(QToolButton):
                 """
             )
             return
-        open_bg = Theme.PANEL_3 if open_menu else Theme.PANEL_2
+        open_bg = Theme.PANEL_2 if open_menu else "transparent"
         self.setStyleSheet(
             f"""
             QToolButton {{
                 background: {open_bg};
                 color: {Theme.TEXT if open_menu else Theme.TEXT_2};
                 border: none;
-                border-radius: {radius}px;
+                border-radius: 6px;
                 padding: 0px 10px;
                 font-size: 12px;
             }}
             QToolButton:hover {{
-                background: {Theme.PANEL_3};
+                background: {Theme.PANEL_2};
                 color: {Theme.TEXT};
+            }}
+            QToolButton:pressed {{
+                background: {Theme.PANEL_3};
             }}
             QToolButton::menu-indicator {{
                 image: none;

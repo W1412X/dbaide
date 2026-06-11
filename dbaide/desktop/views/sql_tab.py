@@ -76,7 +76,7 @@ class SqlTab(QWidget):
         self._splitter.addWidget(editor_wrap)
 
         self._busy = BusyAnimator(
-            lambda: self.run_btn.setIcon(spinner_icon(self._busy.angle, color=Theme.ACCENT_TEXT, size=15)),
+            lambda: self.run_btn.setIcon(spinner_icon(self._busy.angle, color=Theme.ACCENT, size=15)),
             parent=self,
         )
 
@@ -100,25 +100,27 @@ class SqlTab(QWidget):
 
     def _icon_button(self, icon_name: str, tooltip: str, *, primary: bool = False) -> QToolButton:
         btn = QToolButton()
-        color = Theme.ACCENT_TEXT if primary else Theme.TEXT_2
+        color = Theme.ACCENT if primary else Theme.TEXT_2
         btn.setIcon(svg_icon(icon_name, color=color, size=14))
         btn.setIconSize(QSize(14, 14))
         btn.setToolTip(tooltip)
         btn.setCursor(Qt.CursorShape.PointingHandCursor)
         btn.setFixedSize(26, 26)
         box = ("padding: 0; margin: 0; min-width: 26px; max-width: 26px;"
-               " min-height: 26px; max-height: 26px; border: none; border-radius: 7px;")
+               " min-height: 26px; max-height: 26px; border: none; border-radius: 6px;")
         if primary:
             btn.setStyleSheet(
-                f"QToolButton {{ background: {Theme.ACCENT}; {box} }}"
-                f"QToolButton:hover {{ background: {Theme.ACCENT_HOVER}; }}"
-                f"QToolButton:disabled {{ background: {Theme.PANEL_2}; }}"
+                f"QToolButton {{ background: transparent; {box} }}"
+                f"QToolButton:hover {{ background: {Theme.PANEL_2}; }}"
+                f"QToolButton:pressed {{ background: {Theme.PANEL_3}; }}"
+                f"QToolButton:disabled {{ background: transparent; }}"
             )
         else:
             btn.setStyleSheet(
-                f"QToolButton {{ background: {Theme.PANEL_2}; {box} }}"
-                f"QToolButton:hover {{ background: {Theme.PANEL_3}; }}"
-                f"QToolButton:disabled {{ background: {Theme.PANEL}; }}"
+                f"QToolButton {{ background: transparent; {box} }}"
+                f"QToolButton:hover {{ background: {Theme.PANEL_2}; }}"
+                f"QToolButton:pressed {{ background: {Theme.PANEL_3}; }}"
+                f"QToolButton:disabled {{ background: transparent; }}"
             )
         return btn
 
@@ -168,7 +170,7 @@ class SqlTab(QWidget):
             self._busy.start()
         else:
             self._busy.stop()
-            self.run_btn.setIcon(svg_icon("play", color=Theme.ACCENT_TEXT, size=15))
+            self.run_btn.setIcon(svg_icon("play", color=Theme.ACCENT, size=15))
             self.run_btn.setToolTip(f"{self._t('sql.run')} · ⌘↵")
         self.run_btn.setEnabled(not running)
         self.explain_btn.setEnabled(not running)
