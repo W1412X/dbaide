@@ -30,6 +30,9 @@ def test_exploratory_sql_progress_is_tool_and_query():
         data = {"row_count": 3}
 
     assert brief_tool_summary("execute_readonly_sql", Result()) == "3 rows"
+
+
+def test_conversation_trace_step_from_progress():
     step = conversation_trace_step(
         progress_event(stage="execute_readonly_sql", title="execute_readonly_sql done", status="completed", kind="tool")
     )

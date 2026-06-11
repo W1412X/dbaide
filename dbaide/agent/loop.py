@@ -307,8 +307,6 @@ class AskAgentLoop:
             if result.ok:
                 summary = _summarize_tool_result(approved_risk_tool, result)
                 transcript.append(f"Tool `{approved_risk_tool}` → {summary}")
-                if orch.run_state.query_result:
-                    return self._build_response(orch, self._answer_from_state(orch), disclosures_before or [])
             else:
                 reason = result.error or brief_tool_summary(approved_risk_tool, result) or "confirmed_execution_failed"
                 return self._build_failed_response(orch, reason, disclosures_before or [])
@@ -419,7 +417,7 @@ class AskAgentLoop:
                         )
                     runtime.consume_step()
                     continue
-                paused = stopped = False
+                paused = False
                 for call in calls:
                     if runtime.steps_remaining <= 0:
                         break
@@ -431,15 +429,10 @@ class AskAgentLoop:
                     if sig == "pending":
                         paused = True
                         break
-                    if sig == "stop":
-                        stopped = True
-                        break
                 if paused:
                     return self._build_wait_response(
                         orch, state, transcript, disclosures_before or [], step_base=step_no,
                     )
-                if stopped:
-                    break
                 continue
 
             if action != "call_tool":
@@ -469,12 +462,8 @@ class AskAgentLoop:
                 return self._build_wait_response(
                     orch, state, transcript, disclosures_before or [], step_base=step_no,
                 )
-            if sig == "stop":
-                break
 
-        # Distinguish a clean stop (a tool `break` above, steps left) from running out
-        # of the step budget mid-task — the latter must not present a stale intermediate
-        # answer as a finished result without telling the user it may be incomplete.
+        # Distinguish running out of the step budget mid-task from a clean finish —
         budget_exhausted = getattr(runtime, "steps_remaining", 1) <= 0
         if orch.run_state.query_result or orch.run_state.answer:
             if orch.run_state.query_result:
@@ -524,9 +513,8 @@ class AskAgentLoop:
                        tool_name: str, args: dict[str, Any], step_no: int,
                        llm_start: int, recorder: Any) -> str:
         """Run one tool: emit trace, invoke, record into memory, and emit the done
-        frame. Returns 'pending' (tool paused for the user), 'stop' (a terminal tool
-        whose result is the answer), or 'ok'. Shared by single and batched dispatch so
-        both paths record/trace identically."""
+        frame. Returns 'pending' (tool paused for the user) or 'ok'. Shared by single
+        and batched dispatch so both paths record/trace identically."""
         self.progress(self._ns_step(progress_event(
             stage=tool_name, title=f"Calling {tool_name}", status="running", kind="tool",
             detail=str(args)[:200] if args else "", step=step_no,
@@ -594,29 +582,7 @@ class AskAgentLoop:
         self.progress(done_event)
         if result.ok and isinstance(result.data, dict) and result.data.get("pending"):
             return "pending"
-        if self._stop_after_tool(orch, state, tool_name, result):
-            return "stop"
         return "ok"
-
-    def _stop_after_tool(self, orch: AskOrchestrator, state: LoopState,
-                         tool_name: str, result: ToolResult) -> bool:
-        """Whether the loop is done after this tool ran — the terminal tools and their
-        answer side-effects, in one place. Returns True to break the loop.
-
-        - execute_sql succeeded → the data result is the answer;
-        - execute_readonly_sql succeeded → keep looping; it is exploratory evidence;
-        - profile_table succeeded → its output is the answer.
-        """
-        if tool_name == "execute_sql" and result.ok:
-            return True
-        if tool_name in _EXECUTE_TOOLS and isinstance(result.data, dict) and result.data.get("blocked"):
-            sql = str(result.data.get("sql") or orch.run_state.sql or "")
-            reason = str(result.data.get("reason") or "Execution blocked")
-            orch.run_state.answer = f"SQL:\n```sql\n{sql}\n```\n\n_{reason}_"
-            return True
-        if tool_name == "profile_table" and result.ok:
-            return True
-        return False
 
     def _fail(self, reason: str) -> None:
         self.orchestrator.run_state.fail_reason = reason
