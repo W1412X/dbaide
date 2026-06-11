@@ -30,7 +30,13 @@ DBAide 连接你的数据库，渐进式发现 schema，拒绝臆测含糊的业
 |------|------|----------|
 | **macOS**（Apple Silicon） | `DBAide-macOS-arm64.dmg` | 打开 DMG → 将 **DBAide** 拖入 **应用程序** → 见下方 [macOS 首次打开](#macos-首次打开允许运行) |
 | **Windows** | `DBAide-Windows-x86_64.msi` | 运行安装程序 → 从 **桌面** 或 **开始菜单** 快捷方式启动 |
-| **Linux** | `DBAide-Linux-x86_64.tar.gz` | 解压后运行 `./DBAide/DBAide`（可选：将 `DBAide/dbaide.desktop` 复制到 `~/.local/share/applications/`） |
+| **Linux** | `DBAide-Linux-x86_64.tar.gz` | 解压后运行 `./DBAide/DBAide`（文件夹内有 `INSTALL.txt`；可选：将 `dbaide.desktop` 复制到 `~/.local/share/applications/`） |
+
+安装包无需 Python。新版 Linux 构建已内置 Qt xcb 依赖；若仍无法启动（或旧版包），请执行：
+
+```bash
+sudo apt install -y libxcb-cursor0 libxkbcommon-x11-0 libgl1 libegl1
+```
 
 以上安装包**无需安装 Python**。
 
@@ -70,7 +76,14 @@ pip install -e .
 ```
 
 SQLite 无需额外驱动；MySQL / PostgreSQL 驱动已包含在核心依赖中。
-安装后运行 `dbaide-gui`（桌面）或 `dbaide`（CLI）。
+
+**Ubuntu / Debian（源码运行桌面）：** 先安装 Qt xcb 系统库：
+
+```bash
+sudo apt install -y libxcb-cursor0 libxkbcommon-x11-0 libgl1 libegl1
+```
+
+然后运行 `dbaide-gui`（桌面）或 `dbaide`（CLI）。
 
 ---
 

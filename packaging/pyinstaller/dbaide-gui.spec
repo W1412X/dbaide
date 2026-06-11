@@ -14,6 +14,10 @@ ICON = str(ICON_DIR / ("dbaide.ico" if sys.platform == "win32" else "dbaide.icns
 block_cipher = None
 STRIP = sys.platform != "win32"  # strip symbols on macOS/Linux (saves size); not on Windows
 
+_runtime_hooks = []
+if sys.platform == "linux":
+    _runtime_hooks.append(str(ROOT / "packaging" / "pyinstaller" / "rthook_linux_libpath.py"))
+
 # mistune loads its plugins (table, strikethrough, url, …) by string name, so
 # PyInstaller's import graph misses them — collect every submodule explicitly or
 # Markdown rendering breaks at runtime in the frozen app.
@@ -79,7 +83,7 @@ a = Analysis(
     hiddenimports=hiddenimports,
     hookspath=[],
     hooksconfig={},
-    runtime_hooks=[],
+    runtime_hooks=_runtime_hooks,
     excludes=["tkinter", "matplotlib", "numpy", "pandas"] + _QT_EXCLUDES,
     win_no_prefer_redirects=False,
     win_private_assemblies=False,

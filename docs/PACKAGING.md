@@ -106,15 +106,19 @@ Compress-Archive -Path dist\DBAide -DestinationPath dist\DBAide-Windows.zip
 
 产物：`dist/DBAide/DBAide`
 
+构建脚本会自动执行 `packaging/linux/bundle_qt_runtime_libs.sh`，将 `libxcb-cursor`
+等 xcb 运行时库打入 `_internal/lib/`（Qt 6.5+ 必需，否则 Ubuntu 用户会看到
+「Could not load the Qt platform plugin xcb」）。
+
 ```bash
 cd dist && tar -czf DBAide-linux-$(uname -m).tar.gz DBAide
 ```
 
 用户解压后运行 `./DBAide/DBAide`。  
-若缺系统库（如 `libxcb`），安装：
+若仍缺系统库（旧包或未 bundle 的本地构建），安装：
 
 ```bash
-sudo apt install -y libxcb-cursor0 libxkbcommon-x11-0 libgl1
+sudo apt install -y libxcb-cursor0 libxkbcommon-x11-0 libgl1 libegl1
 ```
 
 可选进阶： [AppImage](https://appimage.org/) 或 `fpm` 打 `.deb`（需额外脚本，当前仓库未内置）。

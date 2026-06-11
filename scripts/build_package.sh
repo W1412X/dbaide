@@ -20,6 +20,10 @@ mkdir -p dist
 case "$TARGET" in
   gui)
     python3 -m PyInstaller packaging/pyinstaller/dbaide-gui.spec --noconfirm --clean
+    if [[ "$(uname -s)" == "Linux" ]]; then
+      chmod +x packaging/linux/bundle_qt_runtime_libs.sh
+      packaging/linux/bundle_qt_runtime_libs.sh dist/DBAide
+    fi
     if [[ "$(uname -s)" == "Darwin" && -d dist/DBAide.app ]]; then
       chmod +x scripts/codesign_macos.sh
       ./scripts/codesign_macos.sh dist/DBAide.app

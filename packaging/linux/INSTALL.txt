@@ -1,0 +1,21 @@
+DBAide — Linux install notes
+=============================
+
+Extract this folder anywhere, then run:
+
+  ./DBAide/DBAide
+
+Recent releases bundle the Qt xcb libraries (including libxcb-cursor) needed on
+Ubuntu 22.04+. No extra packages should be required for the frozen app.
+
+If you still see "Could not load the Qt platform plugin xcb":
+
+  sudo apt update
+  sudo apt install -y libxcb-cursor0 libxkbcommon-x11-0 libgl1 libegl1
+
+For the pip / source install (dbaide-gui), install the same packages once.
+
+Optional desktop entry:
+
+  cp DBAide/dbaide.desktop ~/.local/share/applications/
+  # Edit Exec= path inside the .desktop file to your extract location.

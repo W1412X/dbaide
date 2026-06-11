@@ -6,6 +6,21 @@ All notable changes to DBAide are documented here. The format is loosely based o
 
 ## [Unreleased]
 
+## [0.1.5] — 2026-06-11
+
+### Fixed
+
+- **Linux startup crash (`xcb` plugin)** — bundle `libxcb-cursor` and related xcb/xkb
+  runtime libraries into the PyInstaller folder; set `LD_LIBRARY_PATH` via a runtime
+  hook so Ubuntu users no longer need manual `apt install libxcb-cursor0`.
+
+### Added
+
+- **`packaging/linux/bundle_qt_runtime_libs.sh`** — CI/local build step to vendor Qt
+  xcb deps; **`INSTALL.txt`** included in the Linux `.tar.gz`.
+- **README / PACKAGING** — document Ubuntu `apt` fallback for source installs and
+  older tarballs.
+
 ## [0.1.4] — 2026-06-11
 
 ### Changed
@@ -410,7 +425,8 @@ and a PyQt6 desktop app, sharing one Python core.
   drag-to-Applications)**, **Windows (`.msi` wizard)**, and **Linux (`.tar.gz`)** —
   pushing a `v*` tag cuts a GitHub Release automatically.
 
-[Unreleased]: https://github.com/W1412X/dbaide/compare/v0.1.4...HEAD
+[Unreleased]: https://github.com/W1412X/dbaide/compare/v0.1.5...HEAD
+[0.1.5]: https://github.com/W1412X/dbaide/compare/v0.1.4...v0.1.5
 [0.1.4]: https://github.com/W1412X/dbaide/compare/v0.1.3...v0.1.4
 [0.1.3]: https://github.com/W1412X/dbaide/compare/v0.1.2...v0.1.3
 [0.1.2]: https://github.com/W1412X/dbaide/compare/v0.1.1...v0.1.2

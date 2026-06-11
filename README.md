@@ -32,9 +32,13 @@ Download the latest installer for your platform from
 |----------|------|------------|
 | **macOS** (Apple Silicon) | `DBAide-macOS-arm64.dmg` | Open the DMG → drag **DBAide** into **Applications** → see [macOS first launch](#macos-first-launch-allow-the-app) below |
 | **Windows** | `DBAide-Windows-x86_64.msi` | Run the installer → launch from the **Desktop** or **Start Menu** shortcut |
-| **Linux** | `DBAide-Linux-x86_64.tar.gz` | Extract, then run `./DBAide/DBAide` (optional: copy `DBAide/dbaide.desktop` into `~/.local/share/applications/`) |
+| **Linux** | `DBAide-Linux-x86_64.tar.gz` | Extract, then run `./DBAide/DBAide` (see `INSTALL.txt` in the folder; optional: copy `dbaide.desktop` into `~/.local/share/applications/`) |
 
-No Python required for these builds.
+No Python required for these builds. Rebuilt Linux tarballs bundle the Qt xcb libraries; if startup still fails (or you have an older release), run:
+
+```bash
+sudo apt install -y libxcb-cursor0 libxkbcommon-x11-0 libgl1 libegl1
+```
 
 #### macOS first launch: allow the app
 
@@ -74,6 +78,13 @@ pip install -e .
 ```
 
 SQLite needs no extra drivers; MySQL/PostgreSQL drivers ship with the core install.
+
+**Ubuntu / Debian (desktop from source):** install Qt xcb libraries once:
+
+```bash
+sudo apt install -y libxcb-cursor0 libxkbcommon-x11-0 libgl1 libegl1
+```
+
 Then run `dbaide-gui` (desktop) or `dbaide` (CLI).
 
 ---
