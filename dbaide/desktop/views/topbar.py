@@ -131,10 +131,10 @@ class TopBar(QWidget):
 
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
+        self.setObjectName("topBar")
         self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
         self._content_height = 42
         self.setFixedHeight(self._content_height)
-        self.setStyleSheet(f"background:{Theme.BG}; border:none;")
         row = QHBoxLayout(self)
         row.setContentsMargins(12, 0, 12, 0)
         row.setSpacing(6)

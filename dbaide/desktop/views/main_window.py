@@ -109,6 +109,12 @@ class MainWindow(QMainWindow):
             from dbaide.desktop.window_chrome import apply_window_background
 
             apply_window_background(self)
+            caption = getattr(self, "_win_caption", None)
+            if caption is not None:
+                from dbaide.desktop.windows_caption import register_frameless_resize
+
+                caption.refresh_theme()
+                register_frameless_resize(self)
         if getattr(self, "_integrated_title_bar", False) and not getattr(self, "_chrome_installed", False):
             self._chrome_installed = True
             from dbaide.desktop.window_chrome import install_top_level_chrome
@@ -292,6 +298,21 @@ class MainWindow(QMainWindow):
         layout = QVBoxLayout(root)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(0)
+
+        from dbaide.desktop.windows_caption import (
+            WindowsCaptionBar,
+            register_frameless_resize,
+            uses_windows_custom_caption,
+        )
+
+        if uses_windows_custom_caption():
+            self.setWindowFlag(Qt.WindowType.FramelessWindowHint, True)
+            self.setProperty("_dbaide_win_caption", True)
+            self._win_caption = WindowsCaptionBar(self, title="")
+            layout.addWidget(self._win_caption)
+        else:
+            self._win_caption = None
+
         self.topbar = TopBar()
         self.topbar.connection_changed.connect(self._connection_changed)
         self.topbar.refresh.connect(self.refresh_all)

@@ -220,6 +220,14 @@ def app_style() -> str:
 QMainWindow, QWidget#root, QDialog {{
     background-color: {T.BG};
 }}
+QWidget#topBar {{
+    background-color: {T.BG};
+    border: none;
+}}
+QWidget#windowsCaptionBar {{
+    background-color: {T.BG};
+    border: none;
+}}
 QFrame[panel="true"] {{
     background: {T.SURFACE};
     border: 1px solid {T.BORDER_SOFT};

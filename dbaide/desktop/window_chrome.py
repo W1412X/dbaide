@@ -60,11 +60,22 @@ def apply_window_background(window: QWidget) -> None:
     pal.setColor(QPalette.ColorRole.Window, bg)
     pal.setColor(QPalette.ColorRole.Base, bg)
     window.setPalette(pal)
-    _apply_windows_dwm_border(window, bg)
+    if sys.platform == "win32" and window.property("_dbaide_win_caption"):
+        return
+    _apply_windows_dwm_theme(window)
 
 
-def _apply_windows_dwm_border(window: QWidget, bg: QColor) -> None:
-    """Tint the outer Win10/11 frame only — never the caption (causes ghosting)."""
+def _colorref(color: QColor) -> int:
+    return (color.blue() << 16) | (color.green() << 8) | color.red()
+
+
+def _apply_windows_dwm_theme(window: QWidget) -> None:
+    """Sync Win10/11 caption strip + border with the app light/dark theme.
+
+    Safe on Windows because we do **not** use ``ExpandedClientAreaHint`` there —
+    client content sits below the native caption, so tinting the caption does not
+    overlap the in-app TopBar (unlike the v0.1.1 ghosting bug).
+    """
     if sys.platform != "win32":
         return
     wid = int(window.winId() or 0)
@@ -74,13 +85,35 @@ def _apply_windows_dwm_border(window: QWidget, bg: QColor) -> None:
         import ctypes
         from ctypes import wintypes
 
-        colorref = wintypes.DWORD((bg.blue() << 16) | (bg.green() << 8) | bg.red())
-        ctypes.windll.dwmapi.DwmSetWindowAttribute(
-            wintypes.HWND(wid),
-            wintypes.DWORD(34),  # DWMWA_BORDER_COLOR
-            ctypes.byref(colorref),
-            ctypes.sizeof(colorref),
-        )
+        from dbaide.desktop.theme import Theme, current_theme_name
+
+        dark = current_theme_name() == "dark"
+        bg = QColor(Theme.BG)
+        text = QColor(Theme.TEXT)
+        dwm = ctypes.windll.dwmapi
+        hwnd = wintypes.HWND(wid)
+
+        def _set_dword(attr: int, value: int) -> None:
+            v = wintypes.DWORD(value)
+            dwm.DwmSetWindowAttribute(
+                hwnd, wintypes.DWORD(attr), ctypes.byref(v), ctypes.sizeof(v)
+            )
+
+        def _set_color(attr: int, color: QColor) -> None:
+            v = wintypes.DWORD(_colorref(color))
+            dwm.DwmSetWindowAttribute(
+                hwnd, wintypes.DWORD(attr), ctypes.byref(v), ctypes.sizeof(v)
+            )
+
+        # 19 = Win10 1809+, 20 = Win11 — enable/disable dark caption chrome.
+        for attr in (19, 20):
+            try:
+                _set_dword(attr, 1 if dark else 0)
+            except Exception:
+                pass
+        _set_color(34, bg)    # DWMWA_BORDER_COLOR
+        _set_color(35, bg)    # DWMWA_CAPTION_COLOR
+        _set_color(36, text)  # DWMWA_TEXT_COLOR
     except Exception:
         return
 
@@ -169,5 +202,10 @@ class ChromeDialog(QDialog):
         super().showEvent(event)
         if not self._chrome_installed:
             self._chrome_installed = True
+            from dbaide.desktop.windows_caption import attach_windows_caption
+
+            bar = attach_windows_caption(self)
             apply_window_background(self)
+            if bar is not None:
+                bar.refresh_theme()
             install_top_level_chrome(self, layout=self.layout())

@@ -35,6 +35,10 @@ _GLYPHS: dict[str, str] = {
               '<line x1="14" x2="14" y1="11" y2="17"/>'),
     "save": '<path d="M15.2 3a2 2 0 0 1 1.4.6l3.8 3.8A2 2 0 0 1 21 8.8V19a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2z"/><path d="M17 21v-8H7v8"/><path d="M7 3v5h8"/>',
     "x": '<path d="M18 6 6 18"/><path d="m6 6 12 12"/>',
+    "minimize": '<line x1="5" x2="19" y1="19" y2="19"/>',
+    "maximize": '<rect x="5" y="5" width="14" height="14" rx="1"/>',
+    "restore": ('<rect x="8" y="8" width="12" height="12" rx="1"/>'
+                '<path d="M4 14V6a2 2 0 0 1 2-2h8"/>'),
     "send": '<path d="M22 2 11 13"/><path d="M22 2 15 22l-4-9-9-4Z"/>',
     "arrow-up": '<path d="m5 12 7-7 7 7"/><path d="M12 19V5"/>',
     "arrow-down": '<path d="M12 5v14"/><path d="m19 12-7 7-7-7"/>',
