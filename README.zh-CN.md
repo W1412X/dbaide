@@ -1,5 +1,7 @@
 <div align="center">
 
+<img src="packaging/icons/png/icon_128.png" alt="DBAide" width="96">
+
 # DBAide
 
 **本地优先的 AI 数据库助手 — 用自然语言安全地提问你的数据。**

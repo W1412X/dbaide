@@ -1,5 +1,7 @@
 <div align="center">
 
+<img src="packaging/icons/png/icon_128.png" alt="DBAide" width="96">
+
 # DBAide
 
 **A local-first AI database assistant — ask your data in plain language, safely.**
