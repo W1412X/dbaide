@@ -100,6 +100,9 @@ Compress-Archive -Path dist\DBAide -DestinationPath dist\DBAide-Windows.zip
 
 ### Ubuntu / Linux
 
+**最低支持：Ubuntu 20.04 LTS**（glibc 2.31）。Release CI 在 `ubuntu-20.04` 上构建，
+因此同一 `.tar.gz` 可在 20.04 / 22.04 / 24.04 等较新系统上运行，但不支持 18.04。
+
 ```bash
 ./scripts/build_package.sh gui
 ```

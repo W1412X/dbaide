@@ -11,4 +11,8 @@ if [[ ${#PACKAGES[@]} -eq 0 ]]; then
 fi
 
 sudo apt-get update -qq
+# libxcb-cursor0 lives in universe on Ubuntu 20.04 LTS.
+sudo apt-get install -y -qq software-properties-common
+sudo add-apt-repository -y universe
+sudo apt-get update -qq
 sudo apt-get install -y -qq "${PACKAGES[@]}"

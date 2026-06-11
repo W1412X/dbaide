@@ -6,6 +6,14 @@ All notable changes to DBAide are documented here. The format is loosely based o
 
 ## [Unreleased]
 
+## [0.1.7] — 2026-06-11
+
+### Changed
+
+- **Linux minimum support Ubuntu 20.04 LTS** — release builds run on `ubuntu-20.04`
+  (glibc 2.31); tarballs run on 20.04+ but not 18.04. Enable `universe` for
+  `libxcb-cursor0` on 20.04 during CI/local builds.
+
 ## [0.1.6] — 2026-06-11
 
 ### Fixed
@@ -432,7 +440,8 @@ and a PyQt6 desktop app, sharing one Python core.
   drag-to-Applications)**, **Windows (`.msi` wizard)**, and **Linux (`.tar.gz`)** —
   pushing a `v*` tag cuts a GitHub Release automatically.
 
-[Unreleased]: https://github.com/W1412X/dbaide/compare/v0.1.6...HEAD
+[Unreleased]: https://github.com/W1412X/dbaide/compare/v0.1.7...HEAD
+[0.1.7]: https://github.com/W1412X/dbaide/compare/v0.1.6...v0.1.7
 [0.1.6]: https://github.com/W1412X/dbaide/compare/v0.1.5...v0.1.6
 [0.1.5]: https://github.com/W1412X/dbaide/compare/v0.1.4...v0.1.5
 [0.1.4]: https://github.com/W1412X/dbaide/compare/v0.1.3...v0.1.4

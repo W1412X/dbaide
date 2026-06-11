@@ -23,7 +23,7 @@ jobs:
         include:
           - os: macos-14
             artifact: DBAide-macOS-arm64
-          - os: ubuntu-22.04
+          - os: ubuntu-20.04
             artifact: DBAide-Linux-x86_64
           - os: windows-latest
             artifact: DBAide-Windows-x86_64

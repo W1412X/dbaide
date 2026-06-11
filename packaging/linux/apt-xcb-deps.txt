@@ -1,4 +1,5 @@
-# Runtime packages for PyQt6 xcb on Ubuntu 22.04+ (used by CI and release builds).
+# Runtime packages for PyQt6 xcb on Ubuntu 20.04+ (used by CI and release builds).
+# libxcb-cursor0 is in the universe component on 20.04 — install_xcb_apt_deps.sh enables it.
 libegl1
 libxkbcommon-x11-0
 libdbus-1-3
