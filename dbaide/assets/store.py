@@ -106,26 +106,43 @@ class AssetStore:
         }
 
     def database_docs(self, instance: str, *, connection=None, fingerprint: str = "") -> list[dict[str, Any]]:
-        if (connection is not None or fingerprint) and not self.connection_matches(
-            instance, connection=connection, fingerprint=fingerprint,
-        ):
-            return []
         path = self.instance_dir(instance) / "databases.json"
         data = self._read_optional(path)
+        if (connection is not None or fingerprint) and not self._document_matches_connection(
+            data, instance=instance, connection=connection, fingerprint=fingerprint,
+        ):
+            return []
         if isinstance(data, dict):
             return list(data.get("databases") or [])
         return []
 
     def table_docs(self, instance: str, database: str, *, connection=None, fingerprint: str = "") -> list[dict[str, Any]]:
-        if (connection is not None or fingerprint) and not self.connection_matches(
-            instance, connection=connection, fingerprint=fingerprint,
-        ):
-            return []
         path = self.database_dir(instance, database) / "tables.json"
         data = self._read_optional(path)
+        if (connection is not None or fingerprint) and not self._document_matches_connection(
+            data, instance=instance, connection=connection, fingerprint=fingerprint,
+        ):
+            return []
         if isinstance(data, dict):
             return list(data.get("tables") or [])
         return []
+
+    def _document_matches_connection(
+        self,
+        data: Any,
+        *,
+        instance: str,
+        connection=None,
+        fingerprint: str = "",
+    ) -> bool:
+        expected = fingerprint or connection_fingerprint(connection)
+        if not expected:
+            return True
+        if isinstance(data, dict):
+            actual = str(data.get("connection_fingerprint") or "")
+            if actual:
+                return fingerprint_matches(actual, expected)
+        return self.connection_matches(instance, connection=connection, fingerprint=expected)
 
     def column_docs(self, instance: str, database: str, table: str, *, connection=None, fingerprint: str = "") -> list[dict[str, Any]]:
         if (connection is not None or fingerprint) and not self.connection_matches(

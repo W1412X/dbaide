@@ -124,7 +124,8 @@ class AssetBuilder:
     # ── Structured progress for the trace (root → per-database nodes) ─────────
 
     def _emit(self, title: str, *, node_id: str = _BUILD_ROOT, parent_id: str = "",
-              status: str = "running", kind: str = "tool", duration_ms: float = 0.0) -> None:
+              status: str = "running", kind: str = "tool", duration_ms: float = 0.0,
+              **extra: object) -> None:
         """Emit a structured build-progress event. The GUI renders these as a tree
         (Building assets → each database); string consumers (CLI) read ``title``."""
         event: dict = {"stage": "build_assets", "title": title, "status": status,
@@ -133,11 +134,23 @@ class AssetBuilder:
             event["parent_id"] = parent_id
         if duration_ms:
             event["duration_ms"] = duration_ms
+        event.update({key: value for key, value in extra.items() if value is not None})
         self.progress(event)
 
-    def _emit_db(self, database: str, title: str, *, status: str = "running") -> None:
+    def _emit_db(
+        self,
+        database: str,
+        title: str,
+        *,
+        status: str = "running",
+        completed_tables: int | None = None,
+        total_tables: int | None = None,
+        current_table: str | None = None,
+    ) -> None:
         self._emit(title, node_id=f"build:db:{database}", parent_id=_BUILD_ROOT,
-                   status=status, kind="substep")
+                   status=status, kind="substep", database=database,
+                   completed_tables=completed_tables, total_tables=total_tables,
+                   current_table=current_table)
 
     def _persist_fk_joins(self, instance: str) -> None:
         """Save the declared foreign keys found during the build as join edges, so a
@@ -257,13 +270,17 @@ class AssetBuilder:
         preserved_docs = self._load_existing_database_docs(instance) if partial else []
         db_names = self._resolve_databases(databases)
         self._emit(f"discovered {len(db_names)} database(s): {', '.join(db_names)}", status="running")
+        tables_by_database = self._discover_database_tables(db_names, only_tables=only_tables)
         if not partial:
             self.store.write_json(
                 self.store.instance_dir(instance) / "databases.json",
                 {
                     "instance": instance,
                     **self.store.connection_metadata(self.connection),
-                    "databases": [{"name": db} for db in db_names],
+                    "databases": [
+                        {"name": db, "table_count": len(tables_by_database.get(db, []))}
+                        for db in db_names
+                    ],
                 },
             )
 
@@ -275,6 +292,7 @@ class AssetBuilder:
         try:
             with ThreadPoolExecutor(max_workers=options.max_workers) as executor:
                 database_docs = self._build_databases(instance, db_names, options, stats, executor,
+                                                      tables_by_database=tables_by_database,
                                                       only_tables=only_tables)
         finally:
             unsubscribe()
@@ -294,6 +312,7 @@ class AssetBuilder:
             self.store.instance_dir(instance) / "databases.json",
             {
                 "instance": instance,
+                **self.store.connection_metadata(self.connection),
                 "databases": [
                     {"name": db.get("name"), "description": db.get("description"), "table_count": db.get("table_count")}
                     for db in database_docs
@@ -345,7 +364,12 @@ class AssetBuilder:
             + (f" · {len(stats.errors)} errors" if stats.errors else "")
         )
         self._emit(summary, status="failed" if stats.errors else "completed",
-                   duration_ms=stats.elapsed_seconds * 1000)
+                   duration_ms=stats.elapsed_seconds * 1000,
+                   tables=stats.tables, columns=stats.columns,
+                   profiled_columns=stats.profiled_columns,
+                   total_queries=stats.total_queries,
+                   peak_inflight=stats.peak_inflight,
+                   errors_count=len(stats.errors))
         return stats
 
     def _dry_run(self, instance: str, databases: list[str] | None, options: BuildOptions,
@@ -391,6 +415,24 @@ class AssetBuilder:
         if databases:
             return databases
         return self.adapter.list_databases()
+
+    def _discover_database_tables(self, db_names: list[str], *,
+                                  only_tables: set[str] | None = None) -> dict[str, list]:
+        tables_by_database: dict[str, list] = {}
+        for database in db_names:
+            self._emit_db(database, f"{database} · listing tables…", status="running")
+            tables = self.adapter.list_tables(database=database)
+            if only_tables is not None:
+                tables = [t for t in tables if self._table_key(t) in only_tables or t.name in only_tables]
+            tables_by_database[database] = tables
+            self._emit_db(
+                database,
+                f"{database} · {len(tables)} tables",
+                status="running",
+                completed_tables=0,
+                total_tables=len(tables),
+            )
+        return tables_by_database
 
     def _load_existing_database_docs(self, instance: str) -> list[dict]:
         docs: list[dict] = []
@@ -465,7 +507,8 @@ class AssetBuilder:
 
     def _build_databases(self, instance: str, db_names: list[str], options: BuildOptions,
                          stats: BuildStats, executor: ThreadPoolExecutor,
-                         *, only_tables: set[str] | None = None) -> list[dict]:
+                         *, tables_by_database: dict[str, list],
+                         only_tables: set[str] | None = None) -> list[dict]:
         """Build databases serially; tables within each database run on the shared pool."""
         database_docs = []
         for database in db_names:
@@ -474,19 +517,19 @@ class AssetBuilder:
                 self._record_error(stats, f"{instance}.{database}: skipped (time budget)")
                 continue
             try:
-                doc = self._build_database(instance, database, options=options, stats=stats,
+                doc = self._build_database(instance, database,
+                                           tables=tables_by_database.get(database, []),
+                                           options=options, stats=stats,
                                            executor=executor, only_tables=only_tables)
                 database_docs.append(doc)
             except Exception as exc:
                 self._record_error(stats, f"{instance}.{database}: {type(exc).__name__}: {exc}")
         return database_docs
 
-    def _build_database(self, instance: str, database: str, *, options: BuildOptions,
+    def _build_database(self, instance: str, database: str, *, tables: list, options: BuildOptions,
                         stats: BuildStats, executor: ThreadPoolExecutor,
                         only_tables: set[str] | None = None) -> dict:
-        self._emit_db(database, f"{database} · listing tables…", status="running")
         self._bump(stats, databases=1)
-        tables = self.adapter.list_tables(database=database)
         # Table-level build: rebuild only the targeted tables; the rest keep their
         # existing docs so the database/instance rollup stays complete.
         preserved_table_docs: list[dict] = []
@@ -495,9 +538,7 @@ class AssetBuilder:
                 td for td in self.store.table_docs(instance, database, connection=self.connection)
                 if str(td.get("name") or td.get("table") or "") not in only_tables
             ]
-            tables = [t for t in tables if self._table_key(t) in only_tables or t.name in only_tables]
         total = len(tables)
-        self._emit_db(database, f"{database} · {total} tables", status="running")
 
         # Tables are independent within a database; fan them out onto the shared pool.
         table_docs: list[dict] = []
@@ -518,13 +559,25 @@ class AssetBuilder:
                 self._record_error(stats, f"{instance}.{database}.{self._table_key(table)}: {type(exc).__name__}: {exc}")
             # The table node itself is emitted live from the worker; here we only
             # advance the database-level progress counter.
-            self._emit_db(database, f"{database} · {done}/{total} tables · {self._table_key(table)}", status="running")
+            self._emit_db(
+                database,
+                f"{database} · {done}/{total} tables · {self._table_key(table)}",
+                status="running",
+                completed_tables=done,
+                total_tables=total,
+                current_table=self._table_key(table),
+            )
         if preserved_table_docs:
             table_docs = table_docs + preserved_table_docs  # keep non-targeted tables in the rollup
         cols = sum(int(td.get("column_count") or 0) for td in table_docs)
-        self._emit_db(database, f"{database} · {len(table_docs)} tables · {cols} columns", status="completed")
+        database_doc = self._write_database_snapshot(instance, database, table_docs, options=options)
+        self._emit_db(database, f"{database} · {len(table_docs)} tables · {cols} columns",
+                      status="completed", completed_tables=done, total_tables=total)
 
-        # Write database-level document (depends on all tables)
+        return database_doc
+
+    def _write_database_snapshot(self, instance: str, database: str, table_docs: list[dict], *,
+                                 options: BuildOptions) -> dict:
         self.store.write_json(
             self.store.database_dir(instance, database) / "tables.json",
             {

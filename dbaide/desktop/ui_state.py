@@ -229,6 +229,21 @@ class UiStateBinder:
         if self._usable(sidebar):
             sidebar.load_schema([], error=str(message or ""))
 
+    def schema_build_progress_start(self, message: str = "") -> None:
+        sidebar = getattr(self.window, "sidebar", None)
+        if self._usable(sidebar) and hasattr(sidebar, "start_build_progress"):
+            sidebar.start_build_progress(str(message or ""))
+
+    def schema_build_progress_update(self, message: object) -> None:
+        sidebar = getattr(self.window, "sidebar", None)
+        if self._usable(sidebar) and hasattr(sidebar, "update_build_progress"):
+            sidebar.update_build_progress(message)
+
+    def schema_build_progress_finish(self, message: str = "", *, failed: bool = False) -> None:
+        sidebar = getattr(self.window, "sidebar", None)
+        if self._usable(sidebar) and hasattr(sidebar, "finish_build_progress"):
+            sidebar.finish_build_progress(str(message or ""), failed=failed)
+
     def set_doc_running(self, doc: Any, running: bool) -> None:
         if self._usable(doc) and hasattr(doc, "set_running"):
             doc.set_running(bool(running))

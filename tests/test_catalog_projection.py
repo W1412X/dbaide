@@ -64,6 +64,36 @@ def test_project_instance_builds_base_from_catalog(tmp_path, monkeypatch):
     assert all("profile" not in c and "semantic_summary" not in c for c in odoc.get("columns", []))
 
 
+def test_schema_tree_can_read_database_before_instance_finishes(tmp_path, monkeypatch):
+    db = tmp_path / "shop.db"
+    conn = sqlite3.connect(db)
+    conn.executescript(
+        """
+        CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT);
+        CREATE TABLE orders (id INTEGER PRIMARY KEY, amount REAL);
+        """
+    )
+    conn.commit(); conn.close()
+
+    svc = _service(tmp_path, monkeypatch)
+    svc.dispatch("save_connection", {"name": "shop", "type": "sqlite", "path": str(db)})
+    snapshots: list[list[dict]] = []
+
+    def on_progress(event):
+        if (
+            isinstance(event, dict)
+            and event.get("node_id") == "build:db:main"
+            and event.get("status") == "completed"
+        ):
+            snapshots.append(svc.dispatch("schema_tree", {"name": "shop"}))
+
+    svc.dispatch("project_instance", {"name": "shop", "progress": on_progress})
+
+    assert snapshots, "database completion should be visible before the final instance doc is written"
+    tables = {t["name"] for db_row in snapshots[0] for t in db_row["children"]}
+    assert tables == {"users", "orders"}
+
+
 def test_enrich_table_is_granular_and_preserves_others(tmp_path, monkeypatch):
     db = tmp_path / "shop.db"
     conn = sqlite3.connect(db)

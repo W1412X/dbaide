@@ -89,3 +89,249 @@ def test_sidebar_schema_row_actions_use_more_menu():
     col_buttons = col_actions.findChildren(QToolButton)
     assert len(col_buttons) == 1
     assert [a.text() for a in col_buttons[0].menu().actions()] == ["Edit note"]
+
+
+def test_sidebar_schema_tree_preserves_expansion_on_refresh():
+    app = _app()
+    sidebar = Sidebar()
+    rows = [
+        {
+            "kind": "database",
+            "name": "main",
+            "path": "shop.main",
+            "children": [
+                {
+                    "kind": "table",
+                    "name": "orders",
+                    "path": "shop.main.orders",
+                    "column_count": 1,
+                    "children": [
+                        {
+                            "kind": "column",
+                            "name": "id",
+                            "path": "shop.main.orders.id",
+                            "data_type": "INTEGER",
+                        }
+                    ],
+                }
+            ],
+        }
+    ]
+    sidebar.load_schema(rows)
+    app.processEvents()
+
+    db_item = sidebar.tree.topLevelItem(0)
+    table_item = db_item.child(0)
+    assert db_item.isExpanded() is False
+    db_item.setExpanded(True)
+    table_item.setExpanded(True)
+    app.processEvents()
+
+    sidebar.load_schema(rows)
+    app.processEvents()
+
+    db_item = sidebar.tree.topLevelItem(0)
+    table_item = db_item.child(0)
+    assert db_item.isExpanded() is True
+    assert table_item.isExpanded() is True
+
+
+def test_sidebar_schema_tree_stays_collapsed_by_default_during_build_progress():
+    app = _app()
+    sidebar = Sidebar()
+    sidebar.load_schema([
+        {
+            "kind": "database",
+            "name": "main",
+            "path": "shop.main",
+            "children": [
+                {
+                    "kind": "table",
+                    "name": "orders",
+                    "path": "shop.main.orders",
+                    "column_count": 0,
+                    "children": [],
+                }
+            ],
+        }
+    ])
+    app.processEvents()
+    sidebar.start_build_progress("Building")
+    sidebar.load_schema([
+        {
+            "kind": "database",
+            "name": "main",
+            "path": "shop.main",
+            "children": [
+                {
+                    "kind": "table",
+                    "name": "orders",
+                    "path": "shop.main.orders",
+                    "column_count": 1,
+                    "children": [],
+                },
+                {
+                    "kind": "table",
+                    "name": "users",
+                    "path": "shop.main.users",
+                    "column_count": 2,
+                    "children": [],
+                },
+            ],
+        }
+    ])
+    app.processEvents()
+    assert sidebar.tree.topLevelItem(0).isExpanded() is False
+
+
+def test_sidebar_incremental_schema_sync_during_build():
+    app = _app()
+    sidebar = Sidebar()
+    rows_v1 = [
+        {
+            "kind": "database",
+            "name": "main",
+            "path": "shop.main",
+            "children": [
+                {
+                    "kind": "table",
+                    "name": "orders",
+                    "path": "shop.main.orders",
+                    "column_count": 1,
+                    "children": [],
+                }
+            ],
+        }
+    ]
+    sidebar.load_schema(rows_v1)
+    app.processEvents()
+    orders = sidebar.tree.topLevelItem(0).child(0)
+    assert sidebar.tree.itemWidget(orders, 1) is not None
+
+    sidebar.start_build_progress("Building")
+    rows_v2 = [
+        {
+            "kind": "database",
+            "name": "main",
+            "path": "shop.main",
+            "children": [
+                {
+                    "kind": "table",
+                    "name": "orders",
+                    "path": "shop.main.orders",
+                    "column_count": 2,
+                    "children": [
+                        {
+                            "kind": "column",
+                            "name": "id",
+                            "path": "shop.main.orders.id",
+                            "data_type": "INTEGER",
+                        }
+                    ],
+                },
+                {
+                    "kind": "table",
+                    "name": "users",
+                    "path": "shop.main.users",
+                    "column_count": 1,
+                    "children": [],
+                },
+            ],
+        }
+    ]
+    sidebar.load_schema(rows_v2)
+    sidebar._flush_schema_render()
+    app.processEvents()
+
+    assert sidebar.tree.topLevelItemCount() == 1
+    assert sidebar.tree.topLevelItem(0).childCount() == 2
+    assert sidebar.tree.topLevelItem(0).child(0).text(0) == "orders (2)"
+    assert sidebar.tree.itemWidget(sidebar.tree.topLevelItem(0).child(0), 1) is not None
+
+
+def test_sidebar_build_progress_spinner_only_while_discovering():
+    app = _app()
+    from dbaide.desktop.views.sidebar import Sidebar
+
+    sidebar = Sidebar()
+    sidebar.start_build_progress("Reading schema")
+    app.processEvents()
+    assert sidebar._build_progress_busy.active is True
+    assert sidebar._build_progress_count.text() == ""
+    assert sidebar.tree.topLevelItemCount() == 0
+
+    sidebar.update_build_progress({
+        "node_id": "build:db:main",
+        "completed_tables": 0,
+        "total_tables": 3,
+    })
+    sidebar._flush_build_progress()
+    app.processEvents()
+    assert sidebar._build_progress_count.text() == "0/3"
+    assert sidebar._build_progress_busy.active is True
+
+
+def test_sidebar_skips_tree_loading_while_build_progress_active():
+    app = _app()
+    sidebar = Sidebar()
+    sidebar.start_build_progress("Reading schema")
+    sidebar.set_loading("should not appear")
+    sidebar.update_loading("also ignored")
+    app.processEvents()
+    assert sidebar.tree.topLevelItemCount() == 0
+    assert sidebar._schema_loading_item is None
+
+
+def test_sidebar_reset_live_updates_drops_stale_schema_flush():
+    app = _app()
+    sidebar = Sidebar()
+    sidebar.load_schema([
+        {
+            "kind": "database",
+            "name": "main",
+            "path": "shop.main",
+            "children": [
+                {
+                    "kind": "table",
+                    "name": "orders",
+                    "path": "shop.main.orders",
+                    "column_count": 1,
+                    "children": [],
+                }
+            ],
+        }
+    ])
+    app.processEvents()
+    sidebar.start_build_progress("Building")
+    sidebar.load_schema([
+        {
+            "kind": "database",
+            "name": "main",
+            "path": "shop.main",
+            "children": [
+                {
+                    "kind": "table",
+                    "name": "orders",
+                    "path": "shop.main.orders",
+                    "column_count": 9,
+                    "children": [],
+                }
+            ],
+        }
+    ])
+    assert sidebar._schema_render_pending is not None
+    sidebar.reset_live_updates()
+    sidebar._flush_schema_render()
+    app.processEvents()
+    assert sidebar.tree.topLevelItem(0).child(0).text(0) == "orders (1)"
+    assert sidebar._build_progress.isHidden()
+
+
+def test_sidebar_failed_build_progress_clears_active():
+    app = _app()
+    sidebar = Sidebar()
+    sidebar.start_build_progress("Building")
+    sidebar.finish_build_progress("boom", failed=True)
+    assert sidebar._build_progress_active is True
+    sidebar._hide_build_progress_if_current(sidebar._build_progress_token)
+    assert sidebar._build_progress_active is False

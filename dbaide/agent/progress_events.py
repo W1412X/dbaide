@@ -219,10 +219,13 @@ def from_trace_event(event: TraceEvent) -> dict[str, Any]:
 def progress_label(payload: str | dict[str, Any]) -> str:
     if isinstance(payload, str):
         return payload.strip()
-    title = str(payload.get("title") or "").strip()
     stage = str(payload.get("stage") or "").strip()
+    title = str(payload.get("title") or "").strip()
+    if stage == "build_assets" and title:
+        from dbaide.i18n import localized_build_title
+        title = localized_build_title(title)
     detail = str(payload.get("detail") or "").strip()
-    if title and stage and title != stage:
+    if title and stage and title != stage and stage != "build_assets":
         text = f"{stage}: {title}"
     else:
         text = title or stage or detail or "Working…"

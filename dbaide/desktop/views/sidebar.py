@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from PyQt6.QtCore import QSize, Qt, pyqtSignal
+from PyQt6.QtCore import QSize, Qt, QTimer, pyqtSignal
 from PyQt6.QtGui import QColor
 from PyQt6.QtWidgets import (
     QFrame,
@@ -23,7 +23,7 @@ from PyQt6.QtWidgets import (
 from dbaide.desktop.components.base import SectionLabel, compact_button
 from dbaide.desktop.components.icons import more_icon, svg_icon, svg_pixmap
 from dbaide.desktop.components.session_list import SessionList
-from dbaide.desktop.components.spinner import BusyAnimator, spinner_icon
+from dbaide.desktop.components.spinner import BusyAnimator, spinner_icon, spinner_pixmap
 from dbaide.desktop.theme import Theme
 
 
@@ -74,7 +74,7 @@ class Sidebar(QWidget):
         schema_layout = QVBoxLayout(schema_panel)
         schema_layout.setContentsMargins(0, 0, 0, 0)
         schema_layout.setSpacing(8)
-        schema_layout.addWidget(SectionLabel("SCHEMA"))
+        schema_layout.addWidget(SectionLabel(t("sidebar.schema_heading")))
         self.search = QLineEdit()
         self.search.setPlaceholderText(t("sidebar.filter"))
         self.search.setToolTip(t("sidebar.filter.hint"))
@@ -95,6 +95,60 @@ class Sidebar(QWidget):
         self.search.textChanged.connect(self._filter_tree)
         self.search.returnPressed.connect(self._semantic_search)
         schema_layout.addWidget(self.search)
+
+        self._build_progress_token = 0
+        self._build_progress_active = False
+        self._build_db_totals: dict[str, int] = {}
+        self._build_db_completed: dict[str, int] = {}
+        self._build_progress_pending: object | None = None
+        self._build_progress_flush = QTimer(self)
+        self._build_progress_flush.setSingleShot(True)
+        self._build_progress_flush.setInterval(120)
+        self._build_progress_flush.timeout.connect(self._flush_build_progress)
+        self._schema_render_pending: list[dict[str, Any]] | None = None
+        self._schema_render_timer = QTimer(self)
+        self._schema_render_timer.setSingleShot(True)
+        self._schema_render_timer.setInterval(250)
+        self._schema_render_timer.timeout.connect(self._flush_schema_render)
+        self._build_progress = QFrame()
+        self._build_progress.setObjectName("schemaBuildProgress")
+        self._build_progress.setStyleSheet(
+            f"""
+            QFrame#schemaBuildProgress {{
+                background: {Theme.PANEL};
+                border: 1px solid {Theme.BORDER_SOFT};
+                border-radius: 8px;
+            }}
+            """
+        )
+        progress_layout = QVBoxLayout(self._build_progress)
+        progress_layout.setContentsMargins(8, 7, 8, 7)
+        progress_layout.setSpacing(4)
+        progress_head = QHBoxLayout()
+        progress_head.setContentsMargins(0, 0, 0, 0)
+        progress_head.setSpacing(8)
+        self._build_progress_spinner = QLabel()
+        self._build_progress_spinner.setFixedSize(15, 15)
+        self._build_progress_spinner.setScaledContents(True)
+        progress_head.addWidget(self._build_progress_spinner, 0, Qt.AlignmentFlag.AlignTop)
+        self._build_progress_title = QLabel("")
+        self._build_progress_title.setStyleSheet(f"color: {Theme.TEXT}; font-size: 12px; font-weight: 650;")
+        self._build_progress_title.setWordWrap(True)
+        progress_head.addWidget(self._build_progress_title, 1)
+        self._build_progress_count = QLabel("")
+        self._build_progress_count.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignTop)
+        self._build_progress_count.setStyleSheet(f"color: {Theme.TEXT_2}; font-size: 11px; font-weight: 650;")
+        progress_head.addWidget(self._build_progress_count)
+        progress_layout.addLayout(progress_head)
+        self._build_progress_detail = QLabel("")
+        self._build_progress_detail.setStyleSheet(
+            f"color: {Theme.MUTED}; font-size: 11px; margin-left: 23px;"
+        )
+        self._build_progress_detail.setWordWrap(True)
+        progress_layout.addWidget(self._build_progress_detail)
+        self._build_progress.hide()
+        schema_layout.addWidget(self._build_progress)
+
         self.tree = QTreeWidget()
         self.tree.setHeaderHidden(True)
         # Column 0 = the schema name (stretches); column 1 = small per-row action
@@ -115,6 +169,8 @@ class Sidebar(QWidget):
         # same. The per-row doc icon (column 1) opens the offline doc instead.
         self.tree.itemClicked.connect(self._row_activated)
         self.tree.itemDoubleClicked.connect(self._double_clicked)
+        self.tree.itemExpanded.connect(self._on_tree_expanded)
+        self.tree.itemCollapsed.connect(self._on_tree_collapsed)
         self.tree.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.tree.customContextMenuRequested.connect(self._context_menu)
         schema_layout.addWidget(self.tree, 1)
@@ -143,8 +199,10 @@ class Sidebar(QWidget):
         self.settings_btn.clicked.connect(self.settings_requested.emit)
         layout.addWidget(self.settings_btn)
         self._rows: list[dict[str, Any]] = []
+        self._expanded_paths: set[str] = set()
         self._schema_loading_item: QTreeWidgetItem | None = None
         self._schema_busy = BusyAnimator(self._tick_schema_loading, parent=self)
+        self._build_progress_busy = BusyAnimator(self._tick_build_progress_spinner, parent=self)
         self._node_refreshing: set[str] = set()
         self._node_busy_buttons: dict[str, QToolButton] = {}
         self._node_busy = BusyAnimator(self._tick_node_refreshing, parent=self)
@@ -178,6 +236,8 @@ class Sidebar(QWidget):
     def set_loading(self, message: str = "") -> None:
         """Show a non-blocking placeholder while the schema is being loaded/projected,
         so the panel never sits silently empty during a (possibly slow) fetch."""
+        if self._build_progress_active:
+            return
         from dbaide.i18n import t as _t
         self._stop_schema_loading()
         self.tree.clear()
@@ -190,6 +250,8 @@ class Sidebar(QWidget):
 
     def update_loading(self, message: str) -> None:
         """Refresh the current schema-loading row without clearing the tree/spinner."""
+        if self._build_progress_active:
+            return
         text = str(message or "").strip()
         if not text:
             return
@@ -199,12 +261,162 @@ class Sidebar(QWidget):
         self._schema_loading_item.setText(0, text)
         self._tick_schema_loading()
 
+    def start_build_progress(self, message: str = "") -> None:
+        from dbaide.i18n import t as _t
+        self._build_progress_flush.stop()
+        self._build_progress_pending = None
+        self._schema_render_timer.stop()
+        self._schema_render_pending = None
+        self._build_progress_token += 1
+        self._build_progress_active = True
+        self._build_db_totals.clear()
+        self._build_db_completed.clear()
+        self._build_progress_title.setText(str(message or _t("build.progress_waiting")))
+        self._build_progress_count.setText("")
+        self._build_progress_detail.setText("")
+        self._stop_schema_loading()
+        if not self._tree_has_schema_nodes():
+            self.tree.clear()
+        self._start_build_progress_spinner()
+        self._build_progress.show()
+
+    def _start_build_progress_spinner(self) -> None:
+        self._tick_build_progress_spinner()
+        self._build_progress_busy.start()
+
+    def _stop_build_progress_spinner(self) -> None:
+        self._build_progress_busy.stop()
+        self._build_progress_spinner.clear()
+
+    def _tick_build_progress_spinner(self) -> None:
+        if self._build_progress.isHidden():
+            return
+        self._build_progress_spinner.setPixmap(
+            spinner_pixmap(self._build_progress_busy.angle, color=Theme.BLUE, size=14),
+        )
+
+    def update_build_progress(self, message: object) -> None:
+        """Coalesce rapid build events so the progress card does not flicker."""
+        self._build_progress_pending = message
+        if not self._build_progress_flush.isActive():
+            self._build_progress_flush.start()
+
+    def _flush_build_progress(self) -> None:
+        try:
+            message = self._build_progress_pending
+            self._build_progress_pending = None
+            if message is None:
+                return
+            self._apply_build_progress(message)
+        except Exception:  # noqa: BLE001 — timer slot must never abort the app
+            import logging
+            logging.getLogger(__name__).exception("build progress flush failed")
+
+    def _flush_schema_render(self) -> None:
+        try:
+            rows = self._schema_render_pending
+            self._schema_render_pending = None
+            if rows is None:
+                return
+            if self._tree_has_schema_nodes():
+                self._sync_schema_tree(rows)
+            else:
+                self._render(rows)
+        except Exception:  # noqa: BLE001
+            import logging
+            logging.getLogger(__name__).exception("schema render flush failed")
+
+    def _apply_build_progress(self, message: object) -> None:
+        from dbaide.i18n import t as _t
+        if not self._build_progress_active:
+            self.start_build_progress(_t("build.progress_waiting"))
+        title = ""
+        detail = ""
+        if isinstance(message, dict):
+            title = str(message.get("title") or "").strip()
+            node_id = str(message.get("node_id") or "")
+            database = str(message.get("database") or "").strip()
+            if not database and node_id.startswith("build:db:"):
+                database = node_id.removeprefix("build:db:")
+            total = _as_int(message.get("total_tables"))
+            completed = _as_int(message.get("completed_tables"))
+            if database and total is not None:
+                self._build_db_totals[database] = total
+            if database and completed is not None:
+                self._build_db_completed[database] = completed
+            current = str(message.get("current_table") or "").strip()
+            if current:
+                detail = _t("build.progress_current", table=current)
+            elif title:
+                detail = _t_localized_build_title(title)
+        else:
+            title = str(message or "").strip()
+            if title:
+                detail = _t_localized_build_title(title)
+        # Headline stays stable after start_build_progress(); live detail goes below.
+        if detail and detail != self._build_progress_detail.text():
+            self._build_progress_detail.setText(detail)
+        total_tables = sum(self._build_db_totals.values())
+        completed_tables = sum(self._build_db_completed.values())
+        if total_tables > 0:
+            count_text = _t("build.progress_tables", done=completed_tables, total=total_tables)
+            if self._build_progress_count.text() != count_text:
+                self._build_progress_count.setText(count_text)
+        elif self._build_progress_count.text():
+            self._build_progress_count.setText("")
+
+    def finish_build_progress(self, message: str = "", *, failed: bool = False) -> None:
+        from dbaide.i18n import t as _t
+        self._build_progress_flush.stop()
+        self._build_progress_pending = None
+        self._schema_render_timer.stop()
+        pending_rows = self._schema_render_pending
+        self._schema_render_pending = None
+        if pending_rows is not None:
+            self._render(pending_rows)
+        self._build_progress_token += 1
+        token = self._build_progress_token
+        if not self._build_progress.isVisible():
+            self._build_progress.show()
+        if message:
+            self._build_progress_title.setText(str(message))
+        else:
+            self._build_progress_title.setText(
+                _t("build.progress_failed_short") if failed else _t("build.progress_complete")
+            )
+        if failed:
+            self._build_progress_detail.setText("")
+            self._build_progress_count.setText(_t("build.progress_failed_short"))
+            self._stop_build_progress_spinner()
+            QTimer.singleShot(5000, lambda token=token: self._hide_build_progress_if_current(token))
+            return
+        total_tables = sum(self._build_db_totals.values())
+        completed_tables = sum(self._build_db_completed.values())
+        if total_tables > 0:
+            self._build_progress_count.setText(
+                _t("build.progress_tables", done=max(completed_tables, total_tables), total=total_tables)
+            )
+        else:
+            self._build_progress_count.setText("")
+        self._stop_build_progress_spinner()
+        QTimer.singleShot(5000, lambda token=token: self._hide_build_progress_if_current(token))
+
+    def _hide_build_progress_if_current(self, token: int) -> None:
+        if token == self._build_progress_token:
+            self._stop_build_progress_spinner()
+            self._build_progress.hide()
+            self._build_progress_active = False
+
     def _tick_schema_loading(self) -> None:
-        if self._schema_loading_item is not None:
+        if self._schema_loading_item is None:
+            return
+        try:
             self._schema_loading_item.setIcon(
                 0,
                 spinner_icon(self._schema_busy.angle, color=Theme.BLUE, size=14),
             )
+        except RuntimeError:
+            self._stop_schema_loading()
 
     def _stop_schema_loading(self) -> None:
         self._schema_busy.stop()
@@ -239,62 +451,256 @@ class Sidebar(QWidget):
     def load_schema(self, rows: list[dict[str, Any]], *, error: str = "") -> None:
         self._rows = rows
         if error:
+            self._schema_render_timer.stop()
+            self._schema_render_pending = None
             self._stop_schema_loading()
             self.tree.clear()
             from dbaide.i18n import t as _t
             self.tree.addTopLevelItem(QTreeWidgetItem([_t("schema.load_failed", error=error)]))
             return
+        if self._build_progress_active and self._tree_has_schema_nodes():
+            self._schema_render_pending = list(rows)
+            if not self._schema_render_timer.isActive():
+                self._schema_render_timer.start()
+            return
         self._render(rows)
+
+    def _tree_has_schema_nodes(self) -> bool:
+        item = self.tree.topLevelItem(0)
+        if item is None:
+            return False
+        data = item.data(0, Qt.ItemDataRole.UserRole)
+        return isinstance(data, dict) and bool(data.get("kind"))
+
+    def _with_tree_updates(self, fn) -> None:
+        self.tree.setUpdatesEnabled(False)
+        try:
+            fn()
+        finally:
+            self.tree.setUpdatesEnabled(True)
 
     def _render(self, rows: list[dict[str, Any]]) -> None:
         from dbaide.i18n import t as _t
-        self._stop_schema_loading()
-        self.tree.clear()
-        if not rows:
-            item = QTreeWidgetItem([_t("schema.no_assets")])
-            item.setToolTip(0, _t("schema.no_assets_hint"))
-            item.setForeground(0, QColor(Theme.MUTED))
-            item.setFlags(Qt.ItemFlag.ItemIsEnabled)
-            self.tree.addTopLevelItem(item)
+
+        def build() -> None:
+            self._stop_schema_loading()
+            self._capture_expanded_paths()
+            self.tree.clear()
+            if not rows:
+                item = QTreeWidgetItem([_t("schema.no_assets")])
+                item.setToolTip(0, _t("schema.no_assets_hint"))
+                item.setForeground(0, QColor(Theme.MUTED))
+                item.setFlags(Qt.ItemFlag.ItemIsEnabled)
+                self.tree.addTopLevelItem(item)
+                return
+            db_icon = svg_icon("database", size=14)
+            tbl_icon = svg_icon("table", size=14)
+            col_icon = svg_icon("columns", size=14)
+            for db in rows:
+                db_item = self._make_tree_item(db, db_icon, _t)
+                for table in db.get("children", []):
+                    table_item = self._make_tree_item(table, tbl_icon, _t, parent_kind="table")
+                    db_item.addChild(table_item)
+                    for col in table.get("children", []):
+                        table_item.addChild(self._make_tree_item(col, col_icon, _t, parent_kind="column"))
+                self.tree.addTopLevelItem(db_item)
+            self._attach_row_actions()
+            self._restore_expanded_paths()
+
+        self._with_tree_updates(build)
+
+    def _sync_schema_tree(self, rows: list[dict[str, Any]]) -> None:
+        from dbaide.i18n import t as _t
+
+        def sync() -> None:
+            self._stop_schema_loading()
+            self._capture_expanded_paths()
+            existing: dict[str, QTreeWidgetItem] = {}
+            for item in self._iter_tree_items():
+                path = self._item_path(item)
+                if path:
+                    existing[path] = item
+            seen: set[str] = set()
+
+            def walk(data: dict[str, Any], parent: QTreeWidgetItem | None, icon_kind: str) -> None:
+                path = str(data.get("path") or "").strip()
+                if path:
+                    seen.add(path)
+                item = existing.get(path) if path else None
+                if item is None:
+                    icons = {
+                        "database": svg_icon("database", size=14),
+                        "table": svg_icon("table", size=14),
+                        "column": svg_icon("columns", size=14),
+                    }
+                    item = self._make_tree_item(data, icons.get(icon_kind, svg_icon("table", size=14)), _t,
+                                                parent_kind=icon_kind)
+                    if parent is None:
+                        self.tree.addTopLevelItem(item)
+                    else:
+                        parent.addChild(item)
+                    if path:
+                        existing[path] = item
+                    self._attach_item_actions(item, data)
+                else:
+                    self._update_tree_item(item, data, _t)
+                child_kind = "table" if icon_kind == "database" else "column"
+                for child in data.get("children", []):
+                    walk(child, item, child_kind)
+
+            for db in rows:
+                walk(db, None, "database")
+
+            for path, item in sorted(
+                ((p, i) for p, i in existing.items() if p not in seen),
+                key=lambda pair: pair[0].count("."),
+                reverse=True,
+            ):
+                try:
+                    self.tree.removeItemWidget(item, 1)
+                except RuntimeError:
+                    pass
+                parent = item.parent()
+                if parent is not None:
+                    parent.removeChild(item)
+                else:
+                    index = self.tree.indexOfTopLevelItem(item)
+                    if index >= 0:
+                        self.tree.takeTopLevelItem(index)
+
+            self._restore_expanded_paths()
+
+        self._with_tree_updates(sync)
+
+    def _make_tree_item(
+        self,
+        data: dict[str, Any],
+        default_icon,
+        _t,
+        *,
+        parent_kind: str = "database",
+    ) -> QTreeWidgetItem:
+        kind = str(data.get("kind") or parent_kind)
+        if kind == "table":
+            label = f"{data['name']} ({data.get('column_count', 0)})"
+        elif kind == "column":
+            suffix = f" · {data.get('data_type')}" if data.get("data_type") else ""
+            label = f"{data['name']}{suffix}"
+        else:
+            label = str(data.get("name") or "")
+        item = QTreeWidgetItem([label])
+        item.setData(0, Qt.ItemDataRole.UserRole, data)
+        self._style_tree_item(item, data, default_icon, _t)
+        return item
+
+    def _update_tree_item(self, item: QTreeWidgetItem, data: dict[str, Any], _t) -> None:
+        kind = str(data.get("kind") or "")
+        if kind == "table":
+            label = f"{data['name']} ({data.get('column_count', 0)})"
+        elif kind == "column":
+            suffix = f" · {data.get('data_type')}" if data.get("data_type") else ""
+            label = f"{data['name']}{suffix}"
+        else:
+            label = str(data.get("name") or "")
+        if item.text(0) != label:
+            item.setText(0, label)
+        item.setData(0, Qt.ItemDataRole.UserRole, data)
+        default_icon = svg_icon(
+            {"database": "database", "table": "table", "column": "columns"}.get(kind, "table"),
+            size=14,
+        )
+        self._style_tree_item(item, data, default_icon, _t)
+
+    def _style_tree_item(self, item: QTreeWidgetItem, data: dict[str, Any], default_icon, _t) -> None:
+        kind = str(data.get("kind") or "")
+        if kind == "table":
+            stale = bool(data.get("stale"))
+            enriched = bool(data.get("enriched"))
+            if stale:
+                item.setIcon(0, svg_icon("alert-triangle", color=Theme.YELLOW, size=14))
+                item.setToolTip(0, _t("schema.status_stale"))
+            else:
+                item.setIcon(0, default_icon)
+                if enriched:
+                    item.setToolTip(0, _t("schema.status_enriched"))
+                    item.setForeground(0, QColor(Theme.TEXT))
+                else:
+                    item.setForeground(0, QColor(Theme.MUTED_2))
+                    item.setToolTip(0, _t("schema.status_base"))
+        else:
+            item.setIcon(0, default_icon)
+            item.setForeground(0, QColor(Theme.TEXT))
+            item.setToolTip(0, "")
+
+    def _attach_item_actions(self, item: QTreeWidgetItem, data: dict[str, Any]) -> None:
+        from dbaide.i18n import t
+        if data.get("kind") in ("database", "table", "column"):
+            self.tree.setItemWidget(item, 1, self._row_actions(data, t))
+
+    def _item_path(self, item: QTreeWidgetItem) -> str:
+        data = item.data(0, Qt.ItemDataRole.UserRole)
+        if isinstance(data, dict):
+            return str(data.get("path") or "").strip()
+        return ""
+
+    def _iter_tree_items(self):
+        for index in range(self.tree.topLevelItemCount()):
+            item = self.tree.topLevelItem(index)
+            if item is None:
+                continue
+            stack = [item]
+            while stack:
+                current = stack.pop()
+                yield current
+                for child_index in range(current.childCount()):
+                    child = current.child(child_index)
+                    if child is not None:
+                        stack.append(child)
+
+    def _capture_expanded_paths(self) -> None:
+        for item in self._iter_tree_items():
+            if not item.isExpanded():
+                continue
+            path = self._item_path(item)
+            if path:
+                self._expanded_paths.add(path)
+
+    def _restore_expanded_paths(self) -> None:
+        if not self._expanded_paths:
             return
-        db_icon = svg_icon("database", size=14)
-        tbl_icon = svg_icon("table", size=14)
-        col_icon = svg_icon("columns", size=14)
-        for db in rows:
-            db_item = QTreeWidgetItem([db["name"]])
-            db_item.setIcon(0, db_icon)
-            db_item.setData(0, Qt.ItemDataRole.UserRole, db)
-            for table in db.get("children", []):
-                # Enrichment status: stale → ⚠ + tooltip; base (catalog-only) → dimmed
-                # so it reads as "structure only, not yet enriched"; enriched → normal.
-                stale = bool(table.get("stale"))
-                enriched = bool(table.get("enriched"))
-                label = f"{table['name']} ({table.get('column_count', 0)})"
-                table_item = QTreeWidgetItem([label])
-                if stale:
-                    table_item.setIcon(0, svg_icon("alert-triangle", color=Theme.YELLOW, size=14))
-                else:
-                    table_item.setIcon(0, tbl_icon)
-                table_item.setData(0, Qt.ItemDataRole.UserRole, table)
-                if stale:
-                    table_item.setToolTip(0, _t("schema.status_stale"))
-                elif enriched:
-                    table_item.setToolTip(0, _t("schema.status_enriched"))
-                else:
-                    table_item.setForeground(0, QColor(Theme.MUTED_2))
-                    table_item.setToolTip(0, _t("schema.status_base"))
-                db_item.addChild(table_item)
-                for col in table.get("children", []):
-                    suffix = f" · {col.get('data_type')}" if col.get("data_type") else ""
-                    col_item = QTreeWidgetItem([f"{col['name']}{suffix}"])
-                    col_item.setIcon(0, col_icon)
-                    col_item.setData(0, Qt.ItemDataRole.UserRole, col)
-                    table_item.addChild(col_item)
-            self.tree.addTopLevelItem(db_item)
-        # Add per-row action icons. Databases/tables get a direct "view doc" icon plus
-        # a compact overflow menu; columns only get the overflow menu because their
-        # note is shown inside the parent table document.
-        self._attach_row_actions()
+        self.tree.blockSignals(True)
+        try:
+            for item in self._iter_tree_items():
+                path = self._item_path(item)
+                if path and path in self._expanded_paths:
+                    item.setExpanded(True)
+        finally:
+            self.tree.blockSignals(False)
+
+    def _on_tree_expanded(self, item: QTreeWidgetItem) -> None:
+        path = self._item_path(item)
+        if path:
+            self._expanded_paths.add(path)
+
+    def _on_tree_collapsed(self, item: QTreeWidgetItem) -> None:
+        path = self._item_path(item)
+        if path:
+            self._expanded_paths.discard(path)
+
+    def clear_schema_expansion(self) -> None:
+        """Reset manual expand/collapse state (e.g. when switching connections)."""
+        self._expanded_paths.clear()
+
+    def reset_live_updates(self) -> None:
+        """Drop debounced schema/build UI work when the connection context changes."""
+        self._build_progress_flush.stop()
+        self._build_progress_pending = None
+        self._schema_render_timer.stop()
+        self._schema_render_pending = None
+        self._build_progress_token += 1
+        self._build_progress_active = False
+        self._stop_build_progress_spinner()
+        self._build_progress.hide()
 
     def _attach_row_actions(self) -> None:
         from dbaide.i18n import t
@@ -458,3 +864,15 @@ class Sidebar(QWidget):
             menu.addAction(t("schema.copy_qualified"),
                            lambda: QApplication.clipboard().setText(qualified))
         menu.exec(self.tree.viewport().mapToGlobal(pos))
+
+
+def _as_int(value: object) -> int | None:
+    try:
+        return int(value) if value is not None else None
+    except (TypeError, ValueError):
+        return None
+
+
+def _t_localized_build_title(title: str) -> str:
+    from dbaide.i18n import localized_build_title
+    return localized_build_title(title)

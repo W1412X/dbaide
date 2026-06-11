@@ -6,7 +6,30 @@ All notable changes to DBAide are documented here. The format is loosely based o
 
 ## [Unreleased]
 
-## [0.1.7] — 2026-06-11
+## [0.1.8] — 2026-06-12
+
+### Added
+
+- **Schema build progress card** — compact spinner + `done/total` counter (no bar);
+  current table shown as a detail line during asset builds.
+- **Live schema tree updates** — tables appear incrementally while assets build,
+  without wiping manual expand/collapse state.
+- **i18n for build progress** — English / 简体中文 strings for build-phase titles,
+  sidebar schema heading, and localized asset-builder status messages.
+
+### Changed
+
+- **Build progress UX** — remove duplicate loading row in the schema tree while the
+  progress card is visible; debounce rapid progress/tree refreshes to reduce flicker.
+
+### Fixed
+
+- **Build progress crash** — fix `NameError` in debounced progress flush (`node_id`).
+- **Connection switch during build** — cancel stale debounced schema refreshes so
+  another connection's tree is not applied to the current view.
+- **Asset builder progress events** — emit per-database table counts and current table
+  for accurate GUI progress tracking.
+
 
 ### Changed
 
@@ -440,7 +463,8 @@ and a PyQt6 desktop app, sharing one Python core.
   drag-to-Applications)**, **Windows (`.msi` wizard)**, and **Linux (`.tar.gz`)** —
   pushing a `v*` tag cuts a GitHub Release automatically.
 
-[Unreleased]: https://github.com/W1412X/dbaide/compare/v0.1.7...HEAD
+[Unreleased]: https://github.com/W1412X/dbaide/compare/v0.1.8...HEAD
+[0.1.8]: https://github.com/W1412X/dbaide/compare/v0.1.7...v0.1.8
 [0.1.7]: https://github.com/W1412X/dbaide/compare/v0.1.6...v0.1.7
 [0.1.6]: https://github.com/W1412X/dbaide/compare/v0.1.5...v0.1.6
 [0.1.5]: https://github.com/W1412X/dbaide/compare/v0.1.4...v0.1.5

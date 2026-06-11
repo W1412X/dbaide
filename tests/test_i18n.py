@@ -80,3 +80,17 @@ def test_result_interpreter_uses_question_language():
     out2 = ResultInterpreter().interpret(question="显示数据", sql="SELECT 1", row_count=0,
                                          columns=[], elapsed_ms=1, truncated=False, warnings=[])
     assert "查询" in out2["summary"]
+
+
+def test_localized_build_title_zh():
+    i18n.set_language("zh")
+    assert i18n.localized_build_title("Building assets · shop") == "正在构建资产 · shop"
+    assert i18n.localized_build_title("main · listing tables…") == "main · 正在列出表…"
+    assert i18n.localized_build_title("orders · describing…") == "orders · 读取结构…"
+    assert i18n.localized_build_title("orders · 3 queries · 1 failed") == "orders · 3 次查询 · 1 失败"
+
+
+def test_localized_build_title_en():
+    i18n.set_language("en")
+    assert i18n.localized_build_title("Building assets · shop") == "Building assets · shop"
+    assert i18n.localized_build_title("main · 2 tables") == "main · 2 tables"

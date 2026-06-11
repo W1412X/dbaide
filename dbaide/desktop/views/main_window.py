@@ -560,7 +560,7 @@ class MainWindow(QMainWindow):
         *,
         on_error: Callable[[object], None] | None = None,
         on_progress: Callable[[object], None] | None = None,
-    ) -> None:
+    ) -> TaskHandle:
         tracks_asset = action in self._ASSET_STATUS_ACTIONS
         if tracks_asset:
             self._push_asset_work(action, payload)
@@ -582,7 +582,7 @@ class MainWindow(QMainWindow):
                 if tracks_asset:
                     self._pop_asset_work(action, payload)
 
-        self.tasks.start(
+        return self.tasks.start(
             action,
             payload,
             on_done=wrapped_success,
@@ -665,6 +665,8 @@ class MainWindow(QMainWindow):
         self._asset_work_stack.clear()
 
     def _refresh_connection_context(self, conn_name: str) -> None:
+        self.sidebar.reset_live_updates()
+        self.sidebar.clear_schema_expansion()
         self._load_schema(conn_name)
         self._load_sessions(conn_name)
         self._refresh_query_history()
@@ -703,28 +705,123 @@ class MainWindow(QMainWindow):
         # keeping a visible loading state, then re-fetch the tree.
         if not rows and name not in self._projected:
             self._projected.add(name)
-            projecting = _i18n_t("schema.projecting")
-            self._ensure_ui_state().schema_loading(projecting)
-            self._run_background(
-                "project_instance", {"name": name},
-                lambda _r: self._fetch_schema_after_project(name),
-                on_error=lambda exc: self._project_failed(name, str(exc)),
-                on_progress=lambda msg: self._on_schema_project_progress(name, msg),
-            )
+            self._start_project_instance(name)
             return
         self._apply_schema_loaded(name, rows)
+
+    def _start_project_instance(self, name: str) -> None:
+        projecting = _i18n_t("schema.projecting")
+        self._ensure_ui_state().schema_build_progress_start(projecting)
+
+        def on_progress(message: object) -> None:
+            self._handle_asset_build_progress(name, message)
+            self._on_schema_project_progress(name, message)
+
+        def on_done(result: object) -> None:
+            self._finish_asset_build_progress(name, result)
+            self._fetch_schema_after_project(name)
+
+        def on_fail(exc: object) -> None:
+            self._fail_asset_build_progress(name, exc)
+            self._project_failed(name, str(exc))
+
+        self._run_background(
+            "project_instance",
+            {"name": name},
+            on_done,
+            on_error=on_fail,
+            on_progress=on_progress,
+        )
 
     def _on_schema_project_progress(self, name: str, message: object) -> None:
         if name != self.current_connection():
             return
-        base = _i18n_t("schema.projecting")
-        title = ""
-        if isinstance(message, dict):
-            title = str(message.get("title") or "").strip()
-        elif message is not None:
-            title = str(message).strip()
-        text = f"{base} · {title}" if title else base
-        self._ensure_ui_state().schema_loading(text, update=True)
+        projecting = _i18n_t("schema.projecting")
+        if self.schema_rows:
+            label = self._progress_label(message) if message else ""
+            text = f"{projecting} · {label}" if label else projecting
+            self._ensure_ui_state().statusbar_message(text)
+            return
+        # Build progress card owns the visible loading state — no duplicate tree row.
+
+    def _handle_asset_build_progress(self, conn: str, message: object) -> None:
+        if conn == self.current_connection():
+            self._ensure_ui_state().schema_build_progress_update(message)
+            self._schedule_live_schema_refresh(conn, message)
+        label = self._progress_label(message)
+        if label:
+            self._ensure_ui_state().statusbar_message(label)
+            self._append_active_build_log(label)
+
+    def _finish_asset_build_progress(self, conn: str, result: object) -> None:
+        if conn != self.current_connection():
+            return
+        stats = result.get("stats", {}) if isinstance(result, dict) else {}
+        tables = int((stats or {}).get("tables") or 0) if isinstance(stats, dict) else 0
+        columns = int((stats or {}).get("columns") or 0) if isinstance(stats, dict) else 0
+        message = _i18n_t(
+            "build.progress_done_summary",
+            tables=tables,
+            columns=columns,
+            queries=(stats or {}).get("total_queries", 0) if isinstance(stats, dict) else 0,
+            errors=len((stats or {}).get("errors") or []) if isinstance(stats, dict) else 0,
+        )
+        self._ensure_ui_state().schema_build_progress_finish(message)
+        self._append_active_build_log(message)
+
+    def _fail_asset_build_progress(self, conn: str, exc: object) -> None:
+        if conn == self.current_connection():
+            self._ensure_ui_state().schema_build_progress_finish(str(exc), failed=True)
+
+    def _schedule_live_schema_refresh(self, conn: str, message: object) -> None:
+        if conn != self.current_connection() or not isinstance(message, dict):
+            return
+        node_id = str(message.get("node_id") or "")
+        if str(message.get("status") or "") != "completed" or not node_id.startswith("build:db:"):
+            return
+        running: set[str] = getattr(self, "_schema_live_refresh_running", set())
+        pending: set[str] = getattr(self, "_schema_live_refresh_pending", set())
+        self._schema_live_refresh_running = running
+        self._schema_live_refresh_pending = pending
+        if conn in running:
+            pending.add(conn)
+            return
+        running.add(conn)
+
+        def start_refresh() -> None:
+            if conn != self.current_connection():
+                running.discard(conn)
+                pending.discard(conn)
+                return
+            self.tasks.start(
+                "schema_tree",
+                {"name": conn},
+                on_done=lambda rows: self._on_live_schema_refresh_done(conn, rows),
+                on_failed=lambda _exc: self._on_live_schema_refresh_done(conn, None),
+            )
+
+        QTimer.singleShot(180, start_refresh)
+
+    def _on_live_schema_refresh_done(self, conn: str, rows: object) -> None:
+        running: set[str] = getattr(self, "_schema_live_refresh_running", set())
+        pending: set[str] = getattr(self, "_schema_live_refresh_pending", set())
+        running.discard(conn)
+        if conn == self.current_connection() and isinstance(rows, list):
+            self.schema_rows = rows
+            self._ensure_ui_state().schema_loaded(self.schema_rows, self._schema_completion())
+        if conn in pending:
+            pending.discard(conn)
+            self._schedule_live_schema_refresh(conn, {"node_id": "build:db:pending", "status": "completed"})
+
+    def _append_active_build_log(self, text: str) -> None:
+        key = self.ask_tab.active_key()
+        if key and self.ask_tab.turn_open(key):
+            self.ask_tab.append_activity(key, text)
+
+    @staticmethod
+    def _progress_label(message: object) -> str:
+        from dbaide.agent.progress_events import progress_label
+        return progress_label(message if isinstance(message, dict) else str(message or ""))
 
     def _project_failed(self, name: str, message: str) -> None:
         self._projected.discard(name)  # allow a retry on the next select (e.g. DB was down)
@@ -737,8 +834,6 @@ class MainWindow(QMainWindow):
             if conn.get("name") == name:
                 conn["asset_status"] = "ready"
                 break
-        loading = _i18n_t("schema.loading")
-        self._ensure_ui_state().schema_loading(loading, update=True)
         self._run_background(
             "schema_tree", {"name": name},
             lambda rows: self._apply_schema_loaded(name, rows),
@@ -1010,12 +1105,44 @@ class MainWindow(QMainWindow):
         self._run_background("list_databases", {"name": conn}, on_loaded)
 
     def _start_build_assets(self, conn: str, databases: list[str], options: dict[str, Any] | None = None) -> None:
+        if self._assets_busy(conn):
+            self.toast(_i18n_t("toast.task_running"))
+            return
         payload: dict[str, Any] = {"name": conn}
         if databases:
             payload["databases"] = databases
         if options:
             payload.update(options)
-        self.oneoff_controller.run_action("build_assets", payload)
+        self._ensure_ui_state().schema_build_progress_start(_i18n_t("status.building"))
+
+        def on_progress(message: object) -> None:
+            self._handle_asset_build_progress(conn, message)
+
+        def on_done(result: object) -> None:
+            self._finish_asset_build_progress(conn, result)
+            if conn == self.current_connection():
+                self._fetch_schema_after_project(conn)
+            stats = result.get("stats", {}) if isinstance(result, dict) else {}
+            self.toast(
+                _i18n_t("toast.assets_built")
+                + _i18n_t(
+                    "toast.build_stats",
+                    queries=(stats or {}).get("total_queries", 0),
+                    peak=(stats or {}).get("peak_inflight", 0),
+                )
+            )
+
+        def on_fail(exc: object) -> None:
+            self._fail_asset_build_progress(conn, exc)
+            self._background_failed(exc)
+
+        self._run_background(
+            "build_assets",
+            payload,
+            on_done,
+            on_error=on_fail,
+            on_progress=on_progress,
+        )
 
     def add_connection(self, conn_type: str = "sqlite") -> None:
         self.open_settings("connections")

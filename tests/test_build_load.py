@@ -118,7 +118,9 @@ def test_build_emits_structured_trace_events(tmp_path):
     assert db_nodes and all(d.get("parent_id") == "build:root" for d in db_nodes)
     # A live per-table progress line and a completed database line.
     assert any("describing" in d["title"] or "/3 tables" in d["title"] for d in db_nodes)
+    assert any(d.get("completed_tables") == 3 and d.get("total_tables") == 3 for d in db_nodes)
     assert any(d.get("status") == "completed" and "columns" in d["title"] for d in db_nodes)
     # The final root summary carries the totals.
     root_done = [d for d in dicts if d.get("node_id") == "build:root" and d.get("status") in ("completed", "failed")]
     assert root_done and "tables" in root_done[-1]["title"] and "queries" in root_done[-1]["title"]
+    assert root_done[-1]["tables"] == 3

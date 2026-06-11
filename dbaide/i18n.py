@@ -12,6 +12,7 @@ when they retranslate.
 
 from __future__ import annotations
 
+import re
 from typing import Callable
 
 DEFAULT_LANGUAGE = "en"
@@ -469,6 +470,7 @@ _STRINGS: dict[str, dict[str, str]] = {
     "sidebar.filter": {"en": "Search schema…", "zh": "搜索结构…"},
     "sidebar.chats": {"en": "Chats", "zh": "对话"},
     "sidebar.schema": {"en": "Schema", "zh": "结构"},
+    "sidebar.schema_heading": {"en": "SCHEMA", "zh": "结构"},
     "sidebar.filter.hint": {
         "en": "Filter the schema tree · press Enter for semantic search",
         "zh": "筛选结构树 · 回车进行语义搜索",
@@ -509,6 +511,70 @@ _STRINGS: dict[str, dict[str, str]] = {
         "en": "Connection load profile: {profile}. Large tables auto-fall back to metadata-only profiling.",
         "zh": "连接负载档位：{profile}。大表会自动降级为仅元数据画像。",
     },
+    "build.progress_title": {"en": "Build progress", "zh": "构建进度"},
+    "build.progress_for": {"en": "Building assets for {conn}", "zh": "正在为 {conn} 构建资产"},
+    "build.progress_all_databases": {"en": "all visible databases", "zh": "所有可见数据库"},
+    "build.progress_scope": {"en": "Scope: {databases}", "zh": "范围：{databases}"},
+    "build.progress_waiting": {"en": "Preparing build…", "zh": "正在准备构建…"},
+    "build.progress_discovering": {"en": "Discovering schema…", "zh": "正在发现库结构…"},
+    "build.progress_tables": {"en": "{done}/{total}", "zh": "{done}/{total}"},
+    "build.progress_current": {"en": "Current table: {table}", "zh": "当前表：{table}"},
+    "build.progress_log": {"en": "Build log", "zh": "构建日志"},
+    "build.progress_complete": {"en": "Build completed", "zh": "构建完成"},
+    "build.progress_done_summary": {
+        "en": "{tables} tables, {columns} columns, {queries} queries, {errors} warnings/errors",
+        "zh": "{tables} 张表，{columns} 列，{queries} 次查询，{errors} 条警告/错误",
+    },
+    "build.progress_failed": {"en": "Build failed: {error}", "zh": "构建失败：{error}"},
+    "build.progress_failed_short": {"en": "Failed", "zh": "失败"},
+    # Build progress titles emitted by AssetBuilder (English keys → localized at display time)
+    "build.emit.root": {"en": "Building assets · {instance}", "zh": "正在构建资产 · {instance}"},
+    "build.emit.testing_conn": {"en": "Testing connection {instance}", "zh": "正在测试连接 {instance}"},
+    "build.emit.discovered": {
+        "en": "Discovered {count} database(s): {names}",
+        "zh": "发现 {count} 个数据库：{names}",
+    },
+    "build.emit.listing_tables": {"en": "{database} · listing tables…", "zh": "{database} · 正在列出表…"},
+    "build.emit.db_tables": {"en": "{database} · {count} tables", "zh": "{database} · {count} 张表"},
+    "build.emit.skipped_budget": {
+        "en": "{database}: skipped (time budget)",
+        "zh": "{database}：已跳过（超出时间预算）",
+    },
+    "build.emit.db_progress": {
+        "en": "{database} · {done}/{total} tables · {table}",
+        "zh": "{database} · {done}/{total} 张表 · {table}",
+    },
+    "build.emit.db_summary": {
+        "en": "{database} · {tables} tables · {columns} columns",
+        "zh": "{database} · {tables} 张表 · {columns} 列",
+    },
+    "build.emit.fk_saved": {
+        "en": "Saved {count} foreign-key join(s) to the catalog",
+        "zh": "已保存 {count} 条外键关联至目录",
+    },
+    "build.emit.dry_run_start": {
+        "en": "Dry-run estimate for {instance}",
+        "zh": "正在为 {instance} 估算模拟运行",
+    },
+    "build.emit.dry_run_done": {
+        "en": "Dry-run · {tables} tables · {columns} columns · ≈{queries} queries",
+        "zh": "模拟运行 · {tables} 张表 · {columns} 列 · ≈{queries} 次查询",
+    },
+    "build.emit.summary": {
+        "en": "{tables} tables · {columns} columns · {profiled} profiled{light} · {queries} queries · peak {peak}{errors}",
+        "zh": "{tables} 张表 · {columns} 列 · {profiled} 已画像{light} · {queries} 次查询 · 峰值 {peak}{errors}",
+    },
+    "build.emit.summary_light": {"en": " · {count} light", "zh": " · {count} 轻量"},
+    "build.emit.summary_errors": {"en": " · {count} errors", "zh": " · {count} 个错误"},
+    "build.table.starting": {"en": "starting…", "zh": "开始…"},
+    "build.table.describing": {"en": "describing…", "zh": "读取结构…"},
+    "build.table.sampling": {"en": "sampling…", "zh": "采样…"},
+    "build.table.counting": {"en": "counting rows…", "zh": "统计行数…"},
+    "build.table.writing": {"en": "writing metadata…", "zh": "写入元数据…"},
+    "build.table.queries_one": {"en": "{table} · 1 query", "zh": "{table} · 1 次查询"},
+    "build.table.queries_many": {"en": "{table} · {count} queries", "zh": "{table} · {count} 次查询"},
+    "build.table.queries_failed": {"en": " · {count} failed", "zh": " · {count} 失败"},
+    "build.table.with_note": {"en": "{table} · {note}", "zh": "{table} · {note}"},
     # Connection dialog
     "conn.browse": {"en": "Browse…", "zh": "浏览…"},
     "conn.add_title": {"en": "Add Connection", "zh": "添加连接"},
@@ -814,6 +880,92 @@ def t(key: str, /, **kwargs: object) -> str:
         return text.format(**kwargs)
     except (KeyError, IndexError):
         return text
+
+
+_TABLE_NOTE_KEYS = {
+    "starting…": "build.table.starting",
+    "describing…": "build.table.describing",
+    "sampling…": "build.table.sampling",
+    "counting rows…": "build.table.counting",
+    "writing metadata…": "build.table.writing",
+}
+
+
+def localized_build_title(title: str) -> str:
+    """Map AssetBuilder's English progress titles to the current UI language."""
+    text = str(title or "").strip()
+    if not text:
+        return text
+
+    m = re.match(r"^Building assets · (.+)$", text)
+    if m:
+        return t("build.emit.root", instance=m.group(1))
+    m = re.match(r"^testing connection (.+)$", text)
+    if m:
+        return t("build.emit.testing_conn", instance=m.group(1))
+    m = re.match(r"^discovered (\d+) database\(s\): (.+)$", text)
+    if m:
+        return t("build.emit.discovered", count=m.group(1), names=m.group(2))
+    m = re.match(r"^saved (\d+) foreign-key join\(s\) to the catalog$", text)
+    if m:
+        return t("build.emit.fk_saved", count=m.group(1))
+    m = re.match(r"^dry-run estimate for (.+)$", text)
+    if m:
+        return t("build.emit.dry_run_start", instance=m.group(1))
+    m = re.match(r"^dry-run · (\d+) tables · (\d+) columns · ≈(\d+) queries$", text)
+    if m:
+        return t("build.emit.dry_run_done", tables=m.group(1), columns=m.group(2), queries=m.group(3))
+    m = re.match(r"^(.+?) · listing tables…$", text)
+    if m:
+        return t("build.emit.listing_tables", database=m.group(1))
+    m = re.match(r"^(.+?): skipped \(time budget\)$", text)
+    if m:
+        return t("build.emit.skipped_budget", database=m.group(1))
+    m = re.match(r"^(.+?) · (\d+)/(\d+) tables · (.+)$", text)
+    if m:
+        return t("build.emit.db_progress", database=m.group(1), done=m.group(2), total=m.group(3), table=m.group(4))
+    m = re.match(r"^(.+?) · (\d+) tables · (\d+) columns$", text)
+    if m:
+        return t("build.emit.db_summary", database=m.group(1), tables=m.group(2), columns=m.group(3))
+    m = re.match(r"^(.+?) · (\d+) tables$", text)
+    if m:
+        return t("build.emit.db_tables", database=m.group(1), count=m.group(2))
+
+    m = re.match(r"^(.+?) · (\d+) quer(?:y|ies)( · (\d+) failed)?$", text)
+    if m:
+        table, count = m.group(1), int(m.group(2))
+        base = t("build.table.queries_one", table=table) if count == 1 else t(
+            "build.table.queries_many", table=table, count=count
+        )
+        if m.group(3):
+            base += t("build.table.queries_failed", count=int(m.group(4)))
+        return base
+
+    m = re.match(r"^(.+?) · (.+)$", text)
+    if m:
+        note_key = _TABLE_NOTE_KEYS.get(m.group(2))
+        if note_key:
+            return t("build.table.with_note", table=m.group(1), note=t(note_key))
+
+    m = re.match(
+        r"^(\d+) tables · (\d+) columns · (\d+) profiled"
+        r"( · (\d+) light)? · (\d+) queries · peak (\d+)( · (\d+) errors)?$",
+        text,
+    )
+    if m:
+        light = t("build.emit.summary_light", count=m.group(5)) if m.group(5) else ""
+        errors = t("build.emit.summary_errors", count=m.group(8)) if m.group(8) else ""
+        return t(
+            "build.emit.summary",
+            tables=m.group(1),
+            columns=m.group(2),
+            profiled=m.group(3),
+            light=light,
+            queries=m.group(6),
+            peak=m.group(7),
+            errors=errors,
+        )
+    return text
 
 
 def on_change(callback: Callable[[str], None]) -> Callable[[], None]:

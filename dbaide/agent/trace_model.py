@@ -379,6 +379,9 @@ def localized_node_head(node: "TraceNode") -> str:
         return _t("trace.intent")
     if stage == "decide" or node.node_type == "llm":
         return _t("trace.thinking")
+    if stage == "build_assets" and title:
+        from dbaide.i18n import localized_build_title
+        return localized_build_title(title)
     if node.agent:
         agent = localized_agent_label(node.agent)
         return _t("trace.subagent", agent=agent, title=title or localized_phase(stage, node.phase))

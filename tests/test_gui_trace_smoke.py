@@ -102,6 +102,113 @@ def test_build_dialog_options(qapp):
     assert "timeout" in opts
 
 
+def test_sidebar_build_progress_tracks_real_counts(qapp):
+    from dbaide.desktop.views.sidebar import Sidebar
+
+    sidebar = Sidebar()
+    sidebar.start_build_progress("Building")
+    sidebar.update_build_progress({
+        "stage": "build_assets",
+        "title": "main · 0/2 tables",
+        "status": "running",
+        "node_id": "build:db:main",
+        "database": "main",
+        "completed_tables": 0,
+        "total_tables": 2,
+    })
+    sidebar._flush_build_progress()
+    sidebar.update_build_progress({
+        "stage": "build_assets",
+        "title": "main · 1/2 tables · users",
+        "status": "running",
+        "node_id": "build:db:main",
+        "database": "main",
+        "completed_tables": 1,
+        "total_tables": 2,
+        "current_table": "users",
+    })
+    sidebar._flush_build_progress()
+    qapp.processEvents()
+    assert not sidebar._build_progress.isHidden()
+    assert sidebar._build_progress_title.text() == "Building"
+    assert "users" in sidebar._build_progress_detail.text()
+    assert sidebar._build_progress_count.text() == "1/2"
+
+    # node_id-only database key (regression: must not crash the flush timer)
+    sidebar.update_build_progress({
+        "stage": "build_assets",
+        "title": "main · 2/2 tables · orders",
+        "status": "running",
+        "node_id": "build:db:main",
+        "completed_tables": 2,
+        "total_tables": 2,
+    })
+    sidebar._flush_build_progress()
+    qapp.processEvents()
+    assert sidebar._build_progress_count.text() == "2/2"
+
+    sidebar.finish_build_progress("done")
+    qapp.processEvents()
+    assert sidebar._build_progress_count.text() == "2/2"
+
+
+def test_empty_schema_projection_uses_inline_progress(qapp):
+    import dbaide.desktop.views.main_window as mw
+
+    win = mw.MainWindow.__new__(mw.MainWindow)
+    win._projected = set()
+    win.schema_rows = []
+    win.current_connection = lambda: "new_conn"  # type: ignore[method-assign]
+    schema_messages: list[tuple[str, bool]] = []
+    progress_starts: list[str] = []
+    win._ensure_ui_state = lambda: type("Ui", (), {  # type: ignore[method-assign]
+        "schema_loading": lambda _self, message, update=False: schema_messages.append((message, update)),
+        "schema_build_progress_start": lambda _self, message: progress_starts.append(message),
+    })()
+    progress_calls: list[tuple[str, object]] = []
+    fetched: list[str] = []
+    failures: list[tuple[str, str]] = []
+    finished: list[tuple[str, object]] = []
+    win._fetch_schema_after_project = lambda name: fetched.append(name)  # type: ignore[method-assign]
+    win._project_failed = lambda name, message: failures.append((name, message))  # type: ignore[method-assign]
+    win._handle_asset_build_progress = lambda name, message: progress_calls.append((name, message))  # type: ignore[method-assign]
+    win._finish_asset_build_progress = lambda name, result: finished.append((name, result))  # type: ignore[method-assign]
+    background_calls: list[dict[str, object]] = []
+
+    def run_background(action, payload, on_success, *, on_error=None, on_progress=None):
+        background_calls.append({
+            "action": action,
+            "payload": payload,
+            "on_success": on_success,
+            "on_error": on_error,
+            "on_progress": on_progress,
+        })
+        return "handle-1"
+
+    win._run_background = run_background  # type: ignore[method-assign]
+
+    win._on_schema_rows("new_conn", [])
+
+    assert "new_conn" in win._projected
+    assert background_calls[0]["action"] == "project_instance"
+    assert background_calls[0]["payload"] == {"name": "new_conn"}
+    assert progress_starts == [mw._i18n_t("schema.projecting")]
+
+    progress = background_calls[0]["on_progress"]
+    assert callable(progress)
+    progress({"title": "main · 1/2 tables", "completed_tables": 1, "total_tables": 2})
+    assert progress_calls[-1][0] == "new_conn"
+    assert progress_calls[-1][1]["completed_tables"] == 1
+    assert schema_messages == []
+
+    done = background_calls[0]["on_success"]
+    assert callable(done)
+    done({"stats": {"tables": 2}})
+    assert finished == [("new_conn", {"stats": {"tables": 2}})]
+    assert fetched == ["new_conn"]
+    assert failures == []
+
+
 def test_settings_resources_page_roundtrip(qapp):
     from dbaide.desktop.dialogs.settings import SettingsDialog
 
