@@ -6,6 +6,19 @@ All notable changes to DBAide are documented here. The format is loosely based o
 
 ## [Unreleased]
 
+## [0.1.4] — 2026-06-11
+
+### Changed
+
+- **Windows title bar** — drop the v0.1.3 custom frameless caption bar; restore
+  native minimize / maximize / close controls.
+
+### Fixed
+
+- **Windows title bar + TopBar theme** — DWM immersive dark/light mode tints the
+  native caption strip (background, border, title text) to match the app palette;
+  in-app `#topBar` background follows theme via global QSS.
+
 ## [0.1.3] — 2026-06-11
 
 ### Added
@@ -397,7 +410,8 @@ and a PyQt6 desktop app, sharing one Python core.
   drag-to-Applications)**, **Windows (`.msi` wizard)**, and **Linux (`.tar.gz`)** —
   pushing a `v*` tag cuts a GitHub Release automatically.
 
-[Unreleased]: https://github.com/W1412X/dbaide/compare/v0.1.3...HEAD
+[Unreleased]: https://github.com/W1412X/dbaide/compare/v0.1.4...HEAD
+[0.1.4]: https://github.com/W1412X/dbaide/compare/v0.1.3...v0.1.4
 [0.1.3]: https://github.com/W1412X/dbaide/compare/v0.1.2...v0.1.3
 [0.1.2]: https://github.com/W1412X/dbaide/compare/v0.1.1...v0.1.2
 [0.1.1]: https://github.com/W1412X/dbaide/compare/v0.1.0...v0.1.1

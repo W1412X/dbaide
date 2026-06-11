@@ -33,12 +33,3 @@ def test_integrated_title_bar_disabled_off_macos(monkeypatch):
     assert supports_integrated_title_bar() is False
     monkeypatch.setattr("dbaide.desktop.window_chrome.sys.platform", "linux")
     assert supports_integrated_title_bar() is False
-
-
-def test_uses_windows_custom_caption_only_on_win32(monkeypatch):
-    from dbaide.desktop.windows_caption import uses_windows_custom_caption
-
-    monkeypatch.setattr("dbaide.desktop.windows_caption.sys.platform", "win32")
-    assert uses_windows_custom_caption() is True
-    monkeypatch.setattr("dbaide.desktop.windows_caption.sys.platform", "darwin")
-    assert uses_windows_custom_caption() is False

@@ -60,8 +60,6 @@ def apply_window_background(window: QWidget) -> None:
     pal.setColor(QPalette.ColorRole.Window, bg)
     pal.setColor(QPalette.ColorRole.Base, bg)
     window.setPalette(pal)
-    if sys.platform == "win32" and window.property("_dbaide_win_caption"):
-        return
     _apply_windows_dwm_theme(window)
 
 
@@ -202,10 +200,5 @@ class ChromeDialog(QDialog):
         super().showEvent(event)
         if not self._chrome_installed:
             self._chrome_installed = True
-            from dbaide.desktop.windows_caption import attach_windows_caption
-
-            bar = attach_windows_caption(self)
             apply_window_background(self)
-            if bar is not None:
-                bar.refresh_theme()
             install_top_level_chrome(self, layout=self.layout())

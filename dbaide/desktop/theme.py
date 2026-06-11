@@ -224,10 +224,6 @@ QWidget#topBar {{
     background-color: {T.BG};
     border: none;
 }}
-QWidget#windowsCaptionBar {{
-    background-color: {T.BG};
-    border: none;
-}}
 QFrame[panel="true"] {{
     background: {T.SURFACE};
     border: 1px solid {T.BORDER_SOFT};
