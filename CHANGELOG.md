@@ -6,6 +6,13 @@ All notable changes to DBAide are documented here. The format is loosely based o
 
 ## [Unreleased]
 
+## [0.1.9] — 2026-06-12
+
+### Changed
+
+- **Linux release builds** — CI now runs on `ubuntu-22.04` (glibc 2.35); tarballs
+  require **Ubuntu 22.04+** (20.04 is no longer supported).
+
 ## [0.1.8] — 2026-06-12
 
 ### Added
@@ -463,7 +470,8 @@ and a PyQt6 desktop app, sharing one Python core.
   drag-to-Applications)**, **Windows (`.msi` wizard)**, and **Linux (`.tar.gz`)** —
   pushing a `v*` tag cuts a GitHub Release automatically.
 
-[Unreleased]: https://github.com/W1412X/dbaide/compare/v0.1.8...HEAD
+[Unreleased]: https://github.com/W1412X/dbaide/compare/v0.1.9...HEAD
+[0.1.9]: https://github.com/W1412X/dbaide/compare/v0.1.8...v0.1.9
 [0.1.8]: https://github.com/W1412X/dbaide/compare/v0.1.7...v0.1.8
 [0.1.7]: https://github.com/W1412X/dbaide/compare/v0.1.6...v0.1.7
 [0.1.6]: https://github.com/W1412X/dbaide/compare/v0.1.5...v0.1.6

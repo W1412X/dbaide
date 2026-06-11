@@ -34,11 +34,11 @@ Download the latest installer for your platform from
 |----------|------|------------|
 | **macOS** (Apple Silicon) | `DBAide-macOS-arm64.dmg` | Open the DMG → drag **DBAide** into **Applications** → see [macOS first launch](#macos-first-launch-allow-the-app) below |
 | **Windows** | `DBAide-Windows-x86_64.msi` | Run the installer → launch from the **Desktop** or **Start Menu** shortcut |
-| **Linux** | `DBAide-Linux-x86_64.tar.gz` | Extract, then run `./DBAide/DBAide` (see `INSTALL.txt`; **Ubuntu 20.04+**; optional: copy `dbaide.desktop` into `~/.local/share/applications/`) |
+| **Linux** | `DBAide-Linux-x86_64.tar.gz` | Extract, then run `./DBAide/DBAide` (see `INSTALL.txt`; **Ubuntu 22.04+**; optional: copy `dbaide.desktop` into `~/.local/share/applications/`) |
 
-No Python required for these builds. Linux tarballs are built on **Ubuntu 20.04 LTS**
-(glibc 2.31) and bundle Qt xcb libraries — they run on **20.04 and newer** Ubuntu/Debian
-desktops, but not on 18.04 or older. If startup still fails:
+No Python required for these builds. Linux tarballs are built on **Ubuntu 22.04 LTS**
+(glibc 2.35) and bundle Qt xcb libraries — they run on **22.04 and newer** Ubuntu/Debian
+desktops, but not on 20.04 or older. If startup still fails:
 
 ```bash
 sudo apt install -y libxcb-cursor0 libxkbcommon-x11-0 libgl1 libegl1
@@ -83,8 +83,8 @@ pip install -e .
 
 SQLite needs no extra drivers; MySQL/PostgreSQL drivers ship with the core install.
 
-**Ubuntu / Debian (desktop from source):** install Qt xcb libraries once (20.04+;
-enable `universe` on 20.04 if `libxcb-cursor0` is missing):
+**Ubuntu / Debian (desktop from source):** install Qt xcb libraries once (22.04+;
+enable `universe` if `libxcb-cursor0` is missing):
 
 ```bash
 sudo apt install -y libxcb-cursor0 libxkbcommon-x11-0 libgl1 libegl1

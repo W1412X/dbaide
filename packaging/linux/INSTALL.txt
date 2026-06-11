@@ -5,20 +5,20 @@ Extract this folder anywhere, then run:
 
   ./DBAide/DBAide
 
-Minimum supported platform: Ubuntu 20.04 LTS (glibc 2.31) and comparable
-Debian-based desktops. Builds are produced on Ubuntu 20.04 so newer Ubuntu /
+Minimum supported platform: Ubuntu 22.04 LTS (glibc 2.35) and comparable
+Debian-based desktops. Builds are produced on Ubuntu 22.04 so newer Ubuntu /
 Debian releases can run the same tarball; older releases (18.04 and below) are
 not supported.
 
 Recent releases bundle the Qt xcb libraries (including libxcb-cursor) needed on
-Ubuntu 20.04+. No extra packages should be required for the frozen app.
+Ubuntu 22.04+. No extra packages should be required for the frozen app.
 
 If you still see "Could not load the Qt platform plugin xcb":
 
   sudo apt update
   sudo apt install -y libxcb-cursor0 libxkbcommon-x11-0 libgl1 libegl1
 
-On Ubuntu 20.04, enable universe first if libxcb-cursor0 is not found:
+On older Ubuntu releases, enable universe first if libxcb-cursor0 is not found:
 
   sudo add-apt-repository universe
   sudo apt update

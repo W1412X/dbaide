@@ -32,10 +32,10 @@ DBAide 连接你的数据库，渐进式发现 schema，拒绝臆测含糊的业
 |------|------|----------|
 | **macOS**（Apple Silicon） | `DBAide-macOS-arm64.dmg` | 打开 DMG → 将 **DBAide** 拖入 **应用程序** → 见下方 [macOS 首次打开](#macos-首次打开允许运行) |
 | **Windows** | `DBAide-Windows-x86_64.msi` | 运行安装程序 → 从 **桌面** 或 **开始菜单** 快捷方式启动 |
-| **Linux** | `DBAide-Linux-x86_64.tar.gz` | 解压后运行 `./DBAide/DBAide`（见 `INSTALL.txt`；**Ubuntu 20.04+**；可选：将 `dbaide.desktop` 复制到 `~/.local/share/applications/`） |
+| **Linux** | `DBAide-Linux-x86_64.tar.gz` | 解压后运行 `./DBAide/DBAide`（见 `INSTALL.txt`；**Ubuntu 22.04+**；可选：将 `dbaide.desktop` 复制到 `~/.local/share/applications/`） |
 
-安装包无需 Python。Linux 包在 **Ubuntu 20.04 LTS**（glibc 2.31）上构建并内置 Qt xcb
-依赖，适用于 **20.04 及更新**的 Ubuntu/Debian 桌面，不支持 18.04 及更早版本。若仍无法启动：
+安装包无需 Python。Linux 包在 **Ubuntu 22.04 LTS**（glibc 2.35）上构建并内置 Qt xcb
+依赖，适用于 **22.04 及更新**的 Ubuntu/Debian 桌面，不支持 20.04 及更早版本。若仍无法启动：
 
 ```bash
 sudo apt install -y libxcb-cursor0 libxkbcommon-x11-0 libgl1 libegl1
@@ -80,7 +80,7 @@ pip install -e .
 
 SQLite 无需额外驱动；MySQL / PostgreSQL 驱动已包含在核心依赖中。
 
-**Ubuntu / Debian（源码运行桌面）：** 先安装 Qt xcb 系统库（20.04+；20.04 若找不到
+**Ubuntu / Debian（源码运行桌面）：** 先安装 Qt xcb 系统库（22.04+；若找不到
 `libxcb-cursor0` 需先 `sudo add-apt-repository universe`）：
 
 ```bash
