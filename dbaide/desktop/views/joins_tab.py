@@ -22,7 +22,7 @@ from dbaide.desktop.dialogs.message_dialog import alert as dialog_alert, confirm
 
 from dbaide.desktop.components.base import compact_button
 from dbaide.desktop.components.icons import svg_icon
-from dbaide.desktop.components.inputs import configure_form, form_label
+from dbaide.desktop.components.inputs import configure_form, configure_wrapped_label, form_label
 from dbaide.desktop.theme import app_style, Theme
 from dbaide.desktop.window_chrome import ChromeDialog
 
@@ -89,7 +89,7 @@ class JoinsTab(QWidget):
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(6)
         hint = QLabel(t("join.hint"))
-        hint.setWordWrap(True)
+        configure_wrapped_label(hint)
         hint.setStyleSheet(f"color: {Theme.MUTED}; font-size: 11px;")
         layout.addWidget(hint)
         row = QHBoxLayout()

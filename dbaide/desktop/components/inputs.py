@@ -77,7 +77,9 @@ def configure_form(form: QFormLayout) -> None:
 def configure_wrapped_label(label: QLabel, *, max_width: int | None = None) -> None:
     """Allow QLabel word-wrap inside constrained layouts (avoids horizontal overflow)."""
     label.setWordWrap(True)
-    label.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
+    policy = QSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
+    policy.setHeightForWidth(True)
+    label.setSizePolicy(policy)
     label.setAlignment(Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignLeft)
     if max_width is not None:
         label.setMaximumWidth(max_width)

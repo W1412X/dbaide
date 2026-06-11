@@ -13,6 +13,7 @@ from PyQt6.QtWidgets import (
 )
 
 from dbaide.desktop.components.icons import svg_icon
+from dbaide.desktop.components.inputs import configure_wrapped_label
 from dbaide.desktop.theme import app_style, Theme
 from dbaide.desktop.window_chrome import ChromeDialog
 from dbaide.i18n import t as _t
@@ -29,11 +30,12 @@ class NoteEditorDialog(ChromeDialog):
         layout.setSpacing(10)
 
         heading = QLabel(target_label)
+        configure_wrapped_label(heading)
         heading.setStyleSheet(f"color: {Theme.TEXT}; font-size: 13px; font-weight: 600;")
         layout.addWidget(heading)
 
         sub = QLabel(_t("notes.editor_hint"))
-        sub.setWordWrap(True)
+        configure_wrapped_label(sub)
         sub.setStyleSheet(f"color: {Theme.MUTED}; font-size: 11px;")
         layout.addWidget(sub)
 

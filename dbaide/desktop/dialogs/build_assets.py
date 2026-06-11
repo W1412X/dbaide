@@ -16,7 +16,7 @@ from PyQt6.QtWidgets import (
 )
 
 from dbaide.desktop.components.base import compact_button
-from dbaide.desktop.components.inputs import Combo
+from dbaide.desktop.components.inputs import Combo, configure_wrapped_label
 from dbaide.desktop.theme import Theme
 
 
@@ -47,12 +47,12 @@ class BuildAssetsDialog(ChromeDialog):
         root.setSpacing(12)
 
         title = QLabel(t("build.select_for", conn=connection_name))
-        title.setWordWrap(True)
+        configure_wrapped_label(title)
         title.setStyleSheet(f"color: {Theme.TEXT}; font-size: 14px; font-weight: 600;")
         root.addWidget(title)
 
         hint = QLabel(t("build.hint"))
-        hint.setWordWrap(True)
+        configure_wrapped_label(hint)
         hint.setProperty("muted", True)
         root.addWidget(hint)
 
@@ -120,7 +120,7 @@ class BuildAssetsDialog(ChromeDialog):
         options.addRow(t("build.time_budget"), self._timeout)
 
         profile_hint = QLabel(t("build.profile_note", profile=load_profile))
-        profile_hint.setWordWrap(True)
+        configure_wrapped_label(profile_hint)
         profile_hint.setProperty("muted", True)
         options.addRow(profile_hint)
         root.addLayout(options)

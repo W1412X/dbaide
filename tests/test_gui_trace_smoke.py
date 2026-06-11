@@ -203,6 +203,30 @@ def test_settings_delete_and_default_wait_for_controller_success(qapp, monkeypat
     assert dlg._default_model == "other"
 
 
+def test_message_dialog_sizes_wrapped_body_to_content(qapp):
+    from dbaide.desktop.dialogs.message_dialog import MessageDialog
+
+    message = "删除连接「" + ("production-readonly-" * 4) + "」？"
+    dlg = MessageDialog(None, "设置", message, confirm=True)
+    qapp.processEvents()
+
+    doc_height = int(dlg._body.document().documentLayout().documentSize().height())
+    assert dlg._body.height() >= doc_height
+    assert dlg._body.toPlainText() == message
+
+
+def test_message_dialog_caps_very_long_body_with_scroll(qapp):
+    from dbaide.desktop.dialogs.message_dialog import MessageDialog, _MAX_BODY_HEIGHT
+
+    message = "\n".join(f"warning {i}: SELECT * FROM orders WHERE created_at >= now()" for i in range(40))
+    dlg = MessageDialog(None, "Risky SQL", message, confirm=True)
+    qapp.processEvents()
+
+    doc_height = int(dlg._body.document().documentLayout().documentSize().height())
+    assert doc_height > _MAX_BODY_HEIGHT
+    assert dlg._body.height() == _MAX_BODY_HEIGHT
+
+
 def test_connection_form_includes_load_profile(qapp):
     from dbaide.desktop.dialogs.connection import ConnectionForm
 

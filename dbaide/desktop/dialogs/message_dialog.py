@@ -3,11 +3,23 @@
 from __future__ import annotations
 
 from PyQt6.QtCore import Qt
-from PyQt6.QtWidgets import QDialog, QHBoxLayout, QLabel, QVBoxLayout, QWidget
+from PyQt6.QtWidgets import (
+    QDialog,
+    QFrame,
+    QHBoxLayout,
+    QLabel,
+    QSizePolicy,
+    QTextBrowser,
+    QVBoxLayout,
+    QWidget,
+)
 
 from dbaide.desktop.components.base import compact_button
 from dbaide.desktop.theme import Theme, app_style
 from dbaide.desktop.window_chrome import ChromeDialog
+
+_CONTENT_WIDTH = 420
+_MAX_BODY_HEIGHT = 320
 
 
 class MessageDialog(ChromeDialog):
@@ -28,7 +40,7 @@ class MessageDialog(ChromeDialog):
 
         self.setWindowTitle(title)
         self.setModal(True)
-        self.setMinimumWidth(360)
+        self.setMinimumWidth(_CONTENT_WIDTH + 40)
         self.setStyleSheet(app_style())
 
         root = QVBoxLayout(self)
@@ -40,14 +52,36 @@ class MessageDialog(ChromeDialog):
             f"color: {Theme.TEXT}; font-size: 16px; font-weight: 700; background: transparent;"
         )
         heading.setWordWrap(True)
+        heading.setMinimumWidth(_CONTENT_WIDTH)
         root.addWidget(heading)
 
-        body = QLabel(message)
-        body.setWordWrap(True)
-        body.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+        body = QTextBrowser()
+        body.setFrameShape(QFrame.Shape.NoFrame)
+        body.setReadOnly(True)
+        body.setOpenExternalLinks(False)
+        body.setPlainText(message)
+        body.document().setDocumentMargin(0)
+        body.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        body.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        body.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        body.setMinimumWidth(_CONTENT_WIDTH)
         body.setStyleSheet(
-            f"color: {Theme.TEXT_2}; font-size: 13px; line-height: 1.45; background: transparent;"
+            f"""
+            QTextBrowser {{
+                color: {Theme.TEXT_2};
+                font-size: 13px;
+                background: transparent;
+                border: none;
+                padding: 0;
+            }}
+            QScrollBar:vertical {{
+                background: transparent;
+                width: 8px;
+            }}
+            """
         )
+        self._body = body
+        self._sync_body_height()
         root.addWidget(body)
 
         actions = QHBoxLayout()
@@ -67,6 +101,12 @@ class MessageDialog(ChromeDialog):
         ok_btn.clicked.connect(self.accept)
         actions.addWidget(ok_btn)
         root.addLayout(actions)
+
+    def _sync_body_height(self) -> None:
+        self._body.document().setTextWidth(_CONTENT_WIDTH)
+        doc_height = int(self._body.document().documentLayout().documentSize().height())
+        body_height = max(30, min(doc_height + 8, _MAX_BODY_HEIGHT))
+        self._body.setFixedHeight(body_height)
 
 
 def alert(parent: QWidget | None, title: str, message: str) -> None:
