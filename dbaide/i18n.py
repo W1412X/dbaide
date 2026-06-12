@@ -413,6 +413,16 @@ _STRINGS: dict[str, dict[str, str]] = {
         "en": "Model request timed out. Try again or increase the timeout in Settings → Models.",
         "zh": "模型请求超时。请重试，或在 设置 → 模型 中增大超时时间。",
     },
+    "error.llm.ssl": {
+        "en": (
+            "HTTPS certificate verification failed when calling the model API. "
+            "Check proxy or corporate certificates; see Settings → Models."
+        ),
+        "zh": (
+            "调用模型 API 时 HTTPS 证书校验失败。"
+            "请检查代理或公司根证书；详见 设置 → 模型。"
+        ),
+    },
     "error.llm.network": {
         "en": "Could not reach the model endpoint. Check network, proxy, and base URL.",
         "zh": "无法连接模型服务。请检查网络、代理与 Base URL。",
@@ -650,6 +660,42 @@ _STRINGS: dict[str, dict[str, str]] = {
     "settings.models.subtitle": {
         "en": "Configure LLM providers. Switch models from the composer.",
         "zh": "配置 LLM 提供方。可在输入栏切换模型。",
+    },
+    "settings.models.ssl_note": {
+        "en": (
+            "HTTPS calls to your model API use the bundled Mozilla CA certificates (certifi). "
+            "If you still see SSL errors, check proxy or corporate root certificates — "
+            "see the startup warning or README troubleshooting."
+        ),
+        "zh": (
+            "连接模型 API 的 HTTPS 请求使用内置的 Mozilla 根证书（certifi）。"
+            "若仍出现 SSL 错误，请检查代理或公司根证书 — "
+            "可参考启动时的提示或 README 故障排除说明。"
+        ),
+    },
+    "startup.ssl.warning.title": {
+        "en": "HTTPS certificate check failed",
+        "zh": "HTTPS 证书校验失败",
+    },
+    "startup.ssl.warning.message": {
+        "en": (
+            "DBAide could not verify HTTPS to a public API host using the bundled CA bundle. "
+            "LLM calls may fail with SSL errors.\n\n"
+            "Common fixes:\n"
+            "• Corporate proxy: import your organization's root certificate into the system keychain\n"
+            "• macOS Python: run Install Certificates.command in your Python folder\n"
+            "• Check network / VPN / firewall\n\n"
+            "See Settings → Models for more about HTTPS and certifi."
+        ),
+        "zh": (
+            "DBAide 使用内置 CA 证书包无法完成对公共 API 主机的 HTTPS 校验，"
+            "LLM 调用可能出现 SSL 错误。\n\n"
+            "常见处理方式：\n"
+            "• 公司代理：将组织根证书导入系统钥匙串并设为信任\n"
+            "• macOS Python：运行 Python 安装目录中的 Install Certificates.command\n"
+            "• 检查网络 / VPN / 防火墙\n\n"
+            "更多说明见 设置 → 模型 中的 HTTPS 提示。"
+        ),
     },
     "settings.new_model": {"en": "New model", "zh": "新建模型"},
     "settings.new_model_hint": {

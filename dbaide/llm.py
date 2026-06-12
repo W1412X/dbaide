@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import ssl
 import time
 import urllib.error
 import urllib.parse
@@ -11,8 +12,18 @@ from dataclasses import dataclass
 from typing import Any, Callable
 
 from .models import ModelConfig
+from .ssl_certs import https_ssl_context
 
 logger = logging.getLogger("dbaide.llm")
+
+_SSL_CONTEXT: ssl.SSLContext | None = None
+
+
+def _ssl_context() -> ssl.SSLContext:
+    global _SSL_CONTEXT
+    if _SSL_CONTEXT is None:
+        _SSL_CONTEXT = https_ssl_context()
+    return _SSL_CONTEXT
 
 
 @dataclass(slots=True)
@@ -104,7 +115,7 @@ class OpenAICompatibleClient(LLMClient):
             try:
                 start = time.perf_counter()
                 # base_url is validated as an absolute http(s) URL in __init__.
-                with urllib.request.urlopen(req, timeout=timeout) as resp:  # nosec B310
+                with urllib.request.urlopen(req, timeout=timeout, context=_ssl_context()) as resp:  # nosec B310
                     data = json.loads(resp.read().decode("utf-8"))
                 elapsed = (time.perf_counter() - start) * 1000
                 logger.debug("llm_response model=%s elapsed_ms=%.0f attempt=%d", self.cfg.model, elapsed, attempt + 1)
@@ -170,7 +181,7 @@ class OpenAICompatibleClient(LLMClient):
         parts: list[str] = []
         try:
             # base_url is validated as an absolute http(s) URL in __init__.
-            with urllib.request.urlopen(req, timeout=timeout) as resp:  # nosec B310
+            with urllib.request.urlopen(req, timeout=timeout, context=_ssl_context()) as resp:  # nosec B310
                 for raw in resp:                         # SSE: one "data: {...}" per line
                     line = raw.decode("utf-8", errors="replace").strip()
                     if not line or not line.startswith("data:"):

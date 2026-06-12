@@ -10,7 +10,14 @@ from dbaide.i18n import t as _t
 _AUTH_MARKERS = ("401", "403", "unauthorized", "invalid api key", "authentication", "invalid_api_key")
 _RATE_MARKERS = ("429", "rate limit", "too many requests", "quota")
 _TIMEOUT_MARKERS = ("timeout", "timed out", "deadline")
-_NETWORK_MARKERS = ("connection refused", "connection reset", "network", "unreachable", "dns", "ssl", "urlopen error")
+_SSL_MARKERS = (
+    "certificate_verify_failed",
+    "certIFICATE_VERIFY_FAILED",
+    "unable to get local issuer certificate",
+    "ssl: certificate",
+    "certificate verify failed",
+)
+_NETWORK_MARKERS = ("connection refused", "connection reset", "network", "unreachable", "dns", "urlopen error")
 
 
 def classify_llm_error(exc: BaseException, *, stage: str = "llm") -> DBAideError:
@@ -59,6 +66,17 @@ def classify_llm_error(exc: BaseException, *, stage: str = "llm") -> DBAideError
             message=message,
             hint=_t("error.llm.timeout"),
             retryable=True,
+            repair_action=RepairAction.STOP,
+            evidence={"exception_type": exc_type},
+        )
+
+    if any(marker in lower for marker in _SSL_MARKERS):
+        return DBAideError(
+            code=ErrorCode.LLM_ERROR,
+            stage=stage,
+            message=message,
+            hint=_t("error.llm.ssl"),
+            retryable=False,
             repair_action=RepairAction.STOP,
             evidence={"exception_type": exc_type},
         )

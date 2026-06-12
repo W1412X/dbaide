@@ -114,6 +114,21 @@ class MainWindow(QMainWindow):
             from dbaide.desktop.window_chrome import install_top_level_chrome
 
             install_top_level_chrome(self, topbar=self.topbar)
+        if not getattr(self, "_ssl_check_scheduled", False):
+            self._ssl_check_scheduled = True
+            QTimer.singleShot(400, self._check_https_certificates_at_startup)
+
+    def _check_https_certificates_at_startup(self) -> None:
+        from dbaide.ssl_certs import check_https_certificates
+
+        result = check_https_certificates()
+        if result.ok:
+            return
+        detail = str(result.detail or "").strip()
+        message = _i18n_t("startup.ssl.warning.message")
+        if detail:
+            message = f"{message}\n\n{detail}"
+        dialog_warn(self, _i18n_t("startup.ssl.warning.title"), message)
 
     def _ensure_run_state(self) -> ConversationRunState:
         if "run_state" not in self.__dict__:

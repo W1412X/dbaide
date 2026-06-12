@@ -80,7 +80,7 @@ def test_openai_client_complete_json_stream_emits_and_parses(monkeypatch):
         def __exit__(self, *a): return False
         def __iter__(self): return fake_lines()
 
-    monkeypatch.setattr(urllib.request, "urlopen", lambda req, timeout=0: FakeResp())
+    monkeypatch.setattr(urllib.request, "urlopen", lambda req, timeout=0, **kw: FakeResp())
     seen: list[str] = []
     payload = client.complete_json_stream(
         [LLMMessage("user", "q")], schema_hint="Return JSON", on_text_chunk=seen.append)
@@ -109,7 +109,7 @@ def test_stream_propagates_callback_exception(monkeypatch):
         def __iter__(self): return fake_lines()
 
     calls = {"text": 0}
-    monkeypatch.setattr(urllib.request, "urlopen", lambda req, timeout=0: FakeResp())
+    monkeypatch.setattr(urllib.request, "urlopen", lambda req, timeout=0, **kw: FakeResp())
     monkeypatch.setattr(client, "complete_text",
                         lambda *a, **k: calls.__setitem__("text", calls["text"] + 1) or "full")
 

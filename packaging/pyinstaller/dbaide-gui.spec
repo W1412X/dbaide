@@ -4,7 +4,7 @@
 import sys
 from pathlib import Path
 
-from PyInstaller.utils.hooks import collect_submodules
+from PyInstaller.utils.hooks import collect_data_files, collect_submodules
 
 ROOT = Path(SPECPATH).resolve().parents[1]
 ICON_DIR = ROOT / "packaging" / "icons"
@@ -27,8 +27,12 @@ mistune_hidden = collect_submodules("mistune")
 # (that force-bundles the entire Qt — QtQml/Quick/Network/Pdf/translations/… — and
 # bloats the package ~3-4x). PyInstaller's built-in PyQt6 hooks bundle just these
 # modules + the platform plugins they need.
+certifi_datas = collect_data_files("certifi")
+
 hiddenimports = [
+    "certifi",
     "dbaide",
+    "dbaide.ssl_certs",
     "dbaide.cli",
     "dbaide.gui",
     "dbaide.i18n",
@@ -81,8 +85,9 @@ a = Analysis(
     [str(ROOT / "dbaide" / "desktop" / "launcher.py")],
     pathex=[str(ROOT)],
     binaries=[],
-    datas=[(str(ROOT / "dbaide" / "desktop" / "assets" / "app_icon.png"),
-            "dbaide/desktop/assets")],
+    datas=[
+        (str(ROOT / "dbaide" / "desktop" / "assets" / "app_icon.png"), "dbaide/desktop/assets"),
+    ] + certifi_datas,
     hiddenimports=hiddenimports,
     hookspath=[],
     hooksconfig={},
