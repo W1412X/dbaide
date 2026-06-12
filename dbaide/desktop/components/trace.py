@@ -27,7 +27,7 @@ from dbaide.agent.trace_model import (
     localized_status,
     localized_summary_line,
 )
-from dbaide.desktop.components.base import compact_button
+from dbaide.desktop.components.base import ghost_action_button
 from dbaide.desktop.components.icons import svg_icon
 from dbaide.desktop.components.inputs import configure_readonly_text_view
 from dbaide.desktop.components.spinner import BusyAnimator, SPINNER_SIZE, spinner_icon
@@ -360,6 +360,8 @@ class TraceDetailPanel(QFrame):
             f" border-left: 1px solid {Theme.BORDER_SOFT}; }}"
         )
         self._raw_text = ""
+        self._copy_label = ""
+        self._copy_feedback_timer: QTimer | None = None
         self._anim: QPropertyAnimation | None = None
         self._build_ui()
         self.hide()
@@ -407,9 +409,11 @@ class TraceDetailPanel(QFrame):
         row = QHBoxLayout()
         row.setContentsMargins(0, 0, 0, 0)
         row.addStretch(1)
-        self._copy_raw = compact_button(
-            t("trace.copy_raw"),
-            icon=svg_icon("copy", color=Theme.TEXT_2, size=14),
+        self._copy_label = t("trace.copy_raw")
+        self._copy_raw = ghost_action_button(
+            self._copy_label,
+            icon=svg_icon("copy", color=Theme.MUTED, size=14),
+            tooltip=self._copy_label,
         )
         self._copy_raw.clicked.connect(self._do_copy_raw)
         self._copy_raw.hide()
@@ -417,15 +421,12 @@ class TraceDetailPanel(QFrame):
         layout.addLayout(row)
 
     def show_detail(self, data: dict) -> None:
+        self._reset_copy_feedback()
         title = str(data.get("title") or data.get("phase") or data.get("stage") or "step")
         self._title.setText(title)
-        raw = data.get("raw") if isinstance(data.get("raw"), dict) else {}
-        try:
-            self._raw_text = json.dumps(raw, ensure_ascii=False, indent=2, default=str) if raw else ""
-        except (TypeError, ValueError):
-            self._raw_text = str(raw)
+        self._raw_text = trace_step_raw_export(data)
         self._body.setHtml(_detail_html(data))
-        self._copy_raw.setVisible(bool(self._raw_text))
+        self._copy_raw.setVisible(bool(self._raw_text.strip()))
         self._relayout(animate=True)
 
     def close_panel(self) -> None:
@@ -468,21 +469,41 @@ class TraceDetailPanel(QFrame):
             self.raise_()
 
     def _do_copy_raw(self) -> None:
-        if self._raw_text:
-            QApplication.clipboard().setText(self._raw_text)
-            self._copy_raw.setText("✓")
-            self._copy_raw.setIcon(svg_icon("check", color=Theme.GREEN, size=14))
-            QTimer.singleShot(1200, self._restore_copy_raw_button)
+        if not self._raw_text.strip():
+            return
+        QApplication.clipboard().setText(self._raw_text)
+        from dbaide.i18n import t
+        self._copy_raw.setText(t("ask.copied"))
+        self._copy_raw.setIcon(svg_icon("check", color=Theme.GREEN, size=14))
+        self._reset_copy_feedback_timer()
+        timer = QTimer(self)
+        timer.setSingleShot(True)
+        timer.timeout.connect(self._reset_copy_feedback)
+        timer.start(1200)
+        self._copy_feedback_timer = timer
 
-    def _restore_copy_raw_button(self) -> None:
+    def _reset_copy_feedback_timer(self) -> None:
+        if self._copy_feedback_timer is not None:
+            try:
+                self._copy_feedback_timer.stop()
+            except RuntimeError:
+                pass
+            self._copy_feedback_timer.deleteLater()
+            self._copy_feedback_timer = None
+
+    def _reset_copy_feedback(self) -> None:
+        self._reset_copy_feedback_timer()
         try:
             from PyQt6 import sip
             if sip.isdeleted(self._copy_raw):
                 return
         except RuntimeError:
             return
-        self._copy_raw.setText(_copy_raw_label())
-        self._copy_raw.setIcon(svg_icon("copy", color=Theme.TEXT_2, size=14))
+        if not self._copy_label:
+            from dbaide.i18n import t
+            self._copy_label = t("trace.copy_raw")
+        self._copy_raw.setText(self._copy_label)
+        self._copy_raw.setIcon(svg_icon("copy", color=Theme.MUTED, size=14))
 
 
 def show_trace_detail(host: QWidget, data: dict) -> None:
@@ -495,9 +516,32 @@ def show_trace_detail(host: QWidget, data: dict) -> None:
     panel.show_detail(data)
 
 
-def _copy_raw_label() -> str:
-    from dbaide.i18n import t
-    return t("trace.copy_raw")
+def trace_step_raw_export(data: dict[str, Any]) -> str:
+    """Clipboard JSON for a trace step — includes display fields plus the raw event."""
+    if not isinstance(data, dict):
+        return ""
+    if data.get("__summary__"):
+        try:
+            return json.dumps(data, ensure_ascii=False, indent=2, default=str)
+        except (TypeError, ValueError):
+            return str(data)
+    raw = data.get("raw") if isinstance(data.get("raw"), dict) else {}
+    payload: dict[str, Any] = {}
+    for key in (
+        "node_id", "stage", "phase", "agent", "status", "title", "detail",
+        "thought", "duration_ms", "step", "node_type",
+    ):
+        value = data.get(key)
+        if value not in (None, "", {}, []):
+            payload[key] = value
+    if raw:
+        payload["event"] = raw
+    if not payload:
+        return ""
+    try:
+        return json.dumps(payload, ensure_ascii=False, indent=2, default=str)
+    except (TypeError, ValueError):
+        return str(payload)
 
 
 def _esc(text: str) -> str:

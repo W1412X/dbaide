@@ -969,6 +969,7 @@ class ConversationView(QScrollArea):
         # restored turn → stays idle until complete_turn sets its "view trace" link.
         if placeholder:
             turn.status.start()
+            self._seed_live_trace_boot(turn)
         self._scroll_bottom()
 
     def append_trace(self, message: str, *, kind: str = "", detail: str = "") -> None:
@@ -1028,6 +1029,21 @@ class ConversationView(QScrollArea):
     def _tr(key: str) -> str:
         from dbaide.i18n import t
         return t(key)
+
+    def _seed_live_trace_boot(self, turn: TurnBlock) -> None:
+        """Prime the trace before the worker thread emits events (connection check, …)."""
+        from dbaide.agent.progress_events import progress_event
+
+        boot = progress_event(
+            stage="environment_check",
+            title=self._tr("trace.phase.environment_check"),
+            status="running",
+            kind="phase",
+            node_id="workflow:environment_check",
+        )
+        turn.add_live_event(boot)
+        if self._current_record is not None:
+            self._current_record["events"].append(boot)
 
     def _append_answer_with_embedded_charts(
         self,

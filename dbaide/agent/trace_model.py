@@ -79,6 +79,7 @@ class TraceModel:
         self._stage_index: dict[str, str] = {}   # stage name → tool node id
         self._last_tool_id = ROOT_ID
         self.overall = "idle"                     # idle | running | done | failed
+        self.boot_phase = ""                      # summary when running but no tool steps yet
         self._pending_thought = ""
         self._first_ts = 0.0
         self._last_ts = 0.0
@@ -117,6 +118,8 @@ class TraceModel:
         if stage in {"workflow_started", "planning"}:
             if self.overall == "idle":
                 self.overall = "running"
+            if status in _ACTIVE:
+                self.boot_phase = title or localized_phase(stage, str(event.get("phase") or ""))
             return
         if stage == "workflow_completed":
             self.overall = "failed" if status == "failed" else "done"
@@ -133,6 +136,8 @@ class TraceModel:
 
         if self.overall == "idle":
             self.overall = "running"
+        if status in _ACTIVE and stage in {"environment_check", "agent_request"}:
+            self.boot_phase = title or localized_phase(stage, str(event.get("phase") or ""))
 
         node_id, parent_id, is_tool = self._identify(event, stage, kind, status, title)
         detail = str(event.get("detail") or event.get("summary") or "").strip()
@@ -293,6 +298,10 @@ class TraceModel:
     def summary_line(self, now: float | None = None) -> str:
         if not self.steps and self.overall == "idle":
             return "Idle"
+        if not self.steps and self.overall == "running":
+            elapsed = self.elapsed_ms(now) / 1000.0
+            phase = self.boot_phase or _t("trace.starting")
+            return f"{phase} · {elapsed:.1f}s"
         elapsed = self.elapsed_ms(now) / 1000.0
         if self.overall == "done":
             return f"Done · {len(self.steps)} steps · {elapsed:.1f}s"
@@ -527,6 +536,10 @@ def render_trace_text(model: "TraceModel") -> str:
 def localized_summary_line(model: "TraceModel") -> str:
     if not model.steps and model.overall == "idle":
         return _t("trace.idle")
+    if not model.steps and model.overall == "running":
+        elapsed = model.elapsed_ms() / 1000.0
+        phase = model.boot_phase or _t("trace.starting")
+        return f"{phase} · {elapsed:.1f}s"
     elapsed = model.elapsed_ms() / 1000.0
     steps = _t("trace.steps", n=len(model.steps))
     if model.overall == "done":

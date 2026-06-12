@@ -52,7 +52,7 @@ def test_trace_panel_live_then_finalize(qapp):
 def test_trace_detail_dialog_shows_step(qapp):
     from PyQt6.QtCore import Qt
     from PyQt6.QtWidgets import QWidget
-    from dbaide.desktop.components.trace import InlineTrace, TraceDetailPanel
+    from dbaide.desktop.components.trace import InlineTrace, TraceDetailPanel, trace_step_raw_export
 
     host = QWidget()
     host.resize(900, 640)
@@ -69,6 +69,27 @@ def test_trace_detail_dialog_shows_step(qapp):
     assert "execute_sql" in text
     assert "SELECT 1" in text
     assert "7 ms" in text
+    exported = trace_step_raw_export(data)
+    assert "SELECT 1" in exported
+    assert "event" in exported
+    assert dlg._raw_text.strip()
+    dlg._do_copy_raw()
+    from PyQt6.QtWidgets import QApplication
+    assert "SELECT 1" in QApplication.clipboard().text()
+
+
+def test_trace_step_raw_export_includes_thought(qapp):
+    from dbaide.desktop.components.trace import trace_step_raw_export
+
+    data = {
+        "node_id": "step:1",
+        "stage": "execute_sql",
+        "thought": "count orders",
+        "raw": {"sql": "SELECT 1", "row_count": 1},
+    }
+    exported = trace_step_raw_export(data)
+    assert "count orders" in exported
+    assert "SELECT 1" in exported
 
 
 def test_trace_panel_load_persisted_events(qapp):

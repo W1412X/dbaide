@@ -6,7 +6,7 @@ import time
 from typing import Any, Callable
 
 from dbaide.adapters import build_adapter
-from dbaide.agent.progress_events import progress_label
+from dbaide.agent.progress_events import progress_event, progress_label
 from dbaide.agent import DataAssistant
 from dbaide.core.cancellation import CancelledError
 from dbaide.core.errors import DBAideError, ErrorCode, RepairAction
@@ -67,12 +67,37 @@ class WorkflowEngine:
 
         result.status = WorkflowStatus.RUNNING
         self._trace(result, "workflow_started", "Workflow started", "agent", summary=request.question)
+        self._live_progress(
+            progress,
+            stage="workflow_started",
+            title=_workflow_progress_title("trace.starting"),
+            status="running",
+            kind="agent",
+        )
 
-        self._trace(result, "environment_check", "Checking environment", "system")
+        env_title = _workflow_progress_title("trace.phase.environment_check")
+        self._trace(result, "environment_check", env_title, "system", status="running")
+        self._live_progress(
+            progress,
+            stage="environment_check",
+            title=env_title,
+            status="running",
+            kind="phase",
+            node_id="workflow:environment_check",
+        )
         try:
             adapter = self._get_adapter()
             adapter.test()
         except Exception as exc:
+            self._live_progress(
+                progress,
+                stage="environment_check",
+                title=env_title,
+                status="failed",
+                kind="phase",
+                node_id="workflow:environment_check",
+                detail=str(exc)[:240],
+            )
             result.status = WorkflowStatus.FAILED
             result.errors.append(DBAideError(
                 code=ErrorCode.CONNECTION_FAILED,
@@ -83,12 +108,31 @@ class WorkflowEngine:
                 repair_action=RepairAction.REFRESH_SCHEMA,
             ))
             result.completed_at = time.time()
-            self._trace(result, "workflow_failed", "Workflow failed", "system", level=TraceLevel.ERROR, summary=str(exc))
+            self._trace(
+                result, "workflow_failed", "Workflow failed", "system",
+                level=TraceLevel.ERROR, summary=str(exc), status="failed",
+            )
             return result
+        self._trace(result, "environment_check", env_title, "system")
+        self._live_progress(
+            progress,
+            stage="environment_check",
+            title=env_title,
+            status="completed",
+            kind="phase",
+            node_id="workflow:environment_check",
+        )
 
         database = request.database_scope[0] if request.database_scope else ""
         execute = True
         self._trace(result, "planning", "Planning guarded read-only workflow", "agent")
+        self._live_progress(
+            progress,
+            stage="planning",
+            title=_workflow_progress_title("trace.phase.agent_request"),
+            status="running",
+            kind="agent",
+        )
 
         assistant = self._build_assistant(request)
         self._trace(result, "agent_request", "Running assistant", "agent")
@@ -287,6 +331,31 @@ class WorkflowEngine:
             confidence=0.0,
         )
 
+    def _live_progress(
+        self,
+        progress: Callable[..., None] | None,
+        *,
+        stage: str,
+        title: str,
+        status: str = "running",
+        kind: str = "phase",
+        node_id: str = "",
+        detail: str = "",
+    ) -> None:
+        """Stream a prelude/progress dict to the GUI (environment check, planning, …)."""
+        if not progress:
+            return
+        payload = progress_event(
+            stage=stage,
+            title=title,
+            status=status,
+            kind=kind,
+            node_id=node_id or f"workflow:{stage}",
+        )
+        if detail:
+            payload["detail"] = detail
+        progress(payload)
+
     def _trace(
         self,
         result: WorkflowResult,
@@ -317,6 +386,14 @@ class WorkflowEngine:
         )
         result.trace.append(event)
         logger.debug("trace: %s - %s", stage, title)
+
+
+def _workflow_progress_title(key: str) -> str:
+    try:
+        from dbaide.i18n import t
+        return t(key)
+    except Exception:
+        return key
 
 
 def _trace_kind(actor: str) -> TraceKind:

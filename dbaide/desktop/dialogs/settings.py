@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-from PyQt6.QtCore import Qt, pyqtSignal
+from PyQt6.QtCore import Qt, QUrl, pyqtSignal
+from PyQt6.QtGui import QDesktopServices
 from PyQt6.QtWidgets import (
     QDialog,
     QFormLayout,
@@ -18,8 +19,16 @@ from PyQt6.QtWidgets import (
 )
 
 from dbaide.desktop.dialogs.message_dialog import confirm as dialog_confirm, warn as dialog_warn
-from dbaide.desktop.components.base import compact_button
-from dbaide.desktop.components.icons import more_icon
+from dbaide.app_info import (
+    APP_NAME,
+    DEVELOPER_NAME,
+    DEVELOPER_URL,
+    LICENSE_NAME,
+    app_version,
+    project_links,
+)
+from dbaide.desktop.components.base import compact_button, ghost_action_button
+from dbaide.desktop.components.icons import more_icon, svg_icon
 from dbaide.desktop.components.inputs import Combo, FORM_INNER_LABEL_RULES, configure_form, form_label
 from dbaide.desktop.components.menu import MenuButton
 from dbaide.desktop.dialogs.connection import ConnectionForm
@@ -226,8 +235,13 @@ class SettingsDialog(ChromeDialog):
             """
         )
         from dbaide.i18n import t as _t
-        for label, key in ((_t("settings.connections"), "connections"), (_t("settings.models"), "models"),
-                           (_t("settings.resources"), "resources"), (_t("settings.general"), "general")):
+        for label, key in (
+            (_t("settings.connections"), "connections"),
+            (_t("settings.models"), "models"),
+            (_t("settings.resources"), "resources"),
+            (_t("settings.general"), "general"),
+            (_t("settings.about"), "about"),
+        ):
             item = QListWidgetItem(label)
             item.setData(Qt.ItemDataRole.UserRole, key)
             self.nav.addItem(item)
@@ -243,10 +257,13 @@ class SettingsDialog(ChromeDialog):
         self.stack.addWidget(self._build_models_page())
         self.stack.addWidget(self._build_resources_page())
         self.stack.addWidget(self._build_general_page())
+        self.stack.addWidget(self._build_about_page())
         body.addWidget(self.stack, 1)
         root.addLayout(body, 1)
 
-        page_map = {"connections": 0, "models": 1, "model": 1, "resources": 2, "general": 3}
+        page_map = {
+            "connections": 0, "models": 1, "model": 1, "resources": 2, "general": 3, "about": 4,
+        }
         self.nav.setCurrentRow(page_map.get(initial_page, 0))
         self._reload_connection_list()
         self._reload_model_list()
@@ -478,6 +495,99 @@ class SettingsDialog(ChromeDialog):
         layout.addWidget(card)
         layout.addStretch(1)
         return page
+
+    def _build_about_page(self) -> QWidget:
+        from dbaide.i18n import t
+
+        page = QWidget()
+        layout = QVBoxLayout(page)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(16)
+        layout.addWidget(self._page_header(t("settings.about"), t("settings.about.subtitle")))
+
+        card = _SectionCard()
+        card_layout = QVBoxLayout(card)
+        card_layout.setContentsMargins(20, 20, 20, 20)
+        card_layout.setSpacing(14)
+
+        title = QLabel(f"{APP_NAME}  v{app_version()}")
+        title.setStyleSheet(f"color: {Theme.TEXT}; font-size: 20px; font-weight: 800;")
+        card_layout.addWidget(title)
+
+        tagline = QLabel(t("settings.about.tagline"))
+        tagline.setWordWrap(True)
+        tagline.setStyleSheet(f"color: {Theme.MUTED}; font-size: 13px;")
+        card_layout.addWidget(tagline)
+
+        card_layout.addWidget(self._about_meta_row(t("settings.about.version"), f"v{app_version()}"))
+        card_layout.addWidget(self._about_link_row(
+            t("settings.about.developer"),
+            DEVELOPER_NAME,
+            DEVELOPER_URL,
+        ))
+        card_layout.addWidget(self._about_meta_row(t("settings.about.license"), LICENSE_NAME))
+
+        links_head = QLabel(t("settings.about.links"))
+        links_head.setStyleSheet(
+            f"color: {Theme.MUTED}; font-size: 11px; font-weight: 600; margin-top: 6px;"
+        )
+        card_layout.addWidget(links_head)
+
+        links_col = QVBoxLayout()
+        links_col.setContentsMargins(0, 0, 0, 0)
+        links_col.setSpacing(2)
+        for label_key, url in project_links():
+            links_col.addWidget(self._about_external_link(t(label_key), url))
+        card_layout.addLayout(links_col)
+
+        layout.addWidget(card)
+        layout.addStretch(1)
+        return page
+
+    @staticmethod
+    def _about_meta_row(label: str, value: str) -> QWidget:
+        row = QWidget()
+        h = QHBoxLayout(row)
+        h.setContentsMargins(0, 0, 0, 0)
+        h.setSpacing(12)
+        key = QLabel(label)
+        key.setFixedWidth(88)
+        key.setStyleSheet(f"color: {Theme.MUTED}; font-size: 12px;")
+        val = QLabel(value)
+        val.setStyleSheet(f"color: {Theme.TEXT}; font-size: 12px;")
+        h.addWidget(key)
+        h.addWidget(val, 1)
+        return row
+
+    @staticmethod
+    def _about_link_row(label: str, text: str, url: str) -> QWidget:
+        row = QWidget()
+        h = QHBoxLayout(row)
+        h.setContentsMargins(0, 0, 0, 0)
+        h.setSpacing(12)
+        key = QLabel(label)
+        key.setFixedWidth(88)
+        key.setStyleSheet(f"color: {Theme.MUTED}; font-size: 12px;")
+        btn = ghost_action_button(
+            text,
+            icon=svg_icon("external-link", color=Theme.MUTED, size=14),
+            tooltip=url,
+        )
+        btn.clicked.connect(lambda _checked=False, target=url: QDesktopServices.openUrl(QUrl(target)))
+        h.addWidget(key)
+        h.addWidget(btn, 0, Qt.AlignmentFlag.AlignLeft)
+        h.addStretch(1)
+        return row
+
+    @staticmethod
+    def _about_external_link(label: str, url: str) -> QWidget:
+        btn = ghost_action_button(
+            label,
+            icon=svg_icon("external-link", color=Theme.MUTED, size=14),
+            tooltip=url,
+        )
+        btn.clicked.connect(lambda _checked=False, target=url: QDesktopServices.openUrl(QUrl(target)))
+        return btn
 
     def _page_header(self, title: str, subtitle: str) -> QWidget:
         wrap = QWidget()

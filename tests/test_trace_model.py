@@ -115,6 +115,34 @@ def test_summary_line_lists_active_agents():
     assert "2 agents" in line
 
 
+def test_running_summary_without_tool_steps_is_not_idle():
+    from dbaide.agent.trace_model import localized_summary_line
+
+    m = TraceModel()
+    _feed(m, [
+        {"stage": "workflow_started", "title": "Starting", "status": "running", "kind": "agent"},
+    ])
+    assert m.overall == "running"
+    assert localized_summary_line(m) != "Idle"
+    assert "Starting" in localized_summary_line(m) or "启动" in localized_summary_line(m)
+
+
+def test_environment_check_is_a_visible_step():
+    m = TraceModel()
+    _feed(m, [
+        progress_event(
+            stage="environment_check",
+            title="Checking environment",
+            status="running",
+            kind="phase",
+            node_id="workflow:environment_check",
+        ),
+    ])
+    assert len(m.steps) == 1
+    assert m.steps[0].stage == "environment_check"
+    assert m.steps[0].status == "running"
+
+
 def test_framing_events_are_not_steps():
     m = TraceModel()
     _feed(m, [

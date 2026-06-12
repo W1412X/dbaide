@@ -52,6 +52,8 @@ PHASE_LABELS: dict[str, str] = {
     "column_stats": "Profiling data",
     "ask_user": "Waiting for you",
     "build_assets": "Building assets",
+    "environment_check": "Checking environment",
+    "agent_request": "Starting agent",
 }
 
 # Friendly names for the named sub-agents that report nested progress.
