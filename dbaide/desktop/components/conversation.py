@@ -38,6 +38,7 @@ from dbaide.desktop.theme import Theme
 _TRACE_CHEVRON_SIZE = 15
 _TRACE_ANIM_MS = 180
 _TRACE_MAX_H = 340
+from dbaide.charts.embed import split_answer_with_charts
 from dbaide.rendering.markdown import render_markdown_safe
 
 
@@ -785,6 +786,12 @@ class TurnBlock(QFrame):
         self._content_host.show()
         self._content.addWidget(widget)
 
+    def remove_content_widget(self, widget: QWidget) -> None:
+        """Drop a widget from the answer column (e.g. replace streamed prose with embeds)."""
+        self._content.removeWidget(widget)
+        widget.setParent(None)
+        widget.deleteLater()
+
     # ── inline trace ───────────────────────────────────────────────────────────
 
     def _trace_open(self) -> bool:
@@ -1022,6 +1029,60 @@ class ConversationView(QScrollArea):
         from dbaide.i18n import t
         return t(key)
 
+    def _append_answer_with_embedded_charts(
+        self,
+        turn: TurnBlock,
+        answer: str,
+        charts: list[dict[str, Any]] | None,
+        *,
+        workflow_id: str = "",
+        replace_widget: _MarkdownBlock | None = None,
+    ) -> None:
+        """Render answer prose and charts in document order (inline placeholders)."""
+        from dbaide.charts.embed import CHART_EMBED_RE
+
+        body = str(answer or "")
+        chart_list = [c for c in (charts or []) if isinstance(c, dict) and c.get("chart_id")]
+        has_embeds = bool(CHART_EMBED_RE.search(body))
+        if (
+            replace_widget is not None
+            and not chart_list
+            and not has_embeds
+            and body.strip()
+        ):
+            try:
+                replace_widget.set_markdown(body)
+            except RuntimeError:
+                turn.remove_content_widget(replace_widget)
+                turn.append_content(_MarkdownBlock(
+                    body,
+                    title="DBAide",
+                    title_tooltip=f"workflow {workflow_id}" if workflow_id else "",
+                ))
+            return
+
+        if replace_widget is not None:
+            turn.remove_content_widget(replace_widget)
+
+        if not body.strip() and not chart_list:
+            return
+
+        segments = split_answer_with_charts(body, chart_list)
+        if not segments and body.strip():
+            segments = [("md", body)]
+
+        first_md = True
+        for kind, payload in segments:
+            if kind == "md":
+                turn.append_content(_MarkdownBlock(
+                    str(payload),
+                    title="DBAide" if first_md else "",
+                    title_tooltip=f"workflow {workflow_id}" if first_md and workflow_id else "",
+                ))
+                first_md = False
+            elif kind == "chart" and isinstance(payload, dict):
+                turn.append_content(ChartBlock(payload))
+
     def append_clarification_reply(self, text: str) -> None:
         if self._current_turn is None:
             return
@@ -1070,25 +1131,17 @@ class ConversationView(QScrollArea):
 
         # Clean author label — just "DBAide" (the internal workflow id is noise in the
         # message header, Codex-style; keep it reachable as a tooltip and in the trace).
-        if self._live_answer is not None:
-            # The answer already token-streamed in live → just snap it to the
-            # authoritative text (it may differ slightly from what streamed).
-            try:
-                self._live_answer.set_markdown(answer or self._live_answer_text)
-            except RuntimeError:
-                pass
-            self._live_answer = None
-            self._live_answer_text = ""
-        elif answer.strip():
-            # No live stream (streaming off, unsupported, or a deterministic answer):
-            # render the full answer at once — no front-end simulation.
-            turn.append_content(_MarkdownBlock(
-                answer, title="DBAide",
-                title_tooltip=f"workflow {workflow_id}" if workflow_id else "",
-            ))
-        for chart in charts or []:
-            if isinstance(chart, dict) and chart.get("chart_id"):
-                turn.append_content(ChartBlock(chart))
+        live = self._live_answer
+        live_text = self._live_answer_text
+        self._live_answer = None
+        self._live_answer_text = ""
+        self._append_answer_with_embedded_charts(
+            turn,
+            answer or live_text,
+            charts,
+            workflow_id=workflow_id,
+            replace_widget=live,
+        )
         if sql.strip() and "```sql" not in answer:
             turn.append_content(_MarkdownBlock(f"```sql\n{sql}\n```", title="SQL"))
         if actions_widget is not None:

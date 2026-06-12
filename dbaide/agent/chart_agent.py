@@ -2,16 +2,15 @@
 
 from __future__ import annotations
 
-import logging
 import math
 from dataclasses import dataclass
 from typing import Any
 
+from dbaide.agent.progressive_schema import ModelRequiredError
 from dbaide.agent.prompts.chart_agent import chart_agent_system_prompt, chart_agent_user_prompt
 from dbaide.charts.spec import ChartSpec
 from dbaide.llm import LLMClient, LLMMessage, NullLLMClient
 
-logger = logging.getLogger("dbaide.chart_agent")
 
 CHART_TYPES = frozenset({
     "bar", "horizontal_bar", "line", "area", "pie", "donut", "stacked_bar", "scatter",
@@ -47,12 +46,9 @@ class ChartAgent:
     ) -> ChartPlan:
         if not rows:
             raise ValueError("no rows to chart")
-        if not isinstance(self.llm, NullLLMClient):
-            try:
-                return self._llm_plan(question=question, intent=intent, columns=columns, rows=rows)
-            except Exception as exc:
-                logger.warning("chart agent LLM failed, using heuristic fallback: %s", exc)
-        return _heuristic_plan(columns, rows, intent=intent)
+        if isinstance(self.llm, NullLLMClient):
+            raise ModelRequiredError("LLM is required for chart planning.")
+        return self._llm_plan(question=question, intent=intent, columns=columns, rows=rows)
 
     def build_spec(self, plan: ChartPlan, *, chart_id: str, rows: list[dict[str, Any]]) -> ChartSpec:
         categories, series = _materialize(plan, rows)
@@ -110,16 +106,26 @@ class ChartAgent:
         )
         if not isinstance(payload, dict):
             raise ValueError("chart agent returned non-object JSON")
-        chart_type = str(payload.get("chart_type") or "bar").strip()
+        chart_type = str(payload.get("chart_type") or "").strip()
         if chart_type not in CHART_TYPES:
-            chart_type = "bar"
-        value_fields = [str(v) for v in (payload.get("value_fields") or []) if str(v).strip()]
-        series_names = [str(v) for v in (payload.get("series_names") or []) if str(v).strip()]
-        category_field = str(payload.get("category_field") or "").strip()
+            raise ValueError(f"chart agent returned unsupported chart_type: {chart_type!r}")
+        value_fields = [str(v).strip() for v in (payload.get("value_fields") or []) if str(v).strip()]
         if not value_fields:
-            value_fields, category_field = _infer_fields(columns, rows, category_field)
+            raise ValueError("chart agent must return non-empty value_fields")
+        category_field = str(payload.get("category_field") or "").strip()
         if not category_field:
-            category_field, _ = _infer_fields(columns, rows, "")
+            raise ValueError("chart agent must return category_field")
+        col_set = set(columns)
+        if category_field not in col_set:
+            raise ValueError(
+                f"chart agent category_field {category_field!r} not in columns: {columns!r}"
+            )
+        unknown = [f for f in value_fields if f not in col_set]
+        if unknown:
+            raise ValueError(
+                f"chart agent value_fields not in columns: {unknown!r} (columns: {columns!r})"
+            )
+        series_names = [str(v) for v in (payload.get("series_names") or []) if str(v).strip()]
         while len(series_names) < len(value_fields):
             series_names.append(value_fields[len(series_names)])
         return ChartPlan(
@@ -133,65 +139,6 @@ class ChartAgent:
             sort_by=str(payload.get("sort_by") or "value_desc").strip() or "value_desc",
             limit=max(1, min(100, int(payload.get("limit") or 20))),
         )
-
-
-def _heuristic_plan(columns: list[str], rows: list[dict[str, Any]], *, intent: str = "") -> ChartPlan:
-    category_field, value_fields = _infer_fields(columns, rows, "")
-    chart_type = "horizontal_bar"
-    if len(value_fields) > 1:
-        chart_type = "stacked_bar"
-    if len(rows) <= 8 and len(value_fields) == 1:
-        chart_type = "pie"
-    return ChartPlan(
-        chart_type=chart_type,
-        title=intent.strip() or "Chart",
-        category_field=category_field,
-        value_fields=value_fields[:3],
-        series_names=value_fields[:3],
-        x_label=value_fields[0] if value_fields else "",
-        y_label=category_field,
-        sort_by="value_desc",
-        limit=20,
-    )
-
-
-def _infer_fields(
-    columns: list[str],
-    rows: list[dict[str, Any]],
-    preferred_category: str,
-) -> tuple[str, list[str]]:
-    numeric: list[str] = []
-    text: list[str] = []
-    for col in columns:
-        if _column_is_numeric(rows, col):
-            numeric.append(col)
-        else:
-            text.append(col)
-    category = preferred_category if preferred_category in columns else ""
-    if not category:
-        category = text[0] if text else (columns[0] if columns else "")
-    if not numeric:
-        numeric = [c for c in columns if c != category]
-    return category, numeric
-
-
-def _column_is_numeric(rows: list[dict[str, Any]], column: str) -> bool:
-    seen = 0
-    numeric = 0
-    for row in rows[:40]:
-        val = row.get(column)
-        if val is None or val == "":
-            continue
-        seen += 1
-        if isinstance(val, (int, float)) and not isinstance(val, bool):
-            numeric += 1
-        else:
-            try:
-                float(val)
-                numeric += 1
-            except (TypeError, ValueError):
-                return False
-    return seen > 0 and numeric == seen
 
 
 def _materialize(plan: ChartPlan, rows: list[dict[str, Any]]) -> tuple[list[str], list[dict[str, Any]]]:

@@ -84,6 +84,7 @@ def register(registry: ToolRegistry, orchestrator) -> None:
                 "title": spec.title,
                 "row_count": spec.row_count,
                 "preview": f"{spec.title} ({spec.row_count} pts)",
+                "embed_markdown": f"{{{{chart:{spec.chart_id}}}}}",
             },
         )
 

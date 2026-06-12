@@ -413,8 +413,8 @@ RENDER_CHART = ToolSpec(
         "chart/visualization (图表/可视化) or when a chart clarifies comparisons or trends. "
         "Requires aggregated numeric data — run execute_sql first. Pass artifact_id from that "
         "result, inline data, or use the latest query result. A dedicated chart agent picks the "
-        "chart type and field mapping; then call finish with a short interpretation (no markdown "
-        "images)."
+        "chart type and field mapping. In finish, embed each chart inline with "
+        "`{{chart:CHART_ID}}` (from tool output) at the appropriate position in your markdown answer."
     ),
     input_schema={
         "artifact_id": "string",
@@ -427,6 +427,7 @@ RENDER_CHART = ToolSpec(
         "title": "string",
         "row_count": "integer",
         "preview": "string",
+        "embed_markdown": "string",
     },
     permission_level=SAFE_METADATA,
     timeout_seconds=60,

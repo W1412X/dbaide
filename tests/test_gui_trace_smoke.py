@@ -546,6 +546,37 @@ def test_answer_chunks_stream_live_then_finalize(qapp):
     assert v._turns[-1]["answer"] == "42 paid orders"  # full text stored for copy
 
 
+def test_complete_turn_embeds_charts_inline(qapp):
+    from dbaide.desktop.components.chart_block import ChartBlock
+    from dbaide.desktop.components.conversation import ConversationView, _MarkdownBlock
+
+    chart = {
+        "chart_id": "chart:1",
+        "chart_type": "bar",
+        "title": "Sales",
+        "categories": ["A"],
+        "series": [{"name": "n", "values": [1.0]}],
+        "row_count": 1,
+    }
+    conv = ConversationView()
+    conv.begin_turn("show chart")
+    conv.complete_turn(
+        answer="Before\n\n{{chart:chart:1}}\n\nAfter",
+        charts=[chart],
+        ok=True,
+    )
+    block = conv._layout.itemAt(conv._layout.count() - 1).widget()
+    types = [
+        w.__class__.__name__
+        for i in range(block._content.count())
+        if (w := block._content.itemAt(i).widget()) is not None
+    ]
+    assert types == ["_MarkdownBlock", "ChartBlock", "_MarkdownBlock"]
+    first = block._content.itemAt(0).widget()
+    assert isinstance(first, _MarkdownBlock)
+    assert "Before" in first._markdown
+
+
 def test_config_stream_answers_default_on(tmp_path):
     from dbaide.config import ConfigManager
     cfg = ConfigManager(path=tmp_path / "config.toml")
