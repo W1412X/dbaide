@@ -738,6 +738,7 @@ _STRINGS: dict[str, dict[str, str]] = {
     },
     "ask.search_results": {"en": "Found {n} matches for `{query}`:", "zh": "找到 {n} 条与 `{query}` 匹配的结果："},
     "ask.copied": {"en": "Copied", "zh": "已复制"},
+    "ask.copy_answer": {"en": "Copy answer", "zh": "复制回复"},
     "ask.copy_sql": {"en": "Copy SQL", "zh": "复制 SQL"},
     "ask.open_in_sql": {"en": "Open in SQL", "zh": "在 SQL 中打开"},
     "ask.open_in_sql_tooltip": {"en": "Open this query in the SQL tab", "zh": "在 SQL 标签页中打开此查询"},

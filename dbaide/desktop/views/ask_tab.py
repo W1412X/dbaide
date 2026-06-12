@@ -208,13 +208,14 @@ class AskTab(QWidget):
             errors=result.get("errors") or None,
             workflow_id=workflow_id,
             ok=ok,
-            actions_widget=self._build_actions(sql, result.get("cli_command")),
+            actions_widget=self._build_actions(answer, sql, result.get("cli_command")),
         )
 
     def append_note(self, key: str, title: str, body: str) -> None:
         view = self.ensure_slot(key)
         view.begin_turn("")
-        view.complete_turn(answer=f"**{title}**\n\n{body}", ok=True)
+        body = f"**{title}**\n\n{body}"
+        view.complete_turn(answer=body, ok=True, actions_widget=self._build_actions(body, "", None))
 
     def append_search_hits(self, key: str, query: str, hits: list[dict[str, Any]]) -> None:
         from dbaide.i18n import t as _t
@@ -229,7 +230,7 @@ class AskTab(QWidget):
             body = "\n".join(lines)
         view = self.ensure_slot(key)
         view.begin_turn(query)
-        view.complete_turn(answer=body, ok=True)
+        view.complete_turn(answer=body, ok=True, actions_widget=self._build_actions(body, "", None))
 
     def clear_slot(self, key: str) -> None:
         view = self._views.get(key)
@@ -260,13 +261,17 @@ class AskTab(QWidget):
                 sql=sql,
                 trace_events=turn.get("trace") or [],
                 ok=status not in ("failed", "cancelled"),
-                actions_widget=self._build_actions(sql, None),
+                actions_widget=self._build_actions(
+                    str(turn.get("answer_markdown") or ""), sql, None,
+                ),
             )
 
     # ── helpers ───────────────────────────────────────────────────────────────
 
-    def _build_actions(self, sql: str, cli_command: str | None) -> QWidget | None:
-        if not sql:
+    def _build_actions(self, answer: str, sql: str, cli_command: str | None) -> QWidget | None:
+        answer = str(answer or "").strip()
+        sql = str(sql or "").strip()
+        if not answer and not sql:
             return None
         from PyQt6.QtCore import QTimer
         from dbaide.desktop.components.base import ghost_action_button
@@ -308,13 +313,16 @@ class AskTab(QWidget):
         row = QHBoxLayout(bar)
         row.setContentsMargins(0, 2, 0, 0)
         row.setSpacing(2)
-        row.addWidget(_copy_btn(_t("ask.copy_sql"), sql))
-        open_btn = ghost_action_button(
-            _t("ask.open_in_sql"), icon=svg_icon("external-link", color=Theme.MUTED, size=14),
-            tooltip=_t("ask.open_in_sql_tooltip"),
-        )
-        open_btn.clicked.connect(lambda: self.open_sql.emit(sql))
-        row.addWidget(open_btn)
+        if answer:
+            row.addWidget(_copy_btn(_t("ask.copy_answer"), answer))
+        if sql:
+            row.addWidget(_copy_btn(_t("ask.copy_sql"), sql))
+            open_btn = ghost_action_button(
+                _t("ask.open_in_sql"), icon=svg_icon("external-link", color=Theme.MUTED, size=14),
+                tooltip=_t("ask.open_in_sql_tooltip"),
+            )
+            open_btn.clicked.connect(lambda: self.open_sql.emit(sql))
+            row.addWidget(open_btn)
         if cli_command:
             row.addWidget(_copy_btn(_t("ask.copy_cli"), str(cli_command)))
         row.addStretch(1)

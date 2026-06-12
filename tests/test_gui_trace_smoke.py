@@ -495,6 +495,29 @@ def test_markdown_block_copy_action_writes_source_message(qapp):
     assert QApplication.clipboard().text() == markdown
 
 
+def test_copy_answer_action_writes_clipboard(qapp):
+    from PyQt6.QtWidgets import QApplication, QPushButton
+    from dbaide.desktop.views.ask_tab import AskTab
+
+    tab = AskTab()
+    bar = tab._build_actions("There are **3** factories.", "", None)
+    assert bar is not None
+    buttons = bar.findChildren(QPushButton)
+    assert len(buttons) == 1
+    buttons[0].click()
+    assert QApplication.clipboard().text() == "There are **3** factories."
+
+
+def test_copy_answer_and_sql_actions(qapp):
+    from PyQt6.QtWidgets import QPushButton
+    from dbaide.desktop.views.ask_tab import AskTab
+
+    tab = AskTab()
+    bar = tab._build_actions("Done.", "SELECT 1", None)
+    labels = [b.text() for b in bar.findChildren(QPushButton)]
+    assert len(labels) >= 2
+
+
 def test_answer_without_stream_renders_immediately(qapp):
     """No live chunks (model can't stream / streaming off) → the full answer renders at
     once, with no front-end simulation. The full text is stored for copy."""
