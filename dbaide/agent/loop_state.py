@@ -115,6 +115,7 @@ def dump_loop_state(
             "memory": orchestrator.run_state.memory.to_dict(),
             "scope_used": bool(orchestrator.run_state.scope_used),
             "query_result": query_result_to_dict(orchestrator.run_state.query_result),
+            "charts": list(orchestrator.run_state.charts or []),
         },
     }
 
@@ -185,6 +186,10 @@ def restore_loop_state(orchestrator: Any, snapshot: dict[str, Any]) -> tuple[lis
     orchestrator.run_state.memory = AgentMemory.from_dict(payload.get("memory"))
     orchestrator.run_state.scope_used = bool(payload.get("scope_used", False))
     orchestrator.run_state.query_result = query_result_from_dict(payload.get("query_result"))
+    charts_payload = payload.get("charts")
+    orchestrator.run_state.charts = [
+        dict(item) for item in _list_or_empty(charts_payload) if isinstance(item, dict)
+    ]
     orchestrator.run_state.execute_allowed = execute_allowed
     if not orchestrator.run_state.memory.goal and orchestrator.run_state.question:
         orchestrator.run_state.memory.reset_goal(

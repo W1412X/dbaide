@@ -209,6 +209,7 @@ class AskTab(QWidget):
             workflow_id=workflow_id,
             ok=ok,
             actions_widget=self._build_actions(answer, sql, result.get("cli_command")),
+            charts=result.get("charts") or None,
         )
 
     def append_note(self, key: str, title: str, body: str) -> None:
@@ -264,6 +265,7 @@ class AskTab(QWidget):
                 actions_widget=self._build_actions(
                     str(turn.get("answer_markdown") or ""), sql, None,
                 ),
+                charts=turn.get("charts") or None,
             )
 
     # ── helpers ───────────────────────────────────────────────────────────────

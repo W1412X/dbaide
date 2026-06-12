@@ -406,6 +406,33 @@ ASK_USER = ToolSpec(
     safe_for_auto_call=True,
 )
 
+RENDER_CHART = ToolSpec(
+    name="render_chart",
+    description=(
+        "Render an interactive chart from tabular SQL results. Call when the user asks for a "
+        "chart/visualization (图表/可视化) or when a chart clarifies comparisons or trends. "
+        "Requires aggregated numeric data — run execute_sql first. Pass artifact_id from that "
+        "result, inline data, or use the latest query result. A dedicated chart agent picks the "
+        "chart type and field mapping; then call finish with a short interpretation (no markdown "
+        "images)."
+    ),
+    input_schema={
+        "artifact_id": "string",
+        "data": "list[dict]",
+        "intent": "string",
+    },
+    output_schema={
+        "chart_id": "string",
+        "chart_type": "string",
+        "title": "string",
+        "row_count": "integer",
+        "preview": "string",
+    },
+    permission_level=SAFE_METADATA,
+    timeout_seconds=60,
+    safe_for_auto_call=True,
+)
+
 RETRIEVE_MEMORY_ITEM = ToolSpec(
     name="retrieve_memory_item",
     description=(

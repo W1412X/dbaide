@@ -1,0 +1,58 @@
+"""Prompts for the dedicated chart-planning agent."""
+
+from __future__ import annotations
+
+from typing import Any
+
+
+def chart_agent_system_prompt() -> str:
+    return (
+        "You are a chart-planning specialist for a database assistant. "
+        "Given tabular query results, choose the best chart type and map columns to "
+        "categories and numeric series. Output JSON only.\n\n"
+        "Supported chart_type values:\n"
+        "- bar: vertical bars, short category names\n"
+        "- horizontal_bar: long category labels (factory names, URLs)\n"
+        "- line: trends over ordered categories or time buckets\n"
+        "- area: like line with filled area (single series preferred)\n"
+        "- pie / donut: part-of-whole with ≤8 slices\n"
+        "- stacked_bar: multiple numeric columns per category\n"
+        "- scatter: two numeric columns (x vs y)\n\n"
+        "Rules:\n"
+        "- category_field must be a text/label column present in the data\n"
+        "- value_fields must be numeric measure columns; use exact column names from input\n"
+        "- Prefer horizontal_bar when category strings are long or >6 categories with text labels\n"
+        "- For pie/donut use a single value_field; categories come from category_field\n"
+        "- For scatter set category_field to the X numeric column and value_fields[0] to Y\n"
+        "- sort_by: value_desc | value_asc | category_asc | none\n"
+        "- limit: max categories to plot (default 20)\n"
+        "- Provide concise axis titles in the user's language when obvious from context"
+    )
+
+
+def chart_agent_user_prompt(
+    *,
+    question: str,
+    intent: str,
+    columns: list[str],
+    rows: list[dict[str, Any]],
+    sample_limit: int = 40,
+) -> str:
+    sample = rows[:sample_limit]
+    lines = [
+        f"User question: {question or '(not provided)'}",
+        f"Chart intent from main agent: {intent or '(visualize the query result)'}",
+        f"Columns: {', '.join(columns)}",
+        f"Row count: {len(rows)} (showing up to {len(sample)} below)",
+        "",
+        "Sample rows (JSON-like):",
+    ]
+    for row in sample:
+        lines.append(str({k: row.get(k) for k in columns if k in row}))
+    lines.append("")
+    lines.append(
+        'Return JSON: {"chart_type":"...", "title":"...", "category_field":"...", '
+        '"value_fields":["..."], "series_names":["..."], "x_label":"...", "y_label":"...", '
+        '"sort_by":"value_desc|value_asc|category_asc|none", "limit":20}'
+    )
+    return "\n".join(lines)

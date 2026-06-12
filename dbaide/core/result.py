@@ -33,6 +33,7 @@ class WorkflowResult:
         "trace", "created_at", "completed_at",
         "pending_question", "pending_options", "pending_questions", "resume_state",
         "clarifications", "disclosed_tables",
+        "charts",
     )
 
     def __init__(
@@ -90,6 +91,7 @@ class WorkflowResult:
         # turn's session memory to read.
         self.clarifications: list[str] = []
         self.disclosed_tables: list[str] = []
+        self.charts: list[dict[str, Any]] = []
 
     def to_dict(self) -> dict[str, Any]:
         """Serialize to JSON-compatible dict."""
@@ -121,6 +123,7 @@ class WorkflowResult:
             "resume_state": self.resume_state,
             "clarifications": self.clarifications,
             "disclosed_tables": self.disclosed_tables,
+            "charts": list(self.charts or []),
         }
 
 

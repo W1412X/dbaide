@@ -540,7 +540,7 @@ class AskAgentLoop:
             data_for_memory = dict(data_for_memory)
             data_for_memory["error"] = result.error.to_dict()
         if isinstance(data_for_memory, dict):
-            for key in ("report_id", "artifact_id"):
+            for key in ("report_id", "artifact_id", "chart_id"):
                 if data_for_memory.get(key):
                     artifacts.append(str(data_for_memory[key]))
             if data_for_memory.get("pending"):
@@ -617,6 +617,7 @@ class AskAgentLoop:
             result=orch.run_state.query_result,
             disclosures=orch.session.disclosure.events[len(disclosures_before):],
             warnings=[t("agent.loop_failed_reason", reason=reason)],
+            charts=list(orch.run_state.charts or []),
         )
 
     def _emit_answer_chunk(self, text: str) -> None:
@@ -818,6 +819,7 @@ class AskAgentLoop:
             pending_options=options,
             pending_questions=list(orch.run_state.pending_questions),
             resume_state=snapshot,
+            charts=list(orch.run_state.charts or []),
         )
 
     def _build_response(
@@ -829,6 +831,7 @@ class AskAgentLoop:
             result=orch.run_state.query_result,
             disclosures=orch.session.disclosure.events[len(disclosures_before):],
             warnings=[],
+            charts=list(orch.run_state.charts or []),
         )
 
     def _trace_sink(self, event: TraceEvent) -> None:

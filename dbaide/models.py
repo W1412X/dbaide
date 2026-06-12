@@ -267,6 +267,7 @@ class AssistantResponse:
         pending_options: list[str] | None = None,
         pending_questions: list[dict[str, Any]] | None = None,
         resume_state: dict[str, Any] | None = None,
+        charts: list[dict[str, Any]] | None = None,
     ) -> None:
         self.answer = answer
         self.sql = sql
@@ -280,3 +281,4 @@ class AssistantResponse:
         # through them one at a time. Falls back to the flat blob if empty.
         self.pending_questions = pending_questions or []
         self.resume_state = resume_state
+        self.charts = list(charts or [])

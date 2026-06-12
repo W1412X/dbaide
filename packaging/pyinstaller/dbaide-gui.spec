@@ -35,6 +35,7 @@ hiddenimports = [
     "dbaide.desktop",
     "dbaide.desktop.views",
     "dbaide.desktop.components",
+    "dbaide.desktop.components.chart_block",
     "dbaide.desktop.dialogs",
     "dbaide.agent",
     "dbaide.agent.loop",
@@ -44,8 +45,9 @@ hiddenimports = [
     "dbaide.history",
     "dbaide.core",
     "dbaide.tools",
-    "dbaide.rendering",
-    "dbaide.rendering.markdown",
+    "dbaide.charts",
+    "dbaide.agent.chart_agent",
+    "dbaide.agent.toolkit.chart_tools",
     "dbaide.adapters",
     "dbaide.adapters.sqlite",
     "dbaide.adapters.mysql",
@@ -58,6 +60,7 @@ hiddenimports = [
     "PyQt6.QtGui",
     "PyQt6.QtWidgets",
     "PyQt6.QtSvg",
+    "PyQt6.QtCharts",
 ] + mistune_hidden
 
 # Drop big Qt modules we never import, so nothing transitively drags them in.
@@ -65,7 +68,7 @@ _QT_EXCLUDES = [
     "PyQt6.QtQml", "PyQt6.QtQuick", "PyQt6.QtQuickWidgets", "PyQt6.QtQuick3D",
     "PyQt6.QtNetwork", "PyQt6.QtMultimedia", "PyQt6.QtMultimediaWidgets",
     "PyQt6.QtWebEngineCore", "PyQt6.QtWebEngineWidgets", "PyQt6.QtWebChannel",
-    "PyQt6.QtWebSockets", "PyQt6.QtCharts", "PyQt6.QtDataVisualization",
+    "PyQt6.QtWebSockets", "PyQt6.QtDataVisualization",
     "PyQt6.QtPdf", "PyQt6.QtPdfWidgets", "PyQt6.QtSql", "PyQt6.QtTest",
     "PyQt6.QtDesigner", "PyQt6.QtUiTools", "PyQt6.QtHelp", "PyQt6.QtBluetooth",
     "PyQt6.QtNfc", "PyQt6.QtPositioning", "PyQt6.QtSensors", "PyQt6.QtSerialPort",

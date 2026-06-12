@@ -915,6 +915,7 @@ class DesktopService:
                 attachments=attachments,
                 schema_scope=schema_scope,
                 created_at=result.created_at or None,
+                charts=list(getattr(result, "charts", []) or []),
             ))
         except Exception:  # noqa: BLE001 — session persistence must never break a query
             logger.debug("failed to record session turn", exc_info=True)

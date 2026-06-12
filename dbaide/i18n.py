@@ -746,6 +746,16 @@ _STRINGS: dict[str, dict[str, str]] = {
     # ── Conversation inline labels ───────────────────────────────────────
     "conversation.warnings": {"en": "Warnings", "zh": "警告"},
     "conversation.notes": {"en": "Notes", "zh": "备注"},
+    "conversation.chart": {"en": "Chart", "zh": "图表"},
+    "conversation.chart_points": {"en": "{n} data points", "zh": "{n} 个数据点"},
+    "conversation.chart_type.bar": {"en": "Bar chart", "zh": "柱状图"},
+    "conversation.chart_type.horizontal_bar": {"en": "Horizontal bar", "zh": "条形图"},
+    "conversation.chart_type.line": {"en": "Line chart", "zh": "折线图"},
+    "conversation.chart_type.area": {"en": "Area chart", "zh": "面积图"},
+    "conversation.chart_type.pie": {"en": "Pie chart", "zh": "饼图"},
+    "conversation.chart_type.donut": {"en": "Donut chart", "zh": "环形图"},
+    "conversation.chart_type.stacked_bar": {"en": "Stacked bar", "zh": "堆叠柱状图"},
+    "conversation.chart_type.scatter": {"en": "Scatter plot", "zh": "散点图"},
     "status.thinking": {"en": "Thinking…", "zh": "思考中…"},
     "status.waiting_reply": {"en": "Waiting for your reply…", "zh": "等待你的回复…"},
     # ── SQL tab messages ─────────────────────────────────────────────────

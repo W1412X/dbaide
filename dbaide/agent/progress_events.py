@@ -281,6 +281,9 @@ def brief_tool_summary(tool: str, result: Any) -> str:
         cols = data.get("columns") or []
         names = ", ".join(str(c.get("column")) for c in cols[:6])
         return f"stats: {names}" + (" …" if len(cols) > 6 else "")
+    if tool == "render_chart":
+        title = str(data.get("title") or data.get("chart_type") or "chart").strip()
+        return f"{title} ({data.get('row_count', '?')} pts)"
     raw = str(data)
     return raw[:200] + ("…" if len(raw) > 200 else "")
 

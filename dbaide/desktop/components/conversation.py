@@ -21,6 +21,7 @@ from PyQt6.QtWidgets import (
     QVBoxLayout,
     QWidget,
 )
+from dbaide.desktop.components.chart_block import ChartBlock
 
 from PyQt6.QtCore import QSize
 
@@ -1044,6 +1045,7 @@ class ConversationView(QScrollArea):
         workflow_id: str = "",
         ok: bool = True,
         actions_widget: QWidget | None = None,
+        charts: list[dict[str, Any]] | None = None,
     ) -> None:
         if self._current_turn is None:
             self.begin_turn("")
@@ -1059,6 +1061,8 @@ class ConversationView(QScrollArea):
             if trace_events:
                 self._current_record["events"] = list(trace_events)
             self._current_record["answer"] = answer
+            if charts:
+                self._current_record["charts"] = list(charts)
         turn.status.set_done(ok=ok, step_count=len(events), events=events)
         # Hand the authoritative trace to the turn so its inline view (if/when the
         # user expands the chip) shows the finalized run, not just what streamed.
@@ -1082,6 +1086,9 @@ class ConversationView(QScrollArea):
                 answer, title="DBAide",
                 title_tooltip=f"workflow {workflow_id}" if workflow_id else "",
             ))
+        for chart in charts or []:
+            if isinstance(chart, dict) and chart.get("chart_id"):
+                turn.append_content(ChartBlock(chart))
         if sql.strip() and "```sql" not in answer:
             turn.append_content(_MarkdownBlock(f"```sql\n{sql}\n```", title="SQL"))
         if actions_widget is not None:
