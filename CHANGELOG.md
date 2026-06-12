@@ -6,6 +6,28 @@ All notable changes to DBAide are documented here. The format is loosely based o
 
 ## [Unreleased]
 
+## [0.2.0] — 2026-06-12
+
+### Added
+
+- **Inline chart embeds** — charts render inside the answer markdown at
+  `{{chart:chart:N}}` or `![caption](chart:N)` placeholders; multiple charts per
+  reply; unreferenced charts still append at the end for backward compatibility.
+- **`embed_markdown` in `render_chart`** — tool output includes a ready-to-paste
+  placeholder for the finish answer.
+
+### Changed
+
+- **Chart Agent (LLM-only planning)** — chart type and column mapping must come from
+  the Chart Agent LLM; removed heuristic chart-type selection and `_infer_fields`
+  fallback (missing/invalid fields raise a retryable tool error instead).
+- **Agent prompts** — main agent embeds charts inline in `finish` answers instead of
+  prose-only summaries at the end.
+
+### Fixed
+
+- **`dbaide.__version__`** — synced with `pyproject.toml` (was stale at `0.0.6`).
+
 ## [0.1.10] — 2026-06-12
 
 ### Added
@@ -486,7 +508,9 @@ and a PyQt6 desktop app, sharing one Python core.
   drag-to-Applications)**, **Windows (`.msi` wizard)**, and **Linux (`.tar.gz`)** —
   pushing a `v*` tag cuts a GitHub Release automatically.
 
-[Unreleased]: https://github.com/W1412X/dbaide/compare/v0.1.9...HEAD
+[Unreleased]: https://github.com/W1412X/dbaide/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/W1412X/dbaide/compare/v0.1.10...v0.2.0
+[0.1.10]: https://github.com/W1412X/dbaide/compare/v0.1.9...v0.1.10
 [0.1.9]: https://github.com/W1412X/dbaide/compare/v0.1.8...v0.1.9
 [0.1.8]: https://github.com/W1412X/dbaide/compare/v0.1.7...v0.1.8
 [0.1.7]: https://github.com/W1412X/dbaide/compare/v0.1.6...v0.1.7
