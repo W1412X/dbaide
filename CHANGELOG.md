@@ -6,6 +6,25 @@ All notable changes to DBAide are documented here. The format is loosely based o
 
 ## [Unreleased]
 
+## [0.2.2] — 2026-06-12
+
+### Added
+
+- **HTTPS certificate trust (`certifi`)** — LLM API calls verify TLS against the
+  bundled Mozilla CA bundle instead of relying on a broken local Python trust store.
+- **Startup SSL check** — GUI warns once at launch if HTTPS verification to a public
+  API host fails (proxy / corporate cert guidance).
+- **Settings → Models** — note explaining HTTPS, certifi, and SSL troubleshooting.
+- **Promo assets** — screenshot set under `docs/images/promo/` and `tools/shoot_promo.py`
+  for capturing marketing images.
+
+### Fixed
+
+- **LLM `CERTIFICATE_VERIFY_FAILED`** — frequent macOS / pyenv SSL errors when
+  calling OpenAI-compatible endpoints; PyInstaller bundles now include certifi data.
+- **SSL error hints** — dedicated `error.llm.ssl` message when certificate verification
+  fails (distinct from generic network errors).
+
 ## [0.2.1] — 2026-06-12
 
 ### Added
@@ -532,7 +551,8 @@ and a PyQt6 desktop app, sharing one Python core.
   drag-to-Applications)**, **Windows (`.msi` wizard)**, and **Linux (`.tar.gz`)** —
   pushing a `v*` tag cuts a GitHub Release automatically.
 
-[Unreleased]: https://github.com/W1412X/dbaide/compare/v0.2.1...HEAD
+[Unreleased]: https://github.com/W1412X/dbaide/compare/v0.2.2...HEAD
+[0.2.2]: https://github.com/W1412X/dbaide/compare/v0.2.1...v0.2.2
 [0.2.1]: https://github.com/W1412X/dbaide/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/W1412X/dbaide/compare/v0.1.10...v0.2.0
 [0.1.10]: https://github.com/W1412X/dbaide/compare/v0.1.9...v0.1.10
