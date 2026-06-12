@@ -6,6 +6,30 @@ All notable changes to DBAide are documented here. The format is loosely based o
 
 ## [Unreleased]
 
+## [0.2.1] — 2026-06-12
+
+### Added
+
+- **Settings → About** — version, developer, license, and project links (GitHub,
+  releases, issues, README).
+- **Chart axis label layout** — compact ISO date formatting, automatic label tilt
+  for dense categories, hover tooltips on line/bar charts.
+
+### Changed
+
+- **Chart Agent prompts** — time-series guidance (line/area, `category_asc`, sensible
+  `limit`, date bucketing in SQL).
+- **Workflow prelude progress** — environment check and planning stream to the live
+  trace before the agent loop starts.
+
+### Fixed
+
+- **Trace summary at run start** — no longer shows「空闲 / Idle」while the connection
+  environment check is running.
+- **Trace detail「复制原始数据」** — copy button layout and full step JSON export.
+- **Chart x-axis labels** — disabled Qt `truncateLabels` that cropped dates to
+  `202…`; rotated labels when categories are dense.
+
 ## [0.2.0] — 2026-06-12
 
 ### Added
@@ -508,7 +532,8 @@ and a PyQt6 desktop app, sharing one Python core.
   drag-to-Applications)**, **Windows (`.msi` wizard)**, and **Linux (`.tar.gz`)** —
   pushing a `v*` tag cuts a GitHub Release automatically.
 
-[Unreleased]: https://github.com/W1412X/dbaide/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/W1412X/dbaide/compare/v0.2.1...HEAD
+[0.2.1]: https://github.com/W1412X/dbaide/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/W1412X/dbaide/compare/v0.1.10...v0.2.0
 [0.1.10]: https://github.com/W1412X/dbaide/compare/v0.1.9...v0.1.10
 [0.1.9]: https://github.com/W1412X/dbaide/compare/v0.1.8...v0.1.9
