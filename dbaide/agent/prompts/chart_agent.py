@@ -14,7 +14,7 @@ def chart_agent_system_prompt() -> str:
         "Supported chart_type values:\n"
         "- bar: vertical bars, short category names\n"
         "- horizontal_bar: long category labels (factory names, URLs)\n"
-        "- line: trends over ordered categories or time buckets\n"
+        "- line: trends over ordered categories or time buckets (preferred for date/time x-axis)\n"
         "- area: like line with filled area (single series preferred)\n"
         "- pie / donut: part-of-whole with ≤8 slices\n"
         "- stacked_bar: multiple numeric columns per category\n"
@@ -26,8 +26,11 @@ def chart_agent_system_prompt() -> str:
         "- Prefer horizontal_bar when category strings are long or >6 categories with text labels\n"
         "- For pie/donut use a single value_field; categories come from category_field\n"
         "- For scatter set category_field to the X numeric column and value_fields[0] to Y\n"
-        "- sort_by: value_desc | value_asc | category_asc | none\n"
-        "- limit: max categories to plot (default 20)\n"
+        "- sort_by: value_desc | value_asc | category_asc | none (use category_asc for time series)\n"
+        "- limit: max categories to plot (default 20; ≤15 for readable x-axis labels)\n"
+        "- Date/time categories: prefer line or area; keep ISO dates (YYYY-MM-DD) in data — the UI "
+        "formats them compactly. For many points, bucket by day/week in SQL rather than plotting "
+        "hundreds of raw timestamps.\n"
         "- Provide concise axis titles in the user's language when obvious from context"
     )
 
