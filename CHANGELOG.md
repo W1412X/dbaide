@@ -6,6 +6,22 @@ All notable changes to DBAide are documented here. The format is loosely based o
 
 ## [Unreleased]
 
+## [0.1.10] — 2026-06-12
+
+### Added
+
+- **Chart rendering** — `render_chart` tool with a dedicated Chart Agent for type/field
+  mapping; Qt Charts UI (`PyQt6-Charts`) for bar, horizontal bar, line, pie, donut,
+  stacked bar, and scatter plots; session persistence for chart specs.
+- **Copy answer** — one-click copy of the agent's full markdown reply in the Ask tab.
+
+### Changed
+
+- **Agent loop termination** — only `action=finish` (or `ask_user`) ends a run; successful
+  `execute_sql` no longer auto-completes the turn.
+- **App icon** — restore bundled PNG logo in the title bar and window icon.
+- **Ask action bar** — ghost-style buttons with icons for copy SQL / open in SQL / copy CLI.
+
 ## [0.1.9] — 2026-06-12
 
 ### Changed
