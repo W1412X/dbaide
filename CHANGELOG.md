@@ -6,6 +6,36 @@ All notable changes to DBAide are documented here. The format is loosely based o
 
 ## [Unreleased]
 
+## [0.2.3] — 2026-06-13
+
+### Added
+
+- **Asset status bar** — persistent schema summary above the tree (尚无资产 / 基础结构 /
+  已采样 / 部分采样 / 增强过期 / 构建有错误) with table/column/sample counts.
+- **Auto base build on new connection** — projects catalog on first connect; toast
+  「基础结构已初始化」.
+- **Build progress for enrich/sampling** — context-menu enrichment uses the same
+  live progress card as manual builds.
+- **GitHub release check** — fetches latest release on startup; TopBar update button
+  (when a newer version exists); Settings → About shows latest release with download link.
+- **`release_check` module** — semver compare, ahead-of-release / up-to-date states.
+
+### Changed
+
+- **Default build concurrency** — production `build_max_workers` **4**; Build Assets
+  dialog reads effective policy (Settings → Resources respected).
+- **Default max concurrent runs** — **6** (was 3).
+- **Resource defaults** — verified end-to-end wiring; build dialog workers follow saved policy.
+
+### Fixed
+
+- **Build failure UX** — failed builds refresh from store instead of wiping the schema
+  tree; asset summary shows errors when instance stats report failures.
+- **Release check UI** — fixed stuck「正在检查…」by marshaling results to the main
+  thread via Qt signal (not `QTimer` from a worker thread).
+- **About latest version** — distinguishes up-to-date, update available, and
+  ahead-of-release (dev builds).
+
 ## [0.2.2] — 2026-06-12
 
 ### Added
@@ -551,7 +581,8 @@ and a PyQt6 desktop app, sharing one Python core.
   drag-to-Applications)**, **Windows (`.msi` wizard)**, and **Linux (`.tar.gz`)** —
   pushing a `v*` tag cuts a GitHub Release automatically.
 
-[Unreleased]: https://github.com/W1412X/dbaide/compare/v0.2.2...HEAD
+[Unreleased]: https://github.com/W1412X/dbaide/compare/v0.2.3...HEAD
+[0.2.3]: https://github.com/W1412X/dbaide/compare/v0.2.2...v0.2.3
 [0.2.2]: https://github.com/W1412X/dbaide/compare/v0.2.1...v0.2.2
 [0.2.1]: https://github.com/W1412X/dbaide/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/W1412X/dbaide/compare/v0.1.10...v0.2.0
