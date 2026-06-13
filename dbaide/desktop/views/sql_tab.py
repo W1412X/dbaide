@@ -40,7 +40,7 @@ class SqlTab(QWidget):
         editor_wrap.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
         editor_wrap.setStyleSheet(
             f"QWidget#sqlEditorPane {{ background: {Theme.SURFACE};"
-            f" border: 1px solid {Theme.BORDER_SOFT}; border-radius: {Theme.RADIUS_LG}px; }}"
+            f" border: 1px solid {Theme.BORDER_SOFT}; border-radius: {Theme.RADIUS_MD}px; }}"
         )
         editor_row = QHBoxLayout(editor_wrap)
         editor_row.setContentsMargins(8, 8, 8, 8)
@@ -107,21 +107,15 @@ class SqlTab(QWidget):
         btn.setCursor(Qt.CursorShape.PointingHandCursor)
         btn.setFixedSize(26, 26)
         box = ("padding: 0; margin: 0; min-width: 26px; max-width: 26px;"
-               " min-height: 26px; max-height: 26px; border: none; border-radius: 6px;")
-        if primary:
-            btn.setStyleSheet(
-                f"QToolButton {{ background: transparent; {box} }}"
-                f"QToolButton:hover {{ background: {Theme.PANEL_2}; }}"
-                f"QToolButton:pressed {{ background: {Theme.PANEL_3}; }}"
-                f"QToolButton:disabled {{ background: transparent; }}"
-            )
-        else:
-            btn.setStyleSheet(
-                f"QToolButton {{ background: transparent; {box} }}"
-                f"QToolButton:hover {{ background: {Theme.PANEL_2}; }}"
-                f"QToolButton:pressed {{ background: {Theme.PANEL_3}; }}"
-                f"QToolButton:disabled {{ background: transparent; }}"
-            )
+               " min-height: 26px; max-height: 26px; border: none; border-radius: 7px;")
+        hover = Theme.PANEL_2
+        pressed = Theme.PANEL_3
+        btn.setStyleSheet(
+            f"QToolButton {{ background: transparent; {box} }}"
+            f"QToolButton:hover {{ background: {hover}; }}"
+            f"QToolButton:pressed {{ background: {pressed}; }}"
+            f"QToolButton:disabled {{ background: transparent; }}"
+        )
         return btn
 
     def eventFilter(self, obj, event):  # noqa: N802 (Qt signature)

@@ -18,8 +18,9 @@ from dbaide.desktop.components.base import compact_button
 from dbaide.desktop.theme import Theme, app_style
 from dbaide.desktop.window_chrome import ChromeDialog
 
-_CONTENT_WIDTH = 420
-_MAX_BODY_HEIGHT = 320
+_CONTENT_WIDTH = 440
+_MIN_BODY_HEIGHT = 44
+_MAX_BODY_HEIGHT = 360
 
 
 class MessageDialog(ChromeDialog):
@@ -40,11 +41,11 @@ class MessageDialog(ChromeDialog):
 
         self.setWindowTitle(title)
         self.setModal(True)
-        self.setMinimumWidth(_CONTENT_WIDTH + 40)
+        self.setMinimumWidth(_CONTENT_WIDTH + 48)
         self.setStyleSheet(app_style())
 
         root = QVBoxLayout(self)
-        root.setContentsMargins(20, 20, 20, 16)
+        root.setContentsMargins(22, 22, 22, 18)
         root.setSpacing(14)
 
         heading = QLabel(title)
@@ -63,7 +64,7 @@ class MessageDialog(ChromeDialog):
         body.document().setDocumentMargin(0)
         body.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         body.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
-        body.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        body.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
         body.setMinimumWidth(_CONTENT_WIDTH)
         body.setStyleSheet(
             f"""
@@ -105,8 +106,10 @@ class MessageDialog(ChromeDialog):
     def _sync_body_height(self) -> None:
         self._body.document().setTextWidth(_CONTENT_WIDTH)
         doc_height = int(self._body.document().documentLayout().documentSize().height())
-        body_height = max(30, min(doc_height + 8, _MAX_BODY_HEIGHT))
-        self._body.setFixedHeight(body_height)
+        body_height = max(_MIN_BODY_HEIGHT, min(doc_height + 12, _MAX_BODY_HEIGHT))
+        self._body.setMinimumHeight(min(body_height, _MAX_BODY_HEIGHT))
+        self._body.setMaximumHeight(_MAX_BODY_HEIGHT)
+        self._body.resize(_CONTENT_WIDTH, body_height)
 
 
 def alert(parent: QWidget | None, title: str, message: str) -> None:

@@ -110,7 +110,7 @@ class StructurePanel(QWidget):
         self._copy_ddl.setCursor(Qt.CursorShape.PointingHandCursor)
         self._copy_ddl.setFixedSize(24, 24)
         self._copy_ddl.setStyleSheet(
-            f"QToolButton {{ background: transparent; border: none; border-radius: 6px; }}"
+            f"QToolButton {{ background: transparent; border: none; border-radius: 7px; }}"
             f"QToolButton:hover {{ background: {Theme.PANEL_3}; }}"
         )
         self._copy_ddl.clicked.connect(self._on_copy_ddl)

@@ -7,7 +7,6 @@ from typing import Any
 from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtWidgets import (
     QDialog,
-    QDialogButtonBox,
     QFormLayout,
     QHBoxLayout,
     QLabel,
@@ -51,18 +50,16 @@ class JoinEditorDialog(ChromeDialog):
             (t("join.note"), self.reason),
         ):
             layout.addRow(form_label(label), widget)
-        buttons = QDialogButtonBox(
-            QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel,
-        )
-        ok_btn = buttons.button(QDialogButtonBox.StandardButton.Ok)
-        cancel_btn = buttons.button(QDialogButtonBox.StandardButton.Cancel)
-        if ok_btn is not None:
-            ok_btn.setIcon(svg_icon("check", color=Theme.GREEN, size=14))
-        if cancel_btn is not None:
-            cancel_btn.setIcon(svg_icon("x", color=Theme.TEXT_2, size=14))
-        buttons.accepted.connect(self.accept)
-        buttons.rejected.connect(self.reject)
-        layout.addRow(buttons)
+        actions = QHBoxLayout()
+        actions.setContentsMargins(0, 6, 0, 0)
+        actions.addStretch(1)
+        cancel_btn = compact_button(t("btn.cancel"), icon=svg_icon("x", color=Theme.TEXT_2, size=14), width=88)
+        ok_btn = compact_button(t("btn.save"), primary=True, icon=svg_icon("check", color=Theme.ACCENT, size=14), width=88)
+        cancel_btn.clicked.connect(self.reject)
+        ok_btn.clicked.connect(self.accept)
+        actions.addWidget(cancel_btn)
+        actions.addWidget(ok_btn)
+        layout.addRow(actions)
 
     def payload(self) -> dict[str, str]:
         return {

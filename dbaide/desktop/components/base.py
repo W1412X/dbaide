@@ -32,7 +32,7 @@ def ghost_action_button(
             background: transparent;
             color: {Theme.MUTED};
             border: none;
-            border-radius: 6px;
+            border-radius: 7px;
             padding: 0 8px;
             font-size: 12px;
             text-align: left;
@@ -54,24 +54,28 @@ def _button_icon_for_text(text: str, *, primary: bool = False) -> QIcon | None:
         (("测试", "test"), "play"),
         (("新建", "new"), "plus"),
         (("导入", "import"), "upload"),
+        (("导出", "export"), "download"),
         (("更多", "more"), "more-horizontal"),
-        (("重置", "reset"), "refresh"),
+        (("重置", "恢复", "默认", "reset", "default"), "refresh"),
         (("取消", "cancel"), "x"),
         (("关闭", "close"), "x"),
         (("复制", "copy"), "copy"),
         (("构建", "build"), "database"),
-        (("全选", "select all"), "check"),
         (("全不选", "select none", "none"), "x"),
+        (("全选", "全部", "select all"), "check"),
         (("返回", "back"), "chevron-left"),
         (("设置", "settings"), "settings"),
         (("浏览", "browse"), "search"),
         (("发送", "send"), "arrow-up"),
         (("下一", "next"), "chevron-right"),
-        (("清空", "clear"), "trash"),
+        (("清空", "清除", "clear"), "trash"),
         (("删除", "delete", "remove"), "trash"),
         (("编辑", "edit"), "pencil"),
         (("刷新", "refresh"), "refresh"),
         (("打开", "open"), "external-link"),
+        (("确认", "确定", "应用", "ok", "confirm", "create", "创建", "apply"), "check"),
+        (("执行", "运行", "run"), "play"),
+        (("诊断", "diagnose"), "search"),
     ]
     for needles, candidate in checks:
         if any(needle in label for needle in needles):
@@ -98,7 +102,12 @@ def compact_button(
     btn.setDefault(False)
     btn.setFixedHeight(26)
     btn.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
-    if icon is None:
+    lower = str(text or "").strip().lower()
+    danger = any(token in lower for token in ("删除", "移除", "危险", "delete", "remove", "danger"))
+    if danger:
+        icon = svg_icon("trash", color=Theme.RED, size=14)
+        btn.setProperty("danger", True)
+    elif icon is None:
         icon = _button_icon_for_text(text, primary=primary)
     if icon is not None:
         btn.setIcon(icon)
@@ -109,7 +118,7 @@ def compact_button(
         btn.setFixedWidth(width)
     else:
         btn.adjustSize()
-        btn.setFixedWidth(max(btn.sizeHint().width(), 72))
+        btn.setFixedWidth(max(btn.sizeHint().width(), 74 if text else 30))
     return btn
 
 
@@ -126,8 +135,8 @@ class Pill(QLabel):
 
     def set_color(self, color: str) -> None:
         self.setStyleSheet(
-            f"color:{color}; background:{Theme.PANEL_2}; border:1px solid {color}; "
-            "border-radius:10px; padding:3px 10px; font-size:11px; font-weight:700;"
+            f"color:{color}; background:{Theme.PANEL_2}; border:1px solid {Theme.BORDER_SOFT}; "
+            "border-radius:8px; padding:3px 9px; font-size:11px; font-weight:700;"
         )
 
 
@@ -155,7 +164,7 @@ class StatusBadge(Pill):
         self.setAlignment(Qt.AlignmentFlag.AlignVCenter)
         self.setStyleSheet(
             f"background:{Theme.PANEL_2}; border:1px solid {Theme.BORDER_SOFT};"
-            " border-radius:10px; padding:0 12px; font-size:12px; font-weight:600;"
+            " border-radius:8px; padding:0 11px; font-size:12px; font-weight:600;"
         )
 
 

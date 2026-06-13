@@ -105,7 +105,7 @@ class WorkbenchView(QWidget):
         # Format are 26px), so the corner icons and that strip read as one column.
         btn.setFixedSize(26, 20)
         btn.setStyleSheet(
-            f"QToolButton {{ background: transparent; border: none; border-radius: 5px;"
+            f"QToolButton {{ background: transparent; border: none; border-radius: 7px;"
             f" padding: 0; margin: 0; min-width: 26px; max-width: 26px;"
             f" min-height: 20px; max-height: 20px; }}"
             f"QToolButton:hover {{ background: {Theme.PANEL_2}; }}"

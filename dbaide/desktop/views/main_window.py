@@ -4,7 +4,7 @@ import sys
 from typing import Any, Callable
 
 from PyQt6 import sip
-from PyQt6.QtCore import Qt, QSettings, QTimer, QEvent
+from PyQt6.QtCore import QObject, Qt, QSettings, QTimer, QEvent, pyqtSignal
 from PyQt6.QtGui import QIcon, QKeySequence, QShortcut
 from PyQt6.QtWidgets import (
     QApplication,
@@ -63,6 +63,12 @@ from dbaide.desktop.ui_state import (
 )
 
 
+class _ReleaseCheckNotifier(QObject):
+    """Marshals release-check results from a worker thread onto the Qt main thread."""
+
+    completed = pyqtSignal(object)
+
+
 class MainWindow(QMainWindow):
     def __init__(self, service: DesktopService) -> None:
         super().__init__()
@@ -91,6 +97,9 @@ class MainWindow(QMainWindow):
 
         self._integrated_title_bar = prepare_top_level_window(self, clear_title=True)
         self.ui_state = UiStateBinder(self)
+        self._release_notifier = _ReleaseCheckNotifier(self)
+        self._release_notifier.completed.connect(self._apply_release_check)
+        self._release_check_in_progress = False
         self._install_shortcuts()
         self._wire_bus()
         self.refresh_all()
@@ -117,6 +126,59 @@ class MainWindow(QMainWindow):
         if not getattr(self, "_ssl_check_scheduled", False):
             self._ssl_check_scheduled = True
             QTimer.singleShot(400, self._check_https_certificates_at_startup)
+        if not getattr(self, "_release_check_scheduled", False):
+            self._release_check_scheduled = True
+            QTimer.singleShot(800, self._check_for_updates_at_startup)
+
+    def _check_for_updates_at_startup(self) -> None:
+        self._start_release_check()
+
+    def _start_release_check(self) -> None:
+        if self._release_check_in_progress:
+            return
+        self._release_check_in_progress = True
+        import threading
+
+        notifier = self._release_notifier
+
+        def worker() -> None:
+            from dbaide.release_check import ReleaseCheckResult, check_for_update
+
+            try:
+                result = check_for_update()
+            except Exception as exc:  # noqa: BLE001 — never leave UI stuck on “Checking…”
+                result = ReleaseCheckResult(ok=False, error=str(exc))
+            notifier.completed.emit(result)
+
+        threading.Thread(target=worker, daemon=True, name="release-check").start()
+
+    def _apply_release_check(self, result: object) -> None:
+        self._release_check_in_progress = False
+        from dbaide.app_info import app_version
+        from dbaide.release_check import ReleaseCheckResult
+
+        if not isinstance(result, ReleaseCheckResult):
+            return
+        self._release_check = result
+        latest = result.latest
+        latest_ver = latest.version if latest else ""
+        release_url = latest.html_url if latest else ""
+        if hasattr(self, "topbar"):
+            self.topbar.set_update_available(
+                result.ok and result.update_available,
+                version=latest_ver,
+                url=release_url,
+            )
+        dialog = getattr(self, "_settings_dialog", None)
+        if dialog is not None and not sip.isdeleted(dialog) and hasattr(dialog, "set_release_check_result"):
+            dialog.set_release_check_result(
+                ok=result.ok,
+                current_version=app_version(),
+                latest_version=latest_ver,
+                update_available=result.update_available,
+                ahead_of_release=result.ahead_of_release,
+                release_url=release_url,
+            )
 
     def _check_https_certificates_at_startup(self) -> None:
         from dbaide.ssl_certs import check_https_certificates
@@ -735,10 +797,11 @@ class MainWindow(QMainWindow):
         def on_done(result: object) -> None:
             self._finish_asset_build_progress(name, result)
             self._fetch_schema_after_project(name)
+            self.toast(_i18n_t("toast.schema_initialized"))
 
         def on_fail(exc: object) -> None:
             self._fail_asset_build_progress(name, exc)
-            self._project_failed(name, str(exc))
+            self._projected.discard(name)
 
         self._run_background(
             "project_instance",
@@ -787,6 +850,7 @@ class MainWindow(QMainWindow):
     def _fail_asset_build_progress(self, conn: str, exc: object) -> None:
         if conn == self.current_connection():
             self._ensure_ui_state().schema_build_progress_finish(str(exc), failed=True)
+            self._fetch_schema_after_project(conn)
 
     def _schedule_live_schema_refresh(self, conn: str, message: object) -> None:
         if conn != self.current_connection() or not isinstance(message, dict):
@@ -840,7 +904,9 @@ class MainWindow(QMainWindow):
 
     def _project_failed(self, name: str, message: str) -> None:
         self._projected.discard(name)  # allow a retry on the next select (e.g. DB was down)
-        self._apply_schema_error(name, message)
+        # Refresh from store — partial/base docs and instance_doc.errors stay visible.
+        if name == self.current_connection():
+            self._fetch_schema_after_project(name)
 
     def _fetch_schema_after_project(self, name: str) -> None:
         if name != self.current_connection():
@@ -1090,9 +1156,8 @@ class MainWindow(QMainWindow):
             return
 
         conns = {c["name"]: c for c in self.bootstrap.get("connections") or []}
-        load_profile = str((conns.get(conn) or {}).get("load_profile") or "production")
-        default_mode = {"production": "light", "staging": "auto", "dev": "auto"}.get(load_profile, "light")
-        default_workers = {"production": 1, "staging": 2, "dev": 4}.get(load_profile, 1)
+        conn_cfg = self.service.cfg.get_connection(conn)
+        default_workers = self.service.cfg.policy_for(conn_cfg).build_max_workers
 
         def on_loaded(result: dict[str, Any]) -> None:
             if conn != self.current_connection():
@@ -1104,8 +1169,6 @@ class MainWindow(QMainWindow):
             dialog = BuildAssetsDialog(
                 connection_name=conn,
                 databases=databases,
-                load_profile=load_profile,
-                default_profile_mode=default_mode,
                 default_max_workers=default_workers,
                 parent=self,
             )
@@ -1202,7 +1265,26 @@ class MainWindow(QMainWindow):
         dialog.export_connection.connect(lambda name: self._settings_export_connection(dialog, name))
         dialog.import_requested.connect(lambda path: self._settings_import_connection(dialog, path))
         dialog.export_all_requested.connect(lambda: self._settings_export_all(dialog))
+        self._settings_dialog = dialog
+        cached = getattr(self, "_release_check", None)
+        if cached is not None:
+            from dbaide.app_info import app_version
+            from dbaide.release_check import ReleaseCheckResult
+
+            if isinstance(cached, ReleaseCheckResult):
+                latest = cached.latest
+                dialog.set_release_check_result(
+                    ok=cached.ok,
+                    current_version=app_version(),
+                    latest_version=latest.version if latest else "",
+                    update_available=cached.update_available,
+                    ahead_of_release=cached.ahead_of_release,
+                    release_url=latest.html_url if latest else "",
+                )
+        elif not self._release_check_in_progress:
+            self._start_release_check()
         dialog.exec()
+        self._settings_dialog = None
 
     def _change_debug_trace(self, enabled: bool) -> None:
         # Capture full LLM prompts/responses into the trace so a copied trace shows
@@ -1369,13 +1451,14 @@ class MainWindow(QMainWindow):
         self._run_background("refresh_instance", payload, done, on_error=fail)
 
     def _enrich_node(self, node: dict[str, Any]) -> None:
-        """Build the optional enrichment (LLM summary + sample + profile) for a table
-        or whole database, from the schema-tree context menu. Runs in the background;
-        a table enriches just itself (others untouched), a database enriches all its
-        tables. Refreshes the tree on completion."""
+        """Build the optional enrichment (LLM summary + sample rows) for a table
+        or whole database, from the schema-tree context menu."""
         conn = self.current_connection()
         if not conn:
             self.toast(_i18n_t("toast.select_connection"))
+            return
+        if self._assets_busy(conn):
+            self.toast(_i18n_t("toast.task_running"))
             return
         kind = str(node.get("kind") or "")
         _instance, database, table, _column = self._schema_path_parts(node)
@@ -1387,20 +1470,28 @@ class MainWindow(QMainWindow):
             action, payload = "build_assets", {"connection_name": conn, "databases": [database]}
         else:
             return
-        self.toast(_i18n_t("toast.enriching", target=target))
 
-        def done(_r: object) -> None:
+        progress_title = _i18n_t("status.enriching")
+        self._ensure_ui_state().schema_build_progress_start(progress_title)
+
+        def on_progress(message: object) -> None:
+            self._handle_asset_build_progress(conn, message)
+
+        def on_done(result: object) -> None:
+            self._finish_asset_build_progress(conn, result)
             if conn != self.current_connection():
                 return
+            self._fetch_schema_after_project(conn)
             self.toast(_i18n_t("toast.enriched", target=target))
             self.bus.emit(ASSETS_CHANGED, {"instance": conn})
 
-        def fail(exc: object) -> None:
+        def on_fail(exc: object) -> None:
+            self._fail_asset_build_progress(conn, exc)
             if conn != self.current_connection():
                 return
             self.toast(_i18n_t("toast.enrich_failed", error=str(exc)))
 
-        self._run_background(action, payload, done, on_error=fail)
+        self._run_background(action, payload, on_done, on_error=on_fail, on_progress=on_progress)
 
     def _settings_delete_connection(self, dialog: SettingsDialog, name: str) -> None:
         def on_done(_result: object) -> None:
@@ -2147,11 +2238,7 @@ class DBAideDesktop:
 
 
 def _app_icon() -> "QIcon | None":
-    """The bundled app icon (dev tree and PyInstaller datas use the same relative
-    path); returns None rather than failing startup if it is missing."""
-    from pathlib import Path
-
-    path = Path(__file__).resolve().parents[1] / "assets" / "app_icon.png"
-    if path.exists():
-        return QIcon(str(path))
-    return None
+    """Window icon uses the original DBAide brand icon."""
+    from dbaide.desktop.components.icons import app_icon
+    icon = app_icon()
+    return icon if not icon.isNull() else None

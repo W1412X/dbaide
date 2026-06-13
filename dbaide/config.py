@@ -16,7 +16,7 @@ DEFAULT_CONFIG_PATH = DEFAULT_CONFIG_DIR / "config.toml"
 CONFIG_VERSION = 1
 
 # Default number of agent runs (sessions) allowed to execute concurrently.
-DEFAULT_MAX_CONCURRENT_RUNS = 3
+DEFAULT_MAX_CONCURRENT_RUNS = 6
 
 # Valid keys for ConnectionConfig and ModelConfig
 _CONNECTION_KEYS = {
@@ -284,7 +284,7 @@ class ConfigManager:
     def max_concurrent_runs(self) -> int:
         """How many agent runs (one per session) may execute at once. A global
         app-level cap, distinct from the per-run database knobs in ResourcePolicy.
-        Stored in ``[resource_defaults].max_concurrent_runs``; defaults to 3."""
+        Stored in ``[resource_defaults].max_concurrent_runs``; defaults to 6."""
         raw = self.resource_defaults().get("max_concurrent_runs")
         try:
             return max(1, min(16, int(raw)))

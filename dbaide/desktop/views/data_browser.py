@@ -125,9 +125,10 @@ class DataBrowser(QWidget):
         self._count_btn.setMinimumWidth(80)
         self._count_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self._count_btn.setStyleSheet(
-            f"QToolButton {{ background: transparent; border: none; color: {Theme.MUTED};"
-            f" font-size: 12px; padding: 0 8px; }}"
-            f"QToolButton:hover {{ color: {Theme.TEXT_2}; }}"
+            f"QToolButton {{ background: transparent; border: none; border-radius: 7px;"
+            f" color: {Theme.MUTED}; font-size: 12px; padding: 0 8px; }}"
+            f"QToolButton:hover {{ color: {Theme.TEXT_2}; background: {Theme.PANEL_2}; }}"
+            f"QToolButton:pressed {{ background: {Theme.PANEL_3}; }}"
         )
         self._count_btn.clicked.connect(self._on_count)
         bar.addWidget(self._count_btn)

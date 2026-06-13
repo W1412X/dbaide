@@ -48,11 +48,11 @@ class EmptyState(QWidget):
 
         if icon:
             tile = QLabel()
-            tile.setFixedSize(52, 52)
+            tile.setFixedSize(44, 44)
             tile.setAlignment(Qt.AlignmentFlag.AlignCenter)
             tile.setPixmap(svg_pixmap(icon, color=Theme.TEXT_2, size=26))
             tile.setStyleSheet(
-                f"background: {Theme.PANEL_2}; border-radius: {Theme.RADIUS_XL + 2}px;"
+                f"background: {Theme.PANEL_2}; border-radius: 8px;"
             )
             col_layout.addWidget(tile, alignment=Qt.AlignmentFlag.AlignHCenter)
             col_layout.addSpacing(6)

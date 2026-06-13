@@ -126,3 +126,20 @@ def test_schema_tree_status_flags(tmp_path, monkeypatch):
     rows = {t["name"]: t for d in svc.dispatch("schema_tree", {"name": "s"}) for t in d["children"]}
     assert rows["a"]["enriched"] is False and rows["a"]["stale"] is False  # base only
     assert rows["b"]["enriched"] is True and rows["b"]["stale"] is False    # enriched
+
+
+def test_schema_asset_summary_failed_when_errors_and_no_tables(tmp_path, monkeypatch):
+    db = tmp_path / "s.db"
+    sqlite3.connect(db).close()
+    svc = _service(tmp_path, monkeypatch)
+    svc.dispatch("save_connection", {"name": "s", "type": "sqlite", "path": str(db)})
+    store = svc.store
+    conn = svc.cfg.get_connection("s")
+    store.write_json(store.instance_dir("s") / "instance.json", {
+        "name": "s",
+        "stats": {"errors": ["discover failed"]},
+        **store.connection_metadata(conn),
+    })
+    summary = svc._schema_asset_summary("s", conn, [])
+    assert summary["state"] == "failed"
+    assert summary["errors"] == 1

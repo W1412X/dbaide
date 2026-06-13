@@ -113,7 +113,7 @@ class ComposerWidget(Panel):
         border = Theme.FOCUS if self._focused else Theme.BORDER
         self.setStyleSheet(
             f"QFrame#composer {{ background: {Theme.PANEL}; border: 1px solid {border};"
-            f" border-radius: 12px; }}"
+            f" border-radius: {Theme.RADIUS_MD}px; }}"
         )
 
     def _set_focused(self, focused: bool) -> None:
@@ -291,13 +291,13 @@ class _ContextChip(QWidget):
         # rule leaks the border, producing a "double box" and hiding the ✕.
         self.setStyleSheet(
             f"QWidget#ctxChip {{ background: {Theme.PANEL_2};"
-            f" border: 1px solid {Theme.BORDER}; border-radius: 13px; }}"
+            f" border: 1px solid {Theme.BORDER}; border-radius: 8px; }}"
             f"QWidget#ctxChip QLabel {{ background: transparent; border: none; }}"
             # padding:0 / min-width:0 are essential — the global QToolButton rule
             # sets `padding: 0 10px; min-height: 26px`, which would leave no room
             # for the compact close icon.
             f"QToolButton#ctxChipClose {{ background: transparent; border: none;"
-            f" border-radius: 9px; color: {Theme.MUTED}; font-size: 13px;"
+            f" border-radius: 7px; color: {Theme.MUTED}; font-size: 13px;"
             f" padding: 0; min-width: 0; min-height: 0; }}"
             f"QToolButton#ctxChipClose:hover {{ background: {Theme.PANEL_3};"
             f" color: {Theme.TEXT}; }}"

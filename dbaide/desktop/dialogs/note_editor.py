@@ -5,13 +5,9 @@ in); the user only edits the note text. Clearing the text removes the note."""
 
 from __future__ import annotations
 
-from PyQt6.QtWidgets import (
-    QDialogButtonBox,
-    QLabel,
-    QPlainTextEdit,
-    QVBoxLayout,
-)
+from PyQt6.QtWidgets import QLabel, QHBoxLayout, QPlainTextEdit, QVBoxLayout
 
+from dbaide.desktop.components.base import compact_button
 from dbaide.desktop.components.icons import svg_icon
 from dbaide.desktop.components.inputs import configure_wrapped_label
 from dbaide.desktop.theme import app_style, Theme
@@ -44,18 +40,16 @@ class NoteEditorDialog(ChromeDialog):
         self.note.setPlaceholderText(_t("notes.editor_ph"))
         layout.addWidget(self.note)
 
-        buttons = QDialogButtonBox(
-            QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel,
-        )
-        ok_btn = buttons.button(QDialogButtonBox.StandardButton.Ok)
-        cancel_btn = buttons.button(QDialogButtonBox.StandardButton.Cancel)
-        if ok_btn is not None:
-            ok_btn.setIcon(svg_icon("check", color=Theme.GREEN, size=14))
-        if cancel_btn is not None:
-            cancel_btn.setIcon(svg_icon("x", color=Theme.TEXT_2, size=14))
-        buttons.accepted.connect(self.accept)
-        buttons.rejected.connect(self.reject)
-        layout.addWidget(buttons)
+        buttons = QHBoxLayout()
+        buttons.setContentsMargins(0, 0, 0, 0)
+        buttons.addStretch(1)
+        cancel_btn = compact_button(_t("btn.cancel"), icon=svg_icon("x", color=Theme.TEXT_2, size=14), width=88)
+        ok_btn = compact_button(_t("btn.save"), primary=True, icon=svg_icon("check", color=Theme.ACCENT, size=14), width=88)
+        cancel_btn.clicked.connect(self.reject)
+        ok_btn.clicked.connect(self.accept)
+        buttons.addWidget(cancel_btn)
+        buttons.addWidget(ok_btn)
+        layout.addLayout(buttons)
 
     def value(self) -> str:
         return self.note.toPlainText().strip()

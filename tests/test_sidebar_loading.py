@@ -249,6 +249,49 @@ def test_sidebar_incremental_schema_sync_during_build():
     assert sidebar.tree.itemWidget(sidebar.tree.topLevelItem(0).child(0), 1) is not None
 
 
+def test_sidebar_asset_state_summary_is_persistent():
+    app = _app()
+    sidebar = Sidebar()
+    sidebar.load_schema([
+        {
+            "kind": "database",
+            "name": "main",
+            "path": "shop.main",
+            "asset_summary": {
+                "state": "base",
+                "tables": 1,
+                "columns": 2,
+                "sampled_tables": 0,
+                "errors": 0,
+            },
+            "children": [
+                {
+                    "kind": "table",
+                    "name": "orders",
+                    "path": "shop.main.orders",
+                    "column_count": 2,
+                    "asset_state": "base",
+                    "children": [],
+                }
+            ],
+        }
+    ])
+    app.processEvents()
+    assert not sidebar._asset_state.isHidden()
+    assert sidebar._asset_state_title.text()
+    assert "1" in sidebar._asset_state_detail.text()
+
+
+def test_sidebar_asset_state_failure_stays_visible():
+    app = _app()
+    sidebar = Sidebar()
+    sidebar.load_schema([], error="permission denied")
+    app.processEvents()
+    assert not sidebar._asset_state.isHidden()
+    assert sidebar._asset_state_title.text()
+    assert sidebar._asset_state_detail.text() == "permission denied"
+
+
 def test_sidebar_build_progress_spinner_only_while_discovering():
     app = _app()
     from dbaide.desktop.views.sidebar import Sidebar

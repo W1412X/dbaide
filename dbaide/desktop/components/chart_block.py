@@ -365,18 +365,18 @@ class ChartBlock(QFrame):
             QFrame#chartBlock {{
                 background: {Theme.PANEL};
                 border: 1px solid {Theme.BORDER_SOFT};
-                border-radius: 12px;
+                border-radius: 8px;
             }}
             """
         )
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(16, 14, 16, 14)
+        layout.setContentsMargins(14, 12, 14, 12)
         layout.setSpacing(8)
 
         title = str(spec.get("title") or "").strip()
         if title:
             header = QLabel(title)
-            header.setFont(QFont("Inter", 14, QFont.Weight.DemiBold))
+            header.setFont(QFont("Inter", 13, QFont.Weight.DemiBold))
             header.setStyleSheet(f"color: {Theme.TEXT}; background: transparent;")
             header.setWordWrap(True)
             layout.addWidget(header)

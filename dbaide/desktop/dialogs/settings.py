@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from PyQt6.QtCore import Qt, QUrl, pyqtSignal
+from PyQt6.QtCore import QSize, Qt, QUrl, pyqtSignal
 from PyQt6.QtGui import QDesktopServices
 from PyQt6.QtWidgets import (
     QDialog,
@@ -68,8 +68,9 @@ class ModelForm(QWidget):
         scroll.setFrameShape(QFrame.Shape.NoFrame)
         inner = QWidget()
         inner.setObjectName("modelFormInner")
+        scroll.setStyleSheet("QScrollArea { background: transparent; border: none; }")
         inner.setStyleSheet(
-            f"QWidget#modelFormInner {{ background: {Theme.BG}; }}{FORM_INNER_LABEL_RULES}"
+            f"QWidget#modelFormInner {{ background: transparent; }}{FORM_INNER_LABEL_RULES}"
         )
         form = QFormLayout(inner)
         configure_form(form)
@@ -226,6 +227,7 @@ class SettingsDialog(ChromeDialog):
         nav_layout.addSpacing(6)
         self.nav = QListWidget()
         self.nav.setFocusPolicy(Qt.FocusPolicy.NoFocus)  # no focus ring on the nav
+        self.nav.setIconSize(QSize(16, 16))
         self.nav.setStyleSheet(
             f"""
             QListWidget {{ background: transparent; border: none; outline: none; }}
@@ -235,14 +237,15 @@ class SettingsDialog(ChromeDialog):
             """
         )
         from dbaide.i18n import t as _t
-        for label, key in (
-            (_t("settings.connections"), "connections"),
-            (_t("settings.models"), "models"),
-            (_t("settings.resources"), "resources"),
-            (_t("settings.general"), "general"),
-            (_t("settings.about"), "about"),
+        for label, key, icon_name in (
+            (_t("settings.connections"), "connections", "database"),
+            (_t("settings.models"), "models", "sparkles"),
+            (_t("settings.resources"), "resources", "shield-check"),
+            (_t("settings.general"), "general", "settings"),
+            (_t("settings.about"), "about", "info"),
         ):
             item = QListWidgetItem(label)
+            item.setIcon(svg_icon(icon_name, color=Theme.TEXT_2, size=16, width=1.8))
             item.setData(Qt.ItemDataRole.UserRole, key)
             self.nav.addItem(item)
         self.nav.currentRowChanged.connect(self._on_nav)
@@ -372,10 +375,11 @@ class SettingsDialog(ChromeDialog):
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
         scroll.setFrameShape(QFrame.Shape.NoFrame)
+        scroll.setStyleSheet("QScrollArea { background: transparent; border: none; }")
         inner = QWidget()
         inner.setObjectName("resourceFormInner")
         inner.setStyleSheet(
-            f"QWidget#resourceFormInner {{ background: {Theme.PANEL}; }}{FORM_INNER_LABEL_RULES}"
+            f"QWidget#resourceFormInner {{ background: transparent; }}{FORM_INNER_LABEL_RULES}"
         )
         form = QFormLayout(inner)
         configure_form(form)
@@ -524,6 +528,28 @@ class SettingsDialog(ChromeDialog):
         card_layout.addWidget(tagline)
 
         card_layout.addWidget(self._about_meta_row(t("settings.about.version"), f"v{app_version()}"))
+        latest_row = QWidget()
+        latest_layout = QHBoxLayout(latest_row)
+        latest_layout.setContentsMargins(0, 0, 0, 0)
+        latest_layout.setSpacing(12)
+        latest_key = QLabel(t("settings.about.latest_version"))
+        latest_key.setFixedWidth(88)
+        latest_key.setStyleSheet(f"color: {Theme.MUTED}; font-size: 12px;")
+        self._about_latest_value = QLabel(t("settings.about.latest_checking"))
+        self._about_latest_value.setStyleSheet(f"color: {Theme.TEXT}; font-size: 12px;")
+        latest_layout.addWidget(latest_key)
+        latest_layout.addWidget(self._about_latest_value, 1)
+        self._about_latest_row = latest_row
+        card_layout.addWidget(self._about_latest_row)
+        self._about_latest_url = ""
+        self._about_latest_link = ghost_action_button(
+            "",
+            icon=svg_icon("external-link", color=Theme.BLUE, size=14),
+            tooltip="",
+        )
+        self._about_latest_link.hide()
+        self._about_latest_link.clicked.connect(self._open_about_latest_release)
+        card_layout.addWidget(self._about_latest_link)
         card_layout.addWidget(self._about_link_row(
             t("settings.about.developer"),
             DEVELOPER_NAME,
@@ -547,6 +573,52 @@ class SettingsDialog(ChromeDialog):
         layout.addWidget(card)
         layout.addStretch(1)
         return page
+
+    def set_release_check_result(
+        self,
+        *,
+        ok: bool,
+        current_version: str = "",
+        latest_version: str = "",
+        update_available: bool = False,
+        ahead_of_release: bool = False,
+        release_url: str = "",
+    ) -> None:
+        from dbaide.i18n import t
+
+        self._about_latest_url = str(release_url or "").strip()
+        if not ok:
+            text = t("settings.about.latest_unavailable")
+            self._about_latest_value.setText(text)
+            self._about_latest_link.hide()
+            return
+        latest = str(latest_version or "").strip()
+        if update_available and latest:
+            text = t("settings.about.latest_available", version=latest)
+        elif ahead_of_release and latest:
+            text = t("settings.about.latest_ahead", version=latest)
+        elif latest:
+            text = t("settings.about.latest_up_to_date", version=latest)
+        else:
+            text = t("settings.about.latest_unavailable")
+        self._about_latest_value.setText(text)
+        if update_available and latest and self._about_latest_url:
+            self._about_latest_link.setText(t("settings.about.latest_available", version=latest))
+            self._about_latest_link.setToolTip(self._about_latest_url)
+            self._about_latest_link.show()
+        else:
+            self._about_latest_link.hide()
+
+    def _open_about_latest_release(self) -> None:
+        url = str(getattr(self, "_about_latest_url", "") or "").strip()
+        if url:
+            QDesktopServices.openUrl(QUrl(url))
+
+    @staticmethod
+    def _set_about_meta_value(row: QWidget, value: str) -> None:
+        labels = row.findChildren(QLabel)
+        if len(labels) >= 2:
+            labels[1].setText(value)
 
     @staticmethod
     def _about_meta_row(label: str, value: str) -> QWidget:
@@ -616,7 +688,7 @@ class SettingsDialog(ChromeDialog):
             QListWidget {{
                 background: {Theme.PANEL};
                 border: 1px solid {Theme.BORDER_SOFT};
-                border-radius: 10px;
+                border-radius: 8px;
             }}
             QListWidget::item {{ padding: 10px 12px; }}
             QListWidget::item:hover {{ background: {Theme.PANEL_2}; }}
@@ -733,11 +805,13 @@ class SettingsDialog(ChromeDialog):
 
     def _set_connection_new_mode(self, new: bool) -> None:
         self.save_conn_btn.setText(_pt("btn.create") if new else _pt("btn.save"))
+        self.save_conn_btn.setIcon(svg_icon("check" if new else "save", color=Theme.ACCENT, size=14))
         key = self._selected_list_key(self.conn_list)
         self.conn_more.setEnabled((not new) and bool(key))
 
     def _set_model_new_mode(self, new: bool) -> None:
         self.save_model_btn.setText(_pt("btn.create") if new else _pt("btn.save"))
+        self.save_model_btn.setIcon(svg_icon("check" if new else "save", color=Theme.ACCENT, size=14))
         key = self._selected_list_key(self.model_list)
         self.model_more.setEnabled((not new) and bool(key))
 

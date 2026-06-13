@@ -62,7 +62,7 @@ class MenuButton(QToolButton):
                 self.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextBesideIcon)
             else:
                 self.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextOnly)
-            self.setFixedHeight(30 if filled else 26)
+            self.setFixedHeight(28 if filled else 26)
             if tooltip:
                 self.setToolTip(tooltip)
         self.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
@@ -99,7 +99,7 @@ class MenuButton(QToolButton):
                 """
             )
             return
-        radius = 12 if self._filled else 6
+        radius = 8 if self._filled else 7
         bg = Theme.PANEL_2 if self._filled else "transparent"
         border = "transparent"
         self.setStyleSheet(
@@ -109,7 +109,7 @@ class MenuButton(QToolButton):
                 color: {Theme.TEXT_2};
                 border: 1px solid {border};
                 border-radius: {radius}px;
-                padding: 0px {14 if self._filled else 12}px;
+                padding: 0px {12 if self._filled else 10}px;
                 font-size: {13 if self._filled else 12}px;
                 font-weight: {650 if self._filled else 500};
             }}
@@ -209,7 +209,7 @@ class PillSelect(QToolButton):
                     background: {open_bg if open_menu else "transparent"};
                     color: {Theme.TEXT if open_menu else Theme.TEXT_2};
                     border: 1px solid transparent;
-                    border-radius: 6px;
+                    border-radius: 7px;
                     padding: 0px 8px 0px 10px;
                     font-size: 12px;
                 }}
@@ -236,7 +236,7 @@ class PillSelect(QToolButton):
                 background: {open_bg};
                 color: {Theme.TEXT if open_menu else Theme.TEXT_2};
                 border: none;
-                border-radius: 6px;
+                border-radius: 7px;
                 padding: 0px 10px;
                 font-size: 12px;
             }}

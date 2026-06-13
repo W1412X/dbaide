@@ -7,7 +7,6 @@ from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QColor, QFont
 from PyQt6.QtWidgets import (
     QApplication,
-    QDialogButtonBox,
     QHBoxLayout,
     QHeaderView,
     QLabel,
@@ -369,15 +368,16 @@ class CellValueDialog(ChromeDialog):
         view.setFont(QFont("Menlo", 11))
         view.setPlainText(value)
         layout.addWidget(view, 1)
-        buttons = QDialogButtonBox()
+        buttons = QHBoxLayout()
+        buttons.setContentsMargins(0, 0, 0, 0)
+        buttons.addStretch(1)
         copy_btn = compact_button(_t("btn.copy"), icon=svg_icon("copy", color=Theme.TEXT_2, size=14), width=78)
         copy_btn.clicked.connect(lambda: QApplication.clipboard().setText(value))
-        buttons.addButton(copy_btn, QDialogButtonBox.ButtonRole.ActionRole)
+        buttons.addWidget(copy_btn)
         close_btn = compact_button(_t("btn.close"), icon=svg_icon("x", color=Theme.TEXT_2, size=14), width=82)
-        buttons.addButton(close_btn, QDialogButtonBox.ButtonRole.RejectRole)
-        buttons.rejected.connect(self.reject)
-        buttons.accepted.connect(self.accept)
-        layout.addWidget(buttons)
+        close_btn.clicked.connect(self.reject)
+        buttons.addWidget(close_btn)
+        layout.addLayout(buttons)
 
 
 def _full_text(value: Any) -> str:

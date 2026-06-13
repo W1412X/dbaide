@@ -95,7 +95,7 @@ class ModeSwitch(QWidget):
             QWidget#modeSwitch {{
                 background: transparent;
                 border: none;
-                border-radius: {Theme.RADIUS_LG}px;
+                border-radius: {Theme.RADIUS_MD}px;
             }}
             QToolButton#modeSwitchButton {{
                 background: transparent;
@@ -156,7 +156,38 @@ class TopBar(QWidget):
         )
         brand.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
         row.addWidget(brand)
-        row.addSpacing(8)
+
+        from dbaide.desktop.components.icons import svg_icon
+
+        self.update_btn = QToolButton()
+        self.update_btn.setObjectName("topbarUpdateButton")
+        self.update_btn.setFixedSize(28, 28)
+        self.update_btn.setIcon(svg_icon("download", color="#ffffff", size=15))
+        self.update_btn.setIconSize(QSize(15, 15))
+        self.update_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.update_btn.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonIconOnly)
+        self.update_btn.setStyleSheet(
+            f"""
+            QToolButton#topbarUpdateButton {{
+                background: {Theme.BLUE};
+                border: none;
+                border-radius: 14px;
+                padding: 0;
+                margin: 0 2px;
+            }}
+            QToolButton#topbarUpdateButton:hover {{
+                background: #2563eb;
+            }}
+            QToolButton#topbarUpdateButton:pressed {{
+                background: #1d4ed8;
+            }}
+            """
+        )
+        self.update_btn.hide()
+        self._update_release_url = ""
+        self.update_btn.clicked.connect(self._open_update_release)
+        row.addWidget(self.update_btn, 0, Qt.AlignmentFlag.AlignVCenter)
+        row.addSpacing(6)
 
         from dbaide.i18n import t
 
@@ -194,6 +225,24 @@ class TopBar(QWidget):
         """Push header controls below / beside native window chrome (Qt 6.9 safe areas)."""
         self.setFixedHeight(max(self._content_height, height))
         self._row.setContentsMargins(left, top, right, bottom)
+
+    def _open_update_release(self) -> None:
+        from PyQt6.QtCore import QUrl
+        from PyQt6.QtGui import QDesktopServices
+
+        url = str(self._update_release_url or "").strip()
+        if url:
+            QDesktopServices.openUrl(QUrl(url))
+
+    def set_update_available(self, available: bool, *, version: str = "", url: str = "") -> None:
+        from dbaide.i18n import t
+
+        self._update_release_url = str(url or "").strip()
+        if available and self._update_release_url:
+            self.update_btn.setToolTip(t("topbar.update.tooltip", version=version))
+            self.update_btn.show()
+        else:
+            self.update_btn.hide()
 
     def _emit_connection(self, value: str) -> None:
         self.connection_changed.emit(str(value or ""))

@@ -37,7 +37,7 @@ class ResourcePolicy:
     statement_timeout_seconds: int = 60
 
     # Asset build.
-    build_max_workers: int = 1
+    build_max_workers: int = 4
     build_profile_mode: str = "light"
 
     # Agent execution.
@@ -80,7 +80,7 @@ LOAD_PROFILES: dict[str, ResourcePolicy] = {
     "production": ResourcePolicy(
         max_inflight_queries=16,
         statement_timeout_seconds=60,
-        build_max_workers=1,
+        build_max_workers=4,
         build_profile_mode="light",
         default_row_limit=100,
         max_row_limit=1000,

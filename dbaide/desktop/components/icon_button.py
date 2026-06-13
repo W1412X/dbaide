@@ -30,7 +30,7 @@ class IconToolButton(QToolButton):
             QToolButton {{
                 background: transparent;
                 border: none;
-                border-radius: 6px;
+                border-radius: 7px;
                 padding: 0;
                 margin: 0;
             }}

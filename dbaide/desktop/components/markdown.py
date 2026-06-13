@@ -34,7 +34,7 @@ class MarkdownView(QTextBrowser):
         if badges:
             chips = " ".join(
                 f"<span style='display:inline-block;margin-right:6px;padding:2px 8px;"
-                f"border:1px solid {Theme.BORDER};border-radius:999px;font-size:10px;"
+                f"border:1px solid {Theme.BORDER};border-radius:8px;font-size:10px;"
                 f"color:{Theme.TEXT_2};'>{escape_user_text(b)}</span>"
                 for b in badges
             )
@@ -42,7 +42,7 @@ class MarkdownView(QTextBrowser):
         body = render_markdown_safe(markdown or "")
         html = (
             f"<section style='margin:16px 0;padding:14px 16px;border:1px solid {Theme.BORDER_SOFT};"
-            f"border-radius:12px;background:{Theme.SURFACE};'>"
+            f"border-radius:8px;background:{Theme.SURFACE};'>"
             f"<div style='color:{color};font-weight:800;font-size:13px;margin-bottom:8px'>"
             f"{escape_user_text(title)}</div>{badge_html}"
             f"<div style='line-height:1.55;color:{Theme.TEXT}'>{body}</div></section>"
@@ -56,7 +56,7 @@ class MarkdownView(QTextBrowser):
         html = (
             f"<div style='margin:10px 0 6px;color:{Theme.TEXT_2};font-weight:700'>SQL{status}</div>"
             f"<pre style='background:{Theme.CODE_BG};color:{Theme.BLUE};border:1px solid {Theme.BORDER};"
-            f"border-radius:10px;padding:12px;white-space:pre-wrap;font-family:Menlo,monospace;font-size:11px;'>"
+            f"border-radius:8px;padding:12px;white-space:pre-wrap;font-family:Menlo,monospace;font-size:11px;'>"
             f"{escape_user_text(sql)}</pre>"
         )
         self._append_html(html)

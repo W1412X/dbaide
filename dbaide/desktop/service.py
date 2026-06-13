@@ -629,6 +629,7 @@ class DesktopService:
             name = self.cfg.get_connection(None).name
         conn = self.cfg.get_connection(name)
         rows: list[dict[str, Any]] = []
+        all_table_docs: list[dict[str, Any]] = []
         for db_doc in self.store.database_docs(name, connection=conn):
             db_name = str(db_doc.get("name") or "")
             db_row = {
@@ -638,12 +639,49 @@ class DesktopService:
                 "children": [],
             }
             table_docs = list(self.store.table_docs(name, db_name, connection=conn))
+            all_table_docs.extend(table_docs)
             referenced_by = self._referenced_by_index(table_docs)
             for table_doc in table_docs:
                 db_row["children"].append(
                     self._table_tree_row(name, db_name, table_doc, referenced_by))
             rows.append(db_row)
+        summary = self._schema_asset_summary(name, conn, all_table_docs)
+        for row in rows:
+            row["asset_summary"] = summary
         return rows
+
+    def _schema_asset_summary(self, instance: str, conn: ConnectionConfig, table_docs: list[dict[str, Any]]) -> dict[str, Any]:
+        instance_doc = self.store.instance_doc(instance, connection=conn) or {}
+        stats = instance_doc.get("stats") or {}
+        errors = stats.get("errors") if isinstance(stats, dict) else []
+        if not isinstance(errors, list):
+            errors = []
+        total_tables = len(table_docs)
+        total_columns = sum(int(td.get("column_count") or len(td.get("columns") or [])) for td in table_docs)
+        sampled_tables = sum(1 for td in table_docs if td.get("sample_rows") or td.get("enriched_at"))
+        stale_tables = sum(1 for td in table_docs if td.get("enrichment_stale"))
+        if not total_tables:
+            state = "failed" if errors else "missing"
+        elif errors:
+            state = "failed"
+        elif stale_tables:
+            state = "stale"
+        elif sampled_tables == total_tables:
+            state = "sampled"
+        elif sampled_tables:
+            state = "partial"
+        else:
+            state = "base"
+        return {
+            "state": state,
+            "tables": total_tables,
+            "columns": total_columns,
+            "sampled_tables": sampled_tables,
+            "stale_tables": stale_tables,
+            "errors": len(errors),
+            "profile_state": "on_demand",
+            "completed_at": instance_doc.get("completed_at"),
+        }
 
     @staticmethod
     def _referenced_by_index(table_docs: list[dict[str, Any]]) -> dict[str, list[dict[str, Any]]]:
@@ -701,6 +739,12 @@ class DesktopService:
             # enriched = has samples/summary, stale = structure moved under it.
             "enriched": bool(table_doc.get("sample_rows")) or bool(table_doc.get("enriched_at")),
             "stale": bool(table_doc.get("enrichment_stale")),
+            "asset_state": (
+                "stale" if table_doc.get("enrichment_stale")
+                else "sampled" if (table_doc.get("sample_rows") or table_doc.get("enriched_at"))
+                else "base"
+            ),
+            "profile_state": "on_demand",
             "children": children,
         }
 

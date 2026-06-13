@@ -49,7 +49,7 @@ def main() -> int:
     b = BuildAssetsDialog(
         connection_name="shop",
         databases=[{"name": "main", "has_assets": False}, {"name": "analytics", "has_assets": True}],
-        load_profile="production", default_profile_mode="light", default_max_workers=2,
+        default_max_workers=2,
     )
     b.resize(560, 460)
     grab(b, "build")

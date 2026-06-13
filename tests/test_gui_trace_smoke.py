@@ -112,13 +112,11 @@ def test_build_dialog_options(qapp):
     dlg = BuildAssetsDialog(
         connection_name="prod",
         databases=[{"name": "main", "has_assets": False}, {"name": "shop", "has_assets": True}],
-        load_profile="production",
-        default_profile_mode="light",
         default_max_workers=1,
     )
     assert set(dlg.selected_databases()) == {"main", "shop"}
     opts = dlg.build_options()
-    assert opts["profile_mode"] == "light"
+    assert "profile_mode" not in opts
     assert opts["max_workers"] == 1
     assert "timeout" in opts
 
@@ -194,6 +192,7 @@ def test_empty_schema_projection_uses_inline_progress(qapp):
     win._project_failed = lambda name, message: failures.append((name, message))  # type: ignore[method-assign]
     win._handle_asset_build_progress = lambda name, message: progress_calls.append((name, message))  # type: ignore[method-assign]
     win._finish_asset_build_progress = lambda name, result: finished.append((name, result))  # type: ignore[method-assign]
+    win.toast = lambda message: None  # type: ignore[method-assign]
     background_calls: list[dict[str, object]] = []
 
     def run_background(action, payload, on_success, *, on_error=None, on_progress=None):

@@ -48,6 +48,8 @@ def test_project_instance_builds_base_from_catalog(tmp_path, monkeypatch):
     assert any(isinstance(e, dict) and e.get("stage") == "build_assets" for e in events)
 
     tree = svc.dispatch("schema_tree", {"name": "shop"})
+    assert tree[0]["asset_summary"]["state"] == "base"
+    assert tree[0]["asset_summary"]["profile_state"] == "on_demand"
     tables = {t["name"] for db in tree for t in db["children"]}
     assert {"users", "orders"} <= tables
 
@@ -122,6 +124,8 @@ def test_enrich_table_is_granular_and_preserves_others(tmp_path, monkeypatch):
     assert not store.table_doc("shop", "main", "users").get("sample_rows"), "other table preserved as base"
     # Both tables still in the rollup / tree (granular build didn't drop the rest).
     tree = svc.dispatch("schema_tree", {"name": "shop"})
+    assert tree[0]["asset_summary"]["state"] == "partial"
+    assert tree[0]["asset_summary"]["sampled_tables"] == 1
     tables = {t["name"] for d in tree for t in d["children"]}
     assert {"users", "orders"} <= tables
 

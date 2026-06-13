@@ -25,7 +25,7 @@ class TestResourcePolicy:
         p = resolve_policy(load_profile=None)
         assert p == LOAD_PROFILES[DEFAULT_LOAD_PROFILE]
         assert p.max_inflight_queries == 16
-        assert p.build_max_workers == 1
+        assert p.build_max_workers == 4
         assert p.build_profile_mode == "light"
 
     def test_unknown_profile_falls_back_to_production(self):
@@ -45,7 +45,7 @@ class TestResourcePolicy:
         assert p.max_inflight_queries == 5
         assert p.max_row_limit == 250
         # untouched fields keep preset values
-        assert p.build_max_workers == 1
+        assert p.build_max_workers == 4
 
     def test_invalid_override_keys_ignored(self):
         p = resolve_policy(load_profile="production", overrides={"nonsense": 9, "max_row_limit": None})
@@ -170,7 +170,7 @@ class TestConfigIntegration:
         cfg = ConfigManager(path=path)
         cfg.upsert_connection(ConnectionConfig(name="local", type="sqlite", path="/tmp/a.db", load_profile="production"))
         first = cfg.policy_for(cfg.connections()["local"])
-        assert first.build_max_workers == 1
+        assert first.build_max_workers == 4
 
         cfg.upsert_connection(ConnectionConfig(name="local", type="sqlite", path="/tmp/a.db", load_profile="dev"))
         second = cfg.policy_for(cfg.connections()["local"])

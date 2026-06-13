@@ -204,7 +204,7 @@ def app_style() -> str:
         background: {T.PANEL};
         color: {T.TEXT};
         border: 1px solid {T.BORDER};
-        border-radius: 9px;
+        border-radius: 8px;
         min-height: 26px;
         max-height: 26px;
         selection-background-color: {T.PANEL_3};
@@ -227,7 +227,7 @@ QWidget#topBar {{
 QFrame[panel="true"] {{
     background: {T.SURFACE};
     border: 1px solid {T.BORDER_SOFT};
-    border-radius: 10px;
+    border-radius: 8px;
 }}
 QLabel[muted="true"] {{
     color: {T.MUTED};
@@ -240,7 +240,7 @@ QPushButton {{
     background: transparent;
     color: {T.TEXT_2};
     border: 1px solid transparent;
-    border-radius: 6px;
+    border-radius: 7px;
     padding: 0px 10px;
     min-height: 26px;
     max-height: 26px;
@@ -274,6 +274,18 @@ QPushButton[primary="true"]:disabled {{
     background: transparent;
     color: {T.MUTED_2};
     border: 1px solid transparent;
+}}
+QPushButton[danger="true"] {{
+    color: {T.RED};
+    background: transparent;
+    border: 1px solid transparent;
+}}
+QPushButton[danger="true"]:hover {{
+    color: {T.RED};
+    background: rgba(255, 107, 107, 0.12);
+}}
+QPushButton[danger="true"]:pressed {{
+    background: rgba(255, 107, 107, 0.18);
 }}
 QPushButton:focus-visible, QToolButton:focus-visible {{
     border: 1px solid {T.BORDER_SOFT};
@@ -451,10 +463,11 @@ QTabBar::tab:selected {{
     border-bottom: 2px solid {T.BLUE};
 }}
 QHeaderView::section {{
-    background: {T.PANEL_2};
+    background: {T.SURFACE};
     color: {T.TEXT_2};
     border: none;
-    padding: 4px 10px;
+    border-bottom: 1px solid {T.BORDER_SOFT};
+    padding: 5px 10px;
     font-weight: 600;
 }}
 QSplitter::handle {{
@@ -537,7 +550,7 @@ QToolButton {{
     background: transparent;
     color: {T.TEXT_2};
     border: 1px solid transparent;
-    border-radius: 6px;
+    border-radius: 7px;
     padding: 0px 10px;
     min-height: 26px;
     max-height: 26px;
@@ -574,7 +587,7 @@ QTabBar[segmented="true"]::tab:last {{
 QTabBar[sidebarSwitch="true"] {{
     background: {T.PANEL};
     border: none;
-    border-radius: 10px;
+    border-radius: 8px;
     padding: 3px;
 }}
 QTabBar[sidebarSwitch="true"]::tab {{
@@ -644,7 +657,7 @@ QTabBar[panelTabs="true"]::close-button:hover {{
 QFrame[panelContent="true"] {{
     background: {T.SURFACE};
     border: 1px solid {T.BORDER_SOFT};
-    border-radius: 10px;
+    border-radius: 8px;
 }}
 QStatusBar {{
     background: {T.BG};
@@ -723,7 +736,7 @@ def menu_stylesheet() -> str:
         background-color: {T.PANEL};
         color: {T.TEXT};
         border: 1px solid {T.BORDER};
-        border-radius: {T.RADIUS_LG}px;
+        border-radius: {T.RADIUS_MD}px;
         padding: 6px;
     }}
     QMenu::item {{
@@ -767,7 +780,7 @@ def workbench_tab_stylesheet(*, bordered_pane: bool = False) -> str:
     T = Theme
     if bordered_pane:
         pane = (
-            f"border: 1px solid {T.BORDER_SOFT}; border-radius: {T.RADIUS_LG}px;"
+            f"border: 1px solid {T.BORDER_SOFT}; border-radius: {T.RADIUS_MD}px;"
             f" top: -1px; background: {T.SURFACE};"
         )
     else:

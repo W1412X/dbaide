@@ -61,7 +61,7 @@ class InlineTrace(QFrame):
         self.setObjectName("inlineTrace")
         self.setStyleSheet(
             f"QFrame#inlineTrace {{ background: {Theme.PANEL}; border: 1px solid {Theme.BORDER_SOFT};"
-            f" border-radius: {Theme.RADIUS_LG}px; }}"
+            f" border-radius: {Theme.RADIUS_MD}px; }}"
         )
         self.setMaximumHeight(340)
         from dbaide.i18n import t

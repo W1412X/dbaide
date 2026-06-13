@@ -16,7 +16,7 @@ from PyQt6.QtWidgets import (
 )
 
 from dbaide.desktop.components.base import compact_button
-from dbaide.desktop.components.inputs import Combo, configure_wrapped_label
+from dbaide.desktop.components.inputs import configure_wrapped_label
 from dbaide.desktop.theme import Theme
 
 
@@ -29,8 +29,6 @@ class BuildAssetsDialog(ChromeDialog):
         *,
         connection_name: str,
         databases: list[dict[str, object]],
-        load_profile: str = "production",
-        default_profile_mode: str = "light",
         default_max_workers: int = 1,
         parent=None,
     ) -> None:
@@ -98,15 +96,9 @@ class BuildAssetsDialog(ChromeDialog):
         select_row.addStretch(1)
         root.addLayout(select_row)
 
-        # ── Resource options (Profile depth / concurrency / total timeout) ──
+        # ── Resource options (concurrency / total timeout) ──
         options = QFormLayout()
         options.setSpacing(8)
-
-        self._profile = Combo()
-        self._profile.addItems(["none", "light", "auto", "all"])
-        idx = max(0, self._profile.findText(str(default_profile_mode or "light")))
-        self._profile.setCurrentIndex(idx)
-        options.addRow(t("build.profile_depth"), self._profile)
 
         self._workers = QSpinBox()
         self._workers.setRange(1, 32)
@@ -119,10 +111,6 @@ class BuildAssetsDialog(ChromeDialog):
         self._timeout.setSuffix(t("build.time_suffix"))
         options.addRow(t("build.time_budget"), self._timeout)
 
-        profile_hint = QLabel(t("build.profile_note", profile=load_profile))
-        configure_wrapped_label(profile_hint)
-        profile_hint.setProperty("muted", True)
-        options.addRow(profile_hint)
         root.addLayout(options)
 
         # Pool any extra height here so the action row stays pinned to the bottom.
@@ -160,7 +148,6 @@ class BuildAssetsDialog(ChromeDialog):
 
     def build_options(self) -> dict[str, object]:
         return {
-            "profile_mode": self._profile.currentText(),
             "max_workers": int(self._workers.value()),
             "timeout": int(self._timeout.value()),
         }

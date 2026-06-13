@@ -32,8 +32,9 @@ class ConnectionForm(QWidget):
         scroll.setFrameShape(QFrame.Shape.NoFrame)
         inner = QWidget()
         inner.setObjectName("connFormInner")
+        scroll.setStyleSheet("QScrollArea { background: transparent; border: none; }")
         inner.setStyleSheet(
-            f"QWidget#connFormInner {{ background: {Theme.BG}; }}{FORM_INNER_LABEL_RULES}"
+            f"QWidget#connFormInner {{ background: transparent; }}{FORM_INNER_LABEL_RULES}"
         )
         form = QFormLayout(inner)
         configure_form(form)
@@ -207,8 +208,7 @@ class ConnectionDialog(ChromeDialog):
         layout = QVBoxLayout(self)
         self.form = ConnectionForm(conn_type=conn_type)
         layout.addWidget(self.form)
-        # Match the app's button language (accent primary + ghost) instead of a
-        # native QDialogButtonBox, so dialogs read consistently.
+        # Match the app's button language (accent primary + ghost) so dialogs read consistently.
         btn_row = QHBoxLayout()
         btn_row.setContentsMargins(0, 6, 0, 0)
         btn_row.addStretch(1)

@@ -99,7 +99,7 @@ class _AttachmentTags(QWidget):
             # Scope to #msgTag so the border doesn't cascade onto the icon/label.
             tag.setStyleSheet(
                 f"QWidget#msgTag {{ background: {Theme.PANEL_2};"
-                f" border: 1px solid {Theme.BORDER_SOFT}; border-radius: 11px; }}"
+                f" border: 1px solid {Theme.BORDER_SOFT}; border-radius: 8px; }}"
                 f"QWidget#msgTag QLabel {{ background: transparent; border: none; }}"
             )
             tag.setFixedHeight(22)
@@ -134,7 +134,7 @@ class _Bubble(QFrame):
             background: {Theme.PANEL_2};
             color: {Theme.TEXT};
             border: 1px solid {Theme.BORDER_SOFT};
-            border-radius: 14px;
+            border-radius: 8px;
             padding: 9px 14px;
             """
         )
@@ -413,7 +413,7 @@ class _MarkdownBlock(QFrame):
         if boxed:
             self.setStyleSheet(
                 f"QFrame#answerBlock {{ background: {Theme.PANEL};"
-                f" border: 1px solid {accent or Theme.BORDER_SOFT}; border-radius: 12px; }}"
+                f" border: 1px solid {accent or Theme.BORDER_SOFT}; border-radius: 8px; }}"
             )
             layout = QVBoxLayout(self)
             layout.setContentsMargins(16, 12, 16, 12)
@@ -549,7 +549,7 @@ class _ClarificationBar(QFrame):
             QFrame#clarificationBar {{
                 background: {Theme.PANEL};
                 border: 1px solid {Theme.BORDER_SOFT};
-                border-radius: 10px;
+                border-radius: 8px;
             }}
             """
         )
@@ -621,7 +621,7 @@ class _ClarificationStepper(QFrame):
         self.setObjectName("clarificationBar")
         self.setStyleSheet(
             f"QFrame#clarificationBar {{ background: {Theme.PANEL};"
-            f" border: 1px solid {Theme.BORDER_SOFT}; border-radius: 10px; }}"
+            f" border: 1px solid {Theme.BORDER_SOFT}; border-radius: 8px; }}"
         )
         self._outer = QVBoxLayout(self)
         self._outer.setContentsMargins(12, 10, 12, 12)

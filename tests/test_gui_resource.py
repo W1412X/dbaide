@@ -99,6 +99,43 @@ def test_service_ask_request_defaults_use_resource_policy(tmp_path):
     assert request.timeout_seconds == 23
 
 
+def test_all_resource_defaults_apply_to_effective_policy(tmp_path):
+    from dbaide.db import policy as policy_mod
+
+    policy_mod.clear_cache()
+    svc = _service(tmp_path)
+    conn = svc.cfg.get_connection("local")
+    overrides = {
+        "max_inflight_queries": 3,
+        "statement_timeout_seconds": 12,
+        "build_max_workers": 2,
+        "default_row_limit": 50,
+        "max_row_limit": 800,
+        "agent_max_steps": 20,
+        "big_table_rows": 2_000_000,
+        "explain_max_rows": 6_000_000,
+        "join_sample_size": 80,
+        "max_concurrent_runs": 2,
+    }
+    svc.save_resource_defaults({"values": overrides})
+    policy = svc.cfg.policy_for(conn)
+    for key, expected in overrides.items():
+        if key == "max_concurrent_runs":
+            assert svc.cfg.max_concurrent_runs() == expected
+        else:
+            assert getattr(policy, key) == expected
+
+
+def test_build_default_workers_from_saved_policy(tmp_path):
+    from dbaide.db import policy as policy_mod
+
+    policy_mod.clear_cache()
+    svc = _service(tmp_path)
+    svc.save_resource_defaults({"values": {"build_max_workers": 3}})
+    policy = svc.cfg.policy_for(svc.cfg.get_connection("local"))
+    assert policy.build_max_workers == 3
+
+
 def test_service_join_endpoint_delete_is_scoped_by_database(tmp_path):
     svc = _service(tmp_path)
     rel = {"table": "orders", "column": "user_id", "ref_table": "users", "ref_column": "id"}

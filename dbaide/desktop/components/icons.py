@@ -7,6 +7,8 @@ device-pixel-ratio so it stays sharp on HiDPI, tinted to the requested colour.
 
 from __future__ import annotations
 
+from pathlib import Path
+
 from PyQt6.QtCore import QByteArray, QRectF, QSize, Qt
 from PyQt6.QtGui import QGuiApplication, QIcon, QPainter, QPixmap
 from PyQt6.QtSvg import QSvgRenderer
@@ -55,6 +57,13 @@ _GLYPHS: dict[str, str] = {
     "play": '<polygon points="6 3 20 12 6 21 6 3"/>',
     "external-link": ('<path d="M15 3h6v6"/><path d="M10 14 21 3"/>'
                       '<path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/>'),
+    "folder-open": ('<path d="m6 14 1.5-2.9A2 2 0 0 1 9.24 10H20a2 2 0 0 1 1.94 2.5l-1.54 6'
+                    'A2 2 0 0 1 18.46 20H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4.9a2 2 0 0 1 1.69.9L12 6h6a2 2 0 0 1 2 2v2"/>'),
+    "info": '<circle cx="12" cy="12" r="10"/><path d="M12 16v-4"/><path d="M12 8h.01"/>',
+    "shield-check": ('<path d="M20 13c0 5-3.5 7.5-7.66 8.95a1 1 0 0 1-.68 0C7.5 20.5 4 18 4 13V6'
+                     'a1 1 0 0 1 1-1c2 0 4.5-1.2 6.24-2.72a1.17 1.17 0 0 1 1.52 0C14.51 3.81 17 5 19 5a1 1 0 0 1 1 1z"/>'
+                     '<path d="m9 12 2 2 4-4"/>'),
+    "key": '<path d="m15.5 7.5 1 1"/><path d="m19 4-9.6 9.6"/><circle cx="7.5" cy="16.5" r="3.5"/><path d="M10 14 8 12"/><path d="M6 18l-2 2"/>',
     "terminal": '<polyline points="4 17 10 11 4 5"/><line x1="12" x2="20" y1="19" y2="19"/>',
     "loader": '<path d="M21 12a9 9 0 1 1-6.219-8.56"/>',  # 270° arc — the spinner
     "table": '<rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18"/><path d="M9 3v18"/>',
@@ -130,22 +139,41 @@ def plus_icon(*, color: str = Theme.MUTED, size: int = 18) -> QIcon:
     return svg_icon("plus", color=color, size=size)
 
 
-def app_logo_pixmap(size: int = 22) -> "QPixmap | None":
-    """The DBAide app icon as a crisp HiDPI pixmap (None if the asset is missing).
-    Shared by the window icon and the header wordmark so the brand stays consistent."""
-    from pathlib import Path
+def _app_icon_path() -> Path:
+    return Path(__file__).resolve().parents[1] / "assets" / "app_icon.png"
 
-    path = Path(__file__).resolve().parents[1] / "assets" / "app_icon.png"
-    if not path.exists():
+
+def app_icon() -> QIcon:
+    """Original DBAide brand icon used by the window and app chrome."""
+    return QIcon(str(_app_icon_path()))
+
+
+def app_logo_pixmap(size: int = 22) -> "QPixmap | None":
+    """Original DBAide brand mark for the top bar."""
+    source = QPixmap(str(_app_icon_path()))
+    if source.isNull():
         return None
-    screen = QGuiApplication.primaryScreen()
-    ratio = screen.devicePixelRatio() if screen else 1.0
-    pm = QPixmap(str(path)).scaled(
-        int(size * ratio), int(size * ratio),
-        Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation,
+    image = source.toImage()
+    left, top = image.width(), image.height()
+    right, bottom = -1, -1
+    for y in range(image.height()):
+        for x in range(image.width()):
+            if image.pixelColor(x, y).alpha() > 0:
+                left = min(left, x)
+                top = min(top, y)
+                right = max(right, x)
+                bottom = max(bottom, y)
+    if right >= left and bottom >= top:
+        source = source.copy(left, top, right - left + 1, bottom - top + 1)
+    dpr = _dpr()
+    target = QSize(int(round(size * dpr)), int(round(size * dpr)))
+    pixmap = source.scaled(
+        target,
+        Qt.AspectRatioMode.KeepAspectRatio,
+        Qt.TransformationMode.SmoothTransformation,
     )
-    pm.setDevicePixelRatio(ratio)
-    return pm
+    pixmap.setDevicePixelRatio(dpr)
+    return pixmap
 
 
 ICON_SIZE = QSize(16, 16)

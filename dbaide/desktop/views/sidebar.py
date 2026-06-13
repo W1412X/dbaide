@@ -149,6 +149,33 @@ class Sidebar(QWidget):
         self._build_progress.hide()
         schema_layout.addWidget(self._build_progress)
 
+        self._asset_state = QFrame()
+        self._asset_state.setObjectName("schemaAssetState")
+        self._asset_state.setStyleSheet(
+            f"""
+            QFrame#schemaAssetState {{
+                background: transparent;
+                border: none;
+            }}
+            """
+        )
+        asset_state_layout = QHBoxLayout(self._asset_state)
+        asset_state_layout.setContentsMargins(1, 0, 1, 2)
+        asset_state_layout.setSpacing(7)
+        self._asset_state_icon = QLabel()
+        self._asset_state_icon.setFixedSize(14, 14)
+        self._asset_state_icon.setScaledContents(True)
+        asset_state_layout.addWidget(self._asset_state_icon, 0, Qt.AlignmentFlag.AlignVCenter)
+        self._asset_state_title = QLabel("")
+        self._asset_state_title.setStyleSheet(f"color: {Theme.TEXT_2}; font-size: 11px; font-weight: 650;")
+        asset_state_layout.addWidget(self._asset_state_title, 0, Qt.AlignmentFlag.AlignVCenter)
+        self._asset_state_detail = QLabel("")
+        self._asset_state_detail.setStyleSheet(f"color: {Theme.MUTED}; font-size: 11px;")
+        self._asset_state_detail.setTextFormat(Qt.TextFormat.PlainText)
+        asset_state_layout.addWidget(self._asset_state_detail, 1, Qt.AlignmentFlag.AlignVCenter)
+        self._asset_state.hide()
+        schema_layout.addWidget(self._asset_state)
+
         self.tree = QTreeWidget()
         self.tree.setHeaderHidden(True)
         # Column 0 = the schema name (stretches); column 1 = small per-row action
@@ -451,6 +478,7 @@ class Sidebar(QWidget):
     def load_schema(self, rows: list[dict[str, Any]], *, error: str = "") -> None:
         self._rows = rows
         if error:
+            self.set_asset_summary({"state": "failed", "errors": 1, "message": error})
             self._schema_render_timer.stop()
             self._schema_render_pending = None
             self._stop_schema_loading()
@@ -458,6 +486,7 @@ class Sidebar(QWidget):
             from dbaide.i18n import t as _t
             self.tree.addTopLevelItem(QTreeWidgetItem([_t("schema.load_failed", error=error)]))
             return
+        self.set_asset_summary(self._asset_summary_from_rows(rows))
         if self._build_progress_active and self._tree_has_schema_nodes():
             self._schema_render_pending = list(rows)
             if not self._schema_render_timer.isActive():
@@ -701,6 +730,90 @@ class Sidebar(QWidget):
         self._build_progress_active = False
         self._stop_build_progress_spinner()
         self._build_progress.hide()
+
+    def set_asset_summary(self, summary: dict[str, Any] | None) -> None:
+        from dbaide.i18n import t as _t
+        summary = summary or {}
+        state = str(summary.get("state") or "missing")
+        color = {
+            "sampled": Theme.GREEN,
+            "partial": Theme.BLUE,
+            "base": Theme.TEXT_2,
+            "stale": Theme.YELLOW,
+            "failed": Theme.RED,
+            "missing": Theme.MUTED,
+        }.get(state, Theme.MUTED)
+        icon = {
+            "sampled": "check",
+            "partial": "database",
+            "base": "database",
+            "stale": "alert-triangle",
+            "failed": "alert-triangle",
+            "missing": "database",
+        }.get(state, "database")
+        self._asset_state_icon.setPixmap(svg_pixmap(icon, color=color, size=14, width=1.8))
+        self._asset_state_title.setText(_t(f"schema.asset_state.{state}"))
+        if summary.get("message"):
+            detail = str(summary.get("message") or "")
+        else:
+            errors = int(summary.get("errors") or 0)
+            detail = _t(
+                "schema.asset_state.detail",
+                tables=int(summary.get("tables") or 0),
+                columns=int(summary.get("columns") or 0),
+                sampled=int(summary.get("sampled_tables") or 0),
+            )
+            if errors:
+                detail += _t("schema.asset_state.errors", errors=errors)
+        self._asset_state_detail.setText(detail)
+        self._asset_state.setToolTip(detail)
+        self._asset_state.show()
+
+    def _asset_summary_from_rows(self, rows: list[dict[str, Any]]) -> dict[str, Any]:
+        for row in rows or []:
+            summary = row.get("asset_summary")
+            if isinstance(summary, dict):
+                return summary
+        if not rows:
+            return {"state": "missing", "tables": 0, "columns": 0, "sampled_tables": 0, "errors": 0}
+        tables = 0
+        columns = 0
+        sampled = 0
+        stale = 0
+        for db in rows:
+            for table in db.get("children", []) or []:
+                tables += 1
+                columns += int(table.get("column_count") or len(table.get("children") or []))
+                state = str(table.get("asset_state") or "")
+                if state == "stale" or table.get("stale"):
+                    stale += 1
+                if state == "sampled" or table.get("enriched"):
+                    sampled += 1
+        errors = 0
+        for row in rows or []:
+            summary = row.get("asset_summary")
+            if isinstance(summary, dict):
+                errors = int(summary.get("errors") or 0)
+                break
+        if errors:
+            state = "failed"
+        elif stale:
+            state = "stale"
+        elif sampled == tables and tables:
+            state = "sampled"
+        elif sampled:
+            state = "partial"
+        else:
+            state = "base"
+        return {
+            "state": state,
+            "tables": tables,
+            "columns": columns,
+            "sampled_tables": sampled,
+            "stale_tables": stale,
+            "errors": errors,
+            "profile_state": "on_demand",
+        }
 
     def _attach_row_actions(self) -> None:
         from dbaide.i18n import t
