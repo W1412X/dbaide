@@ -6,6 +6,14 @@ All notable changes to DBAide are documented here. The format is loosely based o
 
 ## [Unreleased]
 
+## [0.2.4] — 2026-06-13
+
+### Changed
+
+- **TopBar update control** — matches Settings → About: external-link icon with
+  「有 vX 可更新」 ghost action; sits to the right of the connection selector (replaces
+  the blue download pill).
+
 ## [0.2.3] — 2026-06-13
 
 ### Added
@@ -581,7 +589,8 @@ and a PyQt6 desktop app, sharing one Python core.
   drag-to-Applications)**, **Windows (`.msi` wizard)**, and **Linux (`.tar.gz`)** —
   pushing a `v*` tag cuts a GitHub Release automatically.
 
-[Unreleased]: https://github.com/W1412X/dbaide/compare/v0.2.3...HEAD
+[Unreleased]: https://github.com/W1412X/dbaide/compare/v0.2.4...HEAD
+[0.2.4]: https://github.com/W1412X/dbaide/compare/v0.2.3...v0.2.4
 [0.2.3]: https://github.com/W1412X/dbaide/compare/v0.2.2...v0.2.3
 [0.2.2]: https://github.com/W1412X/dbaide/compare/v0.2.1...v0.2.2
 [0.2.1]: https://github.com/W1412X/dbaide/compare/v0.2.0...v0.2.1
