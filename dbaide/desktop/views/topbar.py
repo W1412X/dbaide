@@ -11,8 +11,8 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 
-from dbaide.desktop.components.base import StatusBadge
-from dbaide.desktop.components.icons import more_icon
+from dbaide.desktop.components.base import StatusBadge, ghost_action_button
+from dbaide.desktop.components.icons import more_icon, svg_icon
 from dbaide.desktop.components.menu import MenuButton, PillSelect
 from dbaide.desktop.platform_ui import configure_chrome_button, label_for_chrome_button
 from dbaide.desktop.theme import Theme
@@ -157,38 +157,6 @@ class TopBar(QWidget):
         brand.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
         row.addWidget(brand)
 
-        from dbaide.desktop.components.icons import svg_icon
-
-        self.update_btn = QToolButton()
-        self.update_btn.setObjectName("topbarUpdateButton")
-        self.update_btn.setFixedSize(28, 28)
-        self.update_btn.setIcon(svg_icon("download", color="#ffffff", size=15))
-        self.update_btn.setIconSize(QSize(15, 15))
-        self.update_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.update_btn.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonIconOnly)
-        self.update_btn.setStyleSheet(
-            f"""
-            QToolButton#topbarUpdateButton {{
-                background: {Theme.BLUE};
-                border: none;
-                border-radius: 14px;
-                padding: 0;
-                margin: 0 2px;
-            }}
-            QToolButton#topbarUpdateButton:hover {{
-                background: #2563eb;
-            }}
-            QToolButton#topbarUpdateButton:pressed {{
-                background: #1d4ed8;
-            }}
-            """
-        )
-        self.update_btn.hide()
-        self._update_release_url = ""
-        self.update_btn.clicked.connect(self._open_update_release)
-        row.addWidget(self.update_btn, 0, Qt.AlignmentFlag.AlignVCenter)
-        row.addSpacing(6)
-
         from dbaide.i18n import t
 
         # Pill selectors — one unified control (label + chevron), no legacy QComboBox
@@ -197,6 +165,16 @@ class TopBar(QWidget):
         self.connection.value_changed.connect(self._emit_connection)
         configure_chrome_button(self.connection)
         row.addWidget(self.connection)
+
+        self.update_btn = ghost_action_button(
+            "",
+            icon=svg_icon("external-link", color=Theme.BLUE, size=14),
+        )
+        configure_chrome_button(self.update_btn)
+        self.update_btn.hide()
+        self._update_release_url = ""
+        self.update_btn.clicked.connect(self._open_update_release)
+        row.addWidget(self.update_btn, 0, Qt.AlignmentFlag.AlignVCenter)
 
         row.addStretch(1)
 
@@ -239,7 +217,10 @@ class TopBar(QWidget):
 
         self._update_release_url = str(url or "").strip()
         if available and self._update_release_url:
-            self.update_btn.setToolTip(t("topbar.update.tooltip", version=version))
+            ver = str(version or "").strip().lstrip("vV")
+            self.update_btn.setText(t("settings.about.latest_available", version=ver))
+            self.update_btn.setToolTip(self._update_release_url)
+            self.update_btn.adjustSize()
             self.update_btn.show()
         else:
             self.update_btn.hide()

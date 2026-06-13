@@ -81,6 +81,18 @@ def test_topbar_update_button_hidden_when_ahead(qapp):
     assert bar.update_btn.isHidden()
 
 
+def test_topbar_update_button_shows_version_label(qapp):
+    from dbaide.desktop.views.topbar import TopBar
+    from dbaide.i18n import t
+
+    bar = TopBar()
+    bar.set_update_available(True, version="0.2.3", url="https://example/release")
+    assert not bar.update_btn.isHidden()
+    assert bar.update_btn.text() == t("settings.about.latest_available", version="0.2.3")
+    bar.set_update_available(False)
+    assert bar.update_btn.isHidden()
+
+
 def test_topbar_update_button_hidden_by_default(qapp):
     from dbaide.desktop.views.topbar import TopBar
 
