@@ -7,6 +7,7 @@ from typing import Any
 
 CHART_TYPES = frozenset({
     "bar", "horizontal_bar", "line", "area", "pie", "donut", "stacked_bar", "scatter",
+    "combo", "grouped_bar", "stacked_area", "multi_axis_line",
 })
 
 
@@ -20,6 +21,7 @@ class ChartSpec:
     x_label: str = ""
     y_label: str = ""
     row_count: int = 0
+    axes: dict[str, dict[str, Any]] = field(default_factory=dict)
 
     def validate(self) -> None:
         if self.chart_type not in CHART_TYPES:
@@ -32,6 +34,13 @@ class ChartSpec:
                 raise ValueError("each series requires non-empty values")
         if self.chart_type not in ("pie", "donut", "scatter") and not self.categories:
             raise ValueError("chart requires categories")
+        for item in self.series:
+            series_type = str(item.get("type") or "").strip()
+            if series_type and series_type not in {"bar", "line", "area"}:
+                raise ValueError(f"unsupported series type: {series_type!r}")
+            axis = str(item.get("axis") or "").strip()
+            if axis and axis not in {"left", "right"}:
+                raise ValueError(f"unsupported series axis: {axis!r}")
 
 
 def chart_spec_to_dict(spec: ChartSpec) -> dict[str, Any]:
@@ -44,6 +53,7 @@ def chart_spec_to_dict(spec: ChartSpec) -> dict[str, Any]:
         "x_label": spec.x_label,
         "y_label": spec.y_label,
         "row_count": spec.row_count,
+        "axes": {str(k): dict(v) for k, v in (spec.axes or {}).items() if isinstance(v, dict)},
     }
 
 
@@ -57,6 +67,11 @@ def chart_spec_from_dict(data: dict[str, Any]) -> ChartSpec:
         x_label=str(data.get("x_label") or ""),
         y_label=str(data.get("y_label") or ""),
         row_count=int(data.get("row_count") or 0),
+        axes={
+            str(k): dict(v)
+            for k, v in (data.get("axes") or {}).items()
+            if isinstance(v, dict)
+        } if isinstance(data.get("axes"), dict) else {},
     )
     spec.validate()
     return spec

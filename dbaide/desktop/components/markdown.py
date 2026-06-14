@@ -49,18 +49,6 @@ class MarkdownView(QTextBrowser):
         )
         self._append_html(html)
 
-    def append_sql_block(self, sql: str, *, validation: str = "") -> None:
-        if not sql:
-            return
-        status = f"<span style='color:{Theme.GREEN};font-size:11px;margin-left:8px'>{escape_user_text(validation)}</span>" if validation else ""
-        html = (
-            f"<div style='margin:10px 0 6px;color:{Theme.TEXT_2};font-weight:700'>SQL{status}</div>"
-            f"<pre style='background:{Theme.CODE_BG};color:{Theme.BLUE};border:1px solid {Theme.BORDER};"
-            f"border-radius:8px;padding:12px;white-space:pre-wrap;font-family:Menlo,monospace;font-size:11px;'>"
-            f"{escape_user_text(sql)}</pre>"
-        )
-        self._append_html(html)
-
     def _append_html(self, html: str) -> None:
         cursor = self.textCursor()
         cursor.movePosition(QTextCursor.MoveOperation.End)

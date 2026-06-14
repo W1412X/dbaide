@@ -4,6 +4,7 @@ not inline — clicking a turn's indicator reveals it there."""
 
 from __future__ import annotations
 
+import re
 from typing import Any
 
 from PyQt6.QtCore import Qt, QTimer, pyqtSignal, QPropertyAnimation, QEasingCurve
@@ -15,6 +16,7 @@ from PyQt6.QtWidgets import (
     QLabel,
     QLineEdit,
     QMenu,
+    QPlainTextEdit,
     QScrollArea,
     QSizePolicy,
     QTextBrowser,
@@ -22,6 +24,7 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 from dbaide.desktop.components.chart_block import ChartBlock
+from dbaide.desktop.components.icon_button import IconToolButton
 
 from PyQt6.QtCore import QSize
 
@@ -67,6 +70,39 @@ def _show_copy_menu(widget: QWidget, pos, *, selected_text: str, full_text: str)
     message_action.setEnabled(bool(full_text.strip()))
     message_action.triggered.connect(lambda: _copy_to_clipboard(full_text))
     menu.exec(widget.mapToGlobal(pos))
+
+
+_FENCED_CODE_RE = re.compile(
+    r"(?ms)^[ \t]{0,3}```([^\n`]*)\n(.*?)^[ \t]{0,3}```[ \t]*$"
+)
+
+
+def _split_fenced_code_blocks(markdown: str) -> list[tuple[str, str, str]]:
+    """Split Markdown into prose/code chunks for UI affordances.
+
+    Rendering prose and fenced blocks separately lets each code block have its own
+    copy button while preserving the original Markdown for whole-message copy.
+    Unclosed fences stay in the prose chunk so the renderer can show the text as-is.
+    """
+    text = str(markdown or "")
+    parts: list[tuple[str, str, str]] = []
+    pos = 0
+    for match in _FENCED_CODE_RE.finditer(text):
+        before = text[pos:match.start()]
+        if before:
+            parts.append(("markdown", before, ""))
+        lang = str(match.group(1) or "").strip().split(None, 1)[0]
+        code = str(match.group(2) or "")
+        if code.endswith("\n"):
+            code = code[:-1]
+        if code.endswith("\r"):
+            code = code[:-1]
+        parts.append(("code", code, lang))
+        pos = match.end()
+    tail = text[pos:]
+    if tail:
+        parts.append(("markdown", tail, ""))
+    return parts or [("markdown", text, "")]
 
 
 class _AttachmentTags(QWidget):
@@ -398,6 +434,96 @@ class _ThinkingIndicator(QFrame):
         self.updateGeometry()
 
 
+class _CodeBlock(QFrame):
+    """Standalone fenced-code block with a compact copy action."""
+
+    def __init__(self, code: str, *, language: str = "", parent=None) -> None:
+        super().__init__(parent)
+        from dbaide.i18n import t
+
+        self._code = str(code or "")
+        self._language = str(language or "").strip()
+        self.setObjectName("answerCodeBlock")
+        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        self.setStyleSheet(
+            f"""
+            QFrame#answerCodeBlock {{
+                background: {Theme.CODE_BG};
+                border: 1px solid {Theme.BORDER_SOFT};
+                border-radius: 8px;
+            }}
+            QPlainTextEdit {{
+                background: transparent;
+                color: {Theme.TEXT};
+                border: none;
+                padding: 0;
+                selection-background-color: {Theme.PANEL_3};
+                font-family: Menlo, Monaco, Consolas, monospace;
+                font-size: 12px;
+            }}
+            QLabel {{
+                background: transparent;
+                color: {Theme.MUTED};
+                font-size: 11px;
+                font-weight: 600;
+            }}
+            """
+        )
+        outer = QVBoxLayout(self)
+        outer.setContentsMargins(10, 7, 10, 10)
+        outer.setSpacing(4)
+
+        header = QHBoxLayout()
+        header.setContentsMargins(0, 0, 0, 0)
+        header.setSpacing(6)
+        label = QLabel(self._language.upper() if self._language else t("conversation.code"))
+        header.addWidget(label)
+        header.addStretch(1)
+        self._copy_btn = IconToolButton(
+            svg_icon("copy", color=Theme.MUTED, size=14),
+            t("message.copy_code"),
+        )
+        self._copy_btn.clicked.connect(self.copy_code)
+        header.addWidget(self._copy_btn)
+        outer.addLayout(header)
+
+        self._editor = QPlainTextEdit()
+        self._editor.setPlainText(self._code)
+        self._editor.setReadOnly(True)
+        self._editor.setLineWrapMode(QPlainTextEdit.LineWrapMode.NoWrap)
+        self._editor.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self._editor.customContextMenuRequested.connect(self._show_editor_menu)
+        self._editor.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        self._editor.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        line_count = max(1, self._code.count("\n") + 1)
+        self._editor.setFixedHeight(min(320, max(50, line_count * 18 + 10)))
+        outer.addWidget(self._editor)
+
+    def copy_code(self) -> None:
+        from dbaide.i18n import t
+
+        QApplication.clipboard().setText(self._code)
+        self._copy_btn.setIcon(svg_icon("check", color=Theme.GREEN, size=14))
+        self._copy_btn.setToolTip(t("ask.copied"))
+
+        def restore() -> None:
+            try:
+                self._copy_btn.setIcon(svg_icon("copy", color=Theme.MUTED, size=14))
+                self._copy_btn.setToolTip(t("message.copy_code"))
+            except RuntimeError:
+                pass
+
+        QTimer.singleShot(1200, restore)
+
+    def _show_editor_menu(self, pos) -> None:
+        _show_copy_menu(
+            self._editor.viewport(),
+            pos,
+            selected_text=str(self._editor.textCursor().selectedText() or "").replace("\u2029", "\n"),
+            full_text=self._code,
+        )
+
+
 class _MarkdownBlock(QFrame):
     """A rendered-markdown chunk in the conversation. By default it flows directly
     on the background (no card) — the assistant's answer reads like prose, the way
@@ -431,59 +557,96 @@ class _MarkdownBlock(QFrame):
             if title_tooltip:
                 t.setToolTip(title_tooltip)
             layout.addWidget(t)
-        self._body = QTextBrowser()
-        self._body.setOpenExternalLinks(True)
-        self._body.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
-        self._body.customContextMenuRequested.connect(self._show_body_menu)
-        self._body.setFrameShape(QFrame.Shape.NoFrame)
-        self._body.setFont(QFont("Inter", 13))
-        configure_readonly_text_view(self._body)
-        self._body.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
-        self._body.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
-        self._body.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
-        self._body.setStyleSheet(
-            f"QTextBrowser {{ background: transparent; border: none; color: {Theme.TEXT}; padding: 0; }}"
-        )
-        # Qt rich text honours a document's default stylesheet far more reliably than
-        # an inline <style> (which silently drops e.g. inline-code backgrounds), so
-        # full Markdown — blockquotes, headings, lists, code, tables — renders.
-        from dbaide.desktop.components.md_css import markdown_stylesheet
-        self._body.document().setDefaultStyleSheet(markdown_stylesheet())
-        self._body.setHtml(render_markdown_safe(self._markdown))
-        layout.addWidget(self._body)
-        self._body.document().documentLayout().documentSizeChanged.connect(self._sync_body_height)
-        self._sync_body_height()
+        self._content_layout = layout
+        self._browsers: list[QTextBrowser] = []
+        self._code_blocks: list[_CodeBlock] = []
+        self._body: QTextBrowser | None = None
+        self._render_segments()
 
     def set_markdown(self, markdown: str) -> None:
         """Re-render the body (used by the progressive answer reveal)."""
         self._markdown = str(markdown or "")
-        self._body.setHtml(render_markdown_safe(self._markdown))
+        self._render_segments()
         self._sync_body_height()
 
-    def _show_body_menu(self, pos) -> None:
+    def _make_text_browser(self, markdown: str) -> QTextBrowser:
+        browser = QTextBrowser()
+        browser.setOpenExternalLinks(True)
+        browser.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        browser.customContextMenuRequested.connect(lambda pos, b=browser: self._show_body_menu(b, pos))
+        browser.setFrameShape(QFrame.Shape.NoFrame)
+        browser.setFont(QFont("Inter", 13))
+        configure_readonly_text_view(browser)
+        browser.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        browser.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        browser.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        browser.setStyleSheet(
+            f"QTextBrowser {{ background: transparent; border: none; color: {Theme.TEXT}; padding: 0; }}"
+        )
+        from dbaide.desktop.components.md_css import markdown_stylesheet
+        browser.document().setDefaultStyleSheet(markdown_stylesheet())
+        browser.setHtml(render_markdown_safe(markdown))
+        browser.document().documentLayout().documentSizeChanged.connect(self._sync_body_height)
+        return browser
+
+    def _render_segments(self) -> None:
+        while self._content_layout.count():
+            item = self._content_layout.takeAt(self._content_layout.count() - 1)
+            widget = item.widget()
+            if widget is not None and not isinstance(widget, QLabel):
+                widget.setParent(None)
+                widget.deleteLater()
+            elif widget is not None:
+                self._content_layout.insertWidget(0, widget)
+                break
+        self._browsers = []
+        self._code_blocks = []
+        self._body = None
+        for kind, payload, meta in _split_fenced_code_blocks(self._markdown):
+            if kind == "code":
+                code = _CodeBlock(payload, language=meta)
+                self._code_blocks.append(code)
+                self._content_layout.addWidget(code)
+                continue
+            if not payload.strip():
+                continue
+            browser = self._make_text_browser(payload)
+            self._browsers.append(browser)
+            if self._body is None:
+                self._body = browser
+            self._content_layout.addWidget(browser)
+        self._sync_body_height()
+
+    def _show_body_menu(self, browser: QTextBrowser, pos) -> None:
         _show_copy_menu(
-            self._body.viewport(),
+            browser.viewport(),
             pos,
-            selected_text=_selected_browser_text(self._body),
-            full_text=self._markdown or self._body.toPlainText(),
+            selected_text=_selected_browser_text(browser),
+            full_text=self._markdown or browser.toPlainText(),
         )
 
     def copy_message(self) -> None:
-        _copy_to_clipboard(self._markdown or self._body.toPlainText())
+        fallback = self._body.toPlainText() if self._body is not None else ""
+        _copy_to_clipboard(self._markdown or fallback)
 
     def copy_selection(self) -> None:
-        _copy_to_clipboard(_selected_browser_text(self._body))
+        for browser in self._browsers:
+            selected = _selected_browser_text(browser)
+            if selected.strip():
+                _copy_to_clipboard(selected)
+                return
 
     def resizeEvent(self, event) -> None:  # noqa: N802
         super().resizeEvent(event)
         self._sync_body_height()
 
     def _sync_body_height(self, *_args) -> None:
-        doc = self._body.document()
-        width = max(self._body.viewport().width(), self.width() - 32, 320)
-        doc.setTextWidth(width)
-        height = int(doc.documentLayout().documentSize().height()) + 8
-        self._body.setFixedHeight(max(height, 24))
+        for browser in self._browsers:
+            doc = browser.document()
+            width = max(browser.viewport().width(), self.width() - 32, 320)
+            doc.setTextWidth(width)
+            height = int(doc.documentLayout().documentSize().height()) + 8
+            browser.setFixedHeight(max(height, 24))
 
 
 class _ClarificationOption(QFrame):
@@ -1115,7 +1278,6 @@ class ConversationView(QScrollArea):
         self,
         *,
         answer: str = "",
-        sql: str = "",
         trace_events: list[dict[str, Any]] | None = None,
         warnings: list[str] | None = None,
         errors: list[str] | None = None,
@@ -1158,8 +1320,6 @@ class ConversationView(QScrollArea):
             workflow_id=workflow_id,
             replace_widget=live,
         )
-        if sql.strip() and "```sql" not in answer:
-            turn.append_content(_MarkdownBlock(f"```sql\n{sql}\n```", title="SQL"))
         if actions_widget is not None:
             turn.append_content(actions_widget)
         notes: list[str] = []

@@ -104,6 +104,11 @@ def register(registry: ToolRegistry, orchestrator) -> None:
             data["clarifications"] = [str(x) for x in (turn.get("clarifications") or [])]
         if "sql" in wanted:
             data["selected_sql"] = str(turn.get("selected_sql") or "")
+            data["executed_sqls"] = [
+                dict(item)
+                for item in (turn.get("executed_sqls") or [])
+                if isinstance(item, dict)
+            ]
         if "answer" in wanted:
             data["answer_markdown"] = str(turn.get("answer_markdown") or "")
         if "tables" in wanted:

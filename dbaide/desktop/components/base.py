@@ -13,8 +13,7 @@ def ghost_action_button(
     text: str, *, icon: QIcon | None = None, tooltip: str = "", parent=None
 ) -> QPushButton:
     """A low-profile inline action: small icon + label, no border, muted until
-    hover (Codex/Claude message-action style). For the row of actions under an
-    answer (Copy SQL, Open in SQL, …)."""
+    hover (Codex/Claude message-action style)."""
     btn = QPushButton(text, parent)
     btn.setCursor(Qt.CursorShape.PointingHandCursor)
     btn.setAutoDefault(False)

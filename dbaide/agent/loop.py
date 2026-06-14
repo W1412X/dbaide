@@ -10,6 +10,7 @@ from typing import TYPE_CHECKING, Any, Callable
 from dbaide.agent.answer_stream import JsonFieldStreamer
 from dbaide.agent.loop_state import dump_loop_state, restore_loop_state
 from dbaide.agent.progress_events import brief_tool_summary, from_trace_event, progress_event
+from dbaide.agent.sql_executions import response_sql_exports
 from dbaide.agent.loop_prompts import DecisionPromptBuilder, tool_prompt_line
 from dbaide.agent.llm_trace import llm_stage
 from dbaide.agent.runtime import AgentRuntime
@@ -301,6 +302,8 @@ class AskAgentLoop:
             ))
             if result.ok:
                 done_event["sql"] = approved_risk_sql
+                if data.get("purpose"):
+                    done_event["purpose"] = str(data["purpose"])
                 if data.get("row_count") is not None:
                     done_event["row_count"] = data.get("row_count")
             self.progress(done_event)
@@ -574,6 +577,8 @@ class AskAgentLoop:
         if executed_sql:
             done_event["sql"] = executed_sql
             data = result.data if isinstance(result.data, dict) else {}
+            if data.get("purpose"):
+                done_event["purpose"] = str(data["purpose"])
             if data.get("row_count") is not None:
                 done_event["row_count"] = data.get("row_count")
             db = str(data.get("database") or orch.run_state.database or "").strip()
@@ -611,13 +616,15 @@ class AskAgentLoop:
             answer = self._answer_from_state(orch)
         if not answer:
             answer = t("agent.loop_failed")
+        selected_sql, executed_sqls = response_sql_exports(orch.run_state)
         return AssistantResponse(
             answer=answer,
-            sql=orch.run_state.sql or "",
+            sql=selected_sql,
             result=orch.run_state.query_result,
             disclosures=orch.session.disclosure.events[len(disclosures_before):],
             warnings=[t("agent.loop_failed_reason", reason=reason)],
             charts=list(orch.run_state.charts or []),
+            executed_sqls=executed_sqls,
         )
 
     def _emit_answer_chunk(self, text: str) -> None:
@@ -808,9 +815,10 @@ class AskAgentLoop:
         if structured:
             wait_event["questions"] = structured
         self.progress(wait_event)
+        selected_sql, executed_sqls = response_sql_exports(orch.run_state)
         return AssistantResponse(
             answer=answer,
-            sql=orch.run_state.sql or "",
+            sql=selected_sql,
             result=None,
             disclosures=orch.session.disclosure.events[len(disclosures_before):],
             warnings=[],
@@ -820,18 +828,21 @@ class AskAgentLoop:
             pending_questions=list(orch.run_state.pending_questions),
             resume_state=snapshot,
             charts=list(orch.run_state.charts or []),
+            executed_sqls=executed_sqls,
         )
 
     def _build_response(
         self, orch: AskOrchestrator, answer: str, disclosures_before: list[str],
     ) -> AssistantResponse:
+        selected_sql, executed_sqls = response_sql_exports(orch.run_state)
         return AssistantResponse(
             answer=answer,
-            sql=orch.run_state.sql or "",
+            sql=selected_sql,
             result=orch.run_state.query_result,
             disclosures=orch.session.disclosure.events[len(disclosures_before):],
             warnings=[],
             charts=list(orch.run_state.charts or []),
+            executed_sqls=executed_sqls,
         )
 
     def _trace_sink(self, event: TraceEvent) -> None:

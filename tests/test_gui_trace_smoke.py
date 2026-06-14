@@ -515,12 +515,43 @@ def test_markdown_block_copy_action_writes_source_message(qapp):
     assert QApplication.clipboard().text() == markdown
 
 
+def test_markdown_code_block_copy_button_copies_code_only(qapp):
+    from dbaide.desktop.components.conversation import _MarkdownBlock
+
+    markdown = "Before\n\n```sql\nSELECT 1;\n```\n\nAfter"
+    block = _MarkdownBlock(markdown, title="DBAide")
+    assert len(block._code_blocks) == 1
+    block._code_blocks[0]._copy_btn.click()
+    assert QApplication.clipboard().text() == "SELECT 1;"
+
+
+def test_markdown_code_block_handles_empty_and_code_only_messages(qapp):
+    from dbaide.desktop.components.conversation import _MarkdownBlock
+
+    block = _MarkdownBlock("```text\n```")
+    assert len(block._code_blocks) == 1
+    block._code_blocks[0].copy_code()
+    assert QApplication.clipboard().text() == ""
+    block.copy_message()  # no text browser exists; must not crash
+
+
+def test_markdown_code_blocks_update_during_streaming(qapp):
+    from dbaide.desktop.components.conversation import _MarkdownBlock
+
+    block = _MarkdownBlock("```sql\nSELECT 1\n```")
+    assert len(block._code_blocks) == 1
+    block.set_markdown("Done\n\n```python\nprint(2)\n```")
+    assert len(block._code_blocks) == 1
+    block._code_blocks[0].copy_code()
+    assert QApplication.clipboard().text() == "print(2)"
+
+
 def test_copy_answer_action_writes_clipboard(qapp):
     from PyQt6.QtWidgets import QApplication, QPushButton
     from dbaide.desktop.views.ask_tab import AskTab
 
     tab = AskTab()
-    bar = tab._build_actions("There are **3** factories.", "", None)
+    bar = tab._build_actions("There are **3** factories.", None)
     assert bar is not None
     buttons = bar.findChildren(QPushButton)
     assert len(buttons) == 1
@@ -528,14 +559,33 @@ def test_copy_answer_action_writes_clipboard(qapp):
     assert QApplication.clipboard().text() == "There are **3** factories."
 
 
-def test_copy_answer_and_sql_actions(qapp):
+def test_answer_actions_only_copy_answer_and_cli(qapp):
     from PyQt6.QtWidgets import QPushButton
     from dbaide.desktop.views.ask_tab import AskTab
 
     tab = AskTab()
-    bar = tab._build_actions("Done.", "SELECT 1", None)
+    bar = tab._build_actions("Done.", None)
     labels = [b.text() for b in bar.findChildren(QPushButton)]
-    assert len(labels) >= 2
+    assert len(labels) == 1
+
+    bar_cli = tab._build_actions("Done.", "dbaide ask ...")
+    labels_cli = [b.text() for b in bar_cli.findChildren(QPushButton)]
+    assert len(labels_cli) == 2
+
+
+def test_complete_turn_renders_answer_only(qapp):
+    from dbaide.desktop.components.conversation import ConversationView, _MarkdownBlock
+
+    conv = ConversationView()
+    conv.begin_turn("q")
+    conv.complete_turn(answer="Done.", ok=True)
+    block = conv._layout.itemAt(conv._layout.count() - 1).widget()
+    markdowns = [
+        w._markdown
+        for i in range(block._content.count())
+        if isinstance((w := block._content.itemAt(i).widget()), _MarkdownBlock)
+    ]
+    assert markdowns == ["Done."]
 
 
 def test_answer_without_stream_renders_immediately(qapp):
@@ -581,7 +631,7 @@ def test_complete_turn_embeds_charts_inline(qapp):
     conv = ConversationView()
     conv.begin_turn("show chart")
     conv.complete_turn(
-        answer="Before\n\n{{chart:chart:1}}\n\nAfter",
+        answer="Before\n\n{{chart:1}}\n\nAfter",
         charts=[chart],
         ok=True,
     )

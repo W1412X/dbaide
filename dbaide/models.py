@@ -268,6 +268,7 @@ class AssistantResponse:
         pending_questions: list[dict[str, Any]] | None = None,
         resume_state: dict[str, Any] | None = None,
         charts: list[dict[str, Any]] | None = None,
+        executed_sqls: list[dict[str, Any]] | None = None,
     ) -> None:
         self.answer = answer
         self.sql = sql
@@ -282,3 +283,4 @@ class AssistantResponse:
         self.pending_questions = pending_questions or []
         self.resume_state = resume_state
         self.charts = list(charts or [])
+        self.executed_sqls = [dict(item) for item in (executed_sqls or []) if isinstance(item, dict)]

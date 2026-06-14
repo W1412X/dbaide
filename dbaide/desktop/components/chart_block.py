@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 from typing import Any
 
 from PyQt6.QtCore import Qt, QMargins
@@ -31,6 +32,25 @@ def _series_colors() -> list[QColor]:
     ]
 
 
+def _safe_float(value: Any) -> float:
+    if isinstance(value, bool):
+        return 0.0
+    try:
+        out = float(value)
+    except (TypeError, ValueError):
+        return 0.0
+    return out if math.isfinite(out) else 0.0
+
+
+def _series_values(item: dict[str, Any], count: int = 0) -> list[float]:
+    values = [_safe_float(v) for v in (item.get("values") or [])]
+    if count > 0:
+        values = values[:count]
+        if len(values) < count:
+            values.extend([0.0] * (count - len(values)))
+    return values
+
+
 def _truncate_label(text: str, max_len: int = 20) -> str:
     """Pie slice labels only — axis categories use charts.labels instead."""
     text = " ".join(str(text or "").split())
@@ -39,7 +59,7 @@ def _truncate_label(text: str, max_len: int = 20) -> str:
     return text[: max_len - 1].rstrip() + "…"
 
 
-def _style_value_axis(axis, values: list[float] | None = None) -> None:
+def _style_value_axis(axis, values: list[float] | None = None, *, value_format: str = "") -> None:
     axis.setLabelsColor(_hex_color("MUTED"))
     axis.setTitleBrush(_hex_color("TEXT_2"))
     axis.setTitleFont(QFont("Inter", 10))
@@ -58,7 +78,12 @@ def _style_value_axis(axis, values: list[float] | None = None) -> None:
     axis.setTickCount(min(6, max(3, 4)))
     axis.setLabelFormat("")  # use callback below when supported
     # PyQt6 QValueAxis: setLabelFormat("%.0f") for integer-ish scales
-    if values and all(abs(v - round(v)) < 1e-6 for v in values if v is not None):
+    fmt = str(value_format or "").strip().lower()
+    if fmt == "percent":
+        axis.setLabelFormat("%.1f%%")
+    elif fmt == "currency":
+        axis.setLabelFormat("%.0f")
+    elif values and all(abs(v - round(v)) < 1e-6 for v in values if v is not None):
         axis.setLabelFormat("%.0f")
     else:
         axis.setLabelFormat("%.1f")
@@ -89,7 +114,7 @@ def _style_bar_set(bar_set, color: QColor) -> None:
     bar_set.setBorderColor(border)
 
 
-def _apply_chart_chrome(chart, *, bottom_margin: int = 8) -> None:
+def _apply_chart_chrome(chart, *, bottom_margin: int = 8, show_legend: bool = False) -> None:
     from PyQt6.QtCharts import QChart
 
     chart.setBackgroundVisible(False)
@@ -100,7 +125,8 @@ def _apply_chart_chrome(chart, *, bottom_margin: int = 8) -> None:
     chart.setAnimationOptions(QChart.AnimationOption.NoAnimation)
     chart.setMargins(QMargins(8, 8, 12, bottom_margin))
     legend = chart.legend()
-    legend.setVisible(False)
+    legend.setVisible(bool(show_legend))
+    legend.setAlignment(Qt.AlignmentFlag.AlignBottom)
     legend.setLabelColor(_hex_color("TEXT_2"))
     legend.setFont(QFont("Inter", 10))
     legend.setBackgroundVisible(False)
@@ -115,6 +141,7 @@ class _ChartView(QWidget):
         *,
         categories: list[str],
         chart_type: str = "",
+        series_units: dict[str, str] | None = None,
         parent=None,
     ) -> None:
         super().__init__(parent)
@@ -127,6 +154,7 @@ class _ChartView(QWidget):
         )
 
         self._categories = list(categories)
+        self._series_units = dict(series_units or {})
         self._view = QChartView(chart, self)
         self._view.setRenderHint(QPainter.RenderHint.Antialiasing)
         self._view.setStyleSheet("background: transparent; border: none;")
@@ -141,17 +169,22 @@ class _ChartView(QWidget):
             elif isinstance(series, (QBarSeries, QStackedBarSeries)):
                 series.hovered.connect(self._on_bar_hovered)
             elif isinstance(series, QLineSeries):
-                series.hovered.connect(self._on_line_hovered)
+                name = series.name()
+                series.hovered.connect(
+                    lambda point, status, n=name: self._on_line_hovered(point, status, n)
+                )
 
-    def _show_tooltip(self, index: int, value: object) -> None:
+    def _show_tooltip(self, index: int, value: object, *, series_name: str = "") -> None:
         if index < 0 or index >= len(self._categories):
             QToolTip.hideText()
             return
         cat = self._categories[index]
+        unit = self._series_units.get(series_name, "")
         if isinstance(value, (int, float)):
-            text = f"{cat}\n{value:,.2g}"
+            val = f"{value:,.2g}{unit}"
         else:
-            text = f"{cat}\n{value}"
+            val = f"{value}{unit}"
+        text = f"{series_name}\n{cat}\n{val}" if series_name else f"{cat}\n{val}"
         QToolTip.showText(QCursor.pos(), text)
 
     def _on_bar_hovered(self, status: bool, index: int, barset) -> None:
@@ -162,14 +195,14 @@ class _ChartView(QWidget):
             val = barset.at(index)
         except Exception:
             val = "?"
-        self._show_tooltip(index, val)
+        self._show_tooltip(index, val, series_name=str(barset.label() or ""))
 
-    def _on_line_hovered(self, point, status: bool) -> None:
+    def _on_line_hovered(self, point, status: bool, series_name: str = "") -> None:
         if not status:
             QToolTip.hideText()
             return
         index = int(round(point.x()))
-        self._show_tooltip(index, point.y())
+        self._show_tooltip(index, point.y(), series_name=series_name)
 
     def resizeEvent(self, event) -> None:  # noqa: N802
         super().resizeEvent(event)
@@ -185,6 +218,69 @@ def _chart_height(chart_type: str, category_count: int, *, bottom_extra: int = 0
     return base + bottom_extra
 
 
+def _series_kind(item: dict[str, Any], chart_type: str, index: int) -> str:
+    raw = str(item.get("type") or "").strip().lower()
+    if raw in {"bar", "line", "area"}:
+        return raw
+    if chart_type in {"line", "multi_axis_line"}:
+        return "line"
+    if chart_type in {"area", "stacked_area"}:
+        return "area"
+    if chart_type == "combo":
+        return "bar" if index == 0 else "line"
+    return "bar"
+
+
+def _series_axis(item: dict[str, Any]) -> str:
+    return "right" if str(item.get("axis") or "").strip().lower() == "right" else "left"
+
+
+def _axis_config(spec, side: str) -> dict[str, Any]:
+    axes = spec.axes or {}
+    raw = axes.get(side) if isinstance(axes, dict) else None
+    return dict(raw or {}) if isinstance(raw, dict) else {}
+
+
+def _axis_label(spec, side: str) -> str:
+    cfg = _axis_config(spec, side)
+    label = str(cfg.get("label") or "").strip()
+    if label:
+        return label
+    return spec.y_label if side == "left" else ""
+
+
+def _compact_axis_title(text: str) -> str:
+    text = str(text or "").strip()
+    for left, right in (("（", "）"), ("(", ")")):
+        while left in text and right in text and text.index(left) < text.rindex(right):
+            start = text.index(left)
+            end = text.index(right, start)
+            text = (text[:start] + text[end + 1:]).strip()
+    return text[:8]
+
+
+def _axis_format(spec, side: str) -> str:
+    return str(_axis_config(spec, side).get("format") or "").strip()
+
+
+def _series_units(spec) -> dict[str, str]:
+    out: dict[str, str] = {}
+    for item in spec.series:
+        name = str(item.get("name") or "")
+        unit = str(item.get("unit") or "").strip()
+        if name and unit:
+            out[name] = unit
+    return out
+
+
+def _wrap_chart(chart, *, categories: list[str], chart_type: str, height: int, series_units: dict[str, str] | None = None) -> QWidget:
+    view = _ChartView(chart, categories=categories, chart_type=chart_type, series_units=series_units)
+    view.setMinimumHeight(height)
+    view.setMaximumHeight(height + 40)
+    view.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+    return view
+
+
 def build_chart_widget(spec_dict: dict[str, Any]) -> QWidget:
     """Build a styled QChartView from a serialized chart spec."""
     from PyQt6.QtCharts import (
@@ -192,7 +288,6 @@ def build_chart_widget(spec_dict: dict[str, Any]) -> QWidget:
         QBarSeries,
         QBarSet,
         QChart,
-        QChartView,
         QHorizontalBarSeries,
         QLineSeries,
         QPieSeries,
@@ -203,20 +298,18 @@ def build_chart_widget(spec_dict: dict[str, Any]) -> QWidget:
 
     spec = chart_spec_from_dict(spec_dict)
     chart = QChart()
-    if len(spec.series) > 1:
-        chart.legend().setVisible(True)
-
     colors = _series_colors()
     raw_categories = [str(c) for c in spec.categories]
     chart_type = spec.chart_type
     _, _angle, bottom_extra = category_axis_layout(raw_categories)
-    _apply_chart_chrome(chart, bottom_margin=8 + bottom_extra)
+    show_legend = len(spec.series) > 1 or chart_type in {"pie", "donut"}
+    units = _series_units(spec)
 
     if chart_type in ("pie", "donut"):
         pie = QPieSeries()
-        values = spec.series[0].get("values") or []
+        values = _series_values(spec.series[0], len(raw_categories))
         for idx, (cat, val) in enumerate(zip(raw_categories, values, strict=False)):
-            slice_ = pie.append(_truncate_label(cat, 20), float(val))
+            slice_ = pie.append(_truncate_label(cat, 20), val)
             slice_.setLabelVisible(len(raw_categories) <= 6)
             slice_.setLabelColor(_hex_color("TEXT_2"))
             slice_.setColor(colors[idx % len(colors)])
@@ -224,9 +317,10 @@ def build_chart_widget(spec_dict: dict[str, Any]) -> QWidget:
         if chart_type == "donut":
             pie.setHoleSize(0.45)
         chart.addSeries(pie)
+        _apply_chart_chrome(chart, bottom_margin=8 + bottom_extra, show_legend=show_legend)
     elif chart_type == "scatter":
         item = spec.series[0]
-        ys = item.get("values") or []
+        ys = _series_values(item, len(raw_categories))
         scatter = QScatterSeries()
         scatter.setName(str(item.get("name") or "values"))
         scatter.setColor(_hex_color("ACCENT"))
@@ -235,27 +329,30 @@ def build_chart_widget(spec_dict: dict[str, Any]) -> QWidget:
         for x_raw, y_raw in zip(raw_categories, ys, strict=False):
             try:
                 x_val = float(x_raw)
+                if not math.isfinite(x_val):
+                    raise ValueError
             except (TypeError, ValueError):
                 x_val = float(scatter.count())
-            scatter.append(x_val, float(y_raw))
+            scatter.append(x_val, _safe_float(y_raw))
         chart.addSeries(scatter)
-        all_y = [float(y) for y in ys]
+        all_y = list(ys)
         axis_x = QValueAxis()
-        axis_x.setTitleText(spec.x_label)
+        axis_x.setTitleText(_compact_axis_title(spec.x_label))
         _style_value_axis(axis_x)
         axis_y = QValueAxis()
-        axis_y.setTitleText(spec.y_label)
-        _style_value_axis(axis_y, all_y)
+        axis_y.setTitleText(_compact_axis_title(_axis_label(spec, "left") or spec.y_label))
+        _style_value_axis(axis_y, all_y, value_format=_axis_format(spec, "left"))
         chart.addAxis(axis_x, Qt.AlignmentFlag.AlignBottom)
         chart.addAxis(axis_y, Qt.AlignmentFlag.AlignLeft)
         scatter.attachAxis(axis_x)
         scatter.attachAxis(axis_y)
+        _apply_chart_chrome(chart, bottom_margin=8 + bottom_extra, show_legend=show_legend)
     elif chart_type == "horizontal_bar":
         all_values: list[float] = []
         series = QHorizontalBarSeries()
         for idx, item in enumerate(spec.series):
             bar_set = QBarSet(str(item.get("name") or ""))
-            vals = [float(v) for v in (item.get("values") or [])]
+            vals = _series_values(item, len(raw_categories))
             all_values.extend(vals)
             for val in vals:
                 bar_set.append(val)
@@ -267,59 +364,26 @@ def build_chart_widget(spec_dict: dict[str, Any]) -> QWidget:
         axis_y = QBarCategoryAxis()
         _configure_category_axis(axis_y, raw_categories)
         axis_x = QValueAxis()
-        axis_x.setTitleText(spec.x_label)
-        _style_value_axis(axis_x, all_values)
+        axis_x.setTitleText(_compact_axis_title(spec.x_label or _axis_label(spec, "left")))
+        _style_value_axis(axis_x, all_values, value_format=_axis_format(spec, "left"))
         chart.addAxis(axis_y, Qt.AlignmentFlag.AlignLeft)
         chart.addAxis(axis_x, Qt.AlignmentFlag.AlignBottom)
         series.attachAxis(axis_y)
         series.attachAxis(axis_x)
-        wrapper = _ChartView(chart, categories=raw_categories, chart_type=chart_type)
-        wrapper.setMinimumHeight(_chart_height(chart_type, len(raw_categories)))
-        wrapper.setMaximumHeight(_chart_height(chart_type, len(raw_categories)) + 40)
-        wrapper.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
-        return wrapper
-    elif chart_type in ("line", "area"):
-        lines: list[QLineSeries] = []
+        _apply_chart_chrome(chart, bottom_margin=8 + bottom_extra, show_legend=show_legend)
+        return _wrap_chart(
+            chart,
+            categories=raw_categories,
+            chart_type=chart_type,
+            height=_chart_height(chart_type, len(raw_categories)),
+            series_units=units,
+        )
+    elif chart_type == "stacked_area":
         all_y: list[float] = []
-        for idx, item in enumerate(spec.series):
-            line = QLineSeries()
-            line.setName(str(item.get("name") or f"Series {idx + 1}"))
-            color = colors[idx % len(colors)]
-            line.setColor(color)
-            pen = line.pen()
-            pen.setWidthF(2.4 if chart_type == "line" else 2.0)
-            line.setPen(pen)
-            vals = item.get("values") or []
-            all_y.extend(float(v) for v in vals)
-            for cat_idx, val in enumerate(vals):
-                line.append(float(cat_idx), float(val))
-            chart.addSeries(line)
-            lines.append(line)
-        axis_x = QBarCategoryAxis()
-        _configure_category_axis(axis_x, raw_categories)
-        axis_y = QValueAxis()
-        axis_y.setTitleText(spec.y_label)
-        _style_value_axis(axis_y, all_y)
-        chart.addAxis(axis_x, Qt.AlignmentFlag.AlignBottom)
-        chart.addAxis(axis_y, Qt.AlignmentFlag.AlignLeft)
-        for line in lines:
-            line.attachAxis(axis_x)
-            line.attachAxis(axis_y)
-        view = _ChartView(chart, categories=raw_categories, chart_type=chart_type)
-        h = _chart_height(chart_type, len(raw_categories), bottom_extra=bottom_extra)
-        view.setMinimumHeight(h)
-        view.setMaximumHeight(h + 40)
-        view.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
-        return view
-    else:
-        all_y = []
-        if chart_type == "stacked_bar":
-            bar_series: QBarSeries | QStackedBarSeries = QStackedBarSeries()
-        else:
-            bar_series = QBarSeries()
+        bar_series = QStackedBarSeries()
         for idx, item in enumerate(spec.series):
             bar_set = QBarSet(str(item.get("name") or f"Series {idx + 1}"))
-            vals = [float(v) for v in (item.get("values") or [])]
+            vals = _series_values(item, len(raw_categories))
             all_y.extend(vals)
             for val in vals:
                 bar_set.append(val)
@@ -329,27 +393,136 @@ def build_chart_widget(spec_dict: dict[str, Any]) -> QWidget:
         axis_x = QBarCategoryAxis()
         _configure_category_axis(axis_x, raw_categories)
         axis_y = QValueAxis()
-        axis_y.setTitleText(spec.y_label)
-        _style_value_axis(axis_y, all_y)
+        axis_y.setTitleText(_compact_axis_title(_axis_label(spec, "left") or spec.y_label))
+        _style_value_axis(axis_y, all_y, value_format=_axis_format(spec, "left"))
         chart.addAxis(axis_x, Qt.AlignmentFlag.AlignBottom)
         chart.addAxis(axis_y, Qt.AlignmentFlag.AlignLeft)
         bar_series.attachAxis(axis_x)
         bar_series.attachAxis(axis_y)
-        view = _ChartView(chart, categories=raw_categories, chart_type=chart_type)
+        _apply_chart_chrome(chart, bottom_margin=8 + bottom_extra, show_legend=show_legend)
+        h = _chart_height(chart_type, len(raw_categories), bottom_extra=bottom_extra)
+        return _wrap_chart(chart, categories=raw_categories, chart_type=chart_type, height=h, series_units=units)
+    elif chart_type in {"line", "area", "combo", "multi_axis_line"}:
+        axis_x = QBarCategoryAxis()
+        _configure_category_axis(axis_x, raw_categories)
+        chart.addAxis(axis_x, Qt.AlignmentFlag.AlignBottom)
+
+        left_values: list[float] = []
+        right_values: list[float] = []
+        attached: list[tuple[object, str]] = []
+        left_bar_series = QBarSeries()
+        right_bar_series = QBarSeries()
+
+        for idx, item in enumerate(spec.series):
+            name = str(item.get("name") or f"Series {idx + 1}")
+            vals = _series_values(item, len(raw_categories))
+            axis_side = _series_axis(item)
+            kind = _series_kind(item, chart_type, idx)
+            color = colors[idx % len(colors)]
+
+            if kind == "bar":
+                bar_set = QBarSet(name)
+                for val in vals:
+                    bar_set.append(val)
+                _style_bar_set(bar_set, color)
+                if axis_side == "right":
+                    right_bar_series.append(bar_set)
+                    right_values.extend(vals)
+                else:
+                    left_bar_series.append(bar_set)
+                    left_values.extend(vals)
+                continue
+
+            if kind == "area":
+                line = QLineSeries()
+                line.setName(name)
+                line.setColor(color)
+                pen = line.pen()
+                pen.setWidthF(2.8)
+                line.setPen(pen)
+                for cat_idx, val in enumerate(vals):
+                    line.append(float(cat_idx), val)
+                target_values = right_values if axis_side == "right" else left_values
+                target_values.extend(vals)
+                chart.addSeries(line)
+                attached.append((line, axis_side))
+                continue
+
+            line = QLineSeries()
+            line.setName(name)
+            line.setColor(color)
+            pen = line.pen()
+            pen.setWidthF(2.4)
+            line.setPen(pen)
+            for cat_idx, val in enumerate(vals):
+                line.append(float(cat_idx), val)
+            target_values = right_values if axis_side == "right" else left_values
+            target_values.extend(vals)
+            chart.addSeries(line)
+            attached.append((line, axis_side))
+
+        if left_bar_series.count() > 0:
+            chart.addSeries(left_bar_series)
+            attached.append((left_bar_series, "left"))
+        if right_bar_series.count() > 0:
+            chart.addSeries(right_bar_series)
+            attached.append((right_bar_series, "right"))
+
+        axis_left = None
+        axis_right = None
+        if left_values:
+            axis_left = QValueAxis()
+            axis_left.setTitleText(_compact_axis_title(_axis_label(spec, "left") or spec.y_label))
+            _style_value_axis(axis_left, left_values, value_format=_axis_format(spec, "left"))
+            chart.addAxis(axis_left, Qt.AlignmentFlag.AlignLeft)
+        if right_values:
+            axis_right = QValueAxis()
+            axis_right.setTitleText(_compact_axis_title(_axis_label(spec, "right")))
+            _style_value_axis(axis_right, right_values, value_format=_axis_format(spec, "right"))
+            chart.addAxis(axis_right, Qt.AlignmentFlag.AlignRight)
+        for series_obj, side in attached:
+            series_obj.attachAxis(axis_x)
+            if side == "right" and axis_right is not None:
+                series_obj.attachAxis(axis_right)
+            elif axis_left is not None:
+                series_obj.attachAxis(axis_left)
+        _apply_chart_chrome(chart, bottom_margin=8 + bottom_extra, show_legend=show_legend)
+        h = _chart_height(chart_type, len(raw_categories), bottom_extra=bottom_extra)
+        return _wrap_chart(chart, categories=raw_categories, chart_type=chart_type, height=h, series_units=units)
+    else:
+        all_y = []
+        if chart_type == "stacked_bar":
+            bar_series: QBarSeries | QStackedBarSeries = QStackedBarSeries()
+        else:
+            bar_series = QBarSeries()
+        for idx, item in enumerate(spec.series):
+            bar_set = QBarSet(str(item.get("name") or f"Series {idx + 1}"))
+            vals = _series_values(item, len(raw_categories))
+            all_y.extend(vals)
+            for val in vals:
+                bar_set.append(val)
+            _style_bar_set(bar_set, colors[idx % len(colors)])
+            bar_series.append(bar_set)
+        chart.addSeries(bar_series)
+        axis_x = QBarCategoryAxis()
+        _configure_category_axis(axis_x, raw_categories)
+        axis_y = QValueAxis()
+        axis_y.setTitleText(_compact_axis_title(_axis_label(spec, "left") or spec.y_label))
+        _style_value_axis(axis_y, all_y, value_format=_axis_format(spec, "left"))
+        chart.addAxis(axis_x, Qt.AlignmentFlag.AlignBottom)
+        chart.addAxis(axis_y, Qt.AlignmentFlag.AlignLeft)
+        bar_series.attachAxis(axis_x)
+        bar_series.attachAxis(axis_y)
+        _apply_chart_chrome(chart, bottom_margin=8 + bottom_extra, show_legend=show_legend)
+        view = _ChartView(chart, categories=raw_categories, chart_type=chart_type, series_units=units)
         h = _chart_height(chart_type, len(raw_categories), bottom_extra=bottom_extra)
         view.setMinimumHeight(h)
         view.setMaximumHeight(h + 40)
         view.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         return view
 
-    view = QChartView(chart)
-    view.setRenderHint(QPainter.RenderHint.Antialiasing)
-    view.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
     h = _chart_height(chart_type, len(raw_categories), bottom_extra=bottom_extra)
-    view.setMinimumHeight(h)
-    view.setMaximumHeight(h + 40)
-    view.setStyleSheet("background: transparent; border: none;")
-    return view
+    return _wrap_chart(chart, categories=raw_categories, chart_type=chart_type, height=h, series_units=units)
 
 
 class ChartBlock(QFrame):
@@ -390,6 +563,14 @@ class ChartBlock(QFrame):
         meta_parts = [type_label]
         if row_count:
             meta_parts.append(t("conversation.chart_points", n=row_count))
+        series_count = len([s for s in (spec.get("series") or []) if isinstance(s, dict)])
+        if series_count > 1:
+            meta_parts.append(t("conversation.chart_series", n=series_count))
+        axes = spec.get("axes") if isinstance(spec.get("axes"), dict) else {}
+        right_axis = axes.get("right") if isinstance(axes, dict) else None
+        right_label = str((right_axis or {}).get("label") or "").strip() if isinstance(right_axis, dict) else ""
+        if right_label:
+            meta_parts.append(t("conversation.chart_right_axis", label=_compact_axis_title(right_label)))
         meta = QLabel(" · ".join(meta_parts))
         meta.setStyleSheet(f"color: {Theme.MUTED}; background: transparent; font-size: 11px;")
         layout.addWidget(meta)

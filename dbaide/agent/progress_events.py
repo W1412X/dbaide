@@ -66,6 +66,7 @@ AGENT_LABELS: dict[str, str] = {
     "risk": "Risk gate",
     "explain": "Cost estimate",
     "sql": "SQL",
+    "chart_agent": "Chart planning",
 }
 
 

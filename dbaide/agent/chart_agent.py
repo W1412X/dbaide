@@ -14,6 +14,7 @@ from dbaide.llm import LLMClient, LLMMessage, NullLLMClient
 
 CHART_TYPES = frozenset({
     "bar", "horizontal_bar", "line", "area", "pie", "donut", "stacked_bar", "scatter",
+    "combo", "grouped_bar", "stacked_area", "multi_axis_line",
 })
 
 
@@ -28,6 +29,10 @@ class ChartPlan:
     y_label: str
     sort_by: str = "value_desc"
     limit: int = 20
+    series_types: list[str] | None = None
+    series_axes: list[str] | None = None
+    units: list[str] | None = None
+    axes: dict[str, dict[str, Any]] | None = None
 
 
 class ChartAgent:
@@ -61,6 +66,7 @@ class ChartAgent:
             x_label=plan.x_label,
             y_label=plan.y_label,
             row_count=len(rows),
+            axes=dict(plan.axes or {}),
         )
         spec.validate()
         return spec
@@ -101,7 +107,9 @@ class ChartAgent:
             schema_hint=(
                 'Return JSON only: {"chart_type":"bar", "title":"...", '
                 '"category_field":"...", "value_fields":["..."], "series_names":["..."], '
-                '"x_label":"...", "y_label":"...", "sort_by":"value_desc", "limit":20}'
+                '"series_types":["bar|line|area"], "series_axes":["left|right"], '
+                '"x_label":"...", "y_label":"...", "axes":{"left":{"label":"..."},'
+                '"right":{"label":"..."}}, "sort_by":"value_desc", "limit":20}'
             ),
         )
         if not isinstance(payload, dict):
@@ -128,6 +136,38 @@ class ChartAgent:
         series_names = [str(v) for v in (payload.get("series_names") or []) if str(v).strip()]
         while len(series_names) < len(value_fields):
             series_names.append(value_fields[len(series_names)])
+        series_types = _normalize_list(
+            payload.get("series_types"),
+            len(value_fields),
+            default=_default_series_type(chart_type),
+            allowed={"bar", "line", "area"},
+        )
+        series_axes = _normalize_list(
+            payload.get("series_axes"),
+            len(value_fields),
+            default="left",
+            allowed={"left", "right"},
+        )
+        units = _string_list(payload.get("units"))
+        while len(units) < len(value_fields):
+            units.append("")
+        axes = payload.get("axes") if isinstance(payload.get("axes"), dict) else {}
+        axes_out: dict[str, dict[str, Any]] = {}
+        for key in ("left", "right"):
+            raw = axes.get(key) if isinstance(axes, dict) else None
+            if isinstance(raw, dict):
+                axes_out[key] = {
+                    "label": str(raw.get("label") or "").strip(),
+                    "format": str(raw.get("format") or "").strip(),
+                }
+        if chart_type in {"combo", "multi_axis_line"} and "right" in series_axes and "right" not in axes_out:
+            right_fields = [
+                name for name, axis in zip(series_names, series_axes, strict=False)
+                if axis == "right"
+            ]
+            axes_out["right"] = {"label": " / ".join(right_fields[:2]), "format": ""}
+        if "left" not in axes_out:
+            axes_out["left"] = {"label": str(payload.get("y_label") or "").strip(), "format": ""}
         return ChartPlan(
             chart_type=chart_type,
             title=str(payload.get("title") or intent or "Chart").strip() or "Chart",
@@ -137,7 +177,11 @@ class ChartAgent:
             x_label=str(payload.get("x_label") or "").strip(),
             y_label=str(payload.get("y_label") or "").strip(),
             sort_by=str(payload.get("sort_by") or "value_desc").strip() or "value_desc",
-            limit=max(1, min(100, int(payload.get("limit") or 20))),
+            limit=_safe_limit(payload.get("limit"), default=20),
+            series_types=series_types,
+            series_axes=series_axes,
+            units=units[: len(value_fields)],
+            axes=axes_out,
         )
 
 
@@ -157,6 +201,10 @@ def _materialize(plan: ChartPlan, rows: list[dict[str, Any]]) -> tuple[list[str]
             y_label=plan.y_label,
             sort_by=plan.sort_by,
             limit=plan.limit,
+            series_types=(plan.series_types or [])[:1],
+            series_axes=(plan.series_axes or [])[:1],
+            units=(plan.units or [])[:1],
+            axes=plan.axes,
         )
     if plan.sort_by == "value_desc" and plan.value_fields:
         key = plan.value_fields[0]
@@ -173,8 +221,51 @@ def _materialize(plan: ChartPlan, rows: list[dict[str, Any]]) -> tuple[list[str]
     for idx, field in enumerate(plan.value_fields):
         name = plan.series_names[idx] if idx < len(plan.series_names) else field
         values = [_as_float(row.get(field)) for _, row in pairs]
-        series.append({"name": name, "values": values, "field": field})
+        item = {"name": name, "values": values, "field": field}
+        if plan.series_types and idx < len(plan.series_types):
+            item["type"] = plan.series_types[idx]
+        if plan.series_axes and idx < len(plan.series_axes):
+            item["axis"] = plan.series_axes[idx]
+        if plan.units and idx < len(plan.units) and plan.units[idx]:
+            item["unit"] = plan.units[idx]
+        series.append(item)
     return categories, series
+
+
+def _default_series_type(chart_type: str) -> str:
+    if chart_type in {"line", "area", "multi_axis_line"}:
+        return "line"
+    if chart_type == "stacked_area":
+        return "area"
+    return "bar"
+
+
+def _normalize_list(value: Any, length: int, *, default: str, allowed: set[str]) -> list[str]:
+    items = _string_list(value)
+    if len(items) == 1 and length > 1:
+        items = items * length
+    out: list[str] = []
+    for item in items[:length]:
+        out.append(item if item in allowed else default)
+    while len(out) < length:
+        out.append(default)
+    return out
+
+
+def _string_list(value: Any) -> list[str]:
+    if isinstance(value, str):
+        return [value.strip()] if value.strip() else []
+    if not isinstance(value, list | tuple):
+        return []
+    return [str(v).strip() for v in value if str(v).strip()]
+
+
+def _safe_limit(value: Any, *, default: int) -> int:
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError):
+        parsed = default
+    return max(1, min(100, parsed))
 
 
 def _as_float(value: Any) -> float:

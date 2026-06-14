@@ -42,6 +42,71 @@ def test_chart_agent_uses_llm_chart_type():
     assert payload["categories"][0].startswith("快讯")
 
 
+def test_chart_agent_materializes_combo_dual_axis_metadata():
+    rows = [
+        {"day": "2026-06-01", "orders": 120, "ad_spend": 3500.0},
+        {"day": "2026-06-02", "orders": 150, "ad_spend": 4200.0},
+    ]
+    llm = _ChartMockLLM({
+        "chart_type": "combo",
+        "title": "销量与广告投入",
+        "category_field": "day",
+        "value_fields": ["orders", "ad_spend"],
+        "series_names": ["订单量", "广告投入"],
+        "series_types": ["bar", "line"],
+        "series_axes": ["left", "right"],
+        "units": ["单", "元"],
+        "axes": {
+            "left": {"label": "订单量", "format": "number"},
+            "right": {"label": "广告投入", "format": "currency"},
+        },
+        "x_label": "日期",
+        "y_label": "订单量",
+        "sort_by": "category_asc",
+        "limit": 20,
+    })
+    spec = ChartAgent(llm).render(
+        chart_id="chart:1",
+        question="销量和广告投入趋势",
+        intent="对齐展示销量与广告投入",
+        columns=["day", "orders", "ad_spend"],
+        rows=rows,
+    )
+    payload = chart_spec_to_dict(spec)
+    assert payload["chart_type"] == "combo"
+    assert payload["series"][0]["type"] == "bar"
+    assert payload["series"][1]["axis"] == "right"
+    assert payload["axes"]["right"]["label"] == "广告投入"
+
+
+def test_chart_agent_tolerates_scalar_optional_fields():
+    rows = [{"day": "2026-06-01", "orders": 120, "spend": 35.5}]
+    llm = _ChartMockLLM({
+        "chart_type": "combo",
+        "title": "趋势",
+        "category_field": "day",
+        "value_fields": ["orders", "spend"],
+        "series_names": ["订单量", "广告投入"],
+        "series_types": "line",
+        "series_axes": "right",
+        "units": "单",
+        "limit": "not-a-number",
+    })
+    spec = ChartAgent(llm).render(
+        chart_id="chart:1",
+        question="q",
+        intent="趋势",
+        columns=["day", "orders", "spend"],
+        rows=rows,
+    )
+    payload = chart_spec_to_dict(spec)
+    assert payload["series"][0]["type"] == "line"
+    assert payload["series"][1]["type"] == "line"
+    assert payload["series"][0]["axis"] == "right"
+    assert payload["series"][1]["axis"] == "right"
+    assert payload["series"][0]["unit"] == "单"
+
+
 def test_chart_agent_requires_llm():
     rows = [{"factory": "A", "power": 1}]
     with pytest.raises(ModelRequiredError):

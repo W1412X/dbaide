@@ -300,12 +300,10 @@ EXPLAIN_SQL = ToolSpec(
 EXECUTE_READONLY_SQL = ToolSpec(
     name="execute_readonly_sql",
     description=(
-        "Execute a validated read-only SQL query as exploratory/intermediate evidence. "
-        "The agent loop continues after success; use execute_sql for the final answer query. "
-        "The result returns row_count (rows fetched) and a preview of the first 20 rows; "
-        "`truncated`=true means the row cap was hit and MORE rows exist. To read a specific "
-        "window of rows, page in the SQL itself with LIMIT/OFFSET (or aggregate) — the "
-        "preview is not the full set."
+        "Execute a validated read-only SQL query and record it in this run's SQL history. "
+        "The agent loop continues after success. Pass purpose (≤20 chars) describing why "
+        "you run this query. The result returns row_count (rows fetched) and a preview of "
+        "the first 20 rows; `truncated`=true means the row cap was hit and MORE rows exist."
     ),
     input_schema={
         "sql": "string",
@@ -324,7 +322,11 @@ EXECUTE_READONLY_SQL = ToolSpec(
 
 EXECUTE_SQL = ToolSpec(
     name="execute_sql",
-    description="Run the final validated read-only SQL answer query. The agent loop may finish after success.",
+    description=(
+        "Execute a validated read-only SQL query and record it in this run's SQL history. "
+        "Also updates the latest query_result for this run. Pass purpose (≤20 chars). "
+        "The agent loop may finish after success, but you must still call action=finish."
+    ),
     input_schema={
         "sql": "string",
         "database": "string",
@@ -413,8 +415,10 @@ RENDER_CHART = ToolSpec(
         "chart/visualization (图表/可视化) or when a chart clarifies comparisons or trends. "
         "Requires aggregated numeric data — run execute_sql first. Pass artifact_id from that "
         "result, inline data, or use the latest query result. A dedicated chart agent picks the "
-        "chart type and field mapping. In finish, embed each chart inline with "
-        "`{{chart:CHART_ID}}` (from tool output) at the appropriate position in your markdown answer."
+        "chart type and field mapping. For complex analytical requests, call this tool multiple "
+        "times, once per coherent view; do not force different units or business meanings into "
+        "one chart. In finish, embed each chart inline with "
+        "`{{chart:N}}` (copy embed_markdown from tool output) at the appropriate position in your markdown answer."
     ),
     input_schema={
         "artifact_id": "string",
@@ -460,9 +464,11 @@ RETRIEVE_TURN = ToolSpec(
     description=(
         "Fetch the full content of one earlier turn in this chat session by turn_id "
         "(t1, t2, …). [Prior turns in this session] shows only Q/A/SQL summaries; "
-        "call this when you need the user's exact clarifications, the full SQL, the "
+        "call this when you need the user's exact clarifications, the full SQL history, the "
         "full answer, or the disclosed tables from that turn. `include` selects which "
-        "fields to return (clarifications/sql/answer/tables); omit it for all."
+        "fields to return (clarifications/sql/answer/tables); omit it for all. "
+        "When include contains sql, returns selected_sql (last query) and executed_sqls "
+        "(all auto-executed queries with purpose tags)."
     ),
     input_schema={"turn_id": "string", "include": "list[string]"},
     output_schema={
@@ -471,6 +477,7 @@ RETRIEVE_TURN = ToolSpec(
         "status": "string",
         "clarifications": "list[string]",
         "selected_sql": "string",
+        "executed_sqls": "list[object]",
         "answer_markdown": "string",
         "disclosed_tables": "list[string]",
         "created_at": "number",

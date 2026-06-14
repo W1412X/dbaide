@@ -66,6 +66,7 @@ def make_turn(
     schema_scope: dict[str, Any] | None = None,
     created_at: float | None = None,
     charts: list[dict[str, Any]] | None = None,
+    executed_sqls: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     """Build a turn dict from a workflow result's salient fields.
 
@@ -93,6 +94,7 @@ def make_turn(
         "schema_scope": schema_scope or {},
         "created_at": created_at if created_at is not None else _now(),
         "charts": list(charts or []),
+        "executed_sqls": [dict(item) for item in (executed_sqls or []) if isinstance(item, dict)],
     }
 
 

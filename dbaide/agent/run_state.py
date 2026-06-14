@@ -68,6 +68,8 @@ class RunState:
 
     fail_reason: str = ""
     charts: list[dict[str, Any]] = field(default_factory=list)
+    # Every successful execute_sql / execute_readonly_sql in this run (order preserved).
+    executed_sqls: list[dict[str, Any]] = field(default_factory=list)
     # The pinned scope (attachments) prioritises the FIRST discovery only; a later
     # discovery in the same run broadens, so a wrong/insufficient pin can't trap the
     # agent into searching only the attached scope forever.

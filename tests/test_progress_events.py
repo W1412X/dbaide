@@ -77,6 +77,12 @@ def test_subagent_event_nested():
     assert ev["kind"] == "substep"
 
 
+def test_agent_label_chart_agent():
+    from dbaide.agent.progress_events import agent_label
+
+    assert agent_label("chart_agent") == "Chart planning"
+
+
 def test_conversation_trace_step_subagent_agent_prefix():
     step = conversation_trace_step(
         subagent_event(agent="schema_link", title="Kept 2 database(s)", parent="discover_schema"),

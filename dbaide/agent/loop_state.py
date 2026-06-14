@@ -10,7 +10,7 @@ from dbaide.agent.progressive_schema import DiscoveryResult, SchemaHit
 from dbaide.i18n import normalize
 from dbaide.models import ColumnInfo, QueryResult
 
-LOOP_STATE_VERSION = 2
+LOOP_STATE_VERSION = 3
 
 
 def column_to_dict(col: ColumnInfo) -> dict[str, Any]:
@@ -116,6 +116,11 @@ def dump_loop_state(
             "scope_used": bool(orchestrator.run_state.scope_used),
             "query_result": query_result_to_dict(orchestrator.run_state.query_result),
             "charts": list(orchestrator.run_state.charts or []),
+            "executed_sqls": [
+                dict(item)
+                for item in (orchestrator.run_state.executed_sqls or [])
+                if isinstance(item, dict)
+            ],
         },
     }
 
@@ -189,6 +194,10 @@ def restore_loop_state(orchestrator: Any, snapshot: dict[str, Any]) -> tuple[lis
     charts_payload = payload.get("charts")
     orchestrator.run_state.charts = [
         dict(item) for item in _list_or_empty(charts_payload) if isinstance(item, dict)
+    ]
+    executed_payload = payload.get("executed_sqls")
+    orchestrator.run_state.executed_sqls = [
+        dict(item) for item in _list_or_empty(executed_payload) if isinstance(item, dict)
     ]
     orchestrator.run_state.execute_allowed = execute_allowed
     if not orchestrator.run_state.memory.goal and orchestrator.run_state.question:

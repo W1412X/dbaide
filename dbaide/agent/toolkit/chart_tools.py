@@ -7,6 +7,7 @@ from typing import Any
 from dbaide.agent.chart_agent import ChartAgent
 from dbaide.agent.progress_events import subagent_event
 from dbaide.charts.data import resolve_chart_rows
+from dbaide.charts.embed import chart_embed_markdown
 from dbaide.charts.spec import chart_spec_to_dict
 from dbaide.tools.registry import ToolContext, ToolRegistry, ToolResult
 from dbaide.tools.specs import RENDER_CHART
@@ -84,7 +85,7 @@ def register(registry: ToolRegistry, orchestrator) -> None:
                 "title": spec.title,
                 "row_count": spec.row_count,
                 "preview": f"{spec.title} ({spec.row_count} pts)",
-                "embed_markdown": f"{{{{chart:{spec.chart_id}}}}}",
+                "embed_markdown": chart_embed_markdown(spec.chart_id),
             },
         )
 

@@ -8,6 +8,7 @@ import logging
 from typing import Any
 
 from dbaide.agent.memory import SQLArtifact, next_prefixed_id
+from dbaide.agent.sql_executions import normalize_sql_purpose, record_sql_execution
 from dbaide.i18n import t
 from dbaide.tools.registry import ToolContext, ToolRegistry, ToolResult
 from dbaide.tools.specs import (
@@ -306,9 +307,10 @@ def register(registry: ToolRegistry, orchestrator) -> None:
                 orchestrator.run_state.sql_feedback = ""
             artifact_id = save_as or _next_sql_artifact_id(orchestrator.run_state.memory)
             result_summary = _result_summary(result)
+            norm_purpose = normalize_sql_purpose(purpose)
             orchestrator.run_state.memory.add_sql_artifact(SQLArtifact(
                 id=artifact_id,
-                purpose=purpose or ("Exploratory SQL evidence" if exploratory else "SQL execution"),
+                purpose=norm_purpose,
                 sql=validation.normalized_sql,
                 database=database,
                 row_count=int(result.row_count or 0),
@@ -318,6 +320,17 @@ def register(registry: ToolRegistry, orchestrator) -> None:
                 warnings=list(validation_report.warnings or []),
                 truncated=bool(getattr(result, "truncated", False)),
             ))
+            record_sql_execution(
+                orchestrator.run_state,
+                sql=validation.normalized_sql,
+                purpose=norm_purpose,
+                database=database,
+                tool=tool_label,
+                row_count=int(result.row_count or 0),
+                elapsed_ms=float(result.elapsed_ms or 0.0),
+                artifact_id=artifact_id,
+                columns=list(result.columns or []),
+            )
             orchestrator.progress(
                 subagent_event(
                     agent="sql",
@@ -336,7 +349,7 @@ def register(registry: ToolRegistry, orchestrator) -> None:
                     "truncated": result.truncated,
                     "elapsed_ms": result.elapsed_ms,
                     "artifact_id": artifact_id,
-                    "purpose": purpose,
+                    "purpose": norm_purpose,
                     "result_summary": result_summary,
                     "sql": validation.normalized_sql,
                     "database": database,

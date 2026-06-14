@@ -21,7 +21,6 @@ class AskTab(QWidget):
     or a temporary client key (``new:N``) for a brand-new, not-yet-saved chat.
     """
 
-    open_sql = pyqtSignal(str)
     empty_action = pyqtSignal(str)
     clarification_choice = pyqtSignal(str, str)   # (slot key, reply)
 
@@ -199,16 +198,14 @@ class AskTab(QWidget):
         workflow_id = str(result.get("workflow_id") or "")
         ok = status not in ("failed", "cancelled")
         answer = result.get("answer_markdown") or result.get("answer_plaintext") or ""
-        sql = result.get("selected_sql") or ""
         self.ensure_slot(key).complete_turn(
             answer=answer,
-            sql=sql,
             trace_events=result.get("trace") or [],
             warnings=result.get("warnings") or None,
             errors=result.get("errors") or None,
             workflow_id=workflow_id,
             ok=ok,
-            actions_widget=self._build_actions(answer, sql, result.get("cli_command")),
+            actions_widget=self._build_actions(answer, result.get("cli_command")),
             charts=result.get("charts") or None,
         )
 
@@ -216,7 +213,7 @@ class AskTab(QWidget):
         view = self.ensure_slot(key)
         view.begin_turn("")
         body = f"**{title}**\n\n{body}"
-        view.complete_turn(answer=body, ok=True, actions_widget=self._build_actions(body, "", None))
+        view.complete_turn(answer=body, ok=True, actions_widget=self._build_actions(body, None))
 
     def append_search_hits(self, key: str, query: str, hits: list[dict[str, Any]]) -> None:
         from dbaide.i18n import t as _t
@@ -231,7 +228,7 @@ class AskTab(QWidget):
             body = "\n".join(lines)
         view = self.ensure_slot(key)
         view.begin_turn(query)
-        view.complete_turn(answer=body, ok=True, actions_widget=self._build_actions(body, "", None))
+        view.complete_turn(answer=body, ok=True, actions_widget=self._build_actions(body, None))
 
     def clear_slot(self, key: str) -> None:
         view = self._views.get(key)
@@ -255,25 +252,22 @@ class AskTab(QWidget):
             attachments = turn.get("attachments") or None
             view.begin_turn(str(turn.get("question") or ""), meta=meta_line, placeholder=False,
                             attachments=attachments)
-            sql = str(turn.get("selected_sql") or "")
             status = str(turn.get("status") or "completed")
             view.complete_turn(
                 answer=str(turn.get("answer_markdown") or ""),
-                sql=sql,
                 trace_events=turn.get("trace") or [],
                 ok=status not in ("failed", "cancelled"),
                 actions_widget=self._build_actions(
-                    str(turn.get("answer_markdown") or ""), sql, None,
+                    str(turn.get("answer_markdown") or ""), None,
                 ),
                 charts=turn.get("charts") or None,
             )
 
     # ── helpers ───────────────────────────────────────────────────────────────
 
-    def _build_actions(self, answer: str, sql: str, cli_command: str | None) -> QWidget | None:
+    def _build_actions(self, answer: str, cli_command: str | None) -> QWidget | None:
         answer = str(answer or "").strip()
-        sql = str(sql or "").strip()
-        if not answer and not sql:
+        if not answer and not cli_command:
             return None
         from PyQt6.QtCore import QTimer
         from dbaide.desktop.components.base import ghost_action_button
@@ -317,14 +311,6 @@ class AskTab(QWidget):
         row.setSpacing(2)
         if answer:
             row.addWidget(_copy_btn(_t("ask.copy_answer"), answer))
-        if sql:
-            row.addWidget(_copy_btn(_t("ask.copy_sql"), sql))
-            open_btn = ghost_action_button(
-                _t("ask.open_in_sql"), icon=svg_icon("external-link", color=Theme.MUTED, size=14),
-                tooltip=_t("ask.open_in_sql_tooltip"),
-            )
-            open_btn.clicked.connect(lambda: self.open_sql.emit(sql))
-            row.addWidget(open_btn)
         if cli_command:
             row.addWidget(_copy_btn(_t("ask.copy_cli"), str(cli_command)))
         row.addStretch(1)

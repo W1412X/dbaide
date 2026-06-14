@@ -421,7 +421,6 @@ class MainWindow(QMainWindow):
         # (SQL editor + data browser). The two are deliberately separate surfaces.
         self.ask_tab = AskTab()
         self.ask_tab.empty_action.connect(self._empty_action)
-        self.ask_tab.open_sql.connect(self.open_sql)
         self.ask_tab.clarification_choice.connect(self._submit_clarification)
         self.query_history_store = QueryHistoryStore()
         self.history_panel = QueryHistoryPanel()

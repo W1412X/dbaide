@@ -6,6 +6,30 @@ All notable changes to DBAide are documented here. The format is loosely based o
 
 ## [Unreleased]
 
+## [0.2.5] — 2026-06-14
+
+### Changed
+
+- **Ask answer area** — removed inline SQL blocks and copy/open SQL shortcuts; SQL remains
+  in Trace for developers.
+- **Charts** — legend, tooltips, combo/dual-axis, stacked area (filled stacked bars),
+  multi-series metadata; ChartAgent prompt prefers multiple charts for complex
+  multi-metric questions.
+- **Chart embeds** — canonical placeholder is `{{chart:N}}` (from `embed_markdown`);
+  charts render only when referenced in the answer (no orphan append).
+- **SQL history** — every successful `execute_sql` / `execute_readonly_sql` appends to
+  `executed_sqls` on the turn (with optional `purpose` tag, ≤20 chars). `selected_sql`
+  is the last executed query for backward compatibility; exploration vs final is no
+  longer a separate channel.
+
+### Fixed
+
+- **Combo charts** — left/right bar series attach to the correct Y axis; all-right-axis
+  combos no longer show an empty left axis; right axis title renders on the chart.
+- **ChartAgent** — scalar `series_types` / `series_axes` from the LLM apply to all
+  series (not only the first).
+- **Trace** — Chart Agent sub-steps show as「Chart planning」instead of raw `chart_agent`.
+
 ## [0.2.4] — 2026-06-13
 
 ### Changed
@@ -589,7 +613,8 @@ and a PyQt6 desktop app, sharing one Python core.
   drag-to-Applications)**, **Windows (`.msi` wizard)**, and **Linux (`.tar.gz`)** —
   pushing a `v*` tag cuts a GitHub Release automatically.
 
-[Unreleased]: https://github.com/W1412X/dbaide/compare/v0.2.4...HEAD
+[Unreleased]: https://github.com/W1412X/dbaide/compare/v0.2.5...HEAD
+[0.2.5]: https://github.com/W1412X/dbaide/compare/v0.2.4...v0.2.5
 [0.2.4]: https://github.com/W1412X/dbaide/compare/v0.2.3...v0.2.4
 [0.2.3]: https://github.com/W1412X/dbaide/compare/v0.2.2...v0.2.3
 [0.2.2]: https://github.com/W1412X/dbaide/compare/v0.2.1...v0.2.2
