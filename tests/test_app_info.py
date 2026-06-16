@@ -27,8 +27,8 @@ def test_settings_about_page_shows_version(qapp):
     from dbaide.desktop.dialogs.settings import SettingsDialog
 
     dlg = SettingsDialog(connections=[], models=[], initial_page="about")
-    assert dlg.stack.currentIndex() == 4
-    page = dlg.stack.widget(4)
+    assert dlg.stack.currentIndex() == 5
+    page = dlg.stack.widget(5)
     from PyQt6.QtWidgets import QLabel
     texts = [w.text() for w in page.findChildren(QLabel)]
     assert APP_NAME in " ".join(texts)
