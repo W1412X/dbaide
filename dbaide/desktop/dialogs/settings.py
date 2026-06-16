@@ -552,7 +552,6 @@ class SettingsDialog(ChromeDialog):
             icon_label = QLabel()
             icon_label.setFixedSize(22, 22)
             icon_label.setPixmap(self._load_tool_icon(tool))
-            icon_label.setStyleSheet("border-radius: 4px;")
             rl.addWidget(icon_label)
 
             name_label = QLabel(tool.capitalize())
