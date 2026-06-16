@@ -963,6 +963,16 @@ class TurnBlock(QFrame):
         self._content_host.hide()
         self._layout.addWidget(self._content_host)
 
+        self._stats_label = QLabel()
+        self._stats_label.setAlignment(Qt.AlignmentFlag.AlignRight)
+        self._stats_label.setFont(QFont("Inter", 10))
+        self._stats_label.setStyleSheet(
+            f"color: {Theme.MUTED_2}; background: transparent;"
+            f" padding-right: 4px;"
+        )
+        self._stats_label.hide()
+        self._layout.addWidget(self._stats_label)
+
     def set_user(self, text: str, *, meta: str = "", attachments: list[dict] | None = None) -> None:
         self._header.show()
         if meta:
@@ -1007,6 +1017,27 @@ class TurnBlock(QFrame):
         self.trace_state.set_final(events)
         if self._trace_open():
             self._trace_box.set_events(self.trace_state.events, live=False)
+        self._update_stats(events)
+
+    def _update_stats(self, events: list[dict[str, Any]]) -> None:
+        from dbaide.agent.trace_model import TraceModel, _format_tokens
+        from dbaide.i18n import t
+        model = TraceModel()
+        for ev in events or []:
+            if isinstance(ev, dict):
+                model.ingest(ev)
+        model.finalize()
+        steps = len(model.steps)
+        if steps <= 0:
+            self._stats_label.hide()
+            return
+        elapsed = model.elapsed_ms() / 1000.0
+        parts = [t("trace.steps", n=steps), f"{elapsed:.1f}s"]
+        tokens = _format_tokens(model.prompt_tokens)
+        if tokens:
+            parts.append(tokens)
+        self._stats_label.setText(" · ".join(parts))
+        self._stats_label.show()
 
     def _toggle_trace(self) -> None:
         if self._trace_box is None:
