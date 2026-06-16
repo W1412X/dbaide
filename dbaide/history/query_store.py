@@ -12,6 +12,7 @@ import json
 import logging
 import os
 import tempfile
+import threading
 import time
 from pathlib import Path
 from typing import Any
@@ -32,6 +33,7 @@ def _safe_name(connection_name: str) -> str:
 class QueryHistoryStore:
     def __init__(self, base_dir: Path | None = None) -> None:
         self.base_dir = base_dir or Path.home() / ".dbaide" / "query_history"
+        self._lock = threading.Lock()
 
     def _path(self, connection_name: str) -> Path:
         return self.base_dir / f"{_safe_name(connection_name)}.jsonl"
@@ -49,20 +51,21 @@ class QueryHistoryStore:
         sql = (sql or "").strip()
         if not sql:
             return
-        entries = self._read(connection_name)
-        # Collapse a re-run of the most recent query into a timestamp bump.
-        if entries and entries[-1].get("sql") == sql:
-            entries.pop()
-        entries.append({
-            "sql": sql,
-            "ok": bool(ok),
-            "row_count": row_count,
-            "elapsed_ms": round(float(elapsed_ms), 1) if elapsed_ms is not None else None,
-            "database": database or "",
-            "ts": time.time(),
-        })
-        entries = entries[-MAX_ENTRIES:]
-        self._write(connection_name, entries)
+        with self._lock:
+            entries = self._read(connection_name)
+            # Collapse a re-run of the most recent query into a timestamp bump.
+            if entries and entries[-1].get("sql") == sql:
+                entries.pop()
+            entries.append({
+                "sql": sql,
+                "ok": bool(ok),
+                "row_count": row_count,
+                "elapsed_ms": round(float(elapsed_ms), 1) if elapsed_ms is not None else None,
+                "database": database or "",
+                "ts": time.time(),
+            })
+            entries = entries[-MAX_ENTRIES:]
+            self._write(connection_name, entries)
 
     def recent(self, connection_name: str, limit: int = 200) -> list[dict[str, Any]]:
         """Most-recent-first history entries."""

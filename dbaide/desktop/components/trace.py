@@ -432,6 +432,7 @@ class TraceDetailPanel(QFrame):
     def close_panel(self) -> None:
         if not self.isVisible():
             return
+        self._stop_animation()
         w = self.width()
         h = self.height()
         x = self.x()
@@ -447,7 +448,17 @@ class TraceDetailPanel(QFrame):
     def _panel_width(self) -> int:
         return min(440, max(320, int(self._host.width() * 0.36)))
 
+    def _stop_animation(self) -> None:
+        if self._anim is not None:
+            try:
+                self._anim.stop()
+                self._anim.deleteLater()
+            except RuntimeError:
+                pass
+            self._anim = None
+
     def _relayout(self, *, animate: bool) -> None:
+        self._stop_animation()
         w = self._panel_width()
         h = self._host.height()
         target = QRect(self._host.width() - w, 0, w, h)
@@ -486,9 +497,9 @@ class TraceDetailPanel(QFrame):
         if self._copy_feedback_timer is not None:
             try:
                 self._copy_feedback_timer.stop()
+                self._copy_feedback_timer.deleteLater()
             except RuntimeError:
                 pass
-            self._copy_feedback_timer.deleteLater()
             self._copy_feedback_timer = None
 
     def _reset_copy_feedback(self) -> None:
