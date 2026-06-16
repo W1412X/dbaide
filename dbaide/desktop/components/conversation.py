@@ -91,7 +91,8 @@ def _split_fenced_code_blocks(markdown: str) -> list[tuple[str, str, str]]:
         before = text[pos:match.start()]
         if before:
             parts.append(("markdown", before, ""))
-        lang = str(match.group(1) or "").strip().split(None, 1)[0]
+        lang_parts = str(match.group(1) or "").strip().split(None, 1)
+        lang = lang_parts[0] if lang_parts else ""
         code = str(match.group(2) or "")
         if code.endswith("\n"):
             code = code[:-1]

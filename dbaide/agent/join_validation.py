@@ -55,7 +55,7 @@ def type_alignment_score(left_type: str, right_type: str) -> float:
     right = normalize_type_name(right_type)
     if left == right:
         return 1.0
-    if left in {right, "unknown", ""} or right in {"unknown", ""}:
+    if left in {"unknown", ""} or right in {"unknown", ""}:
         return 0.5
     # Loosely related catalog families — scoring hint only.
     numeric = {"int", "integer", "bigint", "smallint", "tinyint", "serial", "float", "double", "real", "decimal", "numeric", "number"}
