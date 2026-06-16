@@ -6,6 +6,14 @@ All notable changes to DBAide are documented here. The format is loosely based o
 
 ## [Unreleased]
 
+## [0.2.18] — 2026-06-16
+
+### Fixed
+
+- **Settings → Integrations** — PyInstaller release builds now bundle all
+  `tool_icons` assets (Claude, Cursor, Windsurf, …); icons were blank in installed
+  apps because only `app_icon.png` was previously included in the frozen bundle.
+
 ## [0.2.5] — 2026-06-14
 
 ### Changed
@@ -615,7 +623,8 @@ and a PyQt6 desktop app, sharing one Python core.
   drag-to-Applications)**, **Windows (`.msi` wizard)**, and **Linux (`.tar.gz`)** —
   pushing a `v*` tag cuts a GitHub Release automatically.
 
-[Unreleased]: https://github.com/W1412X/dbaide/compare/v0.2.5...HEAD
+[Unreleased]: https://github.com/W1412X/dbaide/compare/v0.2.18...HEAD
+[0.2.18]: https://github.com/W1412X/dbaide/compare/v0.2.17...v0.2.18
 [0.2.5]: https://github.com/W1412X/dbaide/compare/v0.2.4...v0.2.5
 [0.2.4]: https://github.com/W1412X/dbaide/compare/v0.2.3...v0.2.4
 [0.2.3]: https://github.com/W1412X/dbaide/compare/v0.2.2...v0.2.3

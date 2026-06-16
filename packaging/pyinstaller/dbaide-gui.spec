@@ -28,6 +28,7 @@ mistune_hidden = collect_submodules("mistune")
 # bloats the package ~3-4x). PyInstaller's built-in PyQt6 hooks bundle just these
 # modules + the platform plugins they need.
 certifi_datas = collect_data_files("certifi")
+desktop_datas = collect_data_files("dbaide.desktop")
 
 hiddenimports = [
     "certifi",
@@ -85,9 +86,7 @@ a = Analysis(
     [str(ROOT / "dbaide" / "desktop" / "launcher.py")],
     pathex=[str(ROOT)],
     binaries=[],
-    datas=[
-        (str(ROOT / "dbaide" / "desktop" / "assets" / "app_icon.png"), "dbaide/desktop/assets"),
-    ] + certifi_datas,
+    datas=desktop_datas + certifi_datas,
     hiddenimports=hiddenimports,
     hookspath=[],
     hooksconfig={},
