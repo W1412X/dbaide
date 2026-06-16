@@ -284,19 +284,19 @@ class AskTab(QWidget):
 
         def _copy_btn(label: str, payload: str) -> QWidget:
             btn = ghost_action_button(
-                label, icon=svg_icon("copy", color=Theme.MUTED, size=14), tooltip=label
+                label, icon=svg_icon("copy", color=Theme.MUTED, size=12), tooltip=label
             )
 
             def _do() -> None:
                 QApplication.clipboard().setText(payload)
                 btn.setText(_t("ask.copied"))
-                btn.setIcon(svg_icon("check", color=Theme.GREEN, size=14))
+                btn.setIcon(svg_icon("check", color=Theme.GREEN, size=12))
 
                 def _restore() -> None:
                     try:
                         if not _is_deleted(btn):
                             btn.setText(label)
-                            btn.setIcon(svg_icon("copy", color=Theme.MUTED, size=14))
+                            btn.setIcon(svg_icon("copy", color=Theme.MUTED, size=12))
                     except RuntimeError:
                         pass
 
@@ -307,11 +307,10 @@ class AskTab(QWidget):
 
         bar = QWidget()
         row = QHBoxLayout(bar)
-        row.setContentsMargins(0, 2, 0, 0)
+        row.setContentsMargins(0, 0, 0, 0)
         row.setSpacing(2)
         if answer:
             row.addWidget(_copy_btn(_t("ask.copy_answer"), answer))
         if cli_command:
             row.addWidget(_copy_btn(_t("ask.copy_cli"), str(cli_command)))
-        row.addStretch(1)
         return bar

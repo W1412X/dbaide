@@ -16,12 +16,12 @@ class IconToolButton(QToolButton):
         super().__init__(parent)
         self._base_icon = icon
         self.setIcon(icon)
-        self.setIconSize(QSize(15, 15))
+        self.setIconSize(QSize(13, 13))
         self.setToolTip(tooltip)
         self.setCursor(Qt.CursorShape.PointingHandCursor)
         self.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonIconOnly)
         self.setAutoRaise(True)
-        self.setFixedSize(26, 26)
+        self.setFixedSize(22, 22)
         self._apply_style()
 
     def _apply_style(self) -> None:

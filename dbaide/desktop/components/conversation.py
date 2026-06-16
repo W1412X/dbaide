@@ -481,7 +481,7 @@ class _CodeBlock(QFrame):
         header.addWidget(label)
         header.addStretch(1)
         self._copy_btn = IconToolButton(
-            svg_icon("copy", color=Theme.MUTED, size=14),
+            svg_icon("copy", color=Theme.MUTED, size=12),
             t("message.copy_code"),
         )
         self._copy_btn.clicked.connect(self.copy_code)
@@ -510,12 +510,12 @@ class _CodeBlock(QFrame):
         from dbaide.i18n import t
 
         QApplication.clipboard().setText(self._code)
-        self._copy_btn.setIcon(svg_icon("check", color=Theme.GREEN, size=14))
+        self._copy_btn.setIcon(svg_icon("check", color=Theme.GREEN, size=12))
         self._copy_btn.setToolTip(t("ask.copied"))
 
         def restore() -> None:
             try:
-                self._copy_btn.setIcon(svg_icon("copy", color=Theme.MUTED, size=14))
+                self._copy_btn.setIcon(svg_icon("copy", color=Theme.MUTED, size=12))
                 self._copy_btn.setToolTip(t("message.copy_code"))
             except RuntimeError:
                 pass
@@ -963,15 +963,24 @@ class TurnBlock(QFrame):
         self._content_host.hide()
         self._layout.addWidget(self._content_host)
 
+        # Footer row: stats on the left, action buttons on the right.
+        self._footer = QWidget()
+        self._footer.setStyleSheet("background: transparent;")
+        self._footer.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        self._footer_layout = QHBoxLayout(self._footer)
+        self._footer_layout.setContentsMargins(0, 0, 0, 0)
+        self._footer_layout.setSpacing(4)
         self._stats_label = QLabel()
-        self._stats_label.setAlignment(Qt.AlignmentFlag.AlignRight)
-        self._stats_label.setFont(QFont("Inter", 10))
+        self._stats_label.setFont(QFont("Inter", 9))
         self._stats_label.setStyleSheet(
             f"color: {Theme.MUTED_2}; background: transparent;"
-            f" padding-right: 4px;"
         )
-        self._stats_label.hide()
-        self._layout.addWidget(self._stats_label)
+        self._footer_layout.addWidget(self._stats_label)
+        self._footer_layout.addStretch(1)
+        self._footer_actions: QHBoxLayout | None = None
+        self._footer.hide()
+        self._layout.addWidget(self._footer)
+        self._trace_model_cache: "TraceModel | None" = None
 
     def set_user(self, text: str, *, meta: str = "", attachments: list[dict] | None = None) -> None:
         self._header.show()
@@ -1011,33 +1020,71 @@ class TurnBlock(QFrame):
         self.trace_state.append(event)
         if self._trace_open():
             self._trace_box.append_live_event(event)
+        self._ingest_live_stats(event)
 
     def set_trace(self, events: list[dict[str, Any]]) -> None:
         """Final, authoritative trace for this turn (from the persisted result)."""
         self.trace_state.set_final(events)
         if self._trace_open():
             self._trace_box.set_events(self.trace_state.events, live=False)
-        self._update_stats(events)
+        self._rebuild_stats(events)
 
-    def _update_stats(self, events: list[dict[str, Any]]) -> None:
-        from dbaide.agent.trace_model import TraceModel, _format_tokens
-        from dbaide.i18n import t
+    def _ingest_live_stats(self, event: dict[str, Any]) -> None:
+        """Feed a single event to the cached trace model for realtime display."""
+        from dbaide.agent.trace_model import TraceModel
+        if self._trace_model_cache is None:
+            self._trace_model_cache = TraceModel()
+        if isinstance(event, dict):
+            self._trace_model_cache.ingest(event)
+        self._render_stats(self._trace_model_cache)
+
+    def _rebuild_stats(self, events: list[dict[str, Any]]) -> None:
+        from dbaide.agent.trace_model import TraceModel
         model = TraceModel()
         for ev in events or []:
             if isinstance(ev, dict):
                 model.ingest(ev)
         model.finalize()
+        self._trace_model_cache = model
+        self._render_stats(model)
+
+    def _render_stats(self, model: "TraceModel") -> None:
+        from dbaide.agent.trace_model import _format_tokens
+        from dbaide.i18n import t
         steps = len(model.steps)
-        if steps <= 0:
-            self._stats_label.hide()
+        if steps <= 0 and model.overall in ("idle",):
             return
         elapsed = model.elapsed_ms() / 1000.0
-        parts = [t("trace.steps", n=steps), f"{elapsed:.1f}s"]
+        parts: list[str] = []
+        if steps > 0:
+            parts.append(t("trace.steps", n=steps))
+        if elapsed >= 0.1:
+            parts.append(f"{elapsed:.1f}s")
         tokens = _format_tokens(model.prompt_tokens)
         if tokens:
             parts.append(tokens)
-        self._stats_label.setText(" · ".join(parts))
-        self._stats_label.show()
+        if parts:
+            self._stats_label.setText(" · ".join(parts))
+            self._footer.show()
+
+    def set_actions(self, widget: QWidget | None) -> None:
+        """Set the action buttons (copy answer, copy CLI) in the footer row."""
+        if self._footer_actions is not None:
+            while self._footer_actions.count():
+                item = self._footer_actions.takeAt(0)
+                w = item.widget()
+                if w is not None:
+                    w.setParent(None)
+                    w.deleteLater()
+        if widget is None:
+            return
+        if self._footer_actions is None:
+            self._footer_actions = QHBoxLayout()
+            self._footer_actions.setContentsMargins(0, 0, 0, 0)
+            self._footer_actions.setSpacing(2)
+            self._footer_layout.addLayout(self._footer_actions)
+        self._footer_actions.addWidget(widget)
+        self._footer.show()
 
     def _toggle_trace(self) -> None:
         if self._trace_box is None:
@@ -1403,7 +1450,7 @@ class ConversationView(QScrollArea):
             replace_widget=live,
         )
         if actions_widget is not None:
-            turn.append_content(actions_widget)
+            turn.set_actions(actions_widget)
         notes: list[str] = []
         if warnings:
             notes.append(f"**{self._tr('conversation.warnings')}**\n" + "\n".join(f"- {w}" for w in warnings))

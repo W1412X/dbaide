@@ -18,11 +18,11 @@ def ghost_action_button(
     btn.setCursor(Qt.CursorShape.PointingHandCursor)
     btn.setAutoDefault(False)
     btn.setDefault(False)
-    btn.setFixedHeight(26)
+    btn.setFixedHeight(22)
     btn.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
     if icon is not None:
         btn.setIcon(icon)
-        btn.setIconSize(QSize(14, 14))
+        btn.setIconSize(QSize(12, 12))
     if tooltip:
         btn.setToolTip(tooltip)
     btn.setStyleSheet(
@@ -31,9 +31,9 @@ def ghost_action_button(
             background: transparent;
             color: {Theme.MUTED};
             border: none;
-            border-radius: 7px;
-            padding: 0 8px;
-            font-size: 12px;
+            border-radius: 5px;
+            padding: 0 6px;
+            font-size: 11px;
             text-align: left;
         }}
         QPushButton:hover {{ background: {Theme.PANEL_2}; color: {Theme.TEXT}; }}
