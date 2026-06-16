@@ -28,7 +28,7 @@ class ChartPlan:
     x_label: str
     y_label: str
     sort_by: str = "value_desc"
-    limit: int = 20
+    limit: int = 15
     series_types: list[str] | None = None
     series_axes: list[str] | None = None
     units: list[str] | None = None
@@ -109,7 +109,7 @@ class ChartAgent:
                 '"category_field":"...", "value_fields":["..."], "series_names":["..."], '
                 '"series_types":["bar|line|area"], "series_axes":["left|right"], '
                 '"x_label":"...", "y_label":"...", "axes":{"left":{"label":"..."},'
-                '"right":{"label":"..."}}, "sort_by":"value_desc", "limit":20}'
+                '"right":{"label":"..."}}, "sort_by":"value_desc", "limit":15}'
             ),
         )
         if not isinstance(payload, dict):
@@ -177,7 +177,7 @@ class ChartAgent:
             x_label=str(payload.get("x_label") or "").strip(),
             y_label=str(payload.get("y_label") or "").strip(),
             sort_by=str(payload.get("sort_by") or "value_desc").strip() or "value_desc",
-            limit=_safe_limit(payload.get("limit"), default=20),
+            limit=_safe_limit(payload.get("limit"), default=15),
             series_types=series_types,
             series_axes=series_axes,
             units=units[: len(value_fields)],

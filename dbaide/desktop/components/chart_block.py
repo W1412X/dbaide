@@ -51,6 +51,21 @@ def _series_values(item: dict[str, Any], count: int = 0) -> list[float]:
     return values
 
 
+def _format_tooltip_value(value: object) -> str:
+    if not isinstance(value, (int, float)):
+        return str(value)
+    v = float(value)
+    if not math.isfinite(v):
+        return str(value)
+    if abs(v) < 1e-8:
+        return "0"
+    if abs(v - round(v)) < 1e-6 and abs(v) < 1e15:
+        return f"{int(round(v)):,}"
+    if abs(v) >= 1000:
+        return f"{v:,.1f}"
+    return f"{v:.2f}"
+
+
 def _truncate_label(text: str, max_len: int = 20) -> str:
     """Pie slice labels only — axis categories use charts.labels instead."""
     text = " ".join(str(text or "").split())
@@ -63,7 +78,7 @@ def _style_value_axis(axis, values: list[float] | None = None, *, value_format: 
     axis.setLabelsColor(_hex_color("MUTED"))
     axis.setTitleBrush(_hex_color("TEXT_2"))
     axis.setTitleFont(QFont("Inter", 10))
-    axis.setLabelsFont(QFont("Inter", 10))
+    axis.setLabelsFont(QFont("Inter", 9))
     axis.setGridLineColor(_hex_color("BORDER_SOFT"))
     axis.setMinorGridLineVisible(False)
     axis.setGridLineVisible(True)
@@ -73,11 +88,9 @@ def _style_value_axis(axis, values: list[float] | None = None, *, value_format: 
         hi = max(values) if values else 1.0
         if hi <= lo:
             hi = lo + 1.0
-        pad = (hi - lo) * 0.08 or hi * 0.08 or 1.0
+        pad = (hi - lo) * 0.10 or hi * 0.10 or 1.0
         axis.setRange(lo, hi + pad)
     axis.setTickCount(min(6, max(3, 4)))
-    axis.setLabelFormat("")  # use callback below when supported
-    # PyQt6 QValueAxis: setLabelFormat("%.0f") for integer-ish scales
     fmt = str(value_format or "").strip().lower()
     if fmt == "percent":
         axis.setLabelFormat("%.1f%%")
@@ -91,7 +104,10 @@ def _style_value_axis(axis, values: list[float] | None = None, *, value_format: 
 
 def _style_category_axis(axis, *, labels_angle: int = 0) -> None:
     axis.setLabelsColor(_hex_color("TEXT_2"))
-    axis.setLabelsFont(QFont("Inter", 10))
+    font_size = 9 if labels_angle else 10
+    axis.setLabelsFont(QFont("Inter", font_size))
+    axis.setTitleFont(QFont("Inter", 10))
+    axis.setTitleBrush(_hex_color("TEXT_2"))
     axis.setGridLineVisible(False)
     axis.setLinePenColor(_hex_color("BORDER"))
     axis.setTruncateLabels(False)
@@ -99,11 +115,13 @@ def _style_category_axis(axis, *, labels_angle: int = 0) -> None:
         axis.setLabelsAngle(labels_angle)
 
 
-def _configure_category_axis(axis, raw_categories: list[str]) -> int:
+def _configure_category_axis(axis, raw_categories: list[str], *, title: str = "") -> int:
     """Append display labels; return extra bottom margin for rotated text."""
     display, angle, bottom_extra = category_axis_layout(raw_categories)
     axis.append(display)
     _style_category_axis(axis, labels_angle=angle)
+    if title:
+        axis.setTitleText(_compact_axis_title(title))
     return bottom_extra
 
 
@@ -114,7 +132,7 @@ def _style_bar_set(bar_set, color: QColor) -> None:
     bar_set.setBorderColor(border)
 
 
-def _apply_chart_chrome(chart, *, bottom_margin: int = 8, show_legend: bool = False) -> None:
+def _apply_chart_chrome(chart, *, left_margin: int = 4, bottom_margin: int = 8, show_legend: bool = False) -> None:
     from PyQt6.QtCharts import QChart
 
     chart.setBackgroundVisible(False)
@@ -123,7 +141,7 @@ def _apply_chart_chrome(chart, *, bottom_margin: int = 8, show_legend: bool = Fa
     chart.setPlotAreaBackgroundPen(QPen(_hex_color("BORDER_SOFT")))
     chart.setTitle("")
     chart.setAnimationOptions(QChart.AnimationOption.NoAnimation)
-    chart.setMargins(QMargins(8, 8, 12, bottom_margin))
+    chart.setMargins(QMargins(left_margin, 8, 8, bottom_margin))
     legend = chart.legend()
     legend.setVisible(bool(show_legend))
     legend.setAlignment(Qt.AlignmentFlag.AlignBottom)
@@ -180,10 +198,7 @@ class _ChartView(QWidget):
             return
         cat = self._categories[index]
         unit = self._series_units.get(series_name, "")
-        if isinstance(value, (int, float)):
-            val = f"{value:,.2g}{unit}"
-        else:
-            val = f"{value}{unit}"
+        val = f"{_format_tooltip_value(value)}{unit}"
         text = f"{series_name}\n{cat}\n{val}" if series_name else f"{cat}\n{val}"
         QToolTip.showText(QCursor.pos(), text)
 
@@ -211,10 +226,10 @@ class _ChartView(QWidget):
 
 def _chart_height(chart_type: str, category_count: int, *, bottom_extra: int = 0) -> int:
     if chart_type == "horizontal_bar":
-        return min(520, max(220, 52 * max(category_count, 1) + 72))
+        return min(560, max(240, 52 * max(category_count, 1) + 80))
     if chart_type in ("pie", "donut"):
-        return 320
-    base = min(420, max(260, 36 * max(category_count, 1) + 120))
+        return 340
+    base = min(440, max(280, 36 * max(category_count, 1) + 120))
     return base + bottom_extra
 
 
@@ -256,7 +271,9 @@ def _compact_axis_title(text: str) -> str:
             start = text.index(left)
             end = text.index(right, start)
             text = (text[:start] + text[end + 1:]).strip()
-    return text[:8]
+    if len(text) > 18:
+        return text[:17].rstrip() + "…"
+    return text
 
 
 def _axis_format(spec, side: str) -> str:
@@ -277,6 +294,7 @@ def _wrap_chart(chart, *, categories: list[str], chart_type: str, height: int, s
     view = _ChartView(chart, categories=categories, chart_type=chart_type, series_units=series_units)
     view.setMinimumHeight(height)
     view.setMaximumHeight(height + 40)
+    view.setMinimumWidth(320)
     view.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
     return view
 
@@ -308,9 +326,16 @@ def build_chart_widget(spec_dict: dict[str, Any]) -> QWidget:
     if chart_type in ("pie", "donut"):
         pie = QPieSeries()
         values = _series_values(spec.series[0], len(raw_categories))
+        total = sum(abs(v) for v in values) or 1.0
+        n_cats = len(raw_categories)
         for idx, (cat, val) in enumerate(zip(raw_categories, values, strict=False)):
             slice_ = pie.append(_truncate_label(cat, 20), val)
-            slice_.setLabelVisible(len(raw_categories) <= 6)
+            if n_cats <= 6:
+                slice_.setLabelVisible(True)
+            elif n_cats <= 10:
+                slice_.setLabelVisible(abs(val) / total >= 0.05)
+            else:
+                slice_.setLabelVisible(abs(val) / total >= 0.08)
             slice_.setLabelColor(_hex_color("TEXT_2"))
             slice_.setColor(colors[idx % len(colors)])
             slice_.setBorderColor(_hex_color("PANEL"))
@@ -370,7 +395,9 @@ def build_chart_widget(spec_dict: dict[str, Any]) -> QWidget:
         chart.addAxis(axis_x, Qt.AlignmentFlag.AlignBottom)
         series.attachAxis(axis_y)
         series.attachAxis(axis_x)
-        _apply_chart_chrome(chart, bottom_margin=8 + bottom_extra, show_legend=show_legend)
+        max_cat_len = max((len(c) for c in raw_categories), default=0)
+        h_left = min(100, max(4, max_cat_len * 6))
+        _apply_chart_chrome(chart, left_margin=h_left, bottom_margin=8 + bottom_extra, show_legend=show_legend)
         return _wrap_chart(
             chart,
             categories=raw_categories,
@@ -391,7 +418,7 @@ def build_chart_widget(spec_dict: dict[str, Any]) -> QWidget:
             bar_series.append(bar_set)
         chart.addSeries(bar_series)
         axis_x = QBarCategoryAxis()
-        _configure_category_axis(axis_x, raw_categories)
+        _configure_category_axis(axis_x, raw_categories, title=spec.x_label)
         axis_y = QValueAxis()
         axis_y.setTitleText(_compact_axis_title(_axis_label(spec, "left") or spec.y_label))
         _style_value_axis(axis_y, all_y, value_format=_axis_format(spec, "left"))
@@ -404,7 +431,7 @@ def build_chart_widget(spec_dict: dict[str, Any]) -> QWidget:
         return _wrap_chart(chart, categories=raw_categories, chart_type=chart_type, height=h, series_units=units)
     elif chart_type in {"line", "area", "combo", "multi_axis_line"}:
         axis_x = QBarCategoryAxis()
-        _configure_category_axis(axis_x, raw_categories)
+        _configure_category_axis(axis_x, raw_categories, title=spec.x_label)
         chart.addAxis(axis_x, Qt.AlignmentFlag.AlignBottom)
 
         left_values: list[float] = []
@@ -505,7 +532,7 @@ def build_chart_widget(spec_dict: dict[str, Any]) -> QWidget:
             bar_series.append(bar_set)
         chart.addSeries(bar_series)
         axis_x = QBarCategoryAxis()
-        _configure_category_axis(axis_x, raw_categories)
+        _configure_category_axis(axis_x, raw_categories, title=spec.x_label)
         axis_y = QValueAxis()
         axis_y.setTitleText(_compact_axis_title(_axis_label(spec, "left") or spec.y_label))
         _style_value_axis(axis_y, all_y, value_format=_axis_format(spec, "left"))
@@ -514,12 +541,8 @@ def build_chart_widget(spec_dict: dict[str, Any]) -> QWidget:
         bar_series.attachAxis(axis_x)
         bar_series.attachAxis(axis_y)
         _apply_chart_chrome(chart, bottom_margin=8 + bottom_extra, show_legend=show_legend)
-        view = _ChartView(chart, categories=raw_categories, chart_type=chart_type, series_units=units)
         h = _chart_height(chart_type, len(raw_categories), bottom_extra=bottom_extra)
-        view.setMinimumHeight(h)
-        view.setMaximumHeight(h + 40)
-        view.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
-        return view
+        return _wrap_chart(chart, categories=raw_categories, chart_type=chart_type, height=h, series_units=units)
 
     h = _chart_height(chart_type, len(raw_categories), bottom_extra=bottom_extra)
     return _wrap_chart(chart, categories=raw_categories, chart_type=chart_type, height=h, series_units=units)

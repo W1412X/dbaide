@@ -37,11 +37,18 @@ def chart_agent_system_prompt() -> str:
         "business meaning. Sales volume and ad spend trends, for example, should normally be separate "
         "charts; add a third ROI/ROAS chart if the SQL result supports it.\n"
         "- sort_by: value_desc | value_asc | category_asc | none (use category_asc for time series)\n"
-        "- limit: max categories to plot (default 20; ≤15 for readable x-axis labels)\n"
+        "- limit: max categories to plot (default 15; keep ≤12 for bar/grouped_bar to avoid label crowding)\n"
         "- Date/time categories: prefer line or area; keep ISO dates (YYYY-MM-DD) in data — the UI "
         "formats them compactly. For many points, bucket by day/week in SQL rather than plotting "
         "hundreds of raw timestamps.\n"
-        "- Provide concise axis titles and legend names in the user's language when obvious from context"
+        "\n"
+        "Label rules (critical for display quality):\n"
+        "- x_label and y_label: keep under 15 characters; strip units/parenthetical info — "
+        "put units in series_names or the axes format field instead\n"
+        "- series_names: keep each name under 12 characters — used in legend and tooltips\n"
+        "- axes.left.label / axes.right.label: same 15-char limit; just the measure name, no units\n"
+        "- title: descriptive but concise, under 30 characters\n"
+        "- Axis labels and titles are displayed in the user's language when obvious from context"
     )
 
 
@@ -71,6 +78,6 @@ def chart_agent_user_prompt(
         '"series_types":["bar|line|area"], "series_axes":["left|right"], '
         '"axes":{"left":{"label":"...","format":"number|currency|percent"},'
         '"right":{"label":"...","format":"number|currency|percent"}}, '
-        '"sort_by":"value_desc|value_asc|category_asc|none", "limit":20}'
+        '"sort_by":"value_desc|value_asc|category_asc|none", "limit":15}'
     )
     return "\n".join(lines)

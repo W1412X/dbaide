@@ -30,10 +30,10 @@ def format_category_label(text: str, *, compact: bool = False) -> str:
             return f"{mo}-{d}"
         return f"{y}-{mo}-{d}"
 
-    if compact and len(text) > 14:
-        return text[:13].rstrip() + "…"
-    if len(text) > 24:
-        return text[:23].rstrip() + "…"
+    if compact and len(text) > 18:
+        return text[:17].rstrip() + "…"
+    if len(text) > 30:
+        return text[:29].rstrip() + "…"
     return text
 
 
@@ -52,7 +52,7 @@ def category_axis_layout(categories: list[str]) -> tuple[list[str], int, int]:
     display = [format_category_label(c, compact=compact) for c in raw]
 
     if very_dense:
-        return display, -60, 52
+        return display, -60, 64
     if dense:
-        return display, -45, 38
+        return display, -45, 48
     return display, 0, 8
