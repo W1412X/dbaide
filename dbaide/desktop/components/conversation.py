@@ -971,9 +971,9 @@ class TurnBlock(QFrame):
         self._footer_layout.setContentsMargins(0, 0, 0, 0)
         self._footer_layout.setSpacing(4)
         self._stats_label = QLabel()
-        self._stats_label.setFont(QFont("Inter", 9))
         self._stats_label.setStyleSheet(
             f"color: {Theme.MUTED_2}; background: transparent;"
+            f" font-size: 10px;"
         )
         self._footer_layout.addWidget(self._stats_label)
         self._footer_layout.addStretch(1)
