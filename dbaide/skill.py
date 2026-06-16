@@ -50,7 +50,7 @@ TOOL_REGISTRY: dict[str, str] = {
     "codex":     ".codex/mcp.json",
     "augment":   ".augment/mcp.json",
     "opencode":  ".opencode/mcp.json",
-    "qcoder":    ".qcoder/mcp.json",
+    "qoder":     ".qoder/mcp.json",
     "mimocode":  ".mimocode/mcp.json",
     "aider":     ".aider/mcp.json",
 }

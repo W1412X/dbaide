@@ -299,7 +299,7 @@ def build_parser() -> argparse.ArgumentParser:
     setup = sub.add_parser("setup", help="Register dbaide as an MCP server in a coding tool's config")
     setup.add_argument("tool", nargs="?", default="",
                        help="Tool name (claude, cursor, codex, trae, windsurf, opencode, "
-                            "qcoder, mimocode, roo, cline, aider, augment), or omit for --all")
+                            "qoder, mimocode, roo, cline, aider, augment), or omit for --all")
     setup.add_argument("--all", action="store_true", dest="setup_all",
                        help="Register in ALL supported tools at once")
     setup.add_argument("--uninstall", action="store_true",
