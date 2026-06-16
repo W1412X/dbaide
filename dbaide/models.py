@@ -43,8 +43,10 @@ class ConnectionConfig:
             raise ValueError("SQLite connections require --path")
         if self.type in {"mysql", "mariadb", "postgres", "postgresql"} and not host:
             host = "localhost"
-        if port is not None and not (1 <= port <= 65535):
-            raise ValueError(f"Port must be 1-65535, got {port}")
+        if port is not None:
+            port = int(port)
+            if not (1 <= port <= 65535):
+                raise ValueError(f"Port must be 1-65535, got {port}")
         self.database = str(database or "").strip()
         self.host = str(host or "").strip()
         self.port = port
@@ -83,6 +85,7 @@ class ModelConfig:
         self.api_key = str(api_key or "")
         self.model = str(model or "")
         # Clamp timeout to valid range
+        timeout_seconds = int(timeout_seconds)
         if timeout_seconds < 1:
             self.timeout_seconds = 1
         elif timeout_seconds > 600:
