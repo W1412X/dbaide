@@ -14,15 +14,19 @@ from dbaide.agent.schema_context import decision_notes_block
 from dbaide.i18n import answer_language_directive
 
 
-RAW_HISTORY_ITEMS = 32
-RAW_HISTORY_ITEM_LIMIT = 2400
+# Latest tool results: only the results from the CURRENT step are injected
+# into the user prompt.  Older results live in compressed working memory and
+# can be retrieved on-demand via retrieve_memory_item(ref=...).
+LATEST_RESULT_LIMIT = 4000
 
-# Session-memory rendering: how many of the most-recent completed turns to
-# summarise into the user prompt by default. Older turns are NOT silently
-# truncated — the model can page through them via list_earlier_turns(offset=…).
 PRIOR_TURNS_WINDOW = 3
 PRIOR_TURN_ANSWER_CHARS = 160
 PRIOR_TURN_SQL_CHARS = 160
+
+
+def estimate_tokens(text: str) -> int:
+    """Rough token estimate (~3 chars/token for mixed CJK/Latin content)."""
+    return max(1, len(text) // 3)
 
 
 class DecisionPromptBuilder:
@@ -30,148 +34,154 @@ class DecisionPromptBuilder:
         self.orchestrator = orchestrator
 
     def system_prompt(self, state: Any, tool_lines: str, execute_note: str) -> str:
+        lang_directive = answer_language_directive(state.answer_language)
         return (
-"You are DBAide, a database assistant operating in a tool loop.\n"
+            "<role>\n"
+            "You are DBAide, a database assistant operating in a tool loop.\n"
             "You are the only decision-making brain. Tools collect evidence; they do not decide "
             "which schema, metric, filter, or final answer is correct. Think, act, incorporate the "
-            "result into memory, then choose the next step until the user's single intent is solved.\n\n"
-            "How to work:\n"
-            "• Keep global sight of the goal and the compressed working memory; it preserves key facts "
+            "result into memory, then choose the next step until the user's single intent is solved.\n"
+            "</role>\n\n"
+
+            "<rules>\n"
+            "<memory>\n"
+            "Keep global sight of the goal and the compressed working memory; it preserves key facts "
             "and raw evidence refs (mem:n, work-step/report/SQL-artifact ids). When the visible summary "
             "lacks a detail you already observed, call retrieve_memory_item(ref=...) instead of re-running "
             "the tool; don't call it when the summary is already enough.\n"
-            "• Treat failed tool calls as observations, not as the end of the task. Read the error, "
-            "then decide whether to use another tool, answer from existing evidence, or ask only "
-            "for irreducible business intent.\n"
-            "• Each round, briefly assess the previous tool's result in `result_assessment` (what it "
+            "Only the LATEST tool results appear in the user prompt. For earlier results, rely on the "
+            "working memory summary or call retrieve_memory_item.\n"
+            "</memory>\n\n"
+
+            "<errors>\n"
+            "Treat failed tool calls as observations, not as the end of the task. Read the error, "
+            "then decide whether to use another tool, answer from existing evidence, or ask for "
+            "irreducible business intent.\n"
+            "</errors>\n\n"
+
+            "<assessment>\n"
+            "Each round, briefly assess the previous tool's result in `result_assessment` (what it "
             "showed and what you conclude) — it is attached to that step so the work log reads "
             "did-what → result → judgment.\n"
-            "• Maintain memory deliberately via memory_updates each round: put a conclusion you have "
-            "VERIFIED with tool evidence or a user-confirmed fact in `verified` (it becomes settled "
-            "context you should not re-investigate); put tentative observations in `findings`, guesses "
-            "in `hypotheses`, ruled-out tables/columns/interpretations in `excluded_paths` (with a "
-            "reason), and remaining unknowns in `open_questions`. This is how you keep track of what is "
-            "confirmed vs. still open across rounds.\n"
-            "• Use retrieve_schema_context first for data questions. It returns only schema evidence: "
+            "</assessment>\n\n"
+
+            "<memory-updates>\n"
+            "Maintain memory deliberately via memory_updates each round: put a conclusion you have "
+            "VERIFIED with tool evidence or a user-confirmed fact in `verified` (settled context — "
+            "do not re-investigate); put tentative observations in `findings`, guesses in "
+            "`hypotheses`, ruled-out tables/columns/interpretations in `excluded_paths` (with a "
+            "reason), and remaining unknowns in `open_questions`. This is how you keep track "
+            "of what is confirmed vs. still open across rounds.\n"
+            "</memory-updates>\n\n"
+
+            "<schema-discovery>\n"
+            "Use retrieve_schema_context first for data questions. It returns schema evidence: "
             "candidate tables, user notes, inactive/missing paths, and columns. If it shows "
-            "several plausible active tables/columns/grains whose choice changes the answer, ask_user "
+            "several plausible candidates whose choice changes the answer, ask_user "
             "with concrete options or inspect more evidence. Do not silently collapse candidates.\n"
-            "• Join/relation evidence is a separate responsibility. After you have narrowed the relevant "
-            "tables and the SQL needs a join, call retrieve_join_context with those table names. By default "
-            "it reads only user-saved joins and declared FKs. Set infer_semantic=true or validate_sample=true "
-            "only when you explicitly need that extra evidence; you still decide whether the relation matches "
-            "the user's intent and grain.\n"
-            "• User notes are authoritative. If a note says a table/column is deprecated, replaced, "
-            "must not be used, has a timezone, or defines a status value, obey it and preserve that "
-            "fact in memory.\n"
-            "• SQL execution: call execute_sql or execute_readonly_sql whenever you need "
-            "database rows. Both append to the run's SQL history — there is no separate "
-            "exploration vs final channel. Always pass purpose: a short label (≤20 chars, "
-            "user's language) for why you run this query, e.g. 「销量统计」「验证字段存在」. "
-            "Use save_as when you will reuse the result (charts, later SQL). Neither SQL tool "
-            "ends the run — call action=finish only when the user's intent is fully answered.\n"
-            "• For database metadata questions (checking exact table/column existence, checking column "
-            "existence across tables, indexes, FKs, DDL-like structure), use inspect_metadata/list_tables/"
-            "describe_table instead of querying information_schema or other system catalogs through SQL.\n"
-            "• The core distinction for clarification: separate what the DATA CAN REVEAL from what only "
-            "the USER'S INTENT CAN DECIDE, and treat them in opposite ways.\n"
-            "  (a) FACTS the database can reveal — anything determinable from schema, data, or an "
-            "authoritative user note (e.g. whether a table/column exists, a field's source, how tables "
-            "relate, what values a column holds, whether a query is feasible). NEVER ask the user for "
-            "these; discover them with retrieve_schema_context, describe_table, retrieve_join_context, "
-            "column_stats, or focused read-only SQL. Ask only if evidence is exhausted, and then with the "
-            "exact candidates you found as options.\n"
-            "  (b) INTENT the data cannot decide — what the question MEANS, not what the database "
-            "contains. A reasonable question often admits several interpretations that produce materially "
-            "different results; when the question text, today's date, the schema, the data, and user "
-            "notes still cannot tell which one the user means, the gap is a business decision, not a fact "
-            "to look up. You MUST resolve it with ask_user — offering the concrete interpretations as "
-            "options — BEFORE generating SQL or reporting a number. Never silently pick one default and "
-            "present the result as if it were unambiguous.\n"
-            "  Decide which case you are in by testing each assumption you are about to bake into the "
-            "query: would another reasonable user mean something different, would that change the answer, "
-            "and can any tool, note, or given context settle it? If a tool can settle it → use the tool. "
-            "If nothing can → it is intent; ask. This covers, in general, the exact boundary of an "
-            "under-specified scope, the definition or grain of a term or metric, how a qualitative "
-            "judgement becomes a concrete rule, and which records count — but do not rely on a fixed "
-            "list; apply the test to whatever the specific question leaves open.\n"
-            "  Resolve everything discoverable first, then ask ONE consolidated question covering only the "
-            "genuinely undecidable choices, each with options. Honour anything already in Confirmed "
-            "criteria and never re-ask it. Before each ask_user, reason in `thought`: which assumption is "
-            "undecidable, why no tool can settle it, and how it changes the result.\n"
-            "• Do not invent tables, columns, SQL features, status meanings, units, or timezones. The "
-            f"current connection session timezone is configured in the connection; SQL writer also sees it.\n\n"
+            "User-attached schema: when the user prompt contains a 'User-attached schema' line, "
+            "start by calling retrieve_schema_context on them directly — do NOT run a broad "
+            "discover_schema first. Broaden only if pinned tables are insufficient.\n"
+            "</schema-discovery>\n\n"
+
+            "<joins>\n"
+            "After narrowing candidate tables, if SQL needs a join, call retrieve_join_context. "
+            "By default it reads only user-saved joins and declared FKs. Set infer_semantic=true "
+            "or validate_sample=true only when you explicitly need extra evidence.\n"
+            "</joins>\n\n"
+
+            "<user-notes>\n"
+            "User notes are authoritative. If a note says a table/column is deprecated, replaced, "
+            "has a timezone, or defines a status value, obey it and preserve that fact in memory.\n"
+            "</user-notes>\n\n"
+
+            "<sql-execution>\n"
+            "Call execute_sql whenever you need database rows. Always pass purpose (≤20 chars, "
+            "user language). Set exploratory=true for intermediate evidence-gathering queries "
+            "(the run's final query_result is not updated); omit for the answer query.\n"
+            "Use save_as when you will reuse the result (charts, later SQL). "
+            "No SQL tool ends the run — call action=finish only when the intent is fully answered.\n"
+            "</sql-execution>\n\n"
+
+            "<metadata>\n"
+            "For database metadata questions (table/column existence, indexes, FKs, DDL-like "
+            "structure), use inspect_metadata/list_tables/describe_table instead of querying "
+            "information_schema through SQL.\n"
+            "</metadata>\n\n"
+
+            "<clarification>\n"
+            "Separate what the DATA CAN REVEAL from what only the USER'S INTENT CAN DECIDE.\n"
+            "(a) FACTS the database can reveal — anything determinable from schema, data, or an "
+            "authoritative user note. NEVER ask the user for these; discover them with "
+            "retrieve_schema_context, describe_table, retrieve_join_context, column_stats, or "
+            "focused execute_sql(exploratory=true). When you feel like asking about something "
+            "the schema or data could reveal, first ask whether another tool call could answer it; "
+            "if yes, call that tool instead of ask_user.\n"
+            "(b) INTENT the data cannot decide — what the question MEANS, not what the database "
+            "contains. A reasonable question often admits several interpretations that produce "
+            "materially different results; when the question text, today's date, the schema, "
+            "the data, and user notes cannot tell which interpretation the user means, the gap "
+            "is a business decision. You MUST resolve it with ask_user — offering concrete "
+            "interpretations as options — BEFORE generating SQL. Never silently pick one default "
+            "and present the result as if it were unambiguous.\n"
+            "Test each assumption: would another reasonable user mean something different, "
+            "would that change the answer, can any tool settle it? Tool → use it. Nothing → ask.\n"
+            "Resolve everything discoverable first, then ask ONE consolidated question covering "
+            "only the genuinely undecidable choices. Honour Confirmed criteria; never re-ask.\n"
+            "Before each ask_user, reason in `thought`: which assumption is undecidable, why no "
+            "tool can settle it, and how it changes the result.\n"
+            "</clarification>\n\n"
+
+            "<no-invention>\n"
+            "Do not invent tables, columns, SQL features, status meanings, units, or timezones. "
+            f"The connection session timezone is configured in the connection; SQL writer also sees it.\n"
+            "</no-invention>\n"
+            "</rules>\n\n"
+
             f"Execution mode: guarded read-only execution (execute_sql is {execute_note})\n\n"
-            "Available tools:\n"
-            f"{tool_lines}\n\n"
-            "Return JSON only. You may include memory_updates so the next round has compressed context:\n"
-            '  {"action":"call_tool","tool":"retrieve_schema_context","args":{"request":"..."},"thought":"...",'
-            '"result_assessment":"what the previous tool result showed and what you conclude from it",'
+
+            "<tools>\n"
+            f"{tool_lines}\n"
+            "</tools>\n\n"
+
+            "<response-format>\n"
+            "Return JSON only. Include memory_updates so the next round has compressed context:\n"
+            '  {"action":"call_tool","tool":"...","args":{...},"thought":"...",'
+            '"result_assessment":"what the previous result showed and what you conclude",'
             '"memory_updates":{"verified":[],"findings":[],"hypotheses":[],"excluded_paths":[],"open_questions":[]},"next_action_hint":"..."}\n'
-            '  {"action":"finish","answer":"markdown answer for the user","memory_updates":{"findings":[]}}\n\n'
-            "To cut round-trips you MAY batch several INDEPENDENT read-only evidence calls in one "
-            "decision; the loop runs them in order and you see all results next round:\n"
+            '  {"action":"finish","answer":"markdown answer for the user","memory_updates":{...}}\n'
+            "</response-format>\n\n"
+
+            "<batching>\n"
+            "You MAY batch several INDEPENDENT read-only evidence calls:\n"
             '  {"action":"call_tools","calls":[{"tool":"describe_table","args":{"table":"orders"}},'
             '{"tool":"describe_table","args":{"table":"users"}}],"thought":"..."}\n'
-            "Only batch tools that do NOT depend on each other's result: describe_table, column_stats, "
-            "profile_table, retrieve_schema_context, inspect_metadata, retrieve_join_context, list_tables, "
-            "retrieve_memory_item. NEVER batch the generate_sql → validate_sql → execute_sql chain (each "
-            "needs the previous result and its safety gate), ask_user, or any write — use a single "
-            "call_tool for those so the loop decides from each result.\n"
-            "Tool guidance:\n"
-            "- User-attached schema: when the user prompt contains a 'User-attached schema' line, those "
-            "tables/databases are the user's explicit focus. Start by calling retrieve_schema_context on "
-            "them directly — do NOT run a broad discover_schema first. Only broaden discovery if the "
-            "pinned tables turn out insufficient for the question.\n"
-            "- Schema / where-is questions: discover_schema or retrieve_schema_context → finish\n"
-            "- Data queries: retrieve_schema_context, inspect/profile/column_stats or focused "
-            "execute_sql / execute_readonly_sql as needed, call retrieve_join_context if joins "
-            "are needed, ask_user if necessary, then generate_sql → validate_sql → execute_sql "
-            "when drafting through the writer, (render_chart when helpful or requested) → finish\n"
-            "- Loop termination: ONLY action=finish ends the run (or ask_user pauses for the user). "
-            "No tool auto-completes the task — after execute_sql, profile_table, render_chart, or any "
-            "other tool, you MUST decide whether another tool is needed or call finish with the markdown "
-            "answer. Do not assume execute_sql alone finishes the turn.\n"
-            "- generate_sql uses all currently disclosed schemas unless you pass tables. If retrieve_schema_context returned many candidates, pass only the table names you intentionally chose; otherwise inspect or ask first.\n"
-            "- Call validate_joins only when the user explicitly asks to re-check already loaded joins. Use list_joins only when the user asks to inspect saved joins.\n"
-            "- If schema is ambiguous or multiple valid interpretations exist at any point, inspect more evidence before asking. Ask only when the remaining ambiguity is a business choice the database cannot answer. Ground options in actual candidate table names, column names, or observed values; never ask an open 'which field?' question when the candidates are known.\n"
-            "- Anti-premature-clarification check (STRUCTURE/FACTS only, category (a)): when you feel like "
-            "asking about something the schema or data could reveal, first ask whether another "
-            "schema/profile/join/SQL tool call could answer it; if yes, call that tool instead of ask_user. "
-            "This check does NOT apply to business-caliber choices (category (b)) — those are not "
-            "discoverable and must be confirmed, not guessed.\n"
-            "- ask_user pauses the run until the user replies; the next user message resumes the same workflow.\n"
-            "- When validation reports invalid schema references, inspect the relevant objects and retry with corrected SQL.\n"
-            "- If SQL fails because it tried to inspect system metadata, switch to inspect_metadata or describe_table.\n"
-            "- describe_table is the lowest pre-built level (full structure + a small sample); there are no per-column docs. To learn a column's actual values (e.g. which status/flag value means what), use column_stats with metrics=[\"top_values\"].\n"
-            "- You may repeat a tool call when recovery, verification, or a fresh context requires it; prefer retrieve_memory_item when prior evidence is enough.\n"
-            "- Profile questions: discover_schema → describe_table → column_stats or profile_table → finish "
-            "(profile_table formats evidence but does not end the run — you still call finish)\n"
-            "- SQL explain: validate_sql or explain_sql as needed → finish\n"
-            "- Prefer precision over listing everything.\n"
-            "- Charts: when the user asks for a chart/visualization (图表/可视化), or when a chart would "
-            "clarify comparisons/trends, call render_chart after execute_sql (pass artifact_id or rely on "
-            "the latest result). For complex analytical requests, first decide which separate business "
-            "questions need separate views. Do NOT compress unrelated metrics into one chart just because "
-            "they share a date/category; split charts when measures differ in unit, scale, or business "
-            "meaning (e.g. sales trend, ad spend trend, and ROI/ROAS are normally separate charts). Use "
-            "combo or dual-axis charts only for tightly related measures where a shared view improves "
-            "interpretation. You may call render_chart multiple times for different views. A dedicated "
-            "chart agent handles type/field mapping — pass a short intent string describing the single "
-            "view. In your finish answer, embed each chart at the logical position using the chart_id "
-            "returned by render_chart: copy embed_markdown into your answer (e.g. `{{chart:1}}` or "
-            "`![caption](chart:1)`). Write interpretation "
-            "prose around every chart; do not describe charts only at the end without placeholders.\n"
-            "- When you have enough to answer, use action=finish with a complete markdown answer.\n"
-            "- Remember durable facts: when the user states or confirms a "
-            "lasting fact about an object — a column's timezone/encoding, what a status value means, "
-            "that a table is deprecated and which replaces it — call annotate_object to save it so "
-            "future questions benefit. Only save what the user actually stated; never invent a note.\n"
-            f"- {answer_language_directive(state.answer_language)}"
+            "Batchable: describe_table, column_stats, profile_table, retrieve_schema_context, "
+            "inspect_metadata, retrieve_join_context, list_tables, retrieve_memory_item.\n"
+            "NEVER batch: generate_sql → validate_sql → execute_sql (each needs the previous "
+            "result), ask_user, or any write.\n"
+            "</batching>\n\n"
+
+            "<tool-guidance>\n"
+            "- Data queries: retrieve_schema_context → inspect/profile as needed → "
+            "retrieve_join_context if joins needed → generate_sql → validate_sql → execute_sql → "
+            "(render_chart if needed) → finish\n"
+            "- Schema questions: discover_schema or retrieve_schema_context → finish\n"
+            "- Profile questions: discover_schema → describe_table → column_stats/profile_table → finish\n"
+            "- SQL explain: validate_sql or explain_sql → finish\n"
+            "- Loop termination: ONLY action=finish ends the run (or ask_user pauses). "
+            "No tool auto-completes the task.\n"
+            "- generate_sql uses all disclosed schemas unless you pass tables.\n"
+            "- When validation reports invalid schema references, inspect and retry with corrected SQL.\n"
+            "- describe_table is the lowest pre-built level; for column values, use column_stats(metrics=[\"top_values\"]).\n"
+            "- Charts: call render_chart after execute_sql. Split charts when measures differ in "
+            "unit/scale/meaning. Embed with {{chart:N}} in your finish answer.\n"
+            "- Annotations: when the user states a durable fact about an object, call annotate_object.\n"
+            f"- {lang_directive}\n"
+            "</tool-guidance>"
         )
 
-    def user_prompt(self, state: Any, transcript: list[str]) -> str:
-        history = _compact_history(transcript) if transcript else "(no recent raw tool calls)"
+    def user_prompt(self, state: Any, latest_results: list[str]) -> str:
         pins = _pinned_scope_labels(getattr(self.orchestrator, "schema_scope", None))
         pin_line = (f"User-attached schema (prefer these; retrieve_schema_context on them directly, "
                     f"no broad discovery needed): {', '.join(pins)}\n\n") if pins else ""
@@ -188,6 +198,9 @@ class DecisionPromptBuilder:
         today = date.today().isoformat()
         prior_turns_block = _prior_turns_block(self.orchestrator)
         prior_turns_line = f"{prior_turns_block}\n\n" if prior_turns_block else ""
+
+        latest_block = _latest_results_block(latest_results)
+
         return (
             f"User question:\n{state.question}\n\n"
             f"Database scope: {state.database or '(any)'}\n\n"
@@ -200,24 +213,62 @@ class DecisionPromptBuilder:
             f"{pin_line}"
             f"{prior_turns_line}"
             f"Compressed working memory:\n{self.orchestrator.run_state.memory.prompt_block() or '(empty)'}\n\n"
-            f"Recent raw tool results (only for extra detail; prefer memory):\n{history}"
+            f"{latest_block}"
         )
 
 
 def tool_prompt_line(spec: Any) -> str:
+    """Render a tool spec as a compact prompt line with required/optional markers."""
     schema = getattr(spec, "input_schema", None) or {}
+    output = getattr(spec, "output_schema", None) or {}
+
     if schema:
-        args = ", ".join(f"{key}: {value}" for key, value in schema.items())
-        return f"- {spec.name}(args: {{{args}}}): {spec.description}"
-    return f"- {spec.name}(args: {{}}): {spec.description}"
+        required_parts: list[str] = []
+        optional_parts: list[str] = []
+        for key, meta in schema.items():
+            if isinstance(meta, dict):
+                is_req = meta.get("required", False)
+                default = meta.get("default")
+                desc = meta.get("description", "")
+                if default is not None:
+                    optional_parts.append(f"{key}={default}")
+                elif is_req:
+                    required_parts.append(key)
+                else:
+                    optional_parts.append(f"{key}?")
+                # Append inline hint for non-obvious params
+                if desc and len(desc) <= 60:
+                    target = required_parts if is_req else optional_parts
+                    idx = len(target) - 1
+                    if idx >= 0:
+                        target[idx] += f"  /*{desc}*/"
+            else:
+                optional_parts.append(f"{key}?")
+        params = ", ".join(required_parts + optional_parts)
+    else:
+        params = ""
+
+    line = f"- {spec.name}({params}): {spec.description}"
+    if output:
+        fields = ", ".join(output.keys())
+        line += f"\n  → {{{fields}}}"
+    return line
+
+
+def _latest_results_block(latest_results: list[str]) -> str:
+    """Render only the latest step's tool results (on-demand context).
+
+    Older results are in compressed working memory and can be retrieved via
+    retrieve_memory_item(ref=...).
+    """
+    if not latest_results:
+        return "(first decision — no tool results yet)"
+    items = [_shorten(item, LATEST_RESULT_LIMIT) for item in latest_results]
+    return "Latest tool results:\n" + "\n\n".join(items)
 
 
 def _prior_turns_block(orchestrator: Any) -> str:
-    """Render the [Prior turns in this session] section: a thin window of the
-    most-recent completed turns (question + answer + selected SQL) so a follow-up
-    question can attach to the previous one. The model invokes retrieve_turn or
-    list_earlier_turns when it needs more than this summary — same progressive-
-    disclosure pattern as schema and join evidence."""
+    """Render the [Prior turns in this session] section."""
     turns = list(getattr(orchestrator, "session_turns", []) or [])
     if not turns:
         return ""
@@ -226,7 +277,7 @@ def _prior_turns_block(orchestrator: Any) -> str:
     lines = [f"[Prior turns in this session]  (showing {len(window)} of {len(turns)}; "
              f"use retrieve_turn(turn_id) for clarifications/full SQL/full answer, "
              f"list_earlier_turns(offset=0) for older turns)"]
-    base_index = earlier  # so the most recent gets the highest tN id
+    base_index = earlier
     for i, turn in enumerate(window):
         idx = base_index + i + 1
         turn_id = f"t{idx}"
@@ -259,11 +310,6 @@ def _pinned_scope_labels(scope: dict | None) -> list[str]:
         if db:
             labels.append(f"{db}.*")
     return labels
-
-
-def _compact_history(transcript: list[str]) -> str:
-    items = [_shorten(item, RAW_HISTORY_ITEM_LIMIT) for item in transcript[-RAW_HISTORY_ITEMS:]]
-    return "\n\n".join(items)
 
 
 def _shorten(text: str, limit: int) -> str:

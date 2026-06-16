@@ -200,7 +200,7 @@ def test_profile_tools_split_qualified_table_before_live_stats(tmp_path):
     assert stats[0]["stats"]["min"] == 10.5
 
 
-def test_execute_readonly_sql_honors_tool_limit(tmp_path):
+def test_execute_sql_exploratory_honors_tool_limit(tmp_path):
     db = tmp_path / "app.db"
     make_multi_db(db)
     conn = sqlite3.connect(db)
@@ -216,8 +216,8 @@ def test_execute_readonly_sql_honors_tool_limit(tmp_path):
     orch._reset_loop_state("sample orders", "main", True)
 
     result = registry.invoke(
-        "execute_readonly_sql",
-        {"sql": "SELECT id FROM orders ORDER BY id", "database": "main", "limit": 2},
+        "execute_sql",
+        {"sql": "SELECT id FROM orders ORDER BY id", "database": "main", "limit": 2, "exploratory": True},
         ToolContext(),
     )
 

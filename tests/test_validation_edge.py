@@ -316,21 +316,21 @@ class TestStuckLoopCircuitBreaker:
 
     def test_hint_injected_after_three_identical_failures(self):
         calls = [
-            ToolCallRecord(tool="execute_readonly_sql", args={"sql": "SELECT 1"}, ok=False, summary="ERROR: undisclosed table: x"),
-            ToolCallRecord(tool="execute_readonly_sql", args={"sql": "SELECT 1"}, ok=False, summary="ERROR: undisclosed table: x"),
-            ToolCallRecord(tool="execute_readonly_sql", args={"sql": "SELECT 1"}, ok=False, summary="ERROR: undisclosed table: x"),
+            ToolCallRecord(tool="execute_sql", args={"sql": "SELECT 1"}, ok=False, summary="ERROR: undisclosed table: x"),
+            ToolCallRecord(tool="execute_sql", args={"sql": "SELECT 1"}, ok=False, summary="ERROR: undisclosed table: x"),
+            ToolCallRecord(tool="execute_sql", args={"sql": "SELECT 1"}, ok=False, summary="ERROR: undisclosed table: x"),
         ]
         state = self._make_state(calls)
         transcript: list[str] = []
         _inject_stuck_loop_hint(state, transcript)
         assert len(transcript) == 1
         assert "WARNING" in transcript[0]
-        assert "execute_readonly_sql" in transcript[0]
+        assert "execute_sql" in transcript[0]
 
     def test_no_hint_with_only_two_failures(self):
         calls = [
-            ToolCallRecord(tool="execute_readonly_sql", args={"sql": "SELECT 1"}, ok=False, summary="ERROR: x"),
-            ToolCallRecord(tool="execute_readonly_sql", args={"sql": "SELECT 1"}, ok=False, summary="ERROR: x"),
+            ToolCallRecord(tool="execute_sql", args={"sql": "SELECT 1"}, ok=False, summary="ERROR: x"),
+            ToolCallRecord(tool="execute_sql", args={"sql": "SELECT 1"}, ok=False, summary="ERROR: x"),
         ]
         state = self._make_state(calls)
         transcript: list[str] = []
@@ -339,9 +339,9 @@ class TestStuckLoopCircuitBreaker:
 
     def test_no_hint_when_errors_differ(self):
         calls = [
-            ToolCallRecord(tool="execute_readonly_sql", args={"sql": "SELECT 1"}, ok=False, summary="ERROR: undisclosed table: x"),
-            ToolCallRecord(tool="execute_readonly_sql", args={"sql": "SELECT 1"}, ok=False, summary="ERROR: syntax error"),
-            ToolCallRecord(tool="execute_readonly_sql", args={"sql": "SELECT 1"}, ok=False, summary="ERROR: undisclosed table: x"),
+            ToolCallRecord(tool="execute_sql", args={"sql": "SELECT 1"}, ok=False, summary="ERROR: undisclosed table: x"),
+            ToolCallRecord(tool="execute_sql", args={"sql": "SELECT 1"}, ok=False, summary="ERROR: syntax error"),
+            ToolCallRecord(tool="execute_sql", args={"sql": "SELECT 1"}, ok=False, summary="ERROR: undisclosed table: x"),
         ]
         state = self._make_state(calls)
         transcript: list[str] = []
@@ -351,8 +351,8 @@ class TestStuckLoopCircuitBreaker:
     def test_no_hint_when_tools_differ(self):
         calls = [
             ToolCallRecord(tool="validate_sql", args={"sql": "SELECT 1"}, ok=False, summary="ERROR: x"),
-            ToolCallRecord(tool="execute_readonly_sql", args={"sql": "SELECT 1"}, ok=False, summary="ERROR: x"),
-            ToolCallRecord(tool="execute_readonly_sql", args={"sql": "SELECT 1"}, ok=False, summary="ERROR: x"),
+            ToolCallRecord(tool="execute_sql", args={"sql": "SELECT 1"}, ok=False, summary="ERROR: x"),
+            ToolCallRecord(tool="execute_sql", args={"sql": "SELECT 1"}, ok=False, summary="ERROR: x"),
         ]
         state = self._make_state(calls)
         transcript: list[str] = []
@@ -361,9 +361,9 @@ class TestStuckLoopCircuitBreaker:
 
     def test_no_hint_when_last_call_succeeds(self):
         calls = [
-            ToolCallRecord(tool="execute_readonly_sql", args={"sql": "SELECT 1"}, ok=False, summary="ERROR: x"),
-            ToolCallRecord(tool="execute_readonly_sql", args={"sql": "SELECT 1"}, ok=False, summary="ERROR: x"),
-            ToolCallRecord(tool="execute_readonly_sql", args={"sql": "SELECT 1"}, ok=True, summary="ok"),
+            ToolCallRecord(tool="execute_sql", args={"sql": "SELECT 1"}, ok=False, summary="ERROR: x"),
+            ToolCallRecord(tool="execute_sql", args={"sql": "SELECT 1"}, ok=False, summary="ERROR: x"),
+            ToolCallRecord(tool="execute_sql", args={"sql": "SELECT 1"}, ok=True, summary="ok"),
         ]
         state = self._make_state(calls)
         transcript: list[str] = []

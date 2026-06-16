@@ -23,7 +23,8 @@ class ClarifyMockLLM(LLMClient):
         user = messages[-1].content if messages else ""
         if "tool loop" not in system.lower():
             return {}
-        if "User reply:" in user or "User reply:" in "\n".join(m.content for m in messages):
+        all_text = user + "\n".join(m.content for m in messages)
+        if "user_reply" in all_text or "User reply:" in all_text:
             return {"action": "finish", "answer": "Grouped by day as requested."}
         return {
             "action": "call_tool",

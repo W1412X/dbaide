@@ -11,7 +11,7 @@ from dbaide.agent.answer_stream import JsonFieldStreamer
 from dbaide.agent.loop_state import dump_loop_state, restore_loop_state
 from dbaide.agent.progress_events import brief_tool_summary, from_trace_event, progress_event
 from dbaide.agent.sql_executions import response_sql_exports
-from dbaide.agent.loop_prompts import DecisionPromptBuilder, tool_prompt_line
+from dbaide.agent.loop_prompts import DecisionPromptBuilder, estimate_tokens, tool_prompt_line
 from dbaide.agent.llm_trace import llm_stage
 from dbaide.agent.runtime import AgentRuntime
 from dbaide.agent.toolkit import build_tool_registry, loop_tool_specs
@@ -28,7 +28,7 @@ logger = logging.getLogger("dbaide.agent.loop")
 
 DECISION_RETRIES = 1
 # Both names bind to the same execute handler; the loop must treat them alike.
-_EXECUTE_TOOLS = frozenset({"execute_sql", "execute_readonly_sql"})
+_EXECUTE_TOOLS = frozenset({"execute_sql"})
 
 # Tools the model may emit several of in ONE decision (action="call_tools"), to cut
 # loop round-trips. Deliberately limited to INDEPENDENT, READ-ONLY evidence gathering
@@ -45,7 +45,7 @@ BATCHABLE_TOOLS = frozenset({
 MAX_BATCH = 6  # cap fan-out per decision so a bad batch can't blow the step budget
 # Tools whose step should carry the exact SQL the system ran/handled, so the trace
 # is a complete, clickable audit of every auto-executed statement.
-_SQL_TOOLS = frozenset({"execute_sql", "execute_readonly_sql", "explain_sql",
+_SQL_TOOLS = frozenset({"execute_sql", "explain_sql",
                         "generate_sql", "validate_sql"})
 
 
@@ -322,11 +322,12 @@ class AskAgentLoop:
         if approved_risk_sql:
             step_no += 1
         recorder = getattr(orch, "llm_recorder", None)
+        last_step_start = len(transcript)
         while runtime.steps_remaining > 0:
             decide_start = recorder.snapshot_len() if recorder else 0
             try:
                 with llm_stage("decide"):
-                    decision = self._decide(state, transcript)
+                    decision = self._decide(state, transcript, last_step_start)
             except LoopDecisionError as exc:
                 logger.warning("loop_decision_failed: %s", exc)
                 transcript.append(
@@ -355,6 +356,7 @@ class AskAgentLoop:
             tool_llm_start = recorder.snapshot_len() if recorder else 0
             action = str(decision.get("action") or "").strip().lower()
             decision_calls = recorder.since(decide_start) if recorder is not None else []
+            prompt_tokens = getattr(self, "_last_prompt_tokens", 0)
             ev = progress_event(
                 stage="decide",
                 title=str(decision.get("thought") or "Agent decision")[:200],
@@ -368,6 +370,8 @@ class AskAgentLoop:
                 parent_id=self._agent_loop_node_id,
             )
             ev["decision"] = decision
+            if prompt_tokens:
+                ev["prompt_tokens"] = prompt_tokens
             if decision_calls:
                 ev["llm_calls"] = decision_calls
             self.progress(ev)
@@ -405,6 +409,7 @@ class AskAgentLoop:
                 )
                 return self._build_response(orch, answer, disclosures_before or [])
 
+            last_step_start = len(transcript)
             if action == "call_tools":
                 calls, dropped = self._batch_calls(decision)
                 if dropped:
@@ -670,13 +675,16 @@ class AskAgentLoop:
         if hint:
             mem.next_action_hint = hint[:500]
 
-    def _decide(self, state: LoopState, transcript: list[str]) -> dict[str, Any]:
+    def _decide(self, state: LoopState, transcript: list[str],
+                 last_step_start: int = 0) -> dict[str, Any]:
         tools = self.allowed_tool_specs
         tool_lines = "\n".join(tool_prompt_line(s) for s in tools)
         execute_note = "allowed" if state.execute_allowed else "disabled"
 
+        latest_results = transcript[last_step_start:]
         system = self.prompts.system_prompt(state, tool_lines, execute_note)
-        user = self.prompts.user_prompt(state, transcript)
+        user = self.prompts.user_prompt(state, latest_results)
+        self._last_prompt_tokens = estimate_tokens(system) + estimate_tokens(user)
 
         last_error = ""
         for attempt in range(DECISION_RETRIES):

@@ -82,7 +82,7 @@ class AgentMockLLM(LLMClient):
         system = messages[0].content if messages else ""
         user = messages[-1].content if messages else ""
         question = _extract_loop_question(user)
-        prior = user.count("Tool `")
+        prior = _count_completed_steps(user)
         execute_allowed = "execute_sql is allowed" in system
 
         if any(k in question for k in ("产线", "有哪些表", "在哪里", "schema", "字段", "email")):
@@ -143,6 +143,20 @@ def _extract_question(user: str) -> str:
         if marker in block:
             block = block.split(marker, 1)[0]
     return block.strip()
+
+
+def _count_completed_steps(user: str) -> int:
+    """Count completed work steps from the compressed working memory.
+
+    The memory's [Work Done] section lists lines like:
+        - w1 describe_table [ok] → ...
+        - w2 generate_sql [ok] → ...
+    """
+    count = 0
+    for line in user.split("\n"):
+        if re.match(r"^\s*- w\d+ \w+", line):
+            count += 1
+    return count
 
 
 def _object_relevant(name: str, question: str, context: str = "") -> bool:

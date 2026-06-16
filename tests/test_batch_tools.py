@@ -91,6 +91,6 @@ def test_batch_calls_filters_and_caps(tmp_path):
 
 def test_batchable_whitelist_excludes_unsafe_tools():
     # Lock the safety boundary: nothing that executes SQL, pauses, or mutates state.
-    for unsafe in ("execute_sql", "execute_readonly_sql", "generate_sql", "validate_sql",
+    for unsafe in ("execute_sql", "generate_sql", "validate_sql",
                    "ask_user", "annotate_object", "add_join", "update_join", "delete_join"):
         assert unsafe not in BATCHABLE_TOOLS

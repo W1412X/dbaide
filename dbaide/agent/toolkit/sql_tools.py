@@ -13,7 +13,7 @@ from dbaide.i18n import t
 from dbaide.tools.registry import ToolContext, ToolRegistry, ToolResult
 from dbaide.tools.specs import (
     GENERATE_SQL, VALIDATE_SQL,
-    EXECUTE_SQL, EXECUTE_READONLY_SQL, EXPLAIN_SQL,
+    EXECUTE_SQL, EXPLAIN_SQL,
 )
 from dbaide.agent.progress_events import subagent_event
 from dbaide.agent.schema_context import (
@@ -166,8 +166,8 @@ def register(registry: ToolRegistry, orchestrator) -> None:
             },
         )
 
-    def _execute_sql(args: dict[str, Any], ctx: ToolContext, *, exploratory: bool = False) -> ToolResult:
-        tool_label = "execute_readonly_sql" if exploratory else "execute_sql"
+    def _execute_sql(args: dict[str, Any], ctx: ToolContext) -> ToolResult:
+        exploratory = bool(args.get("exploratory", False))
         sql = str(args.get("sql") or orchestrator.run_state.sql or "").strip()
         database = str(args.get("database") or orchestrator.run_state.table_database or orchestrator.run_state.database or "")
         purpose = str(args.get("purpose") or "").strip()
@@ -175,19 +175,19 @@ def register(registry: ToolRegistry, orchestrator) -> None:
         limit = _positive_int(args.get("limit"), orchestrator.session.default_limit)
         timeout_seconds = _positive_int(args.get("timeout_seconds"), None)
         if not sql:
-            return ToolResult(ok=False, error=_err(tool_label, "sql is required"))
+            return ToolResult(ok=False, error=_err("execute_sql", "sql is required"))
 
         if not orchestrator.run_state.execute_allowed:
             return ToolResult(
                 ok=False,
-                error=_err(tool_label, "Execution disabled for this request", retryable=False),
+                error=_err("execute_sql", "Execution disabled for this request", retryable=False),
             )
 
         validation = orchestrator.query.validate_sql(sql, add_limit=True, limit=limit)
         if not validation.ok:
             issues = "; ".join(i.message for i in validation.issues)
             orchestrator.run_state.sql_feedback = validation_feedback([i.message for i in validation.issues])
-            return ToolResult(ok=False, error=_err(tool_label, f"SQL invalid: {issues}"))
+            return ToolResult(ok=False, error=_err("execute_sql", f"SQL invalid: {issues}"))
         orchestrator.run_state.query_result = None
 
         validation_report = orchestrator.query.validate_sql_report(
@@ -217,7 +217,7 @@ def register(registry: ToolRegistry, orchestrator) -> None:
                     subagent_event(
                         agent="explain",
                         title=f"EXPLAIN ~{estimated_rows:,} rows",
-                        parent=tool_label,
+                        parent="execute_sql",
                         detail=f"cost gate limit {explain_max_rows:,}",
                         status="completed" if estimated_rows <= explain_max_rows else "info",
                     ),
@@ -235,7 +235,7 @@ def register(registry: ToolRegistry, orchestrator) -> None:
             subagent_event(
                 agent="risk",
                 title=f"Risk: {risk.action}",
-                parent=tool_label,
+                parent="execute_sql",
                 detail=risk.reason,
                 status="completed" if risk.action == "auto_execute" else "info",
             ),
@@ -268,7 +268,7 @@ def register(registry: ToolRegistry, orchestrator) -> None:
                     "sql": validation.normalized_sql,
                     "sql_hash": sql_hash,
                     "execute_args": execute_args,
-                    "tool": "execute_readonly_sql" if exploratory else "execute_sql",
+                    "tool": "execute_sql",
                     "reason": risk.reason,
                     "risk_action": risk.action,
                     "risk_level": risk.risk_level,
@@ -324,7 +324,7 @@ def register(registry: ToolRegistry, orchestrator) -> None:
                 sql=validation.normalized_sql,
                 purpose=norm_purpose,
                 database=database,
-                tool=tool_label,
+                tool="execute_sql",
                 row_count=int(result.row_count or 0),
                 elapsed_ms=float(result.elapsed_ms or 0.0),
                 artifact_id=artifact_id,
@@ -334,7 +334,7 @@ def register(registry: ToolRegistry, orchestrator) -> None:
                 subagent_event(
                     agent="sql",
                     title=f"Executed · {result.row_count} rows · {result.elapsed_ms:.0f}ms",
-                    parent=tool_label,
+                    parent="execute_sql",
                     detail=validation.normalized_sql,
                     status="completed",
                 ),
@@ -359,7 +359,7 @@ def register(registry: ToolRegistry, orchestrator) -> None:
             # but the connection lacks privileges.
             if not exploratory:
                 orchestrator.run_state.sql_feedback = str(exc)
-            return ToolResult(ok=False, error=_err(tool_label, str(exc), retryable=False))
+            return ToolResult(ok=False, error=_err("execute_sql", str(exc), retryable=False))
         except Exception as exc:
             if not exploratory:
                 orchestrator.run_state.sql_feedback = str(exc)
@@ -368,7 +368,7 @@ def register(registry: ToolRegistry, orchestrator) -> None:
             # exception. Mark as retryable so the model can adjust its SQL, but
             # the circuit-breaker in the agent loop will cut off identical
             # repeated failures.
-            return ToolResult(ok=False, error=_err(tool_label, str(exc), retryable=True))
+            return ToolResult(ok=False, error=_err("execute_sql", str(exc), retryable=True))
 
     def _explain_sql(args: dict[str, Any], _ctx: ToolContext) -> ToolResult:
         sql = str(args.get("sql") or orchestrator.run_state.sql or "").strip()
@@ -376,28 +376,10 @@ def register(registry: ToolRegistry, orchestrator) -> None:
         if not sql:
             return ToolResult(ok=False, error=_err("explain_sql", "sql is required"))
         report = orchestrator.diagnose.diagnose_sql(sql, database=database)
-        if report.get("ok"):
-            explain = report.get("explain") or []
-            if orchestrator.run_state.answer_language == "zh":
-                lines = [f"EXPLAIN 诊断：\n```sql\n{sql}\n```", ""]
-            else:
-                lines = [f"EXPLAIN diagnosis for:\n```sql\n{sql}\n```", ""]
-            lines.append("```text")
-            lines.append(json.dumps(explain, ensure_ascii=False, default=str, indent=2))
-            lines.append("```")
-            orchestrator.run_state.answer = "\n".join(lines)
-        elif report.get("issues"):
-            if orchestrator.run_state.answer_language == "zh":
-                lines = [f"EXPLAIN 诊断：\n```sql\n{sql}\n```", ""]
-            else:
-                lines = [f"EXPLAIN diagnosis for:\n```sql\n{sql}\n```", ""]
-            lines += [f"- {issue}" for issue in report.get("issues") or []]
-            orchestrator.run_state.answer = "\n".join(lines)
         return ToolResult(ok=bool(report.get("ok")), data=report)
 
     registry.register(GENERATE_SQL, _generate_sql)
     registry.register(VALIDATE_SQL, _validate_sql)
-    registry.register(EXECUTE_READONLY_SQL, lambda args, ctx: _execute_sql(args, ctx, exploratory=True))
     registry.register(EXECUTE_SQL, _execute_sql)
     registry.register(EXPLAIN_SQL, _explain_sql)
 

@@ -76,11 +76,12 @@ class _StressMock(LLMClient):
         return {"sql": f"SELECT COUNT(*) AS n FROM {table}", "rationale": "count", "confidence": 0.9}
 
     def _loop(self, system: str, user: str) -> dict[str, Any]:
-        if "User reply:" in user:
+        has_user_reply = "user_reply" in user or "User reply:" in user
+        if has_user_reply:
             self.ambiguous = False
         q = (user.split("User question:", 1)[1].split("Database scope:", 1)[0].strip()
              if "User question:" in user else user)
-        prior = user.count("Tool `")
+        prior = _count_work_steps(user)
         execute_allowed = "execute_sql is allowed" in system
         if any(k in q for k in ("有哪些表", "字段", "在哪里", "结构")):
             if prior == 0:
@@ -90,7 +91,7 @@ class _StressMock(LLMClient):
         active_tables = self._active_candidate_tables()
         if not active_tables:
             return {"action": "call_tool", "tool": "retrieve_schema_context", "args": {"request": q}}
-        if self.ambiguous and "User reply:" not in user and user.count("Tool `ask_user`") == 0:
+        if self.ambiguous and not has_user_reply and "ask_user" not in user:
             return {
                 "action": "call_tool",
                 "tool": "ask_user",
@@ -99,7 +100,7 @@ class _StressMock(LLMClient):
         if (
             len(active_tables) >= 2
             and not rs.relations
-            and user.count("Tool `retrieve_join_context`") == 0
+            and "retrieve_join_context" not in user
             and any(k in q for k in ("每个", "关联", "join"))
         ):
             return {
@@ -125,6 +126,15 @@ class _StressMock(LLMClient):
             if candidate.status == "active":
                 out.append(candidate.table)
         return out
+
+
+def _count_work_steps(user: str) -> int:
+    """Count completed work steps from the compressed working memory."""
+    count = 0
+    for line in user.split("\n"):
+        if re.match(r"^\s*- w\d+ \w+", line):
+            count += 1
+    return count
 
 
 _SCHEMAS = {
@@ -339,14 +349,17 @@ class _DiagnoseMock(_StressMock):
     SQL = "SELECT * FROM orders WHERE total > 100"
 
     def _loop(self, system, user):
-        if "Tool `explain_sql`" not in user:
+        if "explain_sql" not in user:
             return {"action": "call_tool", "tool": "explain_sql", "args": {"sql": self.SQL}}
-        return {"action": "finish", "answer": ""}  # answer comes from run_state via explain_sql
+        return {
+            "action": "finish",
+            "answer": f"EXPLAIN 诊断：\n```sql\n{self.SQL}\n```\n查询计划已返回。",
+        }
 
 
 def test_explain_diagnose_path(_connections):
-    """A 'why is this slow' question drives explain_sql to a clean finish; the EXPLAIN
-    diagnosis becomes the answer even though the model finishes with an empty string."""
+    """A 'why is this slow' question drives explain_sql to a clean finish; the agent
+    (not the tool) composes the answer from the explain result."""
     cfg = _connections["shop"]
     ref: dict = {}
     mock = _DiagnoseMock(ref)

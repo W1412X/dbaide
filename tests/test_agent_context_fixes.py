@@ -766,20 +766,16 @@ def test_loop_prompt_advertises_tool_input_schema(tmp_path):
     decision = loop._decide(LoopState(question="q", database="", execute_allowed=True), [])
 
     assert decision["action"] == "finish"
-    assert "column_stats(args:" in llm.system
-    assert "metrics: list[string]" in llm.system
-    assert "execute_sql(args:" in llm.system
+    assert "column_stats(table" in llm.system
+    assert "execute_sql(" in llm.system
 
 
 def test_tool_specs_unified_sql_history_with_purpose_tags():
-    from dbaide.tools.specs import ASK_USER, EXECUTE_READONLY_SQL, EXECUTE_SQL
+    from dbaide.tools.specs import ASK_USER, EXECUTE_SQL
 
-    assert "SQL history" in EXECUTE_READONLY_SQL.description
-    assert "purpose" in EXECUTE_READONLY_SQL.description
-    assert "loop continues" in EXECUTE_READONLY_SQL.description
     assert "SQL history" in EXECUTE_SQL.description
     assert "purpose" in EXECUTE_SQL.description
-    assert "query_result" in EXECUTE_SQL.description or "latest" in EXECUTE_SQL.description
+    assert "query_result" in EXECUTE_SQL.description or "exploratory" in EXECUTE_SQL.description
     assert "pending" in ASK_USER.output_schema
     assert "answer" not in ASK_USER.output_schema
 
@@ -1096,7 +1092,7 @@ def test_work_log_rolls_up_dropped_steps_keeping_object_names():
     mem = AgentMemory()
     # Earliest steps will fall out of the prompt window; they must not vanish.
     mem.record_work(action="describe_table", args={"database": "shop", "table": "legacy_orders"}, ok=True, summary="x")
-    mem.record_work(action="execute_readonly_sql", args={"sql": "SELECT 1"}, ok=False, summary="boom")
+    mem.record_work(action="execute_sql", args={"sql": "SELECT 1"}, ok=False, summary="boom")
     for i in range(PROMPT_SLICE_WORK + 5):
         mem.record_work(action="column_stats", args={"database": "shop", "table": f"t{i}"}, ok=True, summary="ok")
 
@@ -1115,7 +1111,7 @@ def test_apply_decision_memory_attaches_result_assessment(tmp_path):
     from dbaide.agent.loop import AskAgentLoop
 
     orch = _orch(tmp_path)
-    orch.run_state.memory.record_work(action="execute_readonly_sql", args={"sql": "SELECT 1"}, ok=True, summary="1 row")
+    orch.run_state.memory.record_work(action="execute_sql", args={"sql": "SELECT 1"}, ok=True, summary="1 row")
     loop = AskAgentLoop(orch)
     loop._apply_decision_memory({"result_assessment": "returned 1 row, the probe worked"})
     assert orch.run_state.memory.work_log[-1].judgment == "returned 1 row, the probe worked"
@@ -1534,15 +1530,16 @@ def test_exploratory_sql_failure_enters_memory_and_loop_can_finish(tmp_path):
             if self.loop_calls == 1:
                 return {
                     "action": "call_tool",
-                    "tool": "execute_readonly_sql",
+                    "tool": "execute_sql",
                     "args": {
                         "sql": "SELECT * FROM missing_table",
                         "database": "main",
                         "purpose": "probe a possible table",
+                        "exploratory": True,
                     },
                     "thought": "Try a quick exploratory probe.",
                 }
-            assert any("Tool `execute_readonly_sql` → ERROR" in msg.content for msg in messages)
+            assert any("Tool `execute_sql` → ERROR" in msg.content for msg in messages)
             return {
                 "action": "finish",
                 "answer": "探索 SQL 失败已记录；我会基于已有证据继续回答。",
@@ -1567,7 +1564,7 @@ def test_exploratory_sql_failure_enters_memory_and_loop_can_finish(tmp_path):
     assert orch.run_state.fail_reason == ""
     assert llm.loop_calls == 2
     assert any(
-        step.action == "execute_readonly_sql" and step.status == "failed"
+        step.action == "execute_sql" and step.status == "failed"
         for step in orch.run_state.memory.work_log
     )
     assert any("missing_table" in step.result_summary for step in orch.run_state.memory.work_log)
@@ -1594,7 +1591,6 @@ def test_default_agent_tool_surface_contains_sql_and_metadata_tools(tmp_path):
     assert "generate_sql" in tools
     assert "validate_sql" in tools
     assert "execute_sql" in tools
-    assert "execute_readonly_sql" in tools
     assert "explain_sql" in tools
 
 
@@ -1676,7 +1672,7 @@ def test_retrieve_join_context_accepts_tables_string(tmp_path):
     assert result.data["relations"]
 
 
-def test_execute_readonly_sql_success_keeps_loop_for_followup_reasoning(tmp_path):
+def test_exploratory_sql_success_keeps_loop_for_followup_reasoning(tmp_path):
     from dbaide.agent.loop import AskAgentLoop
 
     class ExploreThenFinishLLM(LLMClient):
@@ -1691,12 +1687,13 @@ def test_execute_readonly_sql_success_keeps_loop_for_followup_reasoning(tmp_path
             if self.loop_calls == 1:
                 return {
                     "action": "call_tool",
-                    "tool": "execute_readonly_sql",
+                    "tool": "execute_sql",
                     "args": {
                         "sql": "SELECT COUNT(*) AS n FROM t",
                         "database": "main",
                         "purpose": "explore row count",
                         "save_as": "count_probe",
+                        "exploratory": True,
                     },
                     "thought": "Probe before final reasoning",
                 }
@@ -1750,11 +1747,12 @@ def test_confirmed_exploratory_sql_does_not_become_final_result(tmp_path):
     orch.run_state.risk_confirmation = {
         "sql": "SELECT COUNT(*) AS n FROM t",
         "sql_hash": "abc",
-        "tool": "execute_readonly_sql",
+        "tool": "execute_sql",
         "execute_args": {
             "sql": "SELECT COUNT(*) AS n FROM t",
             "database": "main",
             "save_as": "count_probe",
+            "exploratory": True,
         },
     }
     orch.run_state.pending_question = "Execute risky exploratory SQL?"
@@ -1795,8 +1793,8 @@ def test_default_sql_artifact_ids_remain_unique_after_trim(tmp_path):
     ids: list[str] = []
     for _ in range(MAX_SQL_ARTIFACTS + 4):
         result = registry.invoke(
-            "execute_readonly_sql",
-            {"sql": "SELECT id FROM t", "database": "main"},
+            "execute_sql",
+            {"sql": "SELECT id FROM t", "database": "main", "exploratory": True},
             ToolContext(),
         )
         assert result.ok
@@ -1855,8 +1853,8 @@ def test_exploratory_sql_does_not_create_stale_final_result(tmp_path):
     ctx = ToolContext()
 
     executed = registry.invoke(
-        "execute_readonly_sql",
-        {"sql": "SELECT COUNT(*) AS n FROM t", "database": "main"},
+        "execute_sql",
+        {"sql": "SELECT COUNT(*) AS n FROM t", "database": "main", "exploratory": True},
         ctx,
     )
     assert executed.ok

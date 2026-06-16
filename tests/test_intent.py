@@ -2,6 +2,7 @@
 runs each, and aggregates — with every sub-intent's result visible (sections in the
 answer + nested, non-colliding trace nodes)."""
 
+import re
 import sqlite3
 
 from dbaide.adapters import build_adapter
@@ -52,6 +53,15 @@ def test_decomposer_caps_and_falls_back_on_garbage():
     assert len(IntentDecomposer(_DecompMock({"nope": 1})).decompose("q")) == 1  # fallback
 
 
+def _count_steps(user: str) -> int:
+    count = 0
+    for line in user.split("\n"):
+        s = line.strip()
+        if re.match(r"^- w\d+ \w+", s):
+            count += 1
+    return count
+
+
 # ── multi-intent end-to-end ──────────────────────────────────────────────────
 
 class MultiMock(LLMClient):
@@ -65,7 +75,7 @@ class MultiMock(LLMClient):
             ]}
         if "tool loop" in system.lower():
             q = user.split("User question:", 1)[1].split("Database scope:", 1)[0].strip() if "User question:" in user else user
-            n = user.count("Tool `")
+            n = _count_steps(user)
             if "columns" in q:
                 return {"action": "finish", "answer": "orders has id, amount, status."} if n else \
                        {"action": "call_tool", "tool": "discover_schema", "args": {"question": q}}

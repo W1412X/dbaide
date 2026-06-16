@@ -21,7 +21,7 @@ def test_record_sql_execution_accumulates_in_order():
         sql="SELECT 1",
         purpose="销量统计",
         database="main",
-        tool="execute_readonly_sql",
+        tool="execute_sql",
         row_count=10,
         elapsed_ms=12.4,
         artifact_id="sql:1",

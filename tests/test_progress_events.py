@@ -29,7 +29,7 @@ def test_exploratory_sql_progress_is_tool_and_query():
         ok = True
         data = {"row_count": 3}
 
-    assert brief_tool_summary("execute_readonly_sql", Result()) == "3 rows"
+    assert brief_tool_summary("execute_sql", Result()) == "3 rows"
 
 
 def test_brief_tool_summary_render_chart():
@@ -42,11 +42,11 @@ def test_brief_tool_summary_render_chart():
 
 def test_conversation_trace_step_from_progress():
     step = conversation_trace_step(
-        progress_event(stage="execute_readonly_sql", title="execute_readonly_sql done", status="completed", kind="tool")
+        progress_event(stage="execute_sql", title="execute_sql done", status="completed", kind="tool")
     )
     assert step is not None
     assert step[1] == "tool"
-    assert "execute_readonly_sql" in step[0]
+    assert "execute_sql" in step[0]
 
 
 def test_progress_label_includes_detail():

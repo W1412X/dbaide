@@ -367,7 +367,7 @@ class AgentMemory:
             self._learn_profile_table(args, data)
         elif action == "validate_joins":
             self._learn_validated_joins(data)
-        elif action in {"execute_sql", "execute_readonly_sql"}:
+        elif action in {"execute_sql"}:
             if data.get("pending") or data.get("blocked"):
                 return
             sql = str(data.get("sql") or args.get("sql") or "").strip()

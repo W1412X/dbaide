@@ -15,7 +15,6 @@ TOOL_TRACE_STAGES = frozenset({
     "generate_sql",
     "validate_sql",
     "execute_sql",
-    "execute_readonly_sql",
     "validate_joins",
     "list_joins",
     "add_join",
@@ -47,7 +46,6 @@ PHASE_LABELS: dict[str, str] = {
     "validate_sql": "Validating SQL",
     "explain_sql": "Checking query cost",
     "execute_sql": "Running query",
-    "execute_readonly_sql": "Running query",
     "profile_table": "Profiling data",
     "column_stats": "Profiling data",
     "ask_user": "Waiting for you",
@@ -77,7 +75,7 @@ AGENT_LABELS: dict[str, str] = {
 STEP_TYPES = ("phase", "tool", "sql", "llm", "decision", "io", "substep", "info")
 
 # Stages that *are* a SQL execution regardless of how they were emitted.
-SQL_STEP_STAGES = frozenset({"execute_sql", "execute_readonly_sql", "explain_sql"})
+SQL_STEP_STAGES = frozenset({"execute_sql", "explain_sql"})
 
 # Short, human label per type — shown as a chip on the step so types are legible.
 STEP_TYPE_LABELS: dict[str, str] = {
@@ -274,7 +272,7 @@ def brief_tool_summary(tool: str, result: Any) -> str:
             issue.get("message", str(issue)) if isinstance(issue, dict) else str(issue)
             for issue in (data.get("issues") or [])[:3]
         ) or "invalid"
-    if tool in {"execute_sql", "execute_readonly_sql"}:
+    if tool in {"execute_sql"}:
         return f"{data.get('row_count', '?')} rows"
     if tool == "ask_user":
         return str(data.get("question") or "waiting for user")[:160]
@@ -346,7 +344,7 @@ def conversation_trace_step(event: dict[str, Any]) -> tuple[str, str, str] | Non
         return title or "SQL generated", "decision", output or detail
     if stage == "sql_validation":
         return title or "Validating SQL", "result", output or detail
-    if stage in {"execution_completed", "execute_sql", "execute_readonly_sql"}:
+    if stage in {"execution_completed", "execute_sql"}:
         return title or summary or stage, "result", output or summary or detail
     if stage in {"workflow_completed", "result_interpreted", "waiting_for_user"}:
         return title or summary or stage, "info", detail or summary

@@ -130,11 +130,10 @@ def test_consume_step_charges_budget():
     assert rt.steps_remaining == before - 1
 
 
-# 10) execute_readonly_sql is treated as an execute tool by the loop.
-def test_execute_alias_recognized():
+# 10) execute_sql is in the execute tools set
+def test_execute_sql_in_execute_tools_set():
     from dbaide.agent.loop import _EXECUTE_TOOLS
     assert "execute_sql" in _EXECUTE_TOOLS
-    assert "execute_readonly_sql" in _EXECUTE_TOOLS
 
 
 # 11) sqlite row estimate via dbstat uses valid columns (no error) when ANALYZE absent.

@@ -17,7 +17,7 @@ LOOP_DECISION_TOOL_NAMES = frozenset({
     "list_databases", "list_tables", "describe_table", "inspect_metadata", "retrieve_join_context",
     "list_joins", "validate_joins",
     "generate_sql", "validate_sql", "execute_sql",
-    "execute_readonly_sql", "explain_sql", "profile_table", "column_stats",
+    "explain_sql", "profile_table", "column_stats",
     "ask_user", "annotate_object", "retrieve_memory_item",
     "retrieve_turn", "list_earlier_turns",
     "render_chart",

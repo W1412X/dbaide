@@ -35,19 +35,20 @@ def _orchestrator(tmp_path):
     return AskOrchestrator(build_adapter(cfg), session, AgentMockLLM())
 
 
-# ── 1. explain_sql does not drop its diagnosis ──────────────────────────────
+# ── 1. explain_sql returns data without side-effecting run_state.answer ─────
 
-def test_explain_sql_sets_loop_answer(tmp_path):
+def test_explain_sql_returns_data_without_side_effect(tmp_path):
     from dbaide.agent.toolkit import build_tool_registry
 
     orch = _orchestrator(tmp_path)
     orch.run_state.answer = ""
     registry = build_tool_registry(orch)
-    handler = registry._handlers["explain_sql"]  # _ctx is unused by _explain_sql
+    handler = registry._handlers["explain_sql"]
     result = handler({"sql": "SELECT amount FROM orders"}, None)
 
     assert result.ok
-    assert "EXPLAIN diagnosis" in orch.run_state.answer
+    assert result.data is not None
+    assert orch.run_state.answer == ""
 
 
 # ── 2. record_columns is fail-closed without a prior list_tables ────────────

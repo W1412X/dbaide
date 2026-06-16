@@ -72,7 +72,7 @@ LIST_DATABASES = ToolSpec(
 LIST_TABLES = ToolSpec(
     name="list_tables",
     description="List all tables in a database",
-    input_schema={"database": "string"},
+    input_schema={"database": {"type": "string"}},
     output_schema={"tables": "list[TableInfo]"},
     permission_level=SAFE_METADATA,
     timeout_seconds=10,
@@ -82,7 +82,10 @@ LIST_TABLES = ToolSpec(
 DESCRIBE_TABLE = ToolSpec(
     name="describe_table",
     description="Get full table metadata: columns, indexes, declared FKs and available asset row/sample metadata",
-    input_schema={"table": "string", "database": "string"},
+    input_schema={
+        "table": {"type": "string", "required": True},
+        "database": {"type": "string"},
+    },
     output_schema={
         "columns": "list[ColumnInfo]",
         "indexes": "list[dict]",
@@ -100,23 +103,21 @@ DESCRIBE_TABLE = ToolSpec(
 INSPECT_METADATA = ToolSpec(
     name="inspect_metadata",
     description=(
-        "Inspect database metadata without running business-data SQL. Use this for "
-        "schema/system catalog questions such as checking exact table/column existence, "
-        "checking column existence across tables, or retrieving indexes/FKs for selected tables. "
-        "This is the controlled alternative to querying information_schema directly. "
-        "A whole-database scan returns up to `limit` tables (default 256) and reports "
-        "`total_tables`; when total_tables exceeds what was returned (`more_tables`), the "
-        "rest were NOT inspected — raise `limit` or pass table_name/tables to reach them."
+        "Inspect database metadata without running business-data SQL. Use for "
+        "schema/system catalog questions: exact table/column existence, "
+        "column existence across tables, indexes/FKs. "
+        "Whole-database scan returns up to `limit` tables (default 256); "
+        "when total_tables exceeds that, pass table_name/tables to reach the rest."
     ),
     input_schema={
-        "database": "string",
-        "tables": "list[string]",
-        "table_name": "string",
-        "column_name": "string",
-        "include_columns": "boolean",
-        "include_indexes": "boolean",
-        "include_foreign_keys": "boolean",
-        "limit": "integer",
+        "database": {"type": "string"},
+        "tables": {"type": "list[string]", "description": "filter to these tables"},
+        "table_name": {"type": "string", "description": "filter to one table by name"},
+        "column_name": {"type": "string", "description": "find this column across tables"},
+        "include_columns": {"type": "boolean"},
+        "include_indexes": {"type": "boolean"},
+        "include_foreign_keys": {"type": "boolean"},
+        "limit": {"type": "integer", "description": "max tables to scan (default 256)"},
     },
     output_schema={
         "database": "string",
@@ -141,12 +142,12 @@ RETRIEVE_JOIN_CONTEXT = ToolSpec(
         "has narrowed candidate tables and needs relation evidence for SQL planning."
     ),
     input_schema={
-        "request": "string",
-        "tables": "list[string]",
-        "database": "string",
-        "infer_semantic": "boolean",
-        "validate_sample": "boolean",
-        "sample_size": "integer",
+        "request": {"type": "string"},
+        "tables": {"type": "list[string]", "description": "the candidate tables to get join evidence for"},
+        "database": {"type": "string"},
+        "infer_semantic": {"type": "boolean", "description": "enable LLM semantic inference (default false)"},
+        "validate_sample": {"type": "boolean", "description": "run sample match-rate check (default false)"},
+        "sample_size": {"type": "integer"},
     },
     output_schema={
         "report_id": "string",
@@ -166,7 +167,7 @@ VALIDATE_JOINS = ToolSpec(
         "Refresh sample evidence and confidence scores for join relations "
         "(type alignment and match rate adjust ranking; does not hard-reject odd business joins)."
     ),
-    input_schema={"sample_size": "integer"},
+    input_schema={"sample_size": {"type": "integer"}},
     output_schema={"relations": "list[dict]", "count": "integer", "validated_count": "integer"},
     permission_level=SAFE_PROFILE,
     timeout_seconds=45,
@@ -180,13 +181,13 @@ LIST_JOINS = ToolSpec(
         "or exact endpoint (table, column, ref_table, ref_column)."
     ),
     input_schema={
-        "database": "string",
-        "tables": "list[string]",
-        "min_confidence": "number",
-        "table": "string",
-        "column": "string",
-        "ref_table": "string",
-        "ref_column": "string",
+        "database": {"type": "string"},
+        "tables": {"type": "list[string]", "description": "filter by table names"},
+        "min_confidence": {"type": "number"},
+        "table": {"type": "string", "description": "exact endpoint filter"},
+        "column": {"type": "string"},
+        "ref_table": {"type": "string"},
+        "ref_column": {"type": "string"},
     },
     output_schema={"joins": "list[dict]", "count": "integer"},
     permission_level=SAFE_METADATA,
@@ -201,15 +202,15 @@ ADD_JOIN = ToolSpec(
         "source=agent for agent-pinned candidates."
     ),
     input_schema={
-        "table": "string",
-        "column": "string",
-        "ref_table": "string",
-        "ref_column": "string",
-        "database": "string",
-        "source": "string",
-        "join_type": "string",
-        "reason": "string",
-        "confidence": "number",
+        "table": {"type": "string", "required": True},
+        "column": {"type": "string", "required": True},
+        "ref_table": {"type": "string", "required": True},
+        "ref_column": {"type": "string", "required": True},
+        "database": {"type": "string"},
+        "source": {"type": "string", "description": "user|agent (default user)"},
+        "join_type": {"type": "string", "description": "LEFT|INNER|etc."},
+        "reason": {"type": "string"},
+        "confidence": {"type": "number"},
     },
     output_schema={"join": "dict", "relation": "dict"},
     permission_level=CONFIG_WRITE,
@@ -221,15 +222,15 @@ UPDATE_JOIN = ToolSpec(
     name="update_join",
     description="Update a saved join by id (endpoints, join_type, reason; user joins keep confidence 0.99).",
     input_schema={
-        "id": "string",
-        "database": "string",
-        "table": "string",
-        "column": "string",
-        "ref_table": "string",
-        "ref_column": "string",
-        "join_type": "string",
-        "reason": "string",
-        "confidence": "number",
+        "id": {"type": "string", "required": True, "description": "join id from list_joins"},
+        "database": {"type": "string"},
+        "table": {"type": "string"},
+        "column": {"type": "string"},
+        "ref_table": {"type": "string"},
+        "ref_column": {"type": "string"},
+        "join_type": {"type": "string", "description": "LEFT|INNER|etc."},
+        "reason": {"type": "string"},
+        "confidence": {"type": "number"},
     },
     output_schema={"join": "dict", "relation": "dict"},
     permission_level=CONFIG_WRITE,
@@ -239,14 +240,14 @@ UPDATE_JOIN = ToolSpec(
 
 DELETE_JOIN = ToolSpec(
     name="delete_join",
-    description="Delete a saved join by id or by full endpoint.",
+    description="Delete a saved join by id or by full endpoint (table+column+ref_table+ref_column).",
     input_schema={
-        "id": "string",
-        "database": "string",
-        "table": "string",
-        "column": "string",
-        "ref_table": "string",
-        "ref_column": "string",
+        "id": {"type": "string", "description": "join id; OR pass full endpoint below"},
+        "database": {"type": "string"},
+        "table": {"type": "string"},
+        "column": {"type": "string"},
+        "ref_table": {"type": "string"},
+        "ref_column": {"type": "string"},
     },
     output_schema={"deleted": "boolean"},
     permission_level=CONFIG_WRITE,
@@ -265,11 +266,11 @@ ANNOTATE_OBJECT = ToolSpec(
         "shown to the agent at high priority on future questions."
     ),
     input_schema={
-        "scope": "string",
-        "note": "string",
-        "database": "string",
-        "table": "string",
-        "column": "string",
+        "note": {"type": "string", "required": True},
+        "scope": {"type": "string", "description": "column|table|database; inferred from other params if omitted"},
+        "database": {"type": "string"},
+        "table": {"type": "string"},
+        "column": {"type": "string"},
     },
     output_schema={"annotation": "dict"},
     permission_level=CONFIG_WRITE,
@@ -280,8 +281,17 @@ ANNOTATE_OBJECT = ToolSpec(
 VALIDATE_SQL = ToolSpec(
     name="validate_sql",
     description="Validate SQL for safety and correctness",
-    input_schema={"sql": "string"},
-    output_schema={"ok": "boolean", "issues": "list[string]", "normalized_sql": "string"},
+    input_schema={
+        "sql": {"type": "string", "description": "defaults to current draft from generate_sql"},
+    },
+    output_schema={
+        "ok": "boolean",
+        "normalized_sql": "string",
+        "issues": "list[dict]",
+        "risk_level": "string",
+        "warnings": "list[string]",
+        "requires_confirmation": "boolean",
+    },
     permission_level=SQL_VALIDATE,
     timeout_seconds=5,
     safe_for_auto_call=True,
@@ -290,52 +300,48 @@ VALIDATE_SQL = ToolSpec(
 EXPLAIN_SQL = ToolSpec(
     name="explain_sql",
     description="Run EXPLAIN on a SQL query",
-    input_schema={"sql": "string", "database": "string"},
-    output_schema={"plan": "list[dict]"},
+    input_schema={
+        "sql": {"type": "string", "description": "defaults to current draft"},
+        "database": {"type": "string"},
+    },
+    output_schema={"ok": "boolean", "explain": "list[dict]", "issues": "list[string]"},
     permission_level=SQL_VALIDATE,
     timeout_seconds=15,
     safe_for_auto_call=True,
 )
 
-EXECUTE_READONLY_SQL = ToolSpec(
-    name="execute_readonly_sql",
-    description=(
-        "Execute a validated read-only SQL query and record it in this run's SQL history. "
-        "The agent loop continues after success. Pass purpose (≤20 chars) describing why "
-        "you run this query. The result returns row_count (rows fetched) and a preview of "
-        "the first 20 rows; `truncated`=true means the row cap was hit and MORE rows exist."
-    ),
-    input_schema={
-        "sql": "string",
-        "database": "string",
-        "purpose": "string",
-        "save_as": "string",
-        "limit": "integer",
-        "timeout_seconds": "integer",
-    },
-    output_schema={"artifact_id": "string", "rows": "list[dict]", "columns": "list[string]", "row_count": "integer"},
-    permission_level=SQL_EXECUTE,
-    timeout_seconds=30,
-    max_rows=10000,
-    safe_for_auto_call=False,
-)
-
 EXECUTE_SQL = ToolSpec(
     name="execute_sql",
     description=(
-        "Execute a validated read-only SQL query and record it in this run's SQL history. "
-        "Also updates the latest query_result for this run. Pass purpose (≤20 chars). "
-        "The agent loop may finish after success, but you must still call action=finish."
+        "Execute a validated SQL query and record it in this run's SQL history. "
+        "Pass purpose (≤20 chars, user language). "
+        "Set exploratory=true for intermediate evidence-gathering queries "
+        "(loop continues, does NOT update the run's final query_result); "
+        "omit or false when the result IS the answer (updates query_result). "
+        "Returns first 20 rows; truncated=true means more rows exist."
     ),
     input_schema={
+        "sql": {"type": "string", "description": "defaults to current draft from generate_sql"},
+        "database": {"type": "string", "description": "defaults to working database"},
+        "purpose": {"type": "string", "description": "short label ≤20 chars, user language"},
+        "save_as": {"type": "string", "description": "artifact name for later reference"},
+        "limit": {"type": "integer", "description": "row cap; defaults to session limit"},
+        "timeout_seconds": {"type": "integer"},
+        "exploratory": {"type": "boolean", "default": False,
+                        "description": "true for intermediate checks that don't set the final result"},
+    },
+    output_schema={
+        "artifact_id": "string",
+        "columns": "list[string]",
+        "rows": "list[dict]",
+        "row_count": "integer",
+        "truncated": "boolean",
+        "elapsed_ms": "number",
+        "purpose": "string",
+        "result_summary": "string",
         "sql": "string",
         "database": "string",
-        "purpose": "string",
-        "save_as": "string",
-        "limit": "integer",
-        "timeout_seconds": "integer",
     },
-    output_schema={"artifact_id": "string", "rows": "list[dict]", "columns": "list[string]", "row_count": "integer"},
     permission_level=SQL_EXECUTE,
     timeout_seconds=30,
     max_rows=10000,
@@ -354,11 +360,11 @@ PROFILE_TABLE = ToolSpec(
         "no column is silently skipped."
     ),
     input_schema={
-        "table": "string",
-        "columns": "list[string]",
-        "database": "string",
-        "column_offset": "integer",
-        "column_limit": "integer",
+        "table": {"type": "string", "required": True},
+        "columns": {"type": "list[string]", "description": "profile exactly these; omit to profile a window"},
+        "database": {"type": "string"},
+        "column_offset": {"type": "integer", "description": "start index for windowed profiling"},
+        "column_limit": {"type": "integer"},
     },
     output_schema={
         "profiles": "list[ColumnProfile]",
@@ -383,8 +389,13 @@ COLUMN_STATS = ToolSpec(
         "values (default 10); distinct_count is the true total — raise `top_k` (or GROUP BY "
         "in SQL) when the value you need isn't among the most frequent."
     ),
-    input_schema={"table": "string", "columns": "list[string]", "metrics": "list[string]",
-                  "database": "string", "top_k": "integer"},
+    input_schema={
+        "table": {"type": "string", "required": True},
+        "columns": {"type": "list[string]", "description": "omit to cover every column"},
+        "metrics": {"type": "list[string]", "description": "min,max,null_rate,distinct_count,top_values,etc.; omit for defaults"},
+        "database": {"type": "string"},
+        "top_k": {"type": "integer", "description": "how many top values to return (default 10)"},
+    },
     output_schema={"columns": "list[dict]"},
     permission_level=SAFE_PROFILE,
     timeout_seconds=60,
@@ -401,7 +412,10 @@ ASK_USER = ToolSpec(
         "Gather evidence with schema/profile/SQL tools first, then ask only the "
         "remaining business choice with concrete options."
     ),
-    input_schema={"question": "string", "options": "list[string]"},
+    input_schema={
+        "question": {"type": "string", "required": True},
+        "options": {"type": "list[string]", "description": "concrete choices for the user"},
+    },
     output_schema={"pending": "boolean", "question": "string", "options": "list[string]"},
     permission_level=SAFE_METADATA,
     timeout_seconds=300,
@@ -421,9 +435,9 @@ RENDER_CHART = ToolSpec(
         "`{{chart:N}}` (copy embed_markdown from tool output) at the appropriate position in your markdown answer."
     ),
     input_schema={
-        "artifact_id": "string",
-        "data": "list[dict]",
-        "intent": "string",
+        "artifact_id": {"type": "string", "description": "from execute_sql result; or omit to use latest result"},
+        "data": {"type": "list[dict]", "description": "inline rows (alternative to artifact_id)"},
+        "intent": {"type": "string", "description": "describe the single view this chart should show"},
     },
     output_schema={
         "chart_id": "string",
@@ -446,7 +460,7 @@ RETRIEVE_MEMORY_ITEM = ToolSpec(
         "and the compressed summary is not enough. This avoids repeating database tools "
         "only to recover details already observed."
     ),
-    input_schema={"ref": "string"},
+    input_schema={"ref": {"type": "string", "required": True, "description": "mem:N, wN, schema:N, sql:N"}},
     output_schema={
         "id": "string",
         "action": "string",
@@ -470,7 +484,10 @@ RETRIEVE_TURN = ToolSpec(
         "When include contains sql, returns selected_sql (last query) and executed_sqls "
         "(all auto-executed queries with purpose tags)."
     ),
-    input_schema={"turn_id": "string", "include": "list[string]"},
+    input_schema={
+        "turn_id": {"type": "string", "required": True, "description": "t1, t2, …"},
+        "include": {"type": "list[string]", "description": "clarifications/sql/answer/tables; omit for all"},
+    },
     output_schema={
         "turn_id": "string",
         "question": "string",
@@ -495,7 +512,10 @@ LIST_EARLIER_TURNS = ToolSpec(
         "you can spot a relevant earlier turn and then retrieve_turn(turn_id) for its "
         "details. `offset` counts from the oldest (offset=0 → start); `limit` defaults to 5."
     ),
-    input_schema={"offset": "integer", "limit": "integer"},
+    input_schema={
+        "offset": {"type": "integer", "description": "counts from oldest (0 = start)"},
+        "limit": {"type": "integer", "description": "default 5"},
+    },
     output_schema={
         "turns": "list[dict]",
         "total": "integer",
@@ -509,7 +529,7 @@ LIST_EARLIER_TURNS = ToolSpec(
 DISCOVER_SCHEMA = ToolSpec(
     name="discover_schema",
     description="Progressive LLM schema discovery (instance → database → table → column)",
-    input_schema={"question": "string"},
+    input_schema={"question": {"type": "string"}},
     output_schema={"hits": "list[dict]", "trace": "list[string]"},
     permission_level=SAFE_METADATA,
     timeout_seconds=60,
@@ -529,12 +549,12 @@ RETRIEVE_SCHEMA_CONTEXT = ToolSpec(
         "for a very broad question that may span more tables."
     ),
     input_schema={
-        "request": "string",
-        "database": "string",
-        "focus_terms": "list[string]",
-        "need": "string",
-        "limit": "integer",
-        "scope": "dict",
+        "request": {"type": "string", "description": "what schema evidence is needed"},
+        "database": {"type": "string"},
+        "focus_terms": {"type": "list[string]"},
+        "need": {"type": "string"},
+        "limit": {"type": "integer", "description": "max candidate tables (default 64)"},
+        "scope": {"type": "dict"},
     },
     output_schema={
         "report_id": "string",
@@ -549,7 +569,12 @@ RETRIEVE_SCHEMA_CONTEXT = ToolSpec(
 GENERATE_SQL = ToolSpec(
     name="generate_sql",
     description="Generate read-only SQL using disclosed table column metadata (all described/retrieved tables, or explicit tables arg)",
-    input_schema={"question": "string", "table": "string", "tables": "list[string]", "database": "string"},
+    input_schema={
+        "question": {"type": "string", "description": "defaults to the user's question"},
+        "table": {"type": "string", "description": "single target table"},
+        "tables": {"type": "list[string]", "description": "multiple target tables"},
+        "database": {"type": "string"},
+    },
     output_schema={"sql": "string", "rationale": "string", "confidence": "float", "tables": "list[string]"},
     permission_level=SAFE_METADATA,
     timeout_seconds=30,

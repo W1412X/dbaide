@@ -83,6 +83,7 @@ class TraceModel:
         self._pending_thought = ""
         self._first_ts = 0.0
         self._last_ts = 0.0
+        self.prompt_tokens = 0
 
     # The top-level tool steps, in order.
     @property
@@ -132,6 +133,9 @@ class TraceModel:
         if stage == "decision" or (kind == "decision" and not phase_for(stage) and int(event.get("step") or 0) == 0):
             if title:
                 self._pending_thought = title
+            pt = event.get("prompt_tokens")
+            if isinstance(pt, (int, float)) and pt > 0:
+                self.prompt_tokens += int(pt)
             return
 
         if self.overall == "idle":
@@ -180,6 +184,9 @@ class TraceModel:
             if new_type == "sql" or node.node_type in ("info", "tool"):
                 node.node_type = new_type
             node.raw = dict(event)
+        pt = event.get("prompt_tokens")
+        if isinstance(pt, (int, float)) and pt > 0:
+            self.prompt_tokens += int(pt)
         self._expand_llm_calls(node)
 
     def _expand_llm_calls(self, node: TraceNode) -> None:
@@ -542,10 +549,17 @@ def localized_summary_line(model: "TraceModel") -> str:
         return f"{phase} · {elapsed:.1f}s"
     elapsed = model.elapsed_ms() / 1000.0
     steps = _t("trace.steps", n=len(model.steps))
+    tokens = _format_tokens(model.prompt_tokens)
     if model.overall == "done":
-        return f"{_t('trace.done')} · {steps} · {elapsed:.1f}s"
+        parts = [_t('trace.done'), steps, f"{elapsed:.1f}s"]
+        if tokens:
+            parts.append(tokens)
+        return " · ".join(parts)
     if model.overall == "failed":
-        return f"{_t('trace.failed')} · {steps} · {elapsed:.1f}s"
+        parts = [_t('trace.failed'), steps, f"{elapsed:.1f}s"]
+        if tokens:
+            parts.append(tokens)
+        return " · ".join(parts)
     phase = localized_phase(model._current_tool().stage, model.current_phase) if model._current_tool() else _t("trace.running")
     current = _t("trace.step", n=model.current_step) if model.current_step else _t("trace.running")
     agents = model.active_agents
@@ -553,6 +567,14 @@ def localized_summary_line(model: "TraceModel") -> str:
     if agents:
         parts.append(", ".join(agents))
     return " · ".join(p for p in parts if p) + f" · {elapsed:.1f}s"
+
+
+def _format_tokens(tokens: int) -> str:
+    if tokens <= 0:
+        return ""
+    if tokens >= 1000:
+        return f"~{tokens / 1000:.1f}k tok"
+    return f"~{tokens} tok"
 
 
 def render_events_text(events: list[dict]) -> str:
