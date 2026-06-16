@@ -26,6 +26,22 @@ def qapp():
     return QApplication.instance() or QApplication([])
 
 
+def test_integrations_page_has_help_button(qapp):
+    from dbaide.desktop.dialogs.settings import SettingsDialog
+
+    dlg = SettingsDialog(connections=[], models=[], initial_page="integrations")
+    from PyQt6.QtWidgets import QToolButton
+
+    buttons = dlg.findChildren(QToolButton)
+    help = [b for b in buttons if b.objectName() == "integrationsHelpBtn"]
+    assert len(help) == 1
+    from dbaide.i18n import t
+
+    assert help[0].toolTip() == t("settings.integrations.help_tooltip")
+    dlg.deleteLater()
+    qapp.processEvents()
+
+
 def test_load_tool_icon_returns_non_empty_pixmap(qapp):
     from dbaide.desktop.dialogs.settings import SettingsDialog
 

@@ -20,7 +20,7 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 
-from dbaide.desktop.dialogs.message_dialog import confirm as dialog_confirm, warn as dialog_warn
+from dbaide.desktop.dialogs.message_dialog import alert as dialog_alert, confirm as dialog_confirm, warn as dialog_warn
 from dbaide.app_info import (
     APP_NAME,
     DEVELOPER_NAME,
@@ -30,6 +30,7 @@ from dbaide.app_info import (
     project_links,
 )
 from dbaide.desktop.components.base import compact_button, ghost_action_button
+from dbaide.desktop.components.icon_button import IconToolButton
 from dbaide.desktop.components.icons import more_icon, svg_icon
 from dbaide.desktop.components.inputs import Combo, FORM_INNER_LABEL_RULES, configure_form, form_label
 from dbaide.desktop.components.menu import MenuButton
@@ -531,6 +532,15 @@ class SettingsDialog(ChromeDialog):
         install_all_btn.clicked.connect(self._on_install_all_integrations)
         bar_layout.addWidget(install_all_btn)
         bar_layout.addStretch(1)
+        help_btn = IconToolButton(
+            svg_icon("circle-help", color=Theme.MUTED, size=16),
+            t("settings.integrations.help_tooltip"),
+        )
+        help_btn.setObjectName("integrationsHelpBtn")
+        help_btn.setIconSize(QSize(16, 16))
+        help_btn.setFixedSize(22, 22)
+        help_btn.clicked.connect(self._show_integrations_help)
+        bar_layout.addWidget(help_btn)
         layout.addWidget(bar)
 
         card = _SectionCard()
@@ -589,6 +599,16 @@ class SettingsDialog(ChromeDialog):
         layout.addWidget(card)
         layout.addStretch(1)
         return page
+
+    def _show_integrations_help(self) -> None:
+        from dbaide.i18n import t
+
+        dialog_alert(
+            self,
+            t("settings.integrations.help.title"),
+            t("settings.integrations.help.body"),
+            max_body_height=520,
+        )
 
     def _refresh_integration_row(self, tool: str, installed: bool) -> None:
         from dbaide.i18n import t

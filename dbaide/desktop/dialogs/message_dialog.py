@@ -21,6 +21,7 @@ from dbaide.desktop.window_chrome import ChromeDialog
 _CONTENT_WIDTH = 440
 _MIN_BODY_HEIGHT = 44
 _MAX_BODY_HEIGHT = 360
+_MAX_HELP_BODY_HEIGHT = 520
 
 
 class MessageDialog(ChromeDialog):
@@ -35,6 +36,7 @@ class MessageDialog(ChromeDialog):
         confirm: bool = False,
         ok_label: str = "",
         cancel_label: str = "",
+        max_body_height: int = _MAX_BODY_HEIGHT,
     ) -> None:
         super().__init__(parent)
         from dbaide.i18n import t
@@ -82,6 +84,7 @@ class MessageDialog(ChromeDialog):
             """
         )
         self._body = body
+        self._max_body_height = max_body_height
         self._sync_body_height()
         root.addWidget(body)
 
@@ -106,14 +109,14 @@ class MessageDialog(ChromeDialog):
     def _sync_body_height(self) -> None:
         self._body.document().setTextWidth(_CONTENT_WIDTH)
         doc_height = int(self._body.document().documentLayout().documentSize().height())
-        body_height = max(_MIN_BODY_HEIGHT, min(doc_height + 12, _MAX_BODY_HEIGHT))
-        self._body.setMinimumHeight(min(body_height, _MAX_BODY_HEIGHT))
-        self._body.setMaximumHeight(_MAX_BODY_HEIGHT)
+        body_height = max(_MIN_BODY_HEIGHT, min(doc_height + 12, self._max_body_height))
+        self._body.setMinimumHeight(min(body_height, self._max_body_height))
+        self._body.setMaximumHeight(self._max_body_height)
         self._body.resize(_CONTENT_WIDTH, body_height)
 
 
-def alert(parent: QWidget | None, title: str, message: str) -> None:
-    dialog = MessageDialog(parent, title, message)
+def alert(parent: QWidget | None, title: str, message: str, *, max_body_height: int = _MAX_BODY_HEIGHT) -> None:
+    dialog = MessageDialog(parent, title, message, max_body_height=max_body_height)
     dialog.exec()
 
 

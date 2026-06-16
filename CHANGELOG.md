@@ -6,6 +6,14 @@ All notable changes to DBAide are documented here. The format is loosely based o
 
 ## [Unreleased]
 
+## [0.3.0] — 2026-06-16
+
+### Added
+
+- **Settings → Integrations** — help button (circle ?) beside「全部安装」opens an MCP
+  integration guide: what it does, prerequisites (connections, models, assets),
+  example prompts for AI tools, and `conn` / `database` tips (EN/ZH).
+
 ## [0.2.18] — 2026-06-16
 
 ### Fixed
@@ -623,7 +631,8 @@ and a PyQt6 desktop app, sharing one Python core.
   drag-to-Applications)**, **Windows (`.msi` wizard)**, and **Linux (`.tar.gz`)** —
   pushing a `v*` tag cuts a GitHub Release automatically.
 
-[Unreleased]: https://github.com/W1412X/dbaide/compare/v0.2.18...HEAD
+[Unreleased]: https://github.com/W1412X/dbaide/compare/v0.3.0...HEAD
+[0.3.0]: https://github.com/W1412X/dbaide/compare/v0.2.18...v0.3.0
 [0.2.18]: https://github.com/W1412X/dbaide/compare/v0.2.17...v0.2.18
 [0.2.5]: https://github.com/W1412X/dbaide/compare/v0.2.4...v0.2.5
 [0.2.4]: https://github.com/W1412X/dbaide/compare/v0.2.3...v0.2.4
