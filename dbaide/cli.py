@@ -203,6 +203,105 @@ def build_parser() -> argparse.ArgumentParser:
     queries.add_argument("conn", nargs="?", help="Connection name. Default: the default connection.")
     queries.add_argument("--tail", type=lambda v: _bounded_int(v, min_val=1, max_val=10000, name="tail"), default=50, help="Number of recent queries to show.")
     queries.add_argument("--json", action="store_true")
+
+    # ── model management ────────────────────────────────────────────────────
+    model = sub.add_parser("model", help="Manage LLM model configurations")
+    msub = model.add_subparsers(dest="model_command", required=True)
+    msub.add_parser("list", help="List configured models")
+    m_add = msub.add_parser("add", help="Add or update a model config")
+    m_add.add_argument("name")
+    m_add.add_argument("--provider", default="openai_compatible", choices=["openai_compatible", "none"])
+    m_add.add_argument("--base-url", default="", help="API base URL")
+    m_add.add_argument("--api-key-env", default="", help="Env var containing the API key")
+    m_add.add_argument("--api-key", default="", help="API key (prefer --api-key-env)")
+    m_add.add_argument("--model", default="", help="Model name/ID")
+    m_add.add_argument("--timeout", type=int, default=60, help="Request timeout in seconds (1-600)")
+    m_add.add_argument("--default", action="store_true", help="Set as the default model")
+    m_del = msub.add_parser("delete", help="Delete a model config")
+    m_del.add_argument("name")
+    m_setdef = msub.add_parser("set-default", help="Set the default model")
+    m_setdef.add_argument("name")
+    m_test = msub.add_parser("test", help="Test an LLM model")
+    m_test.add_argument("name", nargs="?", help="Model name (default: the default model)")
+
+    # ── config (resource defaults) ──────────────────────────────────────────
+    config = sub.add_parser("config", help="View or modify resource defaults")
+    config_sub = config.add_subparsers(dest="config_command", required=True)
+    config_sub.add_parser("show", help="Show current resource defaults and agent parameters")
+    cfg_set = config_sub.add_parser("set", help="Set a resource default")
+    cfg_set.add_argument("key", help="Parameter name (e.g. max_workers, query_timeout, max_concurrent_runs)")
+    cfg_set.add_argument("value", help="Parameter value")
+    config_sub.add_parser("reset", help="Reset all resource defaults to built-in values")
+
+    # ── session management ──────────────────────────────────────────────────
+    sess = sub.add_parser("session", help="Manage chat sessions")
+    sess_sub = sess.add_subparsers(dest="session_command", required=True)
+    sess_list = sess_sub.add_parser("list", help="List saved sessions")
+    sess_list.add_argument("--conn", default="")
+    sess_list.add_argument("--limit", type=int, default=20)
+    sess_show = sess_sub.add_parser("show", help="Show a session's conversation")
+    sess_show.add_argument("session_id")
+    sess_show.add_argument("--conn", default="")
+    sess_show.add_argument("--json", action="store_true")
+    sess_rename = sess_sub.add_parser("rename", help="Rename a session")
+    sess_rename.add_argument("session_id")
+    sess_rename.add_argument("title")
+    sess_rename.add_argument("--conn", default="")
+    sess_del = sess_sub.add_parser("delete", help="Delete a session")
+    sess_del.add_argument("session_id")
+    sess_del.add_argument("--conn", default="")
+
+    # ── join catalog ────────────────────────────────────────────────────────
+    join = sub.add_parser("join", help="Manage join hints")
+    jsub = join.add_subparsers(dest="join_command", required=True)
+    j_list = jsub.add_parser("list", help="List join relationships")
+    j_list.add_argument("--conn", default="")
+    j_list.add_argument("--database", default="")
+    j_list.add_argument("--json", action="store_true")
+    j_add = jsub.add_parser("add", help="Add a join hint")
+    j_add.add_argument("--conn", default="")
+    j_add.add_argument("--database", default="")
+    j_add.add_argument("--table", required=True, help="Left table")
+    j_add.add_argument("--column", required=True, help="Left column")
+    j_add.add_argument("--ref-table", required=True, help="Right table")
+    j_add.add_argument("--ref-column", required=True, help="Right column")
+    j_del = jsub.add_parser("delete", help="Delete a join hint")
+    j_del.add_argument("--conn", default="")
+    j_del.add_argument("--id", default="", help="Join id")
+    j_del.add_argument("--table", default="")
+    j_del.add_argument("--column", default="")
+    j_del.add_argument("--ref-table", default="")
+    j_del.add_argument("--ref-column", default="")
+
+    # ── history ─────────────────────────────────────────────────────────────
+    hist = sub.add_parser("history", help="Manage workflow run history")
+    hsub = hist.add_subparsers(dest="history_command", required=True)
+    h_list = hsub.add_parser("list", help="List recent workflow runs")
+    h_list.add_argument("--conn", default="")
+    h_list.add_argument("--limit", type=int, default=20)
+    h_list.add_argument("--json", action="store_true")
+    h_del = hsub.add_parser("delete", help="Delete a history entry")
+    h_del.add_argument("workflow_id")
+    h_del.add_argument("--conn", default="")
+
+    # ── export / import ─────────────────────────────────────────────────────
+    exp = sub.add_parser("export", help="Export connections, models and config")
+    exp.add_argument("--conn", default="", help="Export a single connection (config + joins + notes)")
+    exp.add_argument("--all", action="store_true", dest="export_all", help="Export everything")
+    exp.add_argument("--out", default="", help="Output file path (default: stdout)")
+
+    imp = sub.add_parser("import", help="Import from a DBAide export file")
+    imp.add_argument("file", help="Path to the export JSON file")
+
+    # ── skill & setup (AI agent integration) ────────────────────────────────
+    skill = sub.add_parser("skill", help="Print the SKILL document for AI agent integration")
+    skill.add_argument("--conn", default="", help="Connection name to hint in examples")
+
+    setup = sub.add_parser("setup", help="Auto-configure integration with a coding tool")
+    setup.add_argument("tool", help="Tool name: claude, cursor, codex, trae, windsurf, opencode, qcoder, mimocode, roo, cline, aider")
+    setup.add_argument("--conn", default="", help="Connection name to hint in examples")
+    setup.add_argument("--project", default=".", help="Project root directory (default: current directory)")
+
     return parser
 
 
@@ -361,7 +460,441 @@ def dispatch(args: argparse.Namespace, cfg: ConfigManager) -> int:
         return 0
     if args.command == "queries":
         return dispatch_queries(args, cfg)
+    if args.command == "model":
+        return dispatch_model(args, cfg)
+    if args.command == "config":
+        return dispatch_config(args, cfg)
+    if args.command == "session":
+        return dispatch_session(args, cfg)
+    if args.command == "join":
+        return dispatch_join(args, cfg)
+    if args.command == "history":
+        return dispatch_history(args, cfg)
+    if args.command == "export":
+        return dispatch_export(args, cfg)
+    if args.command == "import":
+        return dispatch_import(args, cfg)
+    if args.command == "skill":
+        return dispatch_skill(args, cfg)
+    if args.command == "setup":
+        return dispatch_setup(args, cfg)
     raise AssertionError(args.command)
+
+
+def dispatch_model(args: argparse.Namespace, cfg: ConfigManager) -> int:
+    from dbaide.models import ModelConfig
+
+    if args.model_command == "list":
+        models = cfg.models()
+        default = str(cfg._data.get("default_model") or "")
+        if not models:
+            print("No models configured. Run `dbaide model add <name> --provider openai_compatible --base-url <url> --model <model>` to add one.")
+            return 0
+        print(f"{'Name':<20} {'Provider':<18} {'Model':<30} {'Default'}")
+        print("-" * 75)
+        for name, m in models.items():
+            is_default = " *" if name == default else ""
+            print(f"{name:<20} {m.provider:<18} {m.model or '(not set)':<30} {is_default}")
+        return 0
+
+    if args.model_command == "add":
+        m = ModelConfig(
+            name=args.name,
+            provider=args.provider,
+            base_url=getattr(args, "base_url", ""),
+            api_key_env=getattr(args, "api_key_env", ""),
+            api_key=getattr(args, "api_key", ""),
+            model=args.model,
+            timeout_seconds=args.timeout,
+        )
+        cfg.upsert_model(m, make_default=args.default)
+        print(f"saved model: {args.name} (provider={m.provider}, model={m.model})")
+        return 0
+
+    if args.model_command == "delete":
+        cfg.delete_model(args.name)
+        print(f"deleted model: {args.name}")
+        return 0
+
+    if args.model_command == "set-default":
+        cfg.set_default_model(args.name)
+        print(f"default model: {args.name}")
+        return 0
+
+    if args.model_command == "test":
+        m = cfg.model(args.name if args.name else None)
+        if m.provider == "none":
+            print(f"model '{m.name}' has provider=none — nothing to test.", file=sys.stderr)
+            return 1
+        llm = build_llm_client(m)
+        result = llm.complete("Say 'hello' in one word.")
+        print(f"ok: {m.name} (provider={m.provider}, model={m.model})")
+        print(f"response: {str(result).strip()[:200]}")
+        return 0
+
+    raise AssertionError(args.model_command)
+
+
+def dispatch_config(args: argparse.Namespace, cfg: ConfigManager) -> int:
+    if args.config_command == "show":
+        from dbaide.db.policy import LOAD_PROFILES
+        from dataclasses import asdict, fields
+        defaults = cfg.resource_defaults()
+        print("Resource defaults (user overrides):")
+        if not defaults:
+            print("  (none — using built-in defaults)")
+        else:
+            for k, v in sorted(defaults.items()):
+                print(f"  {k} = {v}")
+        print()
+        print("Built-in presets:")
+        for name, profile in LOAD_PROFILES.items():
+            vals = asdict(profile)
+            summary = ", ".join(f"{k}={v}" for k, v in vals.items())
+            print(f"  {name}: {summary}")
+        return 0
+
+    if args.config_command == "set":
+        defaults = cfg.resource_defaults()
+        key = args.key
+        try:
+            value: int | str = int(args.value)
+        except ValueError:
+            value = args.value
+        defaults[key] = value
+        cfg.set_resource_defaults(defaults)
+        print(f"set {key} = {value}")
+        return 0
+
+    if args.config_command == "reset":
+        cfg.set_resource_defaults({})
+        print("resource defaults reset to built-in values")
+        return 0
+
+    raise AssertionError(args.config_command)
+
+
+def dispatch_session(args: argparse.Namespace, cfg: ConfigManager) -> int:
+    from dbaide.history.session_store import ChatSessionStore
+
+    store = ChatSessionStore()
+    conn_name = args.conn or cfg.get_connection(None).name
+
+    if args.session_command == "list":
+        sessions = store.list_sessions(conn_name, limit=args.limit)
+        if not sessions:
+            print(f"No sessions for {conn_name}.")
+            return 0
+        import datetime
+        print(f"{'ID':<14} {'Turns':>5}  {'Updated':<20} Title")
+        print("-" * 75)
+        for s in sessions:
+            ts = datetime.datetime.fromtimestamp(s.get("updated_at") or 0).strftime("%Y-%m-%d %H:%M")
+            print(f"{s['session_id']:<14} {s.get('turn_count', 0):>5}  {ts:<20} {s.get('title', '')}")
+        return 0
+
+    if args.session_command == "show":
+        data = store.load(conn_name, args.session_id)
+        if data is None:
+            print(f"Session not found: {conn_name}/{args.session_id}", file=sys.stderr)
+            return 1
+        if args.json:
+            print(json.dumps(data, ensure_ascii=False, indent=2, default=str))
+            return 0
+        print(f"Session: {data.get('title', '')} ({args.session_id})")
+        print("-" * 60)
+        for i, turn in enumerate(data.get("turns") or [], 1):
+            q = turn.get("question", "")
+            a = turn.get("answer_markdown", "")
+            print(f"\n[{i}] Q: {q}")
+            if a:
+                print(f"    A: {a[:500]}{'...' if len(a) > 500 else ''}")
+        return 0
+
+    if args.session_command == "rename":
+        ok = store.rename(conn_name, args.session_id, args.title)
+        print("renamed." if ok else "session not found.")
+        return 0 if ok else 1
+
+    if args.session_command == "delete":
+        ok = store.delete(conn_name, args.session_id)
+        print("deleted." if ok else "session not found.")
+        return 0 if ok else 1
+
+    raise AssertionError(args.session_command)
+
+
+def dispatch_join(args: argparse.Namespace, cfg: ConfigManager) -> int:
+    from dbaide.joins import JoinCatalogStore
+    from dbaide.connection_identity import connection_fingerprint
+
+    catalog = JoinCatalogStore()
+    conn = cfg.get_connection(args.conn or None)
+    fp = connection_fingerprint(conn)
+
+    if args.join_command == "list":
+        joins = catalog.list_records(conn.name, database=args.database, fingerprint=fp)
+        if args.json:
+            print(json.dumps(joins, ensure_ascii=False, indent=2, default=str))
+            return 0
+        if not joins:
+            print(f"No join hints for {conn.name}.")
+            return 0
+        for j in joins:
+            db = j.get("database", "")
+            src = j.get("source", "")
+            prefix = f"{db}." if db else ""
+            print(f"{prefix}{j.get('table','')}.{j.get('column','')} -> "
+                  f"{prefix}{j.get('ref_table','')}.{j.get('ref_column','')}  "
+                  f"[{src}] (id: {j.get('id','')})")
+        return 0
+
+    if args.join_command == "add":
+        record = catalog.add(
+            conn.name,
+            {
+                "table": args.table, "column": args.column,
+                "ref_table": args.ref_table, "ref_column": args.ref_column,
+            },
+            source="user",
+            database=args.database or conn.database,
+            fingerprint=fp,
+        )
+        print(f"added join: {record.get('table')}.{record.get('column')} -> "
+              f"{record.get('ref_table')}.{record.get('ref_column')} (id: {record.get('id')})")
+        return 0
+
+    if args.join_command == "delete":
+        endpoint = None
+        if args.table and args.column and args.ref_table and args.ref_column:
+            endpoint = {
+                "table": args.table, "column": args.column,
+                "ref_table": args.ref_table, "ref_column": args.ref_column,
+            }
+        ok = catalog.delete(conn.name, join_id=args.id, endpoint=endpoint, fingerprint=fp)
+        print("deleted." if ok else "join not found.")
+        return 0 if ok else 1
+
+    raise AssertionError(args.join_command)
+
+
+def dispatch_history(args: argparse.Namespace, cfg: ConfigManager) -> int:
+    from dbaide.history.store import WorkflowHistoryStore
+
+    store = WorkflowHistoryStore()
+    conn_name = args.conn or cfg.get_connection(None).name
+
+    if args.history_command == "list":
+        entries = store.list_workflows(conn_name, limit=args.limit)
+        if args.json:
+            print(json.dumps(entries, ensure_ascii=False, indent=2, default=str))
+            return 0
+        if not entries:
+            print(f"No history for {conn_name}.")
+            return 0
+        import datetime
+        print(f"{'ID':<14} {'Status':<12} {'Time':<20} Question")
+        print("-" * 80)
+        for e in entries:
+            ts = datetime.datetime.fromtimestamp(e.get("created_at") or 0).strftime("%Y-%m-%d %H:%M")
+            q = str(e.get("question") or "")[:50]
+            print(f"{e.get('workflow_id',''):<14} {e.get('status',''):<12} {ts:<20} {q}")
+        return 0
+
+    if args.history_command == "delete":
+        ok = store.delete(conn_name, args.workflow_id)
+        print("deleted." if ok else "entry not found.")
+        return 0 if ok else 1
+
+    raise AssertionError(args.history_command)
+
+
+def dispatch_export(args: argparse.Namespace, cfg: ConfigManager) -> int:
+    from dbaide.assets import AssetStore
+    from dbaide.joins import JoinCatalogStore
+    from dbaide.annotations import AnnotationStore
+    from datetime import datetime, timezone
+
+    if args.export_all:
+        joins_store = JoinCatalogStore()
+        ann_store = AnnotationStore()
+        connections: list[dict] = []
+        all_joins: dict[str, list] = {}
+        all_anns: dict[str, list] = {}
+        for name, conn in cfg.connections().items():
+            d = {"name": conn.name, "type": conn.type, "database": conn.database,
+                 "host": conn.host, "port": conn.port, "user": conn.user,
+                 "password_env": conn.password_env, "path": conn.path,
+                 "load_profile": conn.load_profile, "session_timezone": conn.session_timezone}
+            connections.append({k: v for k, v in d.items() if v not in (None, "", 0)})
+            j = joins_store._load(name)
+            if j:
+                all_joins[name] = j
+            a = ann_store._load(name)
+            if a:
+                all_anns[name] = a
+        models = []
+        for name, m in cfg.models().items():
+            md = {"name": m.name, "provider": m.provider, "base_url": m.base_url,
+                  "api_key_env": m.api_key_env, "model": m.model, "timeout_seconds": m.timeout_seconds}
+            models.append({k: v for k, v in md.items() if v not in (None, "", 0)})
+        payload = {
+            "dbaide_export": {"version": 1, "type": "full",
+                              "exported_at": datetime.now(timezone.utc).isoformat()},
+            "connections": connections, "models": models,
+            "resource_defaults": cfg.resource_defaults(),
+            "joins": all_joins, "annotations": all_anns,
+        }
+    elif args.conn:
+        conn = cfg.get_connection(args.conn)
+        joins_store = JoinCatalogStore()
+        ann_store = AnnotationStore()
+        d = {"name": conn.name, "type": conn.type, "database": conn.database,
+             "host": conn.host, "port": conn.port, "user": conn.user,
+             "password_env": conn.password_env, "path": conn.path,
+             "load_profile": conn.load_profile, "session_timezone": conn.session_timezone}
+        payload = {
+            "dbaide_export": {"version": 1, "type": "connection",
+                              "exported_at": datetime.now(timezone.utc).isoformat()},
+            "connection": {k: v for k, v in d.items() if v not in (None, "", 0)},
+            "joins": joins_store._load(conn.name),
+            "annotations": ann_store._load(conn.name),
+        }
+    else:
+        print("specify --conn <name> or --all", file=sys.stderr)
+        return 1
+
+    text = json.dumps(payload, ensure_ascii=False, indent=2, default=str)
+    if args.out:
+        Path(args.out).parent.mkdir(parents=True, exist_ok=True)
+        Path(args.out).write_text(text, encoding="utf-8")
+        print(f"exported to {args.out}")
+    else:
+        print(text)
+    return 0
+
+
+def dispatch_import(args: argparse.Namespace, cfg: ConfigManager) -> int:
+    from dbaide.config import _CONNECTION_KEYS, _MODEL_KEYS
+    from dbaide.annotations import AnnotationStore
+    from dbaide.joins import JoinCatalogStore
+
+    path = Path(args.file)
+    if not path.exists():
+        print(f"file not found: {args.file}", file=sys.stderr)
+        return 1
+    data = json.loads(path.read_text(encoding="utf-8"))
+    meta = data.get("dbaide_export") or {}
+    if meta.get("type") not in ("connection", "full"):
+        print("not a valid DBAide export file", file=sys.stderr)
+        return 1
+
+    ann_store = AnnotationStore()
+    joins_store = JoinCatalogStore()
+
+    if meta["type"] == "full":
+        for cd in data.get("connections") or []:
+            name = cd.get("name", "")
+            if not name:
+                continue
+            payload = {k: v for k, v in cd.items() if k in _CONNECTION_KEYS}
+            payload.setdefault("name", name)
+            payload.setdefault("type", "")
+            cfg.upsert_connection(ConnectionConfig(**payload))
+            print(f"  imported connection: {name}")
+        for md in data.get("models") or []:
+            name = md.get("name", "")
+            if not name:
+                continue
+            from dbaide.models import ModelConfig
+            payload = {k: v for k, v in md.items() if k in _MODEL_KEYS}
+            payload.setdefault("name", name)
+            cfg.upsert_model(ModelConfig(**payload))
+            print(f"  imported model: {name}")
+        if data.get("resource_defaults"):
+            cfg.set_resource_defaults(data["resource_defaults"])
+            print("  imported resource defaults")
+        for conn_name, joins in (data.get("joins") or {}).items():
+            if joins:
+                joins_store._save(conn_name, joins)
+                print(f"  imported {len(joins)} joins for {conn_name}")
+        for conn_name, anns in (data.get("annotations") or {}).items():
+            for ann in anns:
+                ann_store.add(conn_name, scope=ann.get("scope", "table"),
+                              database=ann.get("database", ""),
+                              table=ann.get("table", ""),
+                              column=ann.get("column", ""),
+                              note=ann.get("note", ""),
+                              source=ann.get("source", "user"))
+            if anns:
+                print(f"  imported {len(anns)} annotations for {conn_name}")
+    else:
+        cd = data.get("connection") or {}
+        name = cd.get("name", "")
+        if not name:
+            print("export file is missing a connection name", file=sys.stderr)
+            return 1
+        payload = {k: v for k, v in cd.items() if k in _CONNECTION_KEYS}
+        payload.setdefault("name", name)
+        payload.setdefault("type", "")
+        cfg.upsert_connection(ConnectionConfig(**payload))
+        print(f"imported connection: {name}")
+        joins = data.get("joins") or []
+        if joins:
+            joins_store._save(name, joins)
+            print(f"  {len(joins)} joins")
+        anns = data.get("annotations") or []
+        for ann in anns:
+            ann_store.add(name, scope=ann.get("scope", "table"),
+                          database=ann.get("database", ""),
+                          table=ann.get("table", ""),
+                          column=ann.get("column", ""),
+                          note=ann.get("note", ""),
+                          source=ann.get("source", "user"))
+        if anns:
+            print(f"  {len(anns)} annotations")
+
+    print("import complete.")
+    return 0
+
+
+def dispatch_skill(args: argparse.Namespace, cfg: ConfigManager) -> int:
+    from dbaide.skill import skill_document
+
+    conn_hint = args.conn
+    if not conn_hint:
+        try:
+            conn_hint = cfg.get_connection(None).name
+        except Exception:
+            pass
+    print(skill_document(connection_hint=conn_hint))
+    return 0
+
+
+def dispatch_setup(args: argparse.Namespace, cfg: ConfigManager) -> int:
+    from dbaide.skill import generate_config, SUPPORTED_TOOLS
+
+    tool = args.tool.lower().strip()
+    if tool not in SUPPORTED_TOOLS:
+        print(f"unknown tool: {tool}", file=sys.stderr)
+        print(f"supported: {', '.join(SUPPORTED_TOOLS)}", file=sys.stderr)
+        return 1
+
+    conn_hint = args.conn
+    if not conn_hint:
+        try:
+            conn_hint = cfg.get_connection(None).name
+        except Exception:
+            pass
+
+    project_root = Path(args.project).resolve()
+    rel_path, content = generate_config(tool, connection_hint=conn_hint)
+    target = project_root / rel_path
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text(content, encoding="utf-8")
+    print(f"wrote {target}")
+    print(f"{tool} integration is ready. The SKILL document has been injected.")
+    return 0
 
 
 def dispatch_queries(args: argparse.Namespace, cfg: ConfigManager) -> int:
