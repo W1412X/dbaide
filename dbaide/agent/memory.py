@@ -697,7 +697,7 @@ class AgentMemory:
         mem.action_ledger = [str(x) for x in _list_or_empty(data.get("action_ledger"))][-MAX_WORK_STEPS:]
         mem.resolved_questions = [str(x) for x in _list_or_empty(data.get("resolved_questions"))][-MAX_RESOLVED_QUESTIONS:]
         mem.next_action_hint = str(data.get("next_action_hint") or "")
-        mem.archive = [_archive_item_from_dict(x) for x in _list_or_empty(data.get("archive")) if isinstance(x, dict)]
+        mem.archive = [_archive_item_from_dict(x) for x in _list_or_empty(data.get("archive")) if isinstance(x, dict)][-MAX_ARCHIVE_INDEX:]
         archive_work_refs = [
             ref
             for item in mem.archive

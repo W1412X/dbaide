@@ -1462,6 +1462,9 @@ class ConversationView(QScrollArea):
         explicitly jump to the maximum after layout settles.
         """
         def _do_scroll() -> None:
+            from PyQt6 import sip
+            if sip.isdeleted(self):
+                return
             self._sync_viewport_width()
             self._root.updateGeometry()
             turn = self._current_turn
