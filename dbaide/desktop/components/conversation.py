@@ -976,7 +976,6 @@ class TurnBlock(QFrame):
             f" font-size: 10px;"
         )
         self._footer_layout.addWidget(self._stats_label)
-        self._footer_layout.addStretch(1)
         self._footer_actions: QHBoxLayout | None = None
         self._footer.hide()
         self._layout.addWidget(self._footer)
@@ -1068,7 +1067,7 @@ class TurnBlock(QFrame):
             self._footer.show()
 
     def set_actions(self, widget: QWidget | None) -> None:
-        """Set the action buttons (copy answer, copy CLI) in the footer row."""
+        """Place the action button right after the stats label."""
         if self._footer_actions is not None:
             while self._footer_actions.count():
                 item = self._footer_actions.takeAt(0)
@@ -1081,8 +1080,9 @@ class TurnBlock(QFrame):
         if self._footer_actions is None:
             self._footer_actions = QHBoxLayout()
             self._footer_actions.setContentsMargins(0, 0, 0, 0)
-            self._footer_actions.setSpacing(2)
+            self._footer_actions.setSpacing(0)
             self._footer_layout.addLayout(self._footer_actions)
+            self._footer_layout.addStretch(1)
         self._footer_actions.addWidget(widget)
         self._footer.show()
 

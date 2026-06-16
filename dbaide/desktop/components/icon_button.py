@@ -16,12 +16,12 @@ class IconToolButton(QToolButton):
         super().__init__(parent)
         self._base_icon = icon
         self.setIcon(icon)
-        self.setIconSize(QSize(13, 13))
+        self.setIconSize(QSize(12, 12))
         self.setToolTip(tooltip)
         self.setCursor(Qt.CursorShape.PointingHandCursor)
         self.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonIconOnly)
         self.setAutoRaise(True)
-        self.setFixedSize(22, 22)
+        self.setFixedSize(18, 18)
         self._apply_style()
 
     def _apply_style(self) -> None:
@@ -30,7 +30,7 @@ class IconToolButton(QToolButton):
             QToolButton {{
                 background: transparent;
                 border: none;
-                border-radius: 7px;
+                border-radius: 5px;
                 padding: 0;
                 margin: 0;
             }}
