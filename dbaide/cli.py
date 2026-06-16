@@ -296,11 +296,17 @@ def build_parser() -> argparse.ArgumentParser:
     # ── skill & setup (AI agent integration) ────────────────────────────────
     skill = sub.add_parser("skill", help="Print the SKILL document for AI agent integration")
     skill.add_argument("--conn", default="", help="Connection name to hint in examples")
+    skill.add_argument("--out", default="", help="Write to file instead of stdout")
 
-    setup = sub.add_parser("setup", help="Auto-configure integration with a coding tool")
-    setup.add_argument("tool", help="Tool name: claude, cursor, codex, trae, windsurf, opencode, qcoder, mimocode, roo, cline, aider")
+    setup = sub.add_parser("setup", help="Inject SKILL document into a coding tool's global config")
+    setup.add_argument("tool", nargs="?", default="",
+                       help="Tool name (claude, cursor, codex, trae, windsurf, opencode, "
+                            "qcoder, mimocode, roo, cline, aider), or omit for --all")
+    setup.add_argument("--all", action="store_true", dest="setup_all",
+                       help="Inject into ALL supported tools at once")
     setup.add_argument("--conn", default="", help="Connection name to hint in examples")
-    setup.add_argument("--project", default=".", help="Project root directory (default: current directory)")
+    setup.add_argument("--project", default="",
+                       help="Also inject into this project directory (in addition to global)")
 
     return parser
 
@@ -867,18 +873,19 @@ def dispatch_skill(args: argparse.Namespace, cfg: ConfigManager) -> int:
             conn_hint = cfg.get_connection(None).name
         except Exception:
             pass
-    print(skill_document(connection_hint=conn_hint))
+    text = skill_document(connection_hint=conn_hint)
+    if args.out:
+        out = Path(args.out)
+        out.parent.mkdir(parents=True, exist_ok=True)
+        out.write_text(text, encoding="utf-8")
+        print(f"wrote {out}")
+    else:
+        print(text)
     return 0
 
 
 def dispatch_setup(args: argparse.Namespace, cfg: ConfigManager) -> int:
-    from dbaide.skill import generate_config, SUPPORTED_TOOLS
-
-    tool = args.tool.lower().strip()
-    if tool not in SUPPORTED_TOOLS:
-        print(f"unknown tool: {tool}", file=sys.stderr)
-        print(f"supported: {', '.join(SUPPORTED_TOOLS)}", file=sys.stderr)
-        return 1
+    from dbaide.skill import setup_tool, setup_all, SUPPORTED_TOOLS
 
     conn_hint = args.conn
     if not conn_hint:
@@ -887,13 +894,30 @@ def dispatch_setup(args: argparse.Namespace, cfg: ConfigManager) -> int:
         except Exception:
             pass
 
-    project_root = Path(args.project).resolve()
-    rel_path, content = generate_config(tool, connection_hint=conn_hint)
-    target = project_root / rel_path
-    target.parent.mkdir(parents=True, exist_ok=True)
-    target.write_text(content, encoding="utf-8")
-    print(f"wrote {target}")
-    print(f"{tool} integration is ready. The SKILL document has been injected.")
+    project = args.project or None
+
+    if args.setup_all:
+        results = setup_all(connection_hint=conn_hint, project=project)
+        for tool, paths in results.items():
+            for p in paths:
+                print(f"  {tool:<12} → {p}")
+        print(f"\n{len(results)} tools configured. SKILL document injected into global config.")
+        return 0
+
+    tool = (args.tool or "").lower().strip()
+    if not tool:
+        print("specify a tool name or use --all", file=sys.stderr)
+        print(f"supported: {', '.join(SUPPORTED_TOOLS)}", file=sys.stderr)
+        return 1
+    if tool not in SUPPORTED_TOOLS:
+        print(f"unknown tool: {tool}", file=sys.stderr)
+        print(f"supported: {', '.join(SUPPORTED_TOOLS)}", file=sys.stderr)
+        return 1
+
+    paths = setup_tool(tool, connection_hint=conn_hint, project=project)
+    for p in paths:
+        print(f"  → {p}")
+    print(f"\n{tool} integration ready. SKILL document injected into global config (~/).")
     return 0
 
 

@@ -211,6 +211,8 @@ dbaide ask "List all databases" --conn all
 
 # ── Integration templates ───────────────────────────────────────────────────
 
+from pathlib import Path
+
 _WRAPPER_HEADER = """\
 # DBAide Integration
 #
@@ -220,70 +222,130 @@ _WRAPPER_HEADER = """\
 """
 
 
-def claude_code_content(*, connection_hint: str = "") -> str:
-    """Content for CLAUDE.md / .claude/commands/dbaide.md."""
+def _content_for(flavour: str, tool: str, connection_hint: str) -> str:
     body = skill_document(connection_hint=connection_hint)
-    return _WRAPPER_HEADER.format(tool="claude") + body
-
-
-def cursor_rules_content(*, connection_hint: str = "") -> str:
-    """Content for .cursor/rules/dbaide.mdc."""
-    body = skill_document(connection_hint=connection_hint)
-    return f"""\
----
-description: DBAide database assistant — use for any database query or schema exploration
-globs:
-alwaysApply: true
----
-
-{body}
-"""
-
-
-def codex_content(*, connection_hint: str = "") -> str:
-    """Content for codex.md / AGENTS.md."""
-    body = skill_document(connection_hint=connection_hint)
-    return _WRAPPER_HEADER.format(tool="codex") + body
-
-
-def generic_rules_content(*, connection_hint: str = "", tool: str = "agent") -> str:
-    """Generic rules file content (Trae, Windsurf, QCoder, etc.)."""
-    body = skill_document(connection_hint=connection_hint)
+    if flavour == "cursor":
+        return (
+            "---\n"
+            "description: DBAide database assistant — use for any database query or schema exploration\n"
+            "globs:\n"
+            "alwaysApply: true\n"
+            "---\n\n"
+            + body
+        )
     return _WRAPPER_HEADER.format(tool=tool) + body
 
 
-# Map of tool name → (config file path relative to project root, content generator)
-TOOL_CONFIGS: dict[str, tuple[str, str]] = {
-    "claude":    (".claude/commands/dbaide.md", "claude"),
-    "cursor":    (".cursor/rules/dbaide.mdc", "cursor"),
-    "codex":     ("codex.md", "codex"),
-    "trae":      (".trae/rules/dbaide.md", "generic"),
-    "windsurf":  (".windsurfrules/dbaide.md", "generic"),
-    "augment":   (".augment/rules/dbaide.md", "generic"),
-    "opencode":  (".opencode/rules/dbaide.md", "generic"),
-    "qcoder":    (".qcoder/rules/dbaide.md", "generic"),
-    "mimocode":  (".mimocode/rules/dbaide.md", "generic"),
-    "roo":       (".roo/rules/dbaide.md", "generic"),
-    "cline":     (".cline/rules/dbaide.md", "generic"),
-    "aider":     (".aider/rules/dbaide.md", "generic"),
+# Each tool entry:
+#   global_path  – path relative to $HOME for the tool's global config
+#   project_path – path relative to project root for project-level config
+#   flavour      – content format (cursor has frontmatter, rest are plain markdown)
+_HOME = Path.home()
+
+TOOL_REGISTRY: dict[str, dict[str, str]] = {
+    "claude": {
+        "global":  ".claude/commands/dbaide.md",
+        "project": ".claude/commands/dbaide.md",
+        "flavour": "generic",
+    },
+    "cursor": {
+        "global":  ".cursor/rules/dbaide.mdc",
+        "project": ".cursor/rules/dbaide.mdc",
+        "flavour": "cursor",
+    },
+    "codex": {
+        "global":  ".codex/instructions/dbaide.md",
+        "project": "codex.md",
+        "flavour": "generic",
+    },
+    "trae": {
+        "global":  ".trae/rules/dbaide.md",
+        "project": ".trae/rules/dbaide.md",
+        "flavour": "generic",
+    },
+    "windsurf": {
+        "global":  ".windsurf/rules/dbaide.md",
+        "project": ".windsurf/rules/dbaide.md",
+        "flavour": "generic",
+    },
+    "augment": {
+        "global":  ".augment/rules/dbaide.md",
+        "project": ".augment/rules/dbaide.md",
+        "flavour": "generic",
+    },
+    "opencode": {
+        "global":  ".opencode/rules/dbaide.md",
+        "project": ".opencode/rules/dbaide.md",
+        "flavour": "generic",
+    },
+    "qcoder": {
+        "global":  ".qcoder/rules/dbaide.md",
+        "project": ".qcoder/rules/dbaide.md",
+        "flavour": "generic",
+    },
+    "mimocode": {
+        "global":  ".mimocode/rules/dbaide.md",
+        "project": ".mimocode/rules/dbaide.md",
+        "flavour": "generic",
+    },
+    "roo": {
+        "global":  ".roo/rules/dbaide.md",
+        "project": ".roo/rules/dbaide.md",
+        "flavour": "generic",
+    },
+    "cline": {
+        "global":  ".cline/rules/dbaide.md",
+        "project": ".cline/rules/dbaide.md",
+        "flavour": "generic",
+    },
+    "aider": {
+        "global":  ".aider/rules/dbaide.md",
+        "project": ".aider/rules/dbaide.md",
+        "flavour": "generic",
+    },
 }
 
-SUPPORTED_TOOLS = sorted(TOOL_CONFIGS.keys())
+SUPPORTED_TOOLS = sorted(TOOL_REGISTRY.keys())
 
 
-def generate_config(tool: str, *, connection_hint: str = "") -> tuple[str, str]:
-    """Return (relative_path, content) for the given tool.
+def setup_tool(
+    tool: str,
+    *,
+    connection_hint: str = "",
+    project: str | None = None,
+) -> list[str]:
+    """Write the SKILL document into the tool's config directory.
 
-    Raises KeyError if *tool* is not in TOOL_CONFIGS.
+    When *project* is given, writes to the project-level path **in addition
+    to** the global path.  Returns the list of absolute paths written.
     """
-    rel_path, flavour = TOOL_CONFIGS[tool]
-    kw = {"connection_hint": connection_hint}
-    if flavour == "claude":
-        content = claude_code_content(**kw)
-    elif flavour == "cursor":
-        content = cursor_rules_content(**kw)
-    elif flavour == "codex":
-        content = codex_content(**kw)
-    else:
-        content = generic_rules_content(tool=tool, **kw)
-    return rel_path, content
+    if tool not in TOOL_REGISTRY:
+        raise KeyError(f"Unknown tool: {tool}. Supported: {', '.join(SUPPORTED_TOOLS)}")
+
+    entry = TOOL_REGISTRY[tool]
+    content = _content_for(entry["flavour"], tool, connection_hint)
+    written: list[str] = []
+
+    # Always write to global config location (~/.tool/...)
+    global_path = _HOME / entry["global"]
+    global_path.parent.mkdir(parents=True, exist_ok=True)
+    global_path.write_text(content, encoding="utf-8")
+    written.append(str(global_path))
+
+    # Optionally also write to project-level location
+    if project:
+        project_path = Path(project).resolve() / entry["project"]
+        if project_path != global_path:
+            project_path.parent.mkdir(parents=True, exist_ok=True)
+            project_path.write_text(content, encoding="utf-8")
+            written.append(str(project_path))
+
+    return written
+
+
+def setup_all(*, connection_hint: str = "", project: str | None = None) -> dict[str, list[str]]:
+    """Write SKILL document for ALL supported tools. Returns {tool: [paths]}."""
+    result: dict[str, list[str]] = {}
+    for tool in SUPPORTED_TOOLS:
+        result[tool] = setup_tool(tool, connection_hint=connection_hint, project=project)
+    return result

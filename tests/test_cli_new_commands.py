@@ -84,23 +84,38 @@ def test_skill_output(tmp_path):
     assert "Command Catalog" in r.stdout
 
 
+def test_skill_export_to_file(tmp_path):
+    out = tmp_path / "skill.md"
+    run_cli(tmp_path, "skill", "--out", str(out))
+    assert out.exists()
+    assert "DBAide" in out.read_text()
+
+
 # ── setup ────────────────────────────────────────────────────────────────────
 
-def test_setup_claude(tmp_path):
+def test_setup_claude_global(tmp_path):
+    """setup claude writes to ~/.claude/commands/ (global config)."""
+    r = run_cli(tmp_path, "setup", "claude")
+    from pathlib import Path
+    target = Path.home() / ".claude" / "commands" / "dbaide.md"
+    assert target.exists()
+    assert "DBAide" in target.read_text()
+
+
+def test_setup_claude_with_project(tmp_path):
+    """setup claude --project also writes project-level file."""
     project = tmp_path / "myproject"
     project.mkdir()
     run_cli(tmp_path, "setup", "claude", "--project", str(project))
     target = project / ".claude" / "commands" / "dbaide.md"
     assert target.exists()
-    content = target.read_text()
-    assert "DBAide" in content
+    assert "DBAide" in target.read_text()
 
 
-def test_setup_cursor(tmp_path):
-    project = tmp_path / "myproject"
-    project.mkdir()
-    run_cli(tmp_path, "setup", "cursor", "--project", str(project))
-    target = project / ".cursor" / "rules" / "dbaide.mdc"
+def test_setup_cursor_global(tmp_path):
+    r = run_cli(tmp_path, "setup", "cursor")
+    from pathlib import Path
+    target = Path.home() / ".cursor" / "rules" / "dbaide.mdc"
     assert target.exists()
     content = target.read_text()
     assert "alwaysApply: true" in content
@@ -113,13 +128,12 @@ def test_setup_unknown_tool(tmp_path):
     assert "unknown tool" in r.stderr
 
 
-def test_setup_all_supported_tools(tmp_path):
-    """Every tool in SUPPORTED_TOOLS produces a file without error."""
+def test_setup_all(tmp_path):
+    """--all injects into every supported tool's global config."""
+    r = run_cli(tmp_path, "setup", "--all")
     from dbaide.skill import SUPPORTED_TOOLS
-    project = tmp_path / "proj"
-    project.mkdir()
     for tool in SUPPORTED_TOOLS:
-        run_cli(tmp_path, "setup", tool, "--project", str(project))
+        assert tool in r.stdout
 
 
 # ── export / import ──────────────────────────────────────────────────────────
