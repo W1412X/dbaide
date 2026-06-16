@@ -842,6 +842,7 @@ _STRINGS: dict[str, dict[str, str]] = {
     "ask.copied": {"en": "Copied", "zh": "已复制"},
     "ask.copy_answer": {"en": "Copy answer", "zh": "复制回复"},
     "ask.copy_cli": {"en": "Copy CLI", "zh": "复制 CLI"},
+    "ask.more_actions": {"en": "More", "zh": "更多"},
     # ── Conversation inline labels ───────────────────────────────────────
     "conversation.warnings": {"en": "Warnings", "zh": "警告"},
     "conversation.notes": {"en": "Notes", "zh": "备注"},

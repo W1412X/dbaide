@@ -269,48 +269,33 @@ class AskTab(QWidget):
         answer = str(answer or "").strip()
         if not answer and not cli_command:
             return None
-        from PyQt6.QtCore import QTimer
-        from dbaide.desktop.components.base import ghost_action_button
+        from dbaide.desktop.components.icon_button import IconToolButton
         from dbaide.desktop.components.icons import svg_icon
+        from dbaide.desktop.components.menu import _style_menu
         from dbaide.desktop.theme import Theme
         from dbaide.i18n import t as _t
 
-        try:
-            import sip as _sip
-            _is_deleted = _sip.isdeleted
-        except ImportError:
-            from PyQt6 import sip as _sip
-            _is_deleted = _sip.isdeleted
-
-        def _copy_btn(label: str, payload: str) -> QWidget:
-            btn = ghost_action_button(
-                label, icon=svg_icon("copy", color=Theme.MUTED, size=12), tooltip=label
-            )
-
-            def _do() -> None:
-                QApplication.clipboard().setText(payload)
-                btn.setText(_t("ask.copied"))
-                btn.setIcon(svg_icon("check", color=Theme.GREEN, size=12))
-
-                def _restore() -> None:
-                    try:
-                        if not _is_deleted(btn):
-                            btn.setText(label)
-                            btn.setIcon(svg_icon("copy", color=Theme.MUTED, size=12))
-                    except RuntimeError:
-                        pass
-
-                QTimer.singleShot(1200, _restore)
-
-            btn.clicked.connect(_do)
-            return btn
-
-        bar = QWidget()
-        row = QHBoxLayout(bar)
-        row.setContentsMargins(0, 0, 0, 0)
-        row.setSpacing(2)
+        items: list[tuple[str, str]] = []
         if answer:
-            row.addWidget(_copy_btn(_t("ask.copy_answer"), answer))
+            items.append((_t("ask.copy_answer"), answer))
         if cli_command:
-            row.addWidget(_copy_btn(_t("ask.copy_cli"), str(cli_command)))
-        return bar
+            items.append((_t("ask.copy_cli"), str(cli_command)))
+        if not items:
+            return None
+
+        btn = IconToolButton(
+            svg_icon("more-horizontal", color=Theme.MUTED, size=14),
+            _t("ask.more_actions"),
+        )
+
+        def _show_menu() -> None:
+            from PyQt6.QtWidgets import QMenu
+            menu = QMenu(btn)
+            _style_menu(menu)
+            for label, payload in items:
+                action = menu.addAction(svg_icon("copy", color=Theme.TEXT_2, size=13), label)
+                action.triggered.connect(lambda _checked=False, p=payload: QApplication.clipboard().setText(p))
+            menu.exec(btn.mapToGlobal(btn.rect().bottomLeft()))
+
+        btn.clicked.connect(_show_menu)
+        return btn

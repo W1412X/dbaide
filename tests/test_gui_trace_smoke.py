@@ -546,31 +546,22 @@ def test_markdown_code_blocks_update_during_streaming(qapp):
     assert QApplication.clipboard().text() == "print(2)"
 
 
-def test_copy_answer_action_writes_clipboard(qapp):
-    from PyQt6.QtWidgets import QApplication, QPushButton
+def test_copy_answer_action_builds_menu_button(qapp):
+    from PyQt6.QtWidgets import QToolButton
     from dbaide.desktop.views.ask_tab import AskTab
 
     tab = AskTab()
-    bar = tab._build_actions("There are **3** factories.", None)
-    assert bar is not None
-    buttons = bar.findChildren(QPushButton)
-    assert len(buttons) == 1
-    buttons[0].click()
-    assert QApplication.clipboard().text() == "There are **3** factories."
+    btn = tab._build_actions("There are **3** factories.", None)
+    assert btn is not None
+    assert isinstance(btn, QToolButton)
 
 
-def test_answer_actions_only_copy_answer_and_cli(qapp):
-    from PyQt6.QtWidgets import QPushButton
+def test_answer_actions_none_when_empty(qapp):
     from dbaide.desktop.views.ask_tab import AskTab
 
     tab = AskTab()
-    bar = tab._build_actions("Done.", None)
-    labels = [b.text() for b in bar.findChildren(QPushButton)]
-    assert len(labels) == 1
-
-    bar_cli = tab._build_actions("Done.", "dbaide ask ...")
-    labels_cli = [b.text() for b in bar_cli.findChildren(QPushButton)]
-    assert len(labels_cli) == 2
+    assert tab._build_actions("", None) is None
+    assert tab._build_actions("", "") is None
 
 
 def test_complete_turn_renders_answer_only(qapp):
