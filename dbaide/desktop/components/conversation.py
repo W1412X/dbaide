@@ -499,6 +499,12 @@ class _CodeBlock(QFrame):
         self._editor.setFixedHeight(min(320, max(50, line_count * 18 + 10)))
         outer.addWidget(self._editor)
 
+    def update_code(self, code: str, *, language: str = "") -> None:
+        self._code = str(code or "")
+        self._editor.setPlainText(self._code)
+        line_count = max(1, self._code.count("\n") + 1)
+        self._editor.setFixedHeight(min(320, max(50, line_count * 18 + 10)))
+
     def copy_code(self) -> None:
         from dbaide.i18n import t
 
@@ -566,8 +572,33 @@ class _MarkdownBlock(QFrame):
     def set_markdown(self, markdown: str) -> None:
         """Re-render the body (used by the progressive answer reveal)."""
         self._markdown = str(markdown or "")
-        self._render_segments()
+        new_segments = _split_fenced_code_blocks(self._markdown)
+        if self._can_update_in_place(new_segments):
+            self._update_in_place(new_segments)
+        else:
+            self._render_segments()
         self._sync_body_height()
+
+    def _can_update_in_place(self, new_segments: list[tuple[str, str, str]]) -> bool:
+        """Check if we can update existing widgets instead of rebuilding."""
+        old_kinds = [("browser" if not isinstance(w, _CodeBlock) else "code")
+                     for w in self._browsers + self._code_blocks]
+        new_kinds = [("code" if k == "code" else "browser")
+                     for k, p, _ in new_segments if k == "code" or p.strip()]
+        return bool(old_kinds) and old_kinds == new_kinds
+
+    def _update_in_place(self, segments: list[tuple[str, str, str]]) -> None:
+        """Update existing widget contents without destroying/recreating them."""
+        bi, ci = 0, 0
+        for kind, payload, meta in segments:
+            if kind == "code":
+                if ci < len(self._code_blocks):
+                    self._code_blocks[ci].update_code(payload, language=meta)
+                ci += 1
+            elif payload.strip():
+                if bi < len(self._browsers):
+                    self._browsers[bi].setHtml(render_markdown_safe(payload))
+                bi += 1
 
     def _make_text_browser(self, markdown: str) -> QTextBrowser:
         browser = QTextBrowser()
@@ -594,6 +625,7 @@ class _MarkdownBlock(QFrame):
             item = self._content_layout.takeAt(self._content_layout.count() - 1)
             widget = item.widget()
             if widget is not None and not isinstance(widget, QLabel):
+                widget.hide()
                 widget.setParent(None)
                 widget.deleteLater()
             elif widget is not None:
@@ -1069,6 +1101,11 @@ class ConversationView(QScrollArea):
         # once at complete_turn.
         self._live_answer: "_MarkdownBlock | None" = None
         self._live_answer_text = ""
+        self._chunk_dirty = False
+        self._chunk_timer = QTimer(self)
+        self._chunk_timer.setSingleShot(True)
+        self._chunk_timer.setInterval(80)
+        self._chunk_timer.timeout.connect(self._flush_answer_chunk)
 
     def append_answer_chunk(self, text: str) -> None:
         """Append a streamed slice of the final answer to the open turn, creating the
@@ -1080,6 +1117,14 @@ class ConversationView(QScrollArea):
             self._live_answer = _MarkdownBlock("", title="DBAide")
             self._current_turn.append_content(self._live_answer)
         self._live_answer_text += text
+        if not self._chunk_dirty:
+            self._chunk_dirty = True
+            self._chunk_timer.start()
+
+    def _flush_answer_chunk(self) -> None:
+        self._chunk_dirty = False
+        if self._live_answer is None:
+            return
         try:
             self._live_answer.set_markdown(self._live_answer_text)
         except RuntimeError:
@@ -1114,6 +1159,8 @@ class ConversationView(QScrollArea):
 
     def begin_turn(self, user_text: str, *, meta: str = "", placeholder: bool = True,
                    attachments: list[dict] | None = None) -> None:
+        self._chunk_timer.stop()
+        self._chunk_dirty = False
         self._live_answer = None
         self._live_answer_text = ""
         turn = TurnBlock()
@@ -1309,6 +1356,9 @@ class ConversationView(QScrollArea):
 
         # Clean author label — just "DBAide" (the internal workflow id is noise in the
         # message header, Codex-style; keep it reachable as a tooltip and in the trace).
+        self._chunk_timer.stop()
+        if self._chunk_dirty:
+            self._flush_answer_chunk()
         live = self._live_answer
         live_text = self._live_answer_text
         self._live_answer = None
@@ -1433,6 +1483,8 @@ class ConversationView(QScrollArea):
         self._turns = []
         self._current_record = None
         self._last_meta = ""
+        self._chunk_timer.stop()
+        self._chunk_dirty = False
         self._live_answer = None
         self._live_answer_text = ""
         self._clarification_bar = None

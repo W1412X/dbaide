@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "dbaide"
-version = "0.2.5"
+version = "0.2.6"
 description = "A lightweight CLI data assistant with progressive schema disclosure."
 readme = "README.md"
 requires-python = ">=3.11"
