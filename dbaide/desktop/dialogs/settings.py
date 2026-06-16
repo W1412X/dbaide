@@ -476,6 +476,37 @@ class SettingsDialog(ChromeDialog):
 
     # ── Integrations page ──────────────────────────────────────────────────
 
+    # Color palette for tool letter-avatars (deterministic by tool name).
+    _TOOL_COLORS = [
+        "#6366f1", "#8b5cf6", "#ec4899", "#f43f5e", "#f97316",
+        "#eab308", "#22c55e", "#14b8a6", "#06b6d4", "#3b82f6",
+        "#a855f7", "#e11d48",
+    ]
+
+    @staticmethod
+    def _tool_icon_pixmap(letter: str, bg_color: str, size: int = 22) -> "QPixmap":
+        """Render a coloured circle with the tool's initial letter."""
+        from PyQt6.QtCore import QRectF
+        from PyQt6.QtGui import QColor, QFont, QPainter, QPixmap
+        dpr = 2.0
+        px = QPixmap(int(size * dpr), int(size * dpr))
+        px.fill(Qt.GlobalColor.transparent)
+        p = QPainter(px)
+        p.setRenderHint(QPainter.RenderHint.Antialiasing)
+        p.scale(dpr, dpr)
+        p.setBrush(QColor(bg_color))
+        p.setPen(Qt.PenStyle.NoPen)
+        p.drawEllipse(QRectF(0, 0, size, size))
+        p.setPen(QColor("#ffffff"))
+        font = QFont()
+        font.setPixelSize(int(size * 0.52))
+        font.setWeight(QFont.Weight.Bold)
+        p.setFont(font)
+        p.drawText(QRectF(0, 0, size, size), Qt.AlignmentFlag.AlignCenter, letter.upper())
+        p.end()
+        px.setDevicePixelRatio(dpr)
+        return px
+
     def _build_integrations_page(self) -> QWidget:
         from dbaide.i18n import t
         from dbaide.skill import TOOL_REGISTRY, SUPPORTED_TOOLS, is_installed
@@ -508,6 +539,7 @@ class SettingsDialog(ChromeDialog):
         for i, tool in enumerate(SUPPORTED_TOOLS):
             config_rel = TOOL_REGISTRY[tool]
             installed = is_installed(tool)
+            color = self._TOOL_COLORS[i % len(self._TOOL_COLORS)]
 
             row = QWidget()
             row.setStyleSheet("background: transparent;")
@@ -515,8 +547,13 @@ class SettingsDialog(ChromeDialog):
             rl.setContentsMargins(8, 7, 8, 7)
             rl.setSpacing(10)
 
+            icon_label = QLabel()
+            icon_label.setFixedSize(22, 22)
+            icon_label.setPixmap(self._tool_icon_pixmap(tool[0], color))
+            rl.addWidget(icon_label)
+
             name_label = QLabel(tool.capitalize())
-            name_label.setFixedWidth(90)
+            name_label.setFixedWidth(80)
             name_label.setStyleSheet(f"color: {Theme.TEXT}; font-size: 13px; font-weight: 600;")
             rl.addWidget(name_label)
 
@@ -565,17 +602,26 @@ class SettingsDialog(ChromeDialog):
 
     def _on_toggle_integration(self, tool: str) -> None:
         from dbaide.skill import is_installed, setup_tool, uninstall_tool
+        from dbaide.i18n import t
 
-        if is_installed(tool):
-            uninstall_tool(tool)
-            self._refresh_integration_row(tool, False)
-        else:
-            setup_tool(tool)
-            self._refresh_integration_row(tool, True)
+        try:
+            if is_installed(tool):
+                uninstall_tool(tool)
+                self._refresh_integration_row(tool, False)
+            else:
+                setup_tool(tool)
+                self._refresh_integration_row(tool, True)
+        except Exception as exc:
+            dialog_warn(self, "DBAide", t("settings.integrations.error", error=str(exc)))
 
     def _on_install_all_integrations(self) -> None:
         from dbaide.skill import setup_all, is_installed
-        setup_all()
+        from dbaide.i18n import t
+
+        try:
+            setup_all()
+        except Exception as exc:
+            dialog_warn(self, "DBAide", t("settings.integrations.error", error=str(exc)))
         for tool in self._integration_rows:
             self._refresh_integration_row(tool, is_installed(tool))
 

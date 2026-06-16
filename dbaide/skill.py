@@ -77,7 +77,15 @@ def _read_config(path: Path) -> dict[str, Any]:
 
 def _write_config(path: Path, data: dict[str, Any]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(data, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+    # Write to a temp file first, then rename — avoids corrupting
+    # the config if the process is killed mid-write.
+    tmp = path.with_suffix(".tmp")
+    try:
+        tmp.write_text(json.dumps(data, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+        tmp.replace(path)
+    except OSError:
+        tmp.unlink(missing_ok=True)
+        raise
 
 
 # ── Public API ──────────────────────────────────────────────────────────────

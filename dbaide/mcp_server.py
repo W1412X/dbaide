@@ -19,6 +19,8 @@ from __future__ import annotations
 
 import json
 import logging
+import os
+import signal
 import sys
 from typing import Any
 
@@ -28,8 +30,16 @@ logger = logging.getLogger("dbaide.mcp")
 
 JSONRPC = "2.0"
 SERVER_NAME = "dbaide"
-SERVER_VERSION = "0.1.0"
 PROTOCOL_VERSION = "2024-11-05"
+
+
+def _server_version() -> str:
+    try:
+        from dbaide import __version__
+        return __version__
+    except Exception:
+        return "0.0.0"
+
 
 ASK_TOOL = {
     "name": "ask",
@@ -76,7 +86,7 @@ def handle_initialize(params: dict) -> dict:
     return {
         "protocolVersion": PROTOCOL_VERSION,
         "capabilities": {"tools": {}},
-        "serverInfo": {"name": SERVER_NAME, "version": SERVER_VERSION},
+        "serverInfo": {"name": SERVER_NAME, "version": _server_version()},
     }
 
 
@@ -94,7 +104,7 @@ def handle_tools_call(params: dict) -> dict:
     if not question:
         return {"content": [{"type": "text", "text": "Error: question is required"}], "isError": True}
 
-    conn = str(arguments.get("conn") or "").strip()
+    conn = str(arguments.get("conn") or "").strip() or None
     database = str(arguments.get("database") or "").strip()
 
     try:
@@ -105,7 +115,7 @@ def handle_tools_call(params: dict) -> dict:
         from dbaide.core.result import WorkflowRequest
 
         cfg = ConfigManager()
-        connection = cfg.get_connection(conn or None)
+        connection = cfg.get_connection(conn)
         llm = build_llm_client(cfg.model())
         store = AssetStore()
 
@@ -136,7 +146,7 @@ def handle_tools_call(params: dict) -> dict:
 
 HANDLERS = {
     "initialize": handle_initialize,
-    "notifications/initialized": None,  # notification, no response
+    "notifications/initialized": None,
     "tools/list": handle_tools_list,
     "tools/call": handle_tools_call,
 }
@@ -144,40 +154,63 @@ HANDLERS = {
 
 # ── Main loop ───────────────────────────────────────────────────────────────
 
+def _send(msg: dict) -> None:
+    try:
+        sys.stdout.write(json.dumps(msg) + "\n")
+        sys.stdout.flush()
+    except (BrokenPipeError, OSError):
+        raise SystemExit(0)
+
+
 def serve() -> None:
     """Run the MCP server on stdio (blocking)."""
-    for line in sys.stdin:
-        line = line.strip()
-        if not line:
-            continue
-        try:
-            msg = json.loads(line)
-        except json.JSONDecodeError:
-            continue
+    # Redirect logging to stderr so it never contaminates the JSON-RPC stream.
+    logging.basicConfig(
+        stream=sys.stderr,
+        level=logging.WARNING,
+        format="%(levelname)s %(name)s: %(message)s",
+    )
 
-        method = msg.get("method", "")
-        msg_id = msg.get("id")
-        params = msg.get("params") or {}
+    # Graceful shutdown on SIGTERM (e.g. when the client kills the process).
+    signal.signal(signal.SIGTERM, lambda *_: raise_exit())
 
-        handler = HANDLERS.get(method)
-        if handler is None:
-            if msg_id is not None and method not in HANDLERS:
-                resp = _error(msg_id, -32601, f"Method not found: {method}")
-                _send(resp)
-            continue
+    try:
+        for line in sys.stdin:
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                msg = json.loads(line)
+            except json.JSONDecodeError:
+                continue
 
-        try:
-            result = handler(params)
-            if msg_id is not None:
-                _send(_ok(msg_id, result))
-        except Exception as exc:
-            if msg_id is not None:
-                _send(_error(msg_id, -32603, str(exc)))
+            method = msg.get("method", "")
+            msg_id = msg.get("id")
+            params = msg.get("params") or {}
+
+            handler = HANDLERS.get(method)
+            if handler is None:
+                if msg_id is not None and method not in HANDLERS:
+                    _send(_error(msg_id, -32601, f"Method not found: {method}"))
+                continue
+
+            try:
+                result = handler(params)
+                if msg_id is not None:
+                    _send(_ok(msg_id, result))
+            except Exception as exc:
+                logger.exception("handler error for %s", method)
+                if msg_id is not None:
+                    _send(_error(msg_id, -32603, str(exc)))
+
+    except (KeyboardInterrupt, SystemExit):
+        pass
+    except (BrokenPipeError, OSError):
+        pass
 
 
-def _send(msg: dict) -> None:
-    sys.stdout.write(json.dumps(msg) + "\n")
-    sys.stdout.flush()
+def raise_exit() -> None:
+    raise SystemExit(0)
 
 
 if __name__ == "__main__":
