@@ -482,23 +482,33 @@ class SettingsDialog(ChromeDialog):
 
     @staticmethod
     def _load_tool_icon(tool: str, size: int = 22) -> "QPixmap":
-        """Load a tool's brand icon from assets, scaled to *size*."""
-        from PyQt6.QtGui import QPixmap
+        """Load a tool's brand icon from assets, scaled to *size* with rounded corners."""
+        from PyQt6.QtGui import QPixmap, QPainter, QPainterPath
         icon_path = SettingsDialog._TOOL_ICONS_DIR / f"{tool}.png"
         if not icon_path.exists():
             px = QPixmap(size, size)
             px.fill(Qt.GlobalColor.transparent)
             return px
         dpr = 2.0
+        hw = int(round(size * dpr))
         source = QPixmap(str(icon_path))
-        target = QSize(int(round(size * dpr)), int(round(size * dpr)))
-        px = source.scaled(
-            target,
+        scaled = source.scaled(
+            QSize(hw, hw),
             Qt.AspectRatioMode.KeepAspectRatio,
             Qt.TransformationMode.SmoothTransformation,
         )
-        px.setDevicePixelRatio(dpr)
-        return px
+        radius = hw * 0.22
+        result = QPixmap(hw, hw)
+        result.fill(Qt.GlobalColor.transparent)
+        painter = QPainter(result)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        path = QPainterPath()
+        path.addRoundedRect(0.0, 0.0, float(hw), float(hw), radius, radius)
+        painter.setClipPath(path)
+        painter.drawPixmap(0, 0, scaled)
+        painter.end()
+        result.setDevicePixelRatio(dpr)
+        return result
 
     def _build_integrations_page(self) -> QWidget:
         from dbaide.i18n import t
