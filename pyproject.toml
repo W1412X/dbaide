@@ -29,4 +29,4 @@ dbaide-gui = "dbaide.gui:main"
 include = ["dbaide*"]
 
 [tool.setuptools.package-data]
-"dbaide.desktop" = ["assets/*.png"]
+"dbaide.desktop" = ["assets/*.png", "assets/tool_icons/*.png"]

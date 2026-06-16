@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from pathlib import Path
+
 from PyQt6.QtCore import QSize, Qt, QUrl, pyqtSignal
 from PyQt6.QtGui import QDesktopServices
 from PyQt6.QtWidgets import (
@@ -476,34 +478,25 @@ class SettingsDialog(ChromeDialog):
 
     # ── Integrations page ──────────────────────────────────────────────────
 
-    # Color palette for tool letter-avatars (deterministic by tool name).
-    _TOOL_COLORS = [
-        "#6366f1", "#8b5cf6", "#ec4899", "#f43f5e", "#f97316",
-        "#eab308", "#22c55e", "#14b8a6", "#06b6d4", "#3b82f6",
-        "#a855f7", "#e11d48",
-    ]
+    _TOOL_ICONS_DIR = Path(__file__).resolve().parents[1] / "assets" / "tool_icons"
 
     @staticmethod
-    def _tool_icon_pixmap(letter: str, bg_color: str, size: int = 22) -> "QPixmap":
-        """Render a coloured circle with the tool's initial letter."""
-        from PyQt6.QtCore import QRectF
-        from PyQt6.QtGui import QColor, QFont, QPainter, QPixmap
+    def _load_tool_icon(tool: str, size: int = 22) -> "QPixmap":
+        """Load a tool's brand icon from assets, scaled to *size*."""
+        from PyQt6.QtGui import QPixmap
+        icon_path = SettingsDialog._TOOL_ICONS_DIR / f"{tool}.png"
+        if not icon_path.exists():
+            px = QPixmap(size, size)
+            px.fill(Qt.GlobalColor.transparent)
+            return px
         dpr = 2.0
-        px = QPixmap(int(size * dpr), int(size * dpr))
-        px.fill(Qt.GlobalColor.transparent)
-        p = QPainter(px)
-        p.setRenderHint(QPainter.RenderHint.Antialiasing)
-        p.scale(dpr, dpr)
-        p.setBrush(QColor(bg_color))
-        p.setPen(Qt.PenStyle.NoPen)
-        p.drawEllipse(QRectF(0, 0, size, size))
-        p.setPen(QColor("#ffffff"))
-        font = QFont()
-        font.setPixelSize(int(size * 0.52))
-        font.setWeight(QFont.Weight.Bold)
-        p.setFont(font)
-        p.drawText(QRectF(0, 0, size, size), Qt.AlignmentFlag.AlignCenter, letter.upper())
-        p.end()
+        source = QPixmap(str(icon_path))
+        target = QSize(int(round(size * dpr)), int(round(size * dpr)))
+        px = source.scaled(
+            target,
+            Qt.AspectRatioMode.KeepAspectRatio,
+            Qt.TransformationMode.SmoothTransformation,
+        )
         px.setDevicePixelRatio(dpr)
         return px
 
@@ -539,7 +532,6 @@ class SettingsDialog(ChromeDialog):
         for i, tool in enumerate(SUPPORTED_TOOLS):
             config_rel = TOOL_REGISTRY[tool]
             installed = is_installed(tool)
-            color = self._TOOL_COLORS[i % len(self._TOOL_COLORS)]
 
             row = QWidget()
             row.setStyleSheet("background: transparent;")
@@ -549,7 +541,8 @@ class SettingsDialog(ChromeDialog):
 
             icon_label = QLabel()
             icon_label.setFixedSize(22, 22)
-            icon_label.setPixmap(self._tool_icon_pixmap(tool[0], color))
+            icon_label.setPixmap(self._load_tool_icon(tool))
+            icon_label.setStyleSheet("border-radius: 4px;")
             rl.addWidget(icon_label)
 
             name_label = QLabel(tool.capitalize())
