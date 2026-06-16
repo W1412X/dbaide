@@ -293,20 +293,17 @@ def build_parser() -> argparse.ArgumentParser:
     imp = sub.add_parser("import", help="Import from a DBAide export file")
     imp.add_argument("file", help="Path to the export JSON file")
 
-    # ── skill & setup (AI agent integration) ────────────────────────────────
-    skill = sub.add_parser("skill", help="Print the SKILL document for AI agent integration")
-    skill.add_argument("--conn", default="", help="Connection name to hint in examples")
-    skill.add_argument("--out", default="", help="Write to file instead of stdout")
+    # ── MCP server & setup (AI agent integration) ────────────────────────────
+    sub.add_parser("mcp", help="Start the MCP (Model Context Protocol) server on stdio")
 
-    setup = sub.add_parser("setup", help="Inject SKILL document into a coding tool's global config")
+    setup = sub.add_parser("setup", help="Register dbaide as an MCP server in a coding tool's config")
     setup.add_argument("tool", nargs="?", default="",
                        help="Tool name (claude, cursor, codex, trae, windsurf, opencode, "
-                            "qcoder, mimocode, roo, cline, aider), or omit for --all")
+                            "qcoder, mimocode, roo, cline, aider, augment), or omit for --all")
     setup.add_argument("--all", action="store_true", dest="setup_all",
-                       help="Inject into ALL supported tools at once")
-    setup.add_argument("--conn", default="", help="Connection name to hint in examples")
-    setup.add_argument("--project", default="",
-                       help="Also inject into this project directory (in addition to global)")
+                       help="Register in ALL supported tools at once")
+    setup.add_argument("--uninstall", action="store_true",
+                       help="Remove the dbaide MCP server entry instead of adding it")
 
     return parser
 
@@ -480,8 +477,8 @@ def dispatch(args: argparse.Namespace, cfg: ConfigManager) -> int:
         return dispatch_export(args, cfg)
     if args.command == "import":
         return dispatch_import(args, cfg)
-    if args.command == "skill":
-        return dispatch_skill(args, cfg)
+    if args.command == "mcp":
+        return dispatch_mcp(args, cfg)
     if args.command == "setup":
         return dispatch_setup(args, cfg)
     raise AssertionError(args.command)
@@ -864,44 +861,40 @@ def dispatch_import(args: argparse.Namespace, cfg: ConfigManager) -> int:
     return 0
 
 
-def dispatch_skill(args: argparse.Namespace, cfg: ConfigManager) -> int:
-    from dbaide.skill import skill_document
-
-    conn_hint = args.conn
-    if not conn_hint:
-        try:
-            conn_hint = cfg.get_connection(None).name
-        except Exception:
-            pass
-    text = skill_document(connection_hint=conn_hint)
-    if args.out:
-        out = Path(args.out)
-        out.parent.mkdir(parents=True, exist_ok=True)
-        out.write_text(text, encoding="utf-8")
-        print(f"wrote {out}")
-    else:
-        print(text)
+def dispatch_mcp(_args: argparse.Namespace, _cfg: ConfigManager) -> int:
+    from dbaide.mcp_server import serve
+    serve()
     return 0
 
 
-def dispatch_setup(args: argparse.Namespace, cfg: ConfigManager) -> int:
-    from dbaide.skill import setup_tool, setup_all, SUPPORTED_TOOLS
+def dispatch_setup(args: argparse.Namespace, _cfg: ConfigManager) -> int:
+    from dbaide.skill import setup_tool, setup_all, uninstall_tool, uninstall_all, SUPPORTED_TOOLS
 
-    conn_hint = args.conn
-    if not conn_hint:
-        try:
-            conn_hint = cfg.get_connection(None).name
-        except Exception:
-            pass
-
-    project = args.project or None
+    if args.uninstall:
+        if args.setup_all:
+            removed = uninstall_all()
+            if removed:
+                for t in removed:
+                    print(f"  removed: {t}")
+                print(f"\n{len(removed)} tool(s) unregistered.")
+            else:
+                print("nothing to remove.")
+            return 0
+        tool = (args.tool or "").lower().strip()
+        if not tool:
+            print("specify a tool name or use --all", file=sys.stderr)
+            return 1
+        if uninstall_tool(tool):
+            print(f"removed dbaide from {tool}")
+        else:
+            print(f"dbaide was not registered in {tool}")
+        return 0
 
     if args.setup_all:
-        results = setup_all(connection_hint=conn_hint, project=project)
-        for tool, paths in results.items():
-            for p in paths:
-                print(f"  {tool:<12} → {p}")
-        print(f"\n{len(results)} tools configured. SKILL document injected into global config.")
+        results = setup_all()
+        for tool, path in results.items():
+            print(f"  {tool:<12} → {path}")
+        print(f"\n{len(results)} tools configured. MCP server registered.")
         return 0
 
     tool = (args.tool or "").lower().strip()
@@ -914,10 +907,9 @@ def dispatch_setup(args: argparse.Namespace, cfg: ConfigManager) -> int:
         print(f"supported: {', '.join(SUPPORTED_TOOLS)}", file=sys.stderr)
         return 1
 
-    paths = setup_tool(tool, connection_hint=conn_hint, project=project)
-    for p in paths:
-        print(f"  → {p}")
-    print(f"\n{tool} integration ready. SKILL document injected into global config (~/).")
+    path = setup_tool(tool)
+    print(f"  → {path}")
+    print(f"\n{tool} integration ready. MCP server registered.")
     return 0
 
 

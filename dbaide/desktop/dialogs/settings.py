@@ -477,9 +477,8 @@ class SettingsDialog(ChromeDialog):
     # ── Integrations page ──────────────────────────────────────────────────
 
     def _build_integrations_page(self) -> QWidget:
-        from pathlib import Path
         from dbaide.i18n import t
-        from dbaide.skill import TOOL_REGISTRY, SUPPORTED_TOOLS
+        from dbaide.skill import TOOL_REGISTRY, SUPPORTED_TOOLS, is_installed
 
         page = QWidget()
         layout = QVBoxLayout(page)
@@ -490,7 +489,6 @@ class SettingsDialog(ChromeDialog):
             t("settings.integrations.subtitle"),
         ))
 
-        # Top action bar: Install All + Export SKILL
         bar = QWidget()
         bar_layout = QHBoxLayout(bar)
         bar_layout.setContentsMargins(0, 0, 0, 0)
@@ -498,24 +496,18 @@ class SettingsDialog(ChromeDialog):
         install_all_btn = compact_button(t("settings.integrations.install_all"), primary=True, width=100)
         install_all_btn.clicked.connect(self._on_install_all_integrations)
         bar_layout.addWidget(install_all_btn)
-        export_btn = compact_button(t("settings.integrations.export_skill"), width=140)
-        export_btn.clicked.connect(self._on_export_skill)
-        bar_layout.addWidget(export_btn)
         bar_layout.addStretch(1)
         layout.addWidget(bar)
 
-        # Tool list
         card = _SectionCard()
         card_layout = QVBoxLayout(card)
         card_layout.setContentsMargins(12, 8, 12, 8)
         card_layout.setSpacing(0)
 
         self._integration_rows: dict[str, dict] = {}
-        home = Path.home()
         for i, tool in enumerate(SUPPORTED_TOOLS):
-            entry = TOOL_REGISTRY[tool]
-            target = home / entry["global"]
-            installed = target.exists()
+            config_rel = TOOL_REGISTRY[tool]
+            installed = is_installed(tool)
 
             row = QWidget()
             row.setStyleSheet("background: transparent;")
@@ -528,7 +520,7 @@ class SettingsDialog(ChromeDialog):
             name_label.setStyleSheet(f"color: {Theme.TEXT}; font-size: 13px; font-weight: 600;")
             rl.addWidget(name_label)
 
-            path_label = QLabel(f"~/{entry['global']}")
+            path_label = QLabel(f"~/{config_rel}")
             path_label.setStyleSheet(f"color: {Theme.MUTED}; font-size: 11px;")
             rl.addWidget(path_label, 1)
 
@@ -544,7 +536,6 @@ class SettingsDialog(ChromeDialog):
             self._integration_rows[tool] = {
                 "status": status_label,
                 "btn": action_btn,
-                "target": target,
             }
             self._refresh_integration_row(tool, installed)
             action_btn.clicked.connect(lambda _checked=False, t=tool: self._on_toggle_integration(t))
@@ -565,7 +556,7 @@ class SettingsDialog(ChromeDialog):
         info = self._integration_rows[tool]
         if installed:
             info["status"].setText("✓")
-            info["status"].setStyleSheet(f"color: #22c55e; font-size: 13px; font-weight: 700;")
+            info["status"].setStyleSheet("color: #22c55e; font-size: 13px; font-weight: 700;")
             info["btn"].setText(t("settings.integrations.uninstall"))
         else:
             info["status"].setText("—")
@@ -573,56 +564,20 @@ class SettingsDialog(ChromeDialog):
             info["btn"].setText(t("settings.integrations.install"))
 
     def _on_toggle_integration(self, tool: str) -> None:
-        from dbaide.skill import setup_tool, TOOL_REGISTRY
-        from pathlib import Path
+        from dbaide.skill import is_installed, setup_tool, uninstall_tool
 
-        info = self._integration_rows[tool]
-        target: Path = info["target"]
-        if target.exists():
-            target.unlink(missing_ok=True)
+        if is_installed(tool):
+            uninstall_tool(tool)
             self._refresh_integration_row(tool, False)
         else:
-            conn_hint = ""
-            try:
-                from dbaide.config import ConfigManager
-                conn_hint = ConfigManager().get_connection(None).name
-            except Exception:
-                pass
-            setup_tool(tool, connection_hint=conn_hint)
+            setup_tool(tool)
             self._refresh_integration_row(tool, True)
 
     def _on_install_all_integrations(self) -> None:
-        from dbaide.skill import setup_all
-        conn_hint = ""
-        try:
-            from dbaide.config import ConfigManager
-            conn_hint = ConfigManager().get_connection(None).name
-        except Exception:
-            pass
-        setup_all(connection_hint=conn_hint)
-        for tool, info in self._integration_rows.items():
-            self._refresh_integration_row(tool, info["target"].exists())
-
-    def _on_export_skill(self) -> None:
-        from PyQt6.QtWidgets import QFileDialog
-        from dbaide.skill import skill_document
-        from dbaide.i18n import t
-
-        conn_hint = ""
-        try:
-            from dbaide.config import ConfigManager
-            conn_hint = ConfigManager().get_connection(None).name
-        except Exception:
-            pass
-
-        path, _ = QFileDialog.getSaveFileName(
-            self, t("settings.integrations.export_skill"),
-            "dbaide-skill.md", "Markdown (*.md);;All files (*)",
-        )
-        if path:
-            from pathlib import Path
-            Path(path).write_text(skill_document(connection_hint=conn_hint), encoding="utf-8")
-            dialog_warn(self, "DBAide", t("settings.integrations.exported", path=path))
+        from dbaide.skill import setup_all, is_installed
+        setup_all()
+        for tool in self._integration_rows:
+            self._refresh_integration_row(tool, is_installed(tool))
 
     def _build_general_page(self) -> QWidget:
         from PyQt6.QtWidgets import QFormLayout

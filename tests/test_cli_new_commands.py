@@ -75,51 +75,25 @@ def test_config_set_and_reset(tmp_path):
     assert "none — using built-in defaults" in r.stdout
 
 
-# ── skill ────────────────────────────────────────────────────────────────────
+# ── setup (MCP registration) ─────────────────────────────────────────────────
 
-def test_skill_output(tmp_path):
-    r = run_cli(tmp_path, "skill")
-    assert "DBAide" in r.stdout
-    assert "dbaide ask" in r.stdout
-    assert "Command Catalog" in r.stdout
-
-
-def test_skill_export_to_file(tmp_path):
-    out = tmp_path / "skill.md"
-    run_cli(tmp_path, "skill", "--out", str(out))
-    assert out.exists()
-    assert "DBAide" in out.read_text()
-
-
-# ── setup ────────────────────────────────────────────────────────────────────
-
-def test_setup_claude_global(tmp_path):
-    """setup claude writes to ~/.claude/commands/ (global config)."""
+def test_setup_claude_registers_mcp(tmp_path):
+    """setup claude writes mcpServers.dbaide into ~/.claude/settings.json."""
     r = run_cli(tmp_path, "setup", "claude")
+    assert "claude" in r.stdout
     from pathlib import Path
-    target = Path.home() / ".claude" / "commands" / "dbaide.md"
+    target = Path.home() / ".claude" / "settings.json"
     assert target.exists()
-    assert "DBAide" in target.read_text()
+    data = json.loads(target.read_text())
+    assert "dbaide" in (data.get("mcpServers") or {})
 
 
-def test_setup_claude_with_project(tmp_path):
-    """setup claude --project also writes project-level file."""
-    project = tmp_path / "myproject"
-    project.mkdir()
-    run_cli(tmp_path, "setup", "claude", "--project", str(project))
-    target = project / ".claude" / "commands" / "dbaide.md"
-    assert target.exists()
-    assert "DBAide" in target.read_text()
-
-
-def test_setup_cursor_global(tmp_path):
-    r = run_cli(tmp_path, "setup", "cursor")
-    from pathlib import Path
-    target = Path.home() / ".cursor" / "rules" / "dbaide.mdc"
-    assert target.exists()
-    content = target.read_text()
-    assert "alwaysApply: true" in content
-    assert "DBAide" in content
+def test_setup_uninstall(tmp_path):
+    """setup --uninstall removes the MCP entry."""
+    run_cli(tmp_path, "setup", "claude")
+    run_cli(tmp_path, "setup", "claude", "--uninstall")
+    from dbaide.skill import is_installed
+    assert not is_installed("claude")
 
 
 def test_setup_unknown_tool(tmp_path):
@@ -129,7 +103,7 @@ def test_setup_unknown_tool(tmp_path):
 
 
 def test_setup_all(tmp_path):
-    """--all injects into every supported tool's global config."""
+    """--all registers dbaide MCP in every supported tool's config."""
     r = run_cli(tmp_path, "setup", "--all")
     from dbaide.skill import SUPPORTED_TOOLS
     for tool in SUPPORTED_TOOLS:
