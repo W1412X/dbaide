@@ -132,6 +132,13 @@ class ConfigManager:
                     self._data = tomllib.load(fh)
             except tomllib.TOMLDecodeError as exc:
                 logger.warning("failed to parse config %s: %s", self.path, exc)
+                backup = self.path.with_suffix(".toml.bak")
+                try:
+                    import shutil
+                    shutil.copy2(self.path, backup)
+                    logger.warning("corrupt config backed up to %s", backup)
+                except OSError:
+                    pass
                 self._data = {"connections": {}, "models": {}}
                 parse_failed = True
             except OSError as exc:
@@ -236,6 +243,8 @@ class ConfigManager:
             name = str(self._data.get("default_model") or "") or (next(iter(models_map), "") if models_map else "default")
         if name in models_map:
             return models_map[name]
+        if models_map:
+            logger.warning("model %r not found in config (available: %s); returning unconfigured stub", name, ", ".join(models_map))
         return ModelConfig(name=name)
 
     def models(self) -> dict[str, ModelConfig]:

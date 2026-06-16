@@ -188,8 +188,7 @@ def register(registry: ToolRegistry, orchestrator) -> None:
             issues = "; ".join(i.message for i in validation.issues)
             orchestrator.run_state.sql_feedback = validation_feedback([i.message for i in validation.issues])
             return ToolResult(ok=False, error=_err(tool_label, f"SQL invalid: {issues}"))
-        if not exploratory:
-            orchestrator.run_state.query_result = None
+        orchestrator.run_state.query_result = None
 
         validation_report = orchestrator.query.validate_sql_report(
             validation.normalized_sql,

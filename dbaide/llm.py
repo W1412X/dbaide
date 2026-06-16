@@ -208,8 +208,10 @@ class OpenAICompatibleClient(LLMClient):
         except (urllib.error.URLError, urllib.error.HTTPError, TimeoutError, OSError) as exc:
             logger.warning("llm_stream_failed, falling back to non-stream: %s", exc)
         # Fallback: a normal completion, emitted as a single chunk.
+        # Discard any partial streamed chunks — the non-stream response is
+        # authoritative and complete_turn will snap the final answer.
         text = self.complete_text(messages)
-        if text and not parts:
+        if text:
             on_chunk(text)
         return text or "".join(parts)
 

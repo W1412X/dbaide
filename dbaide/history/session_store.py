@@ -16,6 +16,7 @@ import json
 import logging
 import os
 import tempfile
+import threading
 import time
 import uuid
 from pathlib import Path
@@ -103,6 +104,7 @@ class ChatSessionStore:
 
     def __init__(self, base_dir: Path | None = None) -> None:
         self.base_dir = base_dir or Path.home() / ".dbaide" / "sessions"
+        self._lock = threading.Lock()
 
     # ── paths ────────────────────────────────────────────────────────────────
 
@@ -198,24 +200,26 @@ class ChatSessionStore:
         self, connection_name: str, session_id: str, turn: dict[str, Any]
     ) -> dict[str, Any] | None:
         """Append a turn; auto-titles an untitled session from the first question."""
-        session = self.load(connection_name, session_id)
-        if session is None:
-            return None
-        session.setdefault("turns", []).append(turn)
-        session["updated_at"] = _now()
-        if not session.get("title") or session["title"] == DEFAULT_TITLE:
-            session["title"] = _title_from_question(str(turn.get("question") or ""))
-        self._write(session)
-        return session
+        with self._lock:
+            session = self.load(connection_name, session_id)
+            if session is None:
+                return None
+            session.setdefault("turns", []).append(turn)
+            session["updated_at"] = _now()
+            if not session.get("title") or session["title"] == DEFAULT_TITLE:
+                session["title"] = _title_from_question(str(turn.get("question") or ""))
+            self._write(session)
+            return session
 
     def rename(self, connection_name: str, session_id: str, title: str) -> bool:
-        session = self.load(connection_name, session_id)
-        if session is None:
-            return False
-        session["title"] = (title or "").strip() or DEFAULT_TITLE
-        session["updated_at"] = _now()
-        self._write(session)
-        return True
+        with self._lock:
+            session = self.load(connection_name, session_id)
+            if session is None:
+                return False
+            session["title"] = (title or "").strip() or DEFAULT_TITLE
+            session["updated_at"] = _now()
+            self._write(session)
+            return True
 
     def delete(self, connection_name: str, session_id: str) -> bool:
         path = self._path(connection_name, session_id)

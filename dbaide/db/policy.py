@@ -147,7 +147,8 @@ def resolve_policy(
     policy = policy.merged_with(overrides or {})
     if instance:
         with _lock:
-            _cache[instance] = policy
+            _cache.setdefault(instance, policy)
+            return _cache[instance]
     return policy
 
 

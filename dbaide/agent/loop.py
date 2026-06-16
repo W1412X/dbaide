@@ -227,7 +227,7 @@ class AskAgentLoop:
                     detail="resuming",
                 ),
             )
-            if orch.run_state.answer and not orch.run_state.query_result:
+            if orch.run_state.answer and not orch.run_state.query_result and not reply:
                 return self._build_response(orch, orch.run_state.answer, disclosures_before or [])
         else:
             orch._reset_loop_state(question, database, execute, answer_language=answer_language)

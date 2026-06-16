@@ -37,18 +37,31 @@ def normalize_version(version: str) -> str:
     return match.group("ver") if match else text.lstrip("vV")
 
 
+_PRE_RELEASE_RE = re.compile(r"(\d+)(alpha|beta|rc|dev)(\d*)", re.IGNORECASE)
+
+
 def version_tuple(version: str) -> tuple[int, ...]:
     normalized = normalize_version(version)
     parts: list[int] = []
+    is_pre = False
     for piece in normalized.split("."):
         if piece.isdigit():
             parts.append(int(piece))
         else:
-            digits = "".join(ch for ch in piece if ch.isdigit())
-            if digits:
-                parts.append(int(digits))
+            m = _PRE_RELEASE_RE.match(piece)
+            if m:
+                parts.append(int(m.group(1)))
+                is_pre = True
+            else:
+                digits = "".join(ch for ch in piece if ch.isdigit())
+                if digits:
+                    parts.append(int(digits))
+                    is_pre = True
             break
-    return tuple(parts or (0,))
+    result = tuple(parts or (0,))
+    if is_pre:
+        result = result + (-1,)
+    return result
 
 
 def compare_versions(left: str, right: str) -> int:

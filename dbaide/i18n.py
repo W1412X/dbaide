@@ -12,8 +12,12 @@ when they retranslate.
 
 from __future__ import annotations
 
+import logging
 import re
 from typing import Callable
+
+_logger = logging.getLogger("dbaide.i18n")
+_warned_keys: set[str] = set()
 
 DEFAULT_LANGUAGE = "en"
 LANGUAGE_NAMES = {"en": "English", "zh": "中文"}
@@ -977,6 +981,9 @@ def detect_user_language(text: str | None) -> str:
 def t(key: str, /, **kwargs: object) -> str:
     entry = _STRINGS.get(key)
     if not entry:
+        if key not in _warned_keys:
+            _warned_keys.add(key)
+            _logger.debug("missing i18n key: %s", key)
         return key
     text = entry.get(_current) or entry.get(DEFAULT_LANGUAGE) or key
     if not kwargs:

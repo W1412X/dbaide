@@ -145,13 +145,13 @@ class AssetStore:
         return self.connection_matches(instance, connection=connection, fingerprint=expected)
 
     def column_docs(self, instance: str, database: str, table: str, *, connection=None, fingerprint: str = "") -> list[dict[str, Any]]:
+        """Derive per-column views from the table doc (the disclosure leaf). There
+        are no per-column files anymore; this keeps a stable shape for callers that
+        iterate columns (schema tree, describe_table, search, dev tools)."""
         if (connection is not None or fingerprint) and not self.connection_matches(
             instance, connection=connection, fingerprint=fingerprint,
         ):
             return []
-        """Derive per-column views from the table doc (the disclosure leaf). There
-        are no per-column files anymore; this keeps a stable shape for callers that
-        iterate columns (schema tree, describe_table, search, dev tools)."""
         tdoc = self.table_doc(instance, database, table, connection=connection, fingerprint=fingerprint)
         if not tdoc:
             return []
