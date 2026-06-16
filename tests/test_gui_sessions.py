@@ -43,6 +43,8 @@ def test_ask_tab_load_session_renders_turns(qapp):
     assert "execute_sql" in text or "SQL" in text                    # turn-1 trace restored
     # the conversation now holds two turn records
     assert len(tab.view("s1")._turns) == 2
+    tab.deleteLater()
+    qapp.processEvents()
 
 
 def _drain(qapp):
@@ -103,3 +105,5 @@ def test_load_session_replaces_previous(qapp):
                              "trace": [], "meta": {}}], connection="shop")
     assert len(tab.view("s1")._turns) == 1
     assert "only one" in tab.copy_text("s1") and "count paid orders" not in tab.copy_text("s1")
+    tab.deleteLater()
+    qapp.processEvents()

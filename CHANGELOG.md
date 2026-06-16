@@ -29,6 +29,8 @@ All notable changes to DBAide are documented here. The format is loosely based o
 - **ChartAgent** — scalar `series_types` / `series_axes` from the LLM apply to all
   series (not only the first).
 - **Trace** — Chart Agent sub-steps show as「Chart planning」instead of raw `chart_agent`.
+- **CI** — GUI session tests tear down `AskTab` widgets to avoid offscreen Qt aborts in
+  the full pytest run; tool-spec test updated for unified SQL history.
 
 ## [0.2.4] — 2026-06-13
 

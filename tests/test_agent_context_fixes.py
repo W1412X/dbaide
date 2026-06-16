@@ -771,12 +771,15 @@ def test_loop_prompt_advertises_tool_input_schema(tmp_path):
     assert "execute_sql(args:" in llm.system
 
 
-def test_tool_specs_distinguish_exploratory_and_final_sql():
+def test_tool_specs_unified_sql_history_with_purpose_tags():
     from dbaide.tools.specs import ASK_USER, EXECUTE_READONLY_SQL, EXECUTE_SQL
 
-    assert "exploratory/intermediate evidence" in EXECUTE_READONLY_SQL.description
+    assert "SQL history" in EXECUTE_READONLY_SQL.description
+    assert "purpose" in EXECUTE_READONLY_SQL.description
     assert "loop continues" in EXECUTE_READONLY_SQL.description
-    assert "final" in EXECUTE_SQL.description
+    assert "SQL history" in EXECUTE_SQL.description
+    assert "purpose" in EXECUTE_SQL.description
+    assert "query_result" in EXECUTE_SQL.description or "latest" in EXECUTE_SQL.description
     assert "pending" in ASK_USER.output_schema
     assert "answer" not in ASK_USER.output_schema
 
