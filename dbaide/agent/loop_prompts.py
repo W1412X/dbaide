@@ -14,12 +14,9 @@ from dbaide.agent.schema_context import decision_notes_block
 from dbaide.i18n import answer_language_directive
 
 
-# Latest tool results: only the results from the CURRENT step are injected
-# into the user prompt.  Older results live in compressed working memory and
-# can be retrieved on-demand via retrieve_memory_item(ref=...).
-LATEST_RESULT_LIMIT = 4000
-
-PRIOR_TURNS_WINDOW = 3
+# Defaults — used when Session values are unavailable (tests, direct construction).
+_DEFAULT_LATEST_RESULT_LIMIT = 4000
+_DEFAULT_PRIOR_TURNS_WINDOW = 3
 PRIOR_TURN_ANSWER_CHARS = 160
 PRIOR_TURN_SQL_CHARS = 160
 
@@ -196,10 +193,13 @@ class DecisionPromptBuilder:
             )
         timezone = str(getattr(self.orchestrator.session.connection, "session_timezone", "UTC") or "UTC")
         today = date.today().isoformat()
-        prior_turns_block = _prior_turns_block(self.orchestrator)
+        session = self.orchestrator.session
+        prior_window = getattr(session, "prior_turns_window", _DEFAULT_PRIOR_TURNS_WINDOW)
+        result_limit = getattr(session, "latest_result_limit", _DEFAULT_LATEST_RESULT_LIMIT)
+        prior_turns_block = _prior_turns_block(self.orchestrator, window_size=prior_window)
         prior_turns_line = f"{prior_turns_block}\n\n" if prior_turns_block else ""
 
-        latest_block = _latest_results_block(latest_results)
+        latest_block = _latest_results_block(latest_results, limit=result_limit)
 
         return (
             f"User question:\n{state.question}\n\n"
@@ -255,7 +255,7 @@ def tool_prompt_line(spec: Any) -> str:
     return line
 
 
-def _latest_results_block(latest_results: list[str]) -> str:
+def _latest_results_block(latest_results: list[str], *, limit: int = _DEFAULT_LATEST_RESULT_LIMIT) -> str:
     """Render only the latest step's tool results (on-demand context).
 
     Older results are in compressed working memory and can be retrieved via
@@ -263,16 +263,16 @@ def _latest_results_block(latest_results: list[str]) -> str:
     """
     if not latest_results:
         return "(first decision — no tool results yet)"
-    items = [_shorten(item, LATEST_RESULT_LIMIT) for item in latest_results]
+    items = [_shorten(item, limit) for item in latest_results]
     return "Latest tool results:\n" + "\n\n".join(items)
 
 
-def _prior_turns_block(orchestrator: Any) -> str:
+def _prior_turns_block(orchestrator: Any, *, window_size: int = _DEFAULT_PRIOR_TURNS_WINDOW) -> str:
     """Render the [Prior turns in this session] section."""
     turns = list(getattr(orchestrator, "session_turns", []) or [])
     if not turns:
         return ""
-    window = turns[-PRIOR_TURNS_WINDOW:]
+    window = turns[-window_size:]
     earlier = len(turns) - len(window)
     lines = [f"[Prior turns in this session]  (showing {len(window)} of {len(turns)}; "
              f"use retrieve_turn(turn_id) for clarifications/full SQL/full answer, "

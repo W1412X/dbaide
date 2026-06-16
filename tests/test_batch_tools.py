@@ -4,7 +4,7 @@ or ordering dependency stays one-per-decision."""
 import sqlite3
 
 from dbaide.adapters import build_adapter
-from dbaide.agent.loop import AskAgentLoop, BATCHABLE_TOOLS, MAX_BATCH
+from dbaide.agent.loop import AskAgentLoop, BATCHABLE_TOOLS, _DEFAULT_MAX_BATCH
 from dbaide.agent.orchestrator import AskOrchestrator
 from dbaide.llm import LLMClient, LLMMessage
 from dbaide.models import ConnectionConfig
@@ -82,11 +82,11 @@ def test_batch_calls_filters_and_caps(tmp_path):
     # Gated/mutating/pausing tools are surfaced, not silently dropped.
     assert set(dropped) == {"execute_sql", "ask_user", "annotate_object"}
 
-    # MAX_BATCH cap.
+    # _DEFAULT_MAX_BATCH cap.
     many = loop._batch_calls({"calls": [
-        {"tool": "describe_table", "args": {"table": f"t{i}"}} for i in range(MAX_BATCH + 4)
+        {"tool": "describe_table", "args": {"table": f"t{i}"}} for i in range(_DEFAULT_MAX_BATCH + 4)
     ]})[0]
-    assert len(many) == MAX_BATCH
+    assert len(many) == _DEFAULT_MAX_BATCH
 
 
 def test_batchable_whitelist_excludes_unsafe_tools():

@@ -156,18 +156,28 @@ class SettingsDialog(ChromeDialog):
     import_requested = pyqtSignal(str)        # file path
     export_all_requested = pyqtSignal()
 
-    # Numeric resource knobs shown on the Resources page: (key, min, max).
-    # The display label comes from i18n ("res.<key>").
-    _RESOURCE_FIELDS = (
-        ("max_inflight_queries", 1, 64),
-        ("statement_timeout_seconds", 1, 600),
-        ("build_max_workers", 1, 32),
-        ("default_row_limit", 1, 100000),
-        ("max_row_limit", 1, 1000000),
-        ("agent_max_steps", 1, 100),
-        ("big_table_rows", 1000, 1000000000),
-        ("explain_max_rows", 1000, 1000000000),
-        ("join_sample_size", 10, 1000),
+    # Numeric resource knobs shown on the Resources page, grouped by category.
+    # Each group: (i18n_group_key, [(field_key, min, max), ...])
+    _RESOURCE_GROUPS = (
+        ("res.group.database", (
+            ("max_inflight_queries", 1, 64),
+            ("statement_timeout_seconds", 1, 600),
+            ("default_row_limit", 1, 100000),
+            ("max_row_limit", 1, 1000000),
+            ("big_table_rows", 1000, 1000000000),
+            ("explain_max_rows", 1000, 1000000000),
+            ("join_sample_size", 10, 1000),
+        )),
+        ("res.group.agent", (
+            ("agent_max_steps", 1, 100),
+            ("prior_turns_window", 0, 20),
+            ("max_batch_tools", 1, 16),
+            ("result_preview_limit", 200, 10000),
+            ("latest_result_limit", 500, 20000),
+        )),
+        ("res.group.build", (
+            ("build_max_workers", 1, 32),
+        )),
     )
 
     def __init__(
@@ -388,9 +398,14 @@ class SettingsDialog(ChromeDialog):
         self._resource_spins: dict[str, QSpinBox] = {}
         self._resource_baselines: dict[str, int] = {}
 
-        # Global app concurrency cap — distinct from the per-run database knobs below,
-        # so it gets its own row + note at the top of the form.
+        # Global app concurrency cap — distinct from the per-run database knobs below.
         from dbaide.config import DEFAULT_MAX_CONCURRENT_RUNS
+        group_header = QLabel(_t("res.group.app"))
+        group_header.setStyleSheet(
+            f"color: {Theme.TEXT}; font-size: 12px; font-weight: 600;"
+            f" padding: 4px 0 2px 0;"
+        )
+        form.addRow(group_header)
         conc_spin = QSpinBox()
         conc_spin.setRange(1, 16)
         conc_spin.setFixedHeight(26)
@@ -406,22 +421,25 @@ class SettingsDialog(ChromeDialog):
         note.setStyleSheet(f"color: {Theme.MUTED}; font-size: 11px; padding: 2px 0 8px 0;")
         form.addRow("", note)
 
-        for key, lo, hi in self._RESOURCE_FIELDS:
-            spin = QSpinBox()
-            spin.setRange(lo, hi)
-            spin.setFixedHeight(26)
-            # A number input doesn't need to span the dialog — keep it compact and
-            # left-aligned next to its label.
-            spin.setMinimumWidth(120)
-            spin.setMaximumWidth(150)
-            # Show a concrete number: the user's override if set, else the load-profile
-            # default. Saving only persists fields the user changed away from the default.
-            baseline = int(prod.get(key, lo))
-            self._resource_baselines[key] = baseline
-            current = self._resource_values.get(key)
-            spin.setValue(int(current) if current not in (None, "") else baseline)
-            self._resource_spins[key] = spin
-            form.addRow(form_label(_t(f"res.{key}")), spin)
+        for group_key, fields in self._RESOURCE_GROUPS:
+            header = QLabel(_t(group_key))
+            header.setStyleSheet(
+                f"color: {Theme.TEXT}; font-size: 12px; font-weight: 600;"
+                f" padding: 10px 0 2px 0;"
+            )
+            form.addRow(header)
+            for key, lo, hi in fields:
+                spin = QSpinBox()
+                spin.setRange(lo, hi)
+                spin.setFixedHeight(26)
+                spin.setMinimumWidth(120)
+                spin.setMaximumWidth(150)
+                baseline = int(prod.get(key, lo))
+                self._resource_baselines[key] = baseline
+                current = self._resource_values.get(key)
+                spin.setValue(int(current) if current not in (None, "") else baseline)
+                self._resource_spins[key] = spin
+                form.addRow(form_label(_t(f"res.{key}")), spin)
 
         scroll.setWidget(inner)
         card_layout.addWidget(scroll, 1)

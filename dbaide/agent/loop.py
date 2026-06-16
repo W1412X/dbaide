@@ -42,7 +42,7 @@ BATCHABLE_TOOLS = frozenset({
     "column_stats", "profile_table", "retrieve_memory_item",
     "retrieve_turn", "list_earlier_turns",
 })
-MAX_BATCH = 6  # cap fan-out per decision so a bad batch can't blow the step budget
+_DEFAULT_MAX_BATCH = 6
 # Tools whose step should carry the exact SQL the system ran/handled, so the trace
 # is a complete, clickable audit of every auto-executed statement.
 _SQL_TOOLS = frozenset({"execute_sql", "explain_sql",
@@ -63,7 +63,7 @@ def _risk_reply_confirms(reply: str) -> bool:
     approved = {"execute anyway", "仍然执行"}
     return text in {item.casefold() for item in approved}
 
-RESULT_PREVIEW_LIMIT = 1400
+_DEFAULT_RESULT_PREVIEW_LIMIT = 1400
 
 # Circuit-breaker: if the same tool fails with the same error this many
 # consecutive times, inject a strong hint so the model stops retrying.
@@ -308,7 +308,8 @@ class AskAgentLoop:
                     done_event["row_count"] = data.get("row_count")
             self.progress(done_event)
             if result.ok:
-                summary = _summarize_tool_result(approved_risk_tool, result)
+                _rpl = getattr(orch.session, "result_preview_limit", _DEFAULT_RESULT_PREVIEW_LIMIT)
+                summary = _summarize_tool_result(approved_risk_tool, result, limit=_rpl)
                 transcript.append(f"Tool `{approved_risk_tool}` → {summary}")
             else:
                 reason = result.error or brief_tool_summary(approved_risk_tool, result) or "confirmed_execution_failed"
@@ -509,7 +510,7 @@ class AskAgentLoop:
             if not tool:
                 continue
             if tool in BATCHABLE_TOOLS and tool in self.allowed_tool_names:
-                if len(runnable) < MAX_BATCH:
+                if len(runnable) < getattr(self.orchestrator.session, "max_batch_tools", _DEFAULT_MAX_BATCH):
                     args = item.get("args") if isinstance(item.get("args"), dict) else {}
                     runnable.append({"tool": tool, "args": args})
             elif tool not in dropped:
@@ -532,7 +533,8 @@ class AskAgentLoop:
                                      if self._trace_parent else f"step:{step_no}")
         with llm_stage(tool_name):
             result = runtime.call_tool(tool_name, args, tool_ctx)
-        summary = _summarize_tool_result(tool_name, result)
+        _rpl = getattr(orch.session, "result_preview_limit", _DEFAULT_RESULT_PREVIEW_LIMIT)
+        summary = _summarize_tool_result(tool_name, result, limit=_rpl)
         brief = brief_tool_summary(tool_name, result)
         state.calls.append(ToolCallRecord(tool=tool_name, args=args, ok=result.ok, summary=summary))
         transcript.append(f"Tool `{tool_name}` → {summary}")
@@ -860,15 +862,15 @@ class AskAgentLoop:
         self.progress(from_trace_event(event))
 
 
-def _summarize_tool_result(tool: str, result: ToolResult) -> str:
+def _summarize_tool_result(tool: str, result: ToolResult, *, limit: int = _DEFAULT_RESULT_PREVIEW_LIMIT) -> str:
     if not result.ok and result.error:
         return f"ERROR: {result.error.message}"
     data = result.data
     if data is None:
         return "ok (empty)"
     text = json.dumps(data, ensure_ascii=False, default=str)
-    if len(text) > RESULT_PREVIEW_LIMIT:
-        return text[:RESULT_PREVIEW_LIMIT] + "…[truncated]"
+    if len(text) > limit:
+        return text[:limit] + "…[truncated]"
     return text
 
 

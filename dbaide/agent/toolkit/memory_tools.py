@@ -146,7 +146,7 @@ def register(registry: ToolRegistry, orchestrator) -> None:
             "turns": out,
             "total": total,
             "more": end < total,
-            "window_size": _DEFAULT_PRIOR_WINDOW,
+            "window_size": getattr(orchestrator.session, "prior_turns_window", _DEFAULT_PRIOR_WINDOW),
         })
 
     registry.register(RETRIEVE_MEMORY_ITEM, _retrieve_memory_item)
