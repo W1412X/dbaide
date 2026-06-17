@@ -63,9 +63,8 @@ def test_sidebar_schema_row_actions_use_more_menu():
     assert db_item.isExpanded() is False
     db_actions = sidebar.tree.itemWidget(db_item, 1)
     db_buttons = db_actions.findChildren(QToolButton)
-    assert len(db_buttons) == 2
-    assert db_buttons[0].toolTip() == "View doc"
-    db_menu_texts = [a.text() for a in db_buttons[1].menu().actions()]
+    assert len(db_buttons) == 1
+    db_menu_texts = [a.text() for a in db_buttons[0].menu().actions()]
     assert "View doc" in db_menu_texts
     assert "Edit note" in db_menu_texts
     assert "Update from database" in db_menu_texts
@@ -76,17 +75,17 @@ def test_sidebar_schema_row_actions_use_more_menu():
     app.processEvents()
     busy_actions = sidebar.tree.itemWidget(db_item, 1)
     busy_buttons = busy_actions.findChildren(QToolButton)
-    assert len(busy_buttons) == 2
-    assert busy_buttons[1].isEnabled() is False
-    assert busy_buttons[1].menu() is None
+    assert len(busy_buttons) == 1
+    assert busy_buttons[0].isEnabled() is False
+    assert busy_buttons[0].menu() is None
     assert sidebar._node_busy.active is True
 
     sidebar.set_node_refreshing(db_item.data(0, Qt.ItemDataRole.UserRole), False)
     app.processEvents()
     restored_actions = sidebar.tree.itemWidget(db_item, 1)
     restored_buttons = restored_actions.findChildren(QToolButton)
-    assert restored_buttons[1].isEnabled() is True
-    restored_texts = [a.text() for a in restored_buttons[1].menu().actions()]
+    assert restored_buttons[0].isEnabled() is True
+    restored_texts = [a.text() for a in restored_buttons[0].menu().actions()]
     assert "Edit note" in restored_texts
     assert "Backup database…" in restored_texts
     assert sidebar._node_busy.active is False

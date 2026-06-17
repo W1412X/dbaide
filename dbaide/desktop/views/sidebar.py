@@ -179,22 +179,20 @@ class Sidebar(QWidget):
 
         self.tree = QTreeWidget()
         self.tree.setHeaderHidden(True)
-        # Column 0 = the schema name (stretches); column 1 = small per-row action
-        # icons. Clicking the row opens its DATA; the doc icon opens the DOC; the
-        # overflow menu groups secondary actions such as notes and refresh.
+        # Column 0 = the schema name (stretches); column 1 = per-row overflow menu.
         self.tree.setColumnCount(2)
         header = self.tree.header()
         header.setStretchLastSection(False)
         header.setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
         header.setSectionResizeMode(1, QHeaderView.ResizeMode.Fixed)
-        header.resizeSection(1, 44)
+        header.resizeSection(1, 26)
         self.tree.setIndentation(16)
         self.tree.setAnimated(True)
         # Borderless tree that blends into the sidebar — interactivity comes from the
         # row hover/selection (global style), not a boxed frame.
         self.tree.setStyleSheet("QTreeWidget { background: transparent; border: none; }")
         # Single click on a row opens its data (the common case); double-click does the
-        # same. The per-row doc icon (column 1) opens the offline doc instead.
+        # same. Doc is available from the table document's sub-tab or the overflow menu.
         self.tree.itemClicked.connect(self._row_activated)
         self.tree.itemDoubleClicked.connect(self._double_clicked)
         self.tree.itemExpanded.connect(self._on_tree_expanded)
@@ -834,10 +832,6 @@ class Sidebar(QWidget):
         lay.setContentsMargins(0, 0, 2, 0)
         lay.setSpacing(2)
         lay.addStretch(1)
-        if data.get("path") and data.get("kind") in ("database", "table"):
-            lay.addWidget(self._icon_button(
-                "file-text", t("schema.view_doc"),
-                lambda d=data: self.schema_preview.emit(d)))
         lay.addWidget(self._more_button(data, t))
         return holder
 
@@ -890,11 +884,6 @@ class Sidebar(QWidget):
                            lambda: QApplication.clipboard().setText(qualified))
         btn.setMenu(menu)
         btn.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
-        return btn
-
-    def _icon_button(self, icon: str, tooltip: str, on_click) -> QToolButton:
-        btn = self._button_base(icon, tooltip)
-        btn.clicked.connect(lambda _checked=False: on_click())
         return btn
 
     def _button_base(self, icon: str, tooltip: str) -> QToolButton:
@@ -954,7 +943,7 @@ class Sidebar(QWidget):
 
     def _row_activated(self, item: QTreeWidgetItem, _column: int) -> None:
         # Single click opens the row's data (tables → data browser; db/column fall back
-        # to their doc inside open_schema_asset). The doc icon is the explicit doc path.
+        # to their doc inside open_schema_asset).
         data = item.data(0, Qt.ItemDataRole.UserRole)
         if isinstance(data, dict) and data.get("path"):
             self.schema_selected.emit(data)
