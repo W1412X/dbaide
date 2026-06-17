@@ -263,6 +263,23 @@ _STRINGS: dict[str, dict[str, str]] = {
         "en": "Register DBAide as an MCP server in AI coding tools",
         "zh": "将 DBAide 注册为 AI 编程工具的 MCP 服务器",
     },
+    "settings.integrations.mode": {"en": "Mode", "zh": "模式"},
+    "settings.integrations.mode.full": {
+        "en": "Full (ask + tools)",
+        "zh": "完整（ask + 原子工具）",
+    },
+    "settings.integrations.mode.ask": {
+        "en": "Ask only (AI pipeline)",
+        "zh": "仅 Ask（AI 全流程）",
+    },
+    "settings.integrations.mode.tools": {
+        "en": "Tools only (atomic DB tools)",
+        "zh": "仅工具（原子数据库工具）",
+    },
+    "settings.integrations.mode.desc": {
+        "en": "Choose which tools to expose via MCP",
+        "zh": "选择通过 MCP 暴露哪些工具",
+    },
     "settings.integrations.install": {"en": "Install", "zh": "安装"},
     "settings.integrations.installed": {"en": "Installed", "zh": "已安装"},
     "settings.integrations.install_all": {"en": "Install All", "zh": "全部安装"},
@@ -283,45 +300,55 @@ _STRINGS: dict[str, dict[str, str]] = {
         "en": (
             "What it does\n"
             "• Install writes a dbaide entry under mcpServers in the tool's config file.\n"
-            "• The AI assistant can then call DBAide's ask tool: natural-language questions "
-            "→ schema discovery, SQL generation, read-only execution, and a formatted answer "
-            "(with SQL evidence in the trace).\n\n"
+            "• The AI assistant can then call DBAide tools via MCP.\n\n"
+            "Three modes\n"
+            "• Full (default): exposes both the ask tool and atomic DB tools. "
+            "The AI can either ask a high-level question or directly call "
+            "list_tables, execute_sql, column_stats, etc.\n"
+            "• Ask only: exposes a single ask tool. Natural-language questions "
+            "→ DBAide's AI pipeline handles everything (schema discovery, SQL, execution, answer). "
+            "Best when the external agent doesn't need low-level DB access.\n"
+            "• Tools only: exposes atomic DB tools without the AI pipeline. "
+            "list_databases, list_tables, describe_table, execute_sql, validate_sql, "
+            "explain_sql, column_stats, profile_table, sample_rows, etc. "
+            "Best when the external agent has its own reasoning and only needs "
+            "DBAide as a database toolkit.\n\n"
             "Before you install\n"
             "1. Settings → Connections: add your database connection and test it.\n"
-            "2. Settings → Models: configure an LLM profile (API key, base URL, etc.).\n"
-            "3. Recommended: build schema assets for that connection once (faster discovery later).\n"
-            "4. Click Install or Install All on this page.\n"
+            "2. Settings → Models: configure an LLM profile (only needed for Full or Ask mode).\n"
+            "3. Recommended: build schema assets for that connection once (faster discovery).\n"
+            "4. Select the mode above, then click Install or Install All.\n"
             "5. Fully quit and restart the target AI tool so it reloads MCP servers.\n\n"
-            "What to say in the AI tool\n"
-            "Ask the assistant to use DBAide / the dbaide MCP server, for example:\n"
-            "• \"Use DBAide to show monthly revenue by channel for the shop connection, last 6 months.\"\n"
-            "• \"Call the dbaide ask tool: conn=shop, question=How many pending orders?\"\n"
-            "• \"Via MCP dbaide, profile the users table for null emails and duplicates.\"\n\n"
             "Tips\n"
-            "• conn is the connection name in DBAide (default connection if omitted).\n"
-            "• database is optional when the question names a schema/database explicitly.\n"
-            "• The GUI app and MCP share the same ~/.dbaide config."
+            "• Install always replaces the old entry — safe to switch modes anytime.\n"
+            "• conn selects the connection name (default connection if omitted).\n"
+            "• The GUI app and MCP share the same ~/.dbaide config.\n"
+            "• CLI equivalent: dbaide setup claude --mode full"
         ),
         "zh": (
             "有什么用\n"
             "• 点击「安装」会在对应工具的配置文件中写入 mcpServers.dbaide。\n"
-            "• AI 编程助手可通过 MCP 调用 DBAide 的 ask 工具：自然语言提问 → 自动发现表结构、"
-            "生成并执行只读 SQL、返回格式化结论（Trace 中可查看 SQL 证据）。\n\n"
+            "• AI 编程助手可通过 MCP 调用 DBAide 的工具。\n\n"
+            "三种模式\n"
+            "• 完整模式（默认）：同时暴露 ask 工具和原子数据库工具。"
+            "AI 既可以直接提问，也可以调用 list_tables、execute_sql、column_stats 等底层工具。\n"
+            "• 仅 Ask：只暴露一个 ask 工具。自然语言提问 → DBAide 的 AI 全流程处理"
+            "（发现表结构、生成 SQL、只读执行、格式化回答）。适合外部 Agent 不需要直接操作数据库的场景。\n"
+            "• 仅工具：只暴露原子数据库工具，不包含 AI 流程。"
+            "list_databases、list_tables、describe_table、execute_sql、validate_sql、"
+            "explain_sql、column_stats、profile_table、sample_rows 等。"
+            "适合外部 Agent 自带推理能力、只需要 DBAide 作为数据库工具箱的场景。\n\n"
             "安装前请准备好\n"
             "1. 设置 → 连接：添加数据库连接并测试连通。\n"
-            "2. 设置 → 模型：配置 LLM（API Key、Base URL 等）。\n"
+            "2. 设置 → 模型：配置 LLM（仅「完整」和「仅 Ask」模式需要）。\n"
             "3. 建议：对该连接执行一次「构建资产」，加速后续 schema 发现。\n"
-            "4. 在本页点击「安装」或「全部安装」。\n"
+            "4. 在上方选择模式，然后点击「安装」或「全部安装」。\n"
             "5. 完全退出并重启目标 AI 工具，使其重新加载 MCP 配置。\n\n"
-            "在 AI 工具里怎么说\n"
-            "让助手调用 DBAide / dbaide MCP，例如：\n"
-            "• 「用 DBAide 查 shop 连接最近 6 个月各渠道月销售额趋势」\n"
-            "• 「调用 dbaide 的 ask：conn=shop，question=待发货订单有多少？」\n"
-            "• 「通过 MCP dbaide 分析 users 表的空邮箱和重复记录」\n\n"
             "提示\n"
-            "• conn 为 DBAide 中的连接名称（省略则用默认连接）。\n"
-            "• database 可选；问题里已指明库/模式时可不写。\n"
-            "• 桌面应用与 MCP 共用 ~/.dbaide 配置。"
+            "• 安装会自动替换旧配置——随时可以切换模式。\n"
+            "• conn 为连接名称（省略则用默认连接）。\n"
+            "• 桌面应用与 MCP 共用 ~/.dbaide 配置。\n"
+            "• CLI 等价命令：dbaide setup claude --mode full"
         ),
     },
     "settings.back": {"en": "← Back", "zh": "← 返回"},

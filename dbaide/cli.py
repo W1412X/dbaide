@@ -302,6 +302,9 @@ def build_parser() -> argparse.ArgumentParser:
     setup.add_argument("tool", nargs="?", default="",
                        help="Tool name (claude, cursor, codex, trae, windsurf, opencode, "
                             "qoder, mimocode, roo, cline, aider, augment), or omit for --all")
+    setup.add_argument("--mode", choices=["full", "ask", "tools"], default="full",
+                       help="full = ask + atomic tools (default), "
+                            "ask = AI pipeline only, tools = atomic tools only")
     setup.add_argument("--all", action="store_true", dest="setup_all",
                        help="Register in ALL supported tools at once")
     setup.add_argument("--uninstall", action="store_true",
@@ -872,6 +875,8 @@ def dispatch_mcp(args: argparse.Namespace, _cfg: ConfigManager) -> int:
 def dispatch_setup(args: argparse.Namespace, _cfg: ConfigManager) -> int:
     from dbaide.skill import setup_tool, setup_all, uninstall_tool, uninstall_all, SUPPORTED_TOOLS
 
+    mode = getattr(args, "mode", "full")
+
     if args.uninstall:
         if args.setup_all:
             removed = uninstall_all()
@@ -892,11 +897,17 @@ def dispatch_setup(args: argparse.Namespace, _cfg: ConfigManager) -> int:
             print(f"dbaide was not registered in {tool}")
         return 0
 
+    mode_desc = {
+        "full": "full (ask + atomic tools)",
+        "ask": "ask (AI pipeline only)",
+        "tools": "tools (atomic DB tools only)",
+    }
+
     if args.setup_all:
-        results = setup_all()
+        results = setup_all(mode=mode)
         for tool, path in results.items():
             print(f"  {tool:<12} → {path}")
-        print(f"\n{len(results)} tools configured. MCP server registered.")
+        print(f"\n{len(results)} tools configured — mode: {mode_desc[mode]}")
         return 0
 
     tool = (args.tool or "").lower().strip()
@@ -909,9 +920,9 @@ def dispatch_setup(args: argparse.Namespace, _cfg: ConfigManager) -> int:
         print(f"supported: {', '.join(SUPPORTED_TOOLS)}", file=sys.stderr)
         return 1
 
-    path = setup_tool(tool)
+    path = setup_tool(tool, mode=mode)
     print(f"  → {path}")
-    print(f"\n{tool} integration ready. MCP server registered.")
+    print(f"\n{tool} integration ready — mode: {mode_desc[mode]}")
     return 0
 
 

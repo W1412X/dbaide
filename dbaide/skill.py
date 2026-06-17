@@ -7,6 +7,15 @@ whether the entry exists.
 
 The MCP server itself lives in ``dbaide.mcp_server`` and is started via
 ``dbaide mcp``.
+
+Three modes are available:
+
+    full  — exposes both the AI pipeline (ask) and atomic DB tools
+    ask   — only the high-level ask tool (AI does everything)
+    tools — only atomic DB tools (external agent drives reasoning)
+
+``setup_tool`` always removes the old entry first (delete-before-install)
+to ensure a clean switch when changing modes.
 """
 
 from __future__ import annotations
@@ -19,6 +28,9 @@ from typing import Any
 
 _HOME = Path.home()
 
+VALID_MODES = ("full", "ask", "tools")
+DEFAULT_MODE = "full"
+
 
 def _dbaide_command() -> str:
     """Return the best command string to start the MCP server."""
@@ -28,12 +40,16 @@ def _dbaide_command() -> str:
     return sys.executable
 
 
-def _mcp_entry() -> dict[str, Any]:
+def _mcp_entry(mode: str = DEFAULT_MODE) -> dict[str, Any]:
     """The mcpServers entry for dbaide."""
     exe = _dbaide_command()
     if exe.endswith("dbaide"):
-        return {"command": exe, "args": ["mcp"]}
-    return {"command": exe, "args": ["-m", "dbaide.mcp_server"]}
+        args = ["mcp"]
+    else:
+        args = ["-m", "dbaide.mcp_server"]
+    if mode and mode != DEFAULT_MODE:
+        args.extend(["--mode", mode])
+    return {"command": exe, "args": args}
 
 
 # ── Per-tool config locations ───────────────────────────────────────────────
@@ -98,15 +114,42 @@ def is_installed(tool: str) -> bool:
     return SERVER_KEY in (data.get("mcpServers") or {})
 
 
-def setup_tool(tool: str) -> str:
-    """Register the dbaide MCP server for *tool*.  Returns the config path."""
+def installed_mode(tool: str) -> str | None:
+    """Return the mode of the currently installed entry, or None if not installed.
+
+    Parses the args list to find ``--mode <value>``.  Returns "full" when
+    ``--mode`` is absent (the default).
+    """
+    if tool not in TOOL_REGISTRY:
+        return None
+    data = _read_config(_config_path(tool))
+    entry = (data.get("mcpServers") or {}).get(SERVER_KEY)
+    if entry is None:
+        return None
+    args = entry.get("args") or []
+    for i, arg in enumerate(args):
+        if arg == "--mode" and i + 1 < len(args):
+            v = args[i + 1]
+            return v if v in VALID_MODES else DEFAULT_MODE
+    return DEFAULT_MODE
+
+
+def setup_tool(tool: str, *, mode: str = DEFAULT_MODE) -> str:
+    """Register the dbaide MCP server for *tool*.
+
+    Always removes the old entry first (delete-before-install) to ensure
+    a clean switch when changing modes.  Returns the config path.
+    """
     if tool not in TOOL_REGISTRY:
         raise KeyError(f"Unknown tool: {tool}. Supported: {', '.join(SUPPORTED_TOOLS)}")
+    if mode not in VALID_MODES:
+        raise ValueError(f"Invalid mode: {mode}. Valid: {', '.join(VALID_MODES)}")
 
     path = _config_path(tool)
     data = _read_config(path)
     servers = data.setdefault("mcpServers", {})
-    servers[SERVER_KEY] = _mcp_entry()
+    servers.pop(SERVER_KEY, None)
+    servers[SERVER_KEY] = _mcp_entry(mode)
     _write_config(path, data)
     return str(path)
 
@@ -125,9 +168,9 @@ def uninstall_tool(tool: str) -> bool:
     return True
 
 
-def setup_all() -> dict[str, str]:
+def setup_all(*, mode: str = DEFAULT_MODE) -> dict[str, str]:
     """Register for ALL tools.  Returns {tool: config_path}."""
-    return {tool: setup_tool(tool) for tool in SUPPORTED_TOOLS}
+    return {tool: setup_tool(tool, mode=mode) for tool in SUPPORTED_TOOLS}
 
 
 def uninstall_all() -> list[str]:

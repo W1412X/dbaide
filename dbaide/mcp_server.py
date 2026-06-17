@@ -755,4 +755,8 @@ def raise_exit() -> None:
 
 
 if __name__ == "__main__":
-    serve()
+    import argparse as _ap
+    _p = _ap.ArgumentParser()
+    _p.add_argument("--mode", choices=["full", "ask", "tools"], default="full")
+    _a = _p.parse_args()
+    serve(mode=_a.mode)
