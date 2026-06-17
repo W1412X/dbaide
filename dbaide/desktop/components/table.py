@@ -51,7 +51,7 @@ class ResultTableWidget(QWidget):
         # value-viewer toggle is gone — only the Export menu remains here.
         self.export_menu = MenuButton(
             t("result.export"),
-            max_width=104,
+            max_width=120,
             icon=svg_icon("download", color=Theme.TEXT_2, size=15),
             filled=True,
         )

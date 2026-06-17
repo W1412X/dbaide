@@ -74,7 +74,7 @@ class BackupDialog(QDialog):
         self._worker = None
 
         self.setWindowTitle(t("backup.title"))
-        self.setFixedWidth(320)
+        self.setFixedWidth(360)
         self.setStyleSheet(
             f"QDialog {{ background: {Theme.SURFACE}; color: {Theme.TEXT}; }}"
             f"QLabel {{ background: transparent; }}"
@@ -105,7 +105,7 @@ class BackupDialog(QDialog):
         fmt_col = QVBoxLayout()
         fmt_col.setSpacing(2)
         fl = QLabel(t("backup.format"))
-        fl.setStyleSheet(f"font-size: 10px; color: {Theme.MUTED};")
+        fl.setStyleSheet(f"font-size: 11px; color: {Theme.MUTED};")
         self._fmt_combo = QComboBox()
         self._fmt_combo.addItems(["csv", "sql", "sqlite"])
         self._fmt_combo.setFixedHeight(26)
@@ -117,7 +117,7 @@ class BackupDialog(QDialog):
         batch_col = QVBoxLayout()
         batch_col.setSpacing(2)
         bl = QLabel(t("backup.batch_size"))
-        bl.setStyleSheet(f"font-size: 10px; color: {Theme.MUTED};")
+        bl.setStyleSheet(f"font-size: 11px; color: {Theme.MUTED};")
         self._batch_spin = QSpinBox()
         self._batch_spin.setRange(100, 100_000)
         self._batch_spin.setValue(5000)
@@ -132,7 +132,7 @@ class BackupDialog(QDialog):
             th_col = QVBoxLayout()
             th_col.setSpacing(2)
             tl = QLabel(t("backup.threads"))
-            tl.setStyleSheet(f"font-size: 10px; color: {Theme.MUTED};")
+            tl.setStyleSheet(f"font-size: 11px; color: {Theme.MUTED};")
             self._thread_spin = QSpinBox()
             self._thread_spin.setRange(1, 16)
             self._thread_spin.setValue(4)
@@ -156,7 +156,7 @@ class BackupDialog(QDialog):
 
         self._start_btn = QPushButton(t("backup.start"))
         self._start_btn.setFixedHeight(28)
-        self._start_btn.setFixedWidth(90)
+        self._start_btn.setMinimumWidth(110)
         self._start_btn.setStyleSheet(
             f"QPushButton {{ background: {Theme.ACCENT}; color: white;"
             f" border: none; border-radius: 6px; padding: 0 12px;"

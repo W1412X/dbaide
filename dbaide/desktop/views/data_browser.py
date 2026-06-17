@@ -90,6 +90,7 @@ class DataBrowser(QWidget):
         bar.setSpacing(8)
         self._title = QLabel("")
         self._title.setFont(QFont("Inter", 13, QFont.Weight.DemiBold))
+        self._title.setMaximumWidth(320)
         bar.addWidget(self._title)
         self._sort_caption = QLabel("")
         self._sort_caption.setStyleSheet(f"color: {Theme.MUTED}; font-size: 11px;")

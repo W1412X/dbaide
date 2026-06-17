@@ -40,8 +40,8 @@ class Sidebar(QWidget):
 
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
-        self.setMinimumWidth(260)
-        self.setMaximumWidth(360)
+        self.setMinimumWidth(280)
+        self.setMaximumWidth(400)
         layout = QVBoxLayout(self)
         layout.setContentsMargins(12, 12, 12, 12)
         layout.setSpacing(10)
@@ -187,7 +187,7 @@ class Sidebar(QWidget):
         header.setStretchLastSection(False)
         header.setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
         header.setSectionResizeMode(1, QHeaderView.ResizeMode.Fixed)
-        header.resizeSection(1, 54)
+        header.resizeSection(1, 44)
         self.tree.setIndentation(16)
         self.tree.setAnimated(True)
         # Borderless tree that blends into the sidebar — interactivity comes from the
@@ -831,8 +831,8 @@ class Sidebar(QWidget):
     def _row_actions(self, data: dict[str, Any], t) -> QWidget:
         holder = QWidget()
         lay = QHBoxLayout(holder)
-        lay.setContentsMargins(0, 0, 8, 0)
-        lay.setSpacing(4)
+        lay.setContentsMargins(0, 0, 2, 0)
+        lay.setSpacing(2)
         lay.addStretch(1)
         if data.get("path") and data.get("kind") in ("database", "table"):
             lay.addWidget(self._icon_button(
