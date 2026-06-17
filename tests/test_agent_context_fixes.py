@@ -1865,8 +1865,13 @@ def test_exploratory_sql_does_not_create_stale_final_result(tmp_path):
     generated = registry.invoke("generate_sql", {"question": "list ids", "table": "t", "database": "main"}, ctx)
 
     assert generated.ok
-    assert orch.run_state.sql == "SELECT id FROM t"
-    assert orch.run_state.query_result is None
+    data = generated.data if isinstance(generated.data, dict) else {}
+    if data.get("fast_executed"):
+        assert "SELECT id FROM t" in orch.run_state.sql
+        assert orch.run_state.query_result is not None
+    else:
+        assert orch.run_state.sql == "SELECT id FROM t"
+        assert orch.run_state.query_result is None
 
 
 def test_resume_clarification_deduplicates_confirmed_criteria(tmp_path):

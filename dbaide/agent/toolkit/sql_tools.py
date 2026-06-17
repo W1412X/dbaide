@@ -30,6 +30,115 @@ from dbaide.agent.toolkit.support import (
 logger = logging.getLogger("dbaide.agent.toolkit")
 
 
+def _can_fast_execute(orchestrator, draft, disclosed) -> bool:
+    """Check whether a freshly generated SQL qualifies for the fast path."""
+    if not orchestrator.run_state.execute_allowed:
+        return False
+    if len(disclosed) > 1:
+        return False
+    if draft.confidence is not None and draft.confidence < 0.8:
+        return False
+    if orchestrator.run_state.memory.open_questions:
+        return False
+    return True
+
+
+def _try_fast_execute(orchestrator, draft, disclosed, database) -> ToolResult | None:
+    """Attempt validate → risk-check → execute inline.  Returns None to fall back."""
+    report = orchestrator.query.validate_sql_report(draft.sql, add_limit=True)
+    if not report.ok:
+        orchestrator.run_state.sql_feedback = validation_feedback(report.issues)
+        return None
+
+    orchestrator.progress(subagent_event(
+        agent="validate",
+        title="Fast validate passed",
+        parent="generate_sql",
+        detail=report.normalized_sql[:160],
+        status="completed",
+    ))
+
+    risk = orchestrator.risk.decide(
+        validation=report,
+        plan_confidence=draft.confidence if draft.confidence is not None else 0.8,
+        table_count=1,
+        has_joins=False,
+        join_confidence=1.0,
+    )
+    if risk.action != "auto_execute":
+        return None
+
+    orchestrator.run_state.sql = report.normalized_sql
+    orchestrator.run_state.query_result = None
+    limit = orchestrator.session.default_limit
+    timeout_seconds = orchestrator.session.timeout_seconds
+
+    try:
+        execute_kwargs: dict[str, Any] = {"database": database, "limit": limit}
+        if timeout_seconds is not None:
+            execute_kwargs["timeout_seconds"] = timeout_seconds
+        if "confirmed" in inspect.signature(orchestrator.query.execute_sql).parameters:
+            execute_kwargs["confirmed"] = True
+        result = orchestrator.query.execute_sql(report.normalized_sql, **execute_kwargs)
+    except Exception:
+        return None
+
+    orchestrator.run_state.query_result = result
+    orchestrator.run_state.sql = report.normalized_sql
+    orchestrator.run_state.sql_feedback = ""
+    artifact_id = _next_sql_artifact_id(orchestrator.run_state.memory)
+    result_summary = _result_summary(result)
+    purpose = normalize_sql_purpose("")
+    orchestrator.run_state.memory.add_sql_artifact(SQLArtifact(
+        id=artifact_id,
+        purpose=purpose,
+        sql=report.normalized_sql,
+        database=database,
+        row_count=int(result.row_count or 0),
+        columns=list(result.columns or []),
+        rows_preview=list((result.rows or [])[:10]),
+        result_summary=result_summary,
+        warnings=list(report.warnings or []),
+        truncated=bool(getattr(result, "truncated", False)),
+    ))
+    record_sql_execution(
+        orchestrator.run_state,
+        sql=report.normalized_sql,
+        purpose=purpose,
+        database=database,
+        tool="execute_sql",
+        row_count=int(result.row_count or 0),
+        elapsed_ms=float(result.elapsed_ms or 0.0),
+        artifact_id=artifact_id,
+        columns=list(result.columns or []),
+    )
+    orchestrator.progress(subagent_event(
+        agent="sql",
+        title=f"Fast executed · {result.row_count} rows · {result.elapsed_ms:.0f}ms",
+        parent="generate_sql",
+        detail=report.normalized_sql[:160],
+        status="completed",
+    ))
+    return ToolResult(
+        ok=True,
+        data={
+            "sql": report.normalized_sql,
+            "fast_executed": True,
+            "rationale": draft.rationale,
+            "confidence": draft.confidence,
+            "columns": result.columns,
+            "rows": result.rows[:20],
+            "row_count": result.row_count,
+            "truncated": result.truncated,
+            "elapsed_ms": result.elapsed_ms,
+            "artifact_id": artifact_id,
+            "result_summary": result_summary,
+            "database": database,
+            "tables": [t for _, t, _ in disclosed],
+        },
+    )
+
+
 def register(registry: ToolRegistry, orchestrator) -> None:
     def _generate_sql(args: dict[str, Any], _ctx: ToolContext) -> ToolResult:
         question = str(args.get("question") or orchestrator.run_state.question or "").strip()
@@ -130,6 +239,13 @@ def register(registry: ToolRegistry, orchestrator) -> None:
             if tables_used:
                 orchestrator.run_state.table = tables_used[0]
                 _note_working_db(orchestrator, disclosed[0][0])
+            if _can_fast_execute(orchestrator, draft, disclosed):
+                fast = _try_fast_execute(
+                    orchestrator, draft, disclosed,
+                    database=disclosed[0][0] or orchestrator.run_state.table_database or orchestrator.run_state.database,
+                )
+                if fast is not None:
+                    return fast
             return ToolResult(
                 ok=True,
                 data={
