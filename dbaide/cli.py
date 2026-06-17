@@ -294,7 +294,9 @@ def build_parser() -> argparse.ArgumentParser:
     imp.add_argument("file", help="Path to the export JSON file")
 
     # ── MCP server & setup (AI agent integration) ────────────────────────────
-    sub.add_parser("mcp", help="Start the MCP (Model Context Protocol) server on stdio")
+    mcp = sub.add_parser("mcp", help="Start the MCP (Model Context Protocol) server on stdio")
+    mcp.add_argument("--mode", choices=["full", "ask", "tools"], default="full",
+                     help="full = ask + atomic tools (default), ask = AI pipeline only, tools = atomic tools only")
 
     setup = sub.add_parser("setup", help="Register dbaide as an MCP server in a coding tool's config")
     setup.add_argument("tool", nargs="?", default="",
@@ -861,9 +863,9 @@ def dispatch_import(args: argparse.Namespace, cfg: ConfigManager) -> int:
     return 0
 
 
-def dispatch_mcp(_args: argparse.Namespace, _cfg: ConfigManager) -> int:
+def dispatch_mcp(args: argparse.Namespace, _cfg: ConfigManager) -> int:
     from dbaide.mcp_server import serve
-    serve()
+    serve(mode=getattr(args, "mode", "full"))
     return 0
 
 
