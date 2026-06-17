@@ -225,7 +225,7 @@ class WorkflowEngine:
         run_state = assistant._orchestrator.run_state  # noqa: SLF001
         result.clarifications = list(getattr(run_state, "clarifications", []) or [])
         result.disclosed_tables = sorted({str(k) for k in (run_state.schemas or {}).keys()})
-        result.charts = list(getattr(run_state, "charts", []) or [])
+        result.charts = list(getattr(response, "charts", None) or getattr(run_state, "charts", []) or [])
         executed_sqls = list(getattr(response, "executed_sqls", None) or [])
         result.executed_sqls = executed_sqls
 

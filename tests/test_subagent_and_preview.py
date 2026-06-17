@@ -3,11 +3,13 @@ import sqlite3
 from typing import Any
 
 from dbaide.adapters import build_adapter
-from dbaide.agent.loop import AskAgentLoop, _fmt_profile, _fmt_sql_result
+from dbaide.agent.loop import AskAgentLoop, _fmt_profile, _fmt_sql_result, _fmt_subagent
 from dbaide.agent.orchestrator import AskOrchestrator
+from dbaide.agent.run_state import RunState
+from dbaide.agent.toolkit.subagent_tools import _merge_child_state
 from dbaide.llm import LLMClient, LLMMessage
 from dbaide.mcp_server import handle_execute_sql
-from dbaide.models import ConnectionConfig, QueryResult
+from dbaide.models import AssistantResponse, ConnectionConfig, QueryResult
 from dbaide.session import Session
 
 
@@ -71,6 +73,32 @@ def test_column_stats_formatter_uses_columns_payload():
     assert "amount: null_rate=0.0, min=1, max=99" in text
 
 
+def test_subagent_formatter_surfaces_preview_state_and_artifacts():
+    text = _fmt_subagent({
+        "task": "inspect large text",
+        "status": "wait_user",
+        "answer": "Need confirmation {{chart:2}}",
+        "result_preview": [{"id": 1, "body": "x... [cell truncated]"}],
+        "row_preview": {
+            "row_preview_truncated": True,
+            "rows_previewed": 1,
+            "rows_returned": 10,
+            "cell_truncated": True,
+            "truncated_cells": 1,
+        },
+        "charts": [{"chart_id": "chart:2"}],
+        "executed_sqls": [{"artifact_id": "sql:2", "purpose": "probe", "sql": "SELECT 1"}],
+        "pending_question": "Continue?",
+        "pending_options": ["yes", "no"],
+    })
+
+    assert "showing 1 of 10 returned rows" in text
+    assert "1 cell(s) truncated" in text
+    assert "Charts: chart:2" in text
+    assert "sql:2 (probe): SELECT 1" in text
+    assert "Pending question: Continue?" in text
+
+
 class _SubagentMock(LLMClient):
     def complete_text(self, messages: list[LLMMessage]) -> str:
         return "compressed"
@@ -125,3 +153,31 @@ def test_agent_can_delegate_to_scoped_subagent(tmp_path):
 
     assert response.answer == "Child evidence received."
     assert any(item.get("tool") == "execute_sql" for item in orch.run_state.executed_sqls)
+
+
+def test_subagent_merge_preserves_parent_state_without_id_collisions():
+    class Holder:
+        def __init__(self) -> None:
+            self.run_state = RunState()
+
+    parent = Holder()
+    child = Holder()
+    parent.run_state.charts = [{"chart_id": "chart:1", "title": "parent"}]
+    parent.run_state.executed_sqls = [{"index": 1, "sql": "SELECT 1", "purpose": "parent", "database": "", "tool": "execute_sql", "artifact_id": "sql:1"}]
+    child.run_state.charts = [{"chart_id": "chart:1", "title": "child"}]
+    child.run_state.clarifications = ["Use paid orders only"]
+    child.run_state.executed_sqls = [{"index": 1, "sql": "SELECT 2", "purpose": "child", "database": "", "tool": "execute_sql", "artifact_id": "sql:1"}]
+    response = AssistantResponse(
+        answer="Child chart: {{chart:1}}",
+        sql="SELECT 2",
+        charts=[{"chart_id": "chart:1", "title": "child"}],
+        executed_sqls=list(child.run_state.executed_sqls),
+    )
+
+    _merge_child_state(parent, child, response)
+
+    assert [chart["chart_id"] for chart in parent.run_state.charts] == ["chart:1", "chart:2"]
+    assert response.answer == "Child chart: {{chart:2}}"
+    assert response.charts[0]["chart_id"] == "chart:2"
+    assert parent.run_state.clarifications == ["Use paid orders only"]
+    assert [item["index"] for item in parent.run_state.executed_sqls] == [1, 2]

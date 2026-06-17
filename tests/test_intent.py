@@ -192,3 +192,29 @@ def test_aggregate_merges_charts_and_executed_sqls():
     assert len(result.executed_sqls) == 2
     assert result.executed_sqls[0]["sql"] == "SELECT 1"
     assert result.executed_sqls[1]["sql"] == "SELECT 2"
+
+
+def test_aggregate_remaps_colliding_chart_and_sql_ids():
+    conn = ConnectionConfig(name="t", type="sqlite", path=":memory:")
+    orch = AskOrchestrator(build_adapter(conn), Session(connection=conn), NullLLMClient())
+
+    intent_a = SubIntent(id="i1", type="data_query", text="revenue", language="en")
+    intent_b = SubIntent(id="i2", type="data_query", text="orders", language="en")
+    resp_a = AssistantResponse(
+        answer="Revenue {{chart:1}}",
+        charts=[{"chart_id": "chart:1", "title": "revenue"}],
+        executed_sqls=[{"index": 1, "artifact_id": "sql:1", "sql": "SELECT revenue"}],
+    )
+    resp_b = AssistantResponse(
+        answer="Orders {{chart:1}} and ![orders](chart:1)",
+        charts=[{"chart_id": "chart:1", "title": "orders"}],
+        executed_sqls=[{"index": 1, "artifact_id": "sql:1", "sql": "SELECT orders"}],
+    )
+
+    result = orch._aggregate("compare revenue and orders", [(intent_a, resp_a), (intent_b, resp_b)])
+
+    assert [chart["chart_id"] for chart in result.charts] == ["chart:1", "chart:2"]
+    assert "Revenue {{chart:1}}" in result.answer
+    assert "Orders {{chart:2}} and ![orders](chart:2)" in result.answer
+    assert [item["index"] for item in result.executed_sqls] == [1, 2]
+    assert [item["artifact_id"] for item in result.executed_sqls] == ["sql:1", "sql:2"]

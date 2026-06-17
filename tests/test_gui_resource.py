@@ -85,6 +85,26 @@ def test_service_execute_sql_honors_payload_limit(tmp_path):
     assert out["sql"].endswith("LIMIT 1")
 
 
+def test_service_execute_sql_rejects_invalid_limit(tmp_path):
+    svc = _service(tmp_path)
+
+    with pytest.raises(ValueError, match="limit must be a positive integer"):
+        svc.execute_sql({"connection_name": "local", "sql": "SELECT 1", "limit": 0})
+
+
+def test_service_request_limit_is_capped_by_resource_policy(tmp_path):
+    svc = _service(tmp_path)
+    svc.cfg.set_resource_defaults({"default_row_limit": 17, "max_row_limit": 50})
+
+    request = svc._build_request(
+        {"question": "q", "limit": 9999},
+        connection_name="local",
+        database="",
+    )
+
+    assert request.limit == 50
+
+
 def test_service_ask_request_defaults_use_resource_policy(tmp_path):
     svc = _service(tmp_path)
     svc.cfg.set_resource_defaults({"default_row_limit": 17, "statement_timeout_seconds": 23})

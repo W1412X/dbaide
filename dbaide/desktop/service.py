@@ -12,6 +12,19 @@ def _safe_float(value: object, default: float = 0.0) -> float:
     except (TypeError, ValueError):
         return default
 
+
+def _positive_int(value: object, default: int, *, name: str, maximum: int | None = None) -> int:
+    raw = default if value in (None, "") else value
+    try:
+        parsed = int(raw)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"{name} must be a positive integer") from exc
+    if parsed <= 0:
+        raise ValueError(f"{name} must be a positive integer")
+    if maximum is not None:
+        parsed = min(parsed, int(maximum))
+    return parsed
+
 from dbaide.adapters import build_adapter
 from dbaide.assets import AssetBuilder, AssetSearch, AssetStore
 from dbaide.joins import JoinCatalogStore
@@ -877,8 +890,18 @@ class DesktopService:
             question=str(payload.get("question") or ""),
             connection_name=connection_name,
             database_scope=[database] if database else [],
-            limit=int(payload.get("limit") or resource_policy.default_row_limit),
-            timeout_seconds=int(payload.get("timeout_seconds") or resource_policy.statement_timeout_seconds),
+            limit=_positive_int(
+                payload.get("limit"),
+                resource_policy.default_row_limit,
+                name="limit",
+                maximum=resource_policy.max_row_limit,
+            ),
+            timeout_seconds=_positive_int(
+                payload.get("timeout_seconds"),
+                resource_policy.statement_timeout_seconds,
+                name="timeout_seconds",
+                maximum=600,
+            ),
             resume_state=payload.get("resume_state"),
             user_reply=str(payload.get("user_reply") or ""),
             schema_scope=payload.get("schema_scope") or {},
@@ -972,7 +995,8 @@ class DesktopService:
     def validate_sql(self, payload: dict[str, Any]) -> dict[str, Any]:
         conn = self.cfg.get_connection(str(payload.get("connection_name") or "") or None)
         sql = str(payload.get("sql") or "")
-        limit = int(payload.get("limit") or self.cfg.policy_for(conn).default_row_limit)
+        policy = self.cfg.policy_for(conn)
+        limit = _positive_int(payload.get("limit"), policy.default_row_limit, name="limit", maximum=policy.max_row_limit)
         tools = self._query_tools(conn)
         validation = tools.validate_sql_report(sql, add_limit=True, limit=limit)
         return {
@@ -989,7 +1013,8 @@ class DesktopService:
         self._guard_busy(conn.name)
         database = str(payload.get("database") or "")
         sql = str(payload.get("sql") or "")
-        limit = int(payload.get("limit") or self.cfg.policy_for(conn).default_row_limit)
+        policy = self.cfg.policy_for(conn)
+        limit = _positive_int(payload.get("limit"), policy.default_row_limit, name="limit", maximum=policy.max_row_limit)
         tools = self._query_tools(conn)
         report = tools.validate_sql_report(sql, add_limit=True, limit=limit)
         if not report.ok:

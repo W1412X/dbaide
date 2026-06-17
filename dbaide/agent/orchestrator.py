@@ -12,6 +12,7 @@ from dbaide.agent.progress_events import progress_event
 from dbaide.agent.progressive_schema import ProgressiveSchemaAgent
 from dbaide.agent.run_state import RunState
 from dbaide.agent.sql_writer import SQLWriter
+from dbaide.charts.embed import merge_chart_specs, remap_chart_refs
 from dbaide.joins import JoinCatalogStore
 from dbaide.annotations import AnnotationStore
 from dbaide.assets import AssetStore
@@ -372,14 +373,19 @@ class AskOrchestrator:
         answer_language = detect_user_language(question)
         empty_answer = "（无回答）" if answer_language == "zh" else "(no answer)"
         for idx, (intent, resp) in enumerate(results, start=1):
+            answer_text = resp.answer or empty_answer
+            charts, chart_id_map = merge_chart_specs(all_charts, resp.charts)
+            if chart_id_map:
+                answer_text = remap_chart_refs(answer_text, chart_id_map)
             sections.append(
                 f"## {idx}. {intent.label_for(answer_language)} — {intent.text}\n\n"
-                f"{resp.answer or empty_answer}"
+                f"{answer_text}"
             )
             warnings.extend(resp.warnings or [])
             disclosures.extend(resp.disclosures or [])
-            all_charts.extend(resp.charts or [])
-            all_executed_sqls.extend(resp.executed_sqls or [])
+            all_charts.extend(charts)
+            for item in (resp.executed_sqls or []):
+                _append_aggregate_execution(all_executed_sqls, item)
             if primary is None and resp.result is not None:
                 primary = resp
         if not disclosures and disclosures_before is not None:
@@ -473,3 +479,15 @@ def _sub_intent_from_dict(data: Any):
         text=str(data.get("text") or ""),
         language=normalize(data.get("language") or "en"),
     )
+
+
+def _append_aggregate_execution(bucket: list[dict[str, Any]], item: dict[str, Any]) -> None:
+    if not isinstance(item, dict):
+        return
+    entry = dict(item)
+    index = len(bucket) + 1
+    entry["index"] = index
+    artifact_id = str(entry.get("artifact_id") or "")
+    if not artifact_id or artifact_id.startswith("sql:"):
+        entry["artifact_id"] = f"sql:{index}"
+    bucket.append(entry)

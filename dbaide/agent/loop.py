@@ -1266,6 +1266,38 @@ def _fmt_subagent(data: Any) -> str:
         parts.append(f"SQL:\n{data['sql']}")
     if data.get("result_preview"):
         parts.append("Result preview:\n" + json.dumps(data["result_preview"], ensure_ascii=False, default=str))
+        row_meta = data.get("row_preview") if isinstance(data.get("row_preview"), dict) else {}
+        notes = []
+        if row_meta.get("row_preview_truncated"):
+            notes.append(f"showing {row_meta.get('rows_previewed')} of {row_meta.get('rows_returned')} returned rows")
+        if row_meta.get("cell_truncated"):
+            notes.append(f"{row_meta.get('truncated_cells')} cell(s) truncated")
+        if notes:
+            parts.append("(" + "; ".join(notes) + ")")
+    if data.get("charts"):
+        chart_ids = [
+            str(item.get("chart_id"))
+            for item in data.get("charts")
+            if isinstance(item, dict) and item.get("chart_id")
+        ]
+        if chart_ids:
+            parts.append(f"Charts: {', '.join(chart_ids)}")
+    if data.get("executed_sqls"):
+        executed = data.get("executed_sqls")
+        if isinstance(executed, list):
+            lines = []
+            for item in executed[:5]:
+                if isinstance(item, dict) and item.get("sql"):
+                    purpose = f" ({item.get('purpose')})" if item.get("purpose") else ""
+                    lines.append(f"- {item.get('artifact_id') or item.get('index') or '?'}{purpose}: {item.get('sql')}")
+            if lines:
+                parts.append("Executed SQL:\n" + "\n".join(lines))
+            if len(executed) > 5:
+                parts.append(f"…+{len(executed) - 5} executed SQL entries")
+    if data.get("pending_question"):
+        parts.append(f"Pending question: {data['pending_question']}")
+    if data.get("pending_options"):
+        parts.append(f"Pending options: {data['pending_options']}")
     if data.get("warnings"):
         parts.append(f"Warnings: {data['warnings']}")
     return "\n\n".join(parts) if parts else _fmt_generic(data)

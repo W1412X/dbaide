@@ -295,6 +295,25 @@ def _text_content(text: str, *, is_error: bool = False) -> dict:
     return result
 
 
+def _positive_int_arg(
+    arguments: dict[str, Any],
+    name: str,
+    default: int,
+    *,
+    maximum: int,
+) -> int:
+    raw = arguments.get(name, default)
+    if raw in (None, ""):
+        raw = default
+    try:
+        value = int(raw)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"{name} must be a positive integer") from exc
+    if value <= 0:
+        raise ValueError(f"{name} must be a positive integer")
+    return min(value, maximum)
+
+
 # ── Serialization helpers ──────────────────────────────────────────────────
 
 def _serialize(obj: Any) -> Any:
@@ -470,7 +489,7 @@ def handle_inspect_metadata(arguments: dict) -> dict:
         include_columns = arguments.get("include_columns", True)
         include_indexes = arguments.get("include_indexes", False)
         include_fks = arguments.get("include_foreign_keys", True)
-        limit = int(arguments.get("limit") or 256)
+        limit = _positive_int_arg(arguments, "limit", 256, maximum=2048)
 
         all_tables = schema.list_tables(database=database)
 
@@ -480,12 +499,13 @@ def handle_inspect_metadata(arguments: dict) -> dict:
             names = set(tables_filter)
             all_tables = [t for t in all_tables if t.name in names]
 
-        all_tables = all_tables[:limit]
+        total_matching_tables = len(all_tables)
+        scanned_tables = all_tables[:limit]
 
         result_tables = []
         matched_columns = []
 
-        for t in all_tables:
+        for t in scanned_tables:
             entry: dict[str, Any] = {"name": t.name, "schema": t.schema, "comment": t.comment}
             if t.estimated_rows is not None:
                 entry["estimated_rows"] = t.estimated_rows
@@ -515,11 +535,18 @@ def handle_inspect_metadata(arguments: dict) -> dict:
         result: dict[str, Any] = {
             "database": database,
             "tables": result_tables,
-            "total_tables": len(all_tables),
+            "table_count": len(result_tables),
+            "total_tables": total_matching_tables,
+            "more_tables": total_matching_tables > len(scanned_tables),
         }
+        if total_matching_tables > len(scanned_tables):
+            result["note"] = (
+                f"Scanned {len(scanned_tables)} of {total_matching_tables} matching tables "
+                f"(limit={limit}). Raise limit or pass table_name/tables for the rest."
+            )
         if column_name:
             result["matched_columns"] = matched_columns
-        return _text_content(json.dumps(result, ensure_ascii=False, indent=2))
+        return _text_content(bounded_json_text(result))
     except Exception as exc:
         return _text_content(f"Error: {exc}", is_error=True)
 
@@ -531,9 +558,10 @@ def handle_execute_sql(arguments: dict) -> dict:
             return _text_content("Error: sql is required", is_error=True)
         conn = arguments.get("conn") or None
         database = str(arguments.get("database") or "")
-        limit = int(arguments.get("limit") or 100)
-        timeout = arguments.get("timeout_seconds")
-        timeout = int(timeout) if timeout is not None else None
+        limit = _positive_int_arg(arguments, "limit", 100, maximum=1000)
+        timeout = None
+        if arguments.get("timeout_seconds") not in (None, ""):
+            timeout = _positive_int_arg(arguments, "timeout_seconds", 30, maximum=600)
 
         _, _, query, _ = _ctx.get(conn)
         result = query.execute_sql(
@@ -608,7 +636,7 @@ def handle_column_stats(arguments: dict) -> dict:
         database = str(arguments.get("database") or "")
         columns = arguments.get("columns") or None
         metrics = arguments.get("metrics") or None
-        top_k = int(arguments.get("top_k") or 10)
+        top_k = _positive_int_arg(arguments, "top_k", 10, maximum=100)
 
         _, _, _, profile = _ctx.get(conn)
         stats = profile.column_stats(table, columns, metrics=metrics, database=database, top_k=top_k)
@@ -625,7 +653,7 @@ def handle_profile_table(arguments: dict) -> dict:
         conn = arguments.get("conn") or None
         database = str(arguments.get("database") or "")
         columns = arguments.get("columns") or None
-        top_k = int(arguments.get("top_k") or 10)
+        top_k = _positive_int_arg(arguments, "top_k", 10, maximum=100)
 
         _, _, _, profile = _ctx.get(conn)
         profiles = profile.profile_table(table, columns, database=database, top_k=top_k)
@@ -642,7 +670,7 @@ def handle_sample_rows(arguments: dict) -> dict:
             return _text_content("Error: table is required", is_error=True)
         conn = arguments.get("conn") or None
         database = str(arguments.get("database") or "")
-        limit = int(arguments.get("limit") or 20)
+        limit = _positive_int_arg(arguments, "limit", 20, maximum=1000)
 
         _, _, _, profile = _ctx.get(conn)
         result = profile.sample_rows(table, database=database, limit=limit)

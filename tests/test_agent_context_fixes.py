@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import sqlite3
+from types import SimpleNamespace
 
 import pytest
 
@@ -177,6 +178,38 @@ def test_confidence_none_when_no_sql_generated(tmp_path):
     orch = _orch(tmp_path)
     orch._reset_loop_state("q", "", True)
     assert orch.run_state.sql_confidence is None  # neutral until the writer sets a real value
+
+
+def test_workflow_uses_response_charts_over_run_state_charts(tmp_path):
+    from dbaide.core.result import WorkflowRequest
+    from dbaide.core.workflow import WorkflowEngine
+
+    cfg = ConnectionConfig(name="local", type="sqlite", path=str(tmp_path / "missing.db"))
+    engine = WorkflowEngine(cfg, _MockLLM())
+    engine._get_adapter = lambda: SimpleNamespace(test=lambda: None)  # type: ignore[assignment]
+
+    run_state = SimpleNamespace(
+        fail_reason="",
+        clarifications=[],
+        schemas={},
+        charts=[{"chart_id": "chart:1", "title": "stale"}],
+    )
+
+    class FakeAssistant:
+        def __init__(self):
+            self._orchestrator = SimpleNamespace(run_state=run_state)
+
+        def ask(self, *args, **kwargs):
+            return AssistantResponse(
+                answer="A {{chart:2}}",
+                charts=[{"chart_id": "chart:2", "title": "merged"}],
+            )
+
+    engine._build_assistant = lambda request: FakeAssistant()  # type: ignore[assignment]
+
+    result = engine.run(WorkflowRequest(question="q"))
+
+    assert result.charts == [{"chart_id": "chart:2", "title": "merged"}]
 
 
 def test_continue_multi_runs_all_remaining_intents(tmp_path):

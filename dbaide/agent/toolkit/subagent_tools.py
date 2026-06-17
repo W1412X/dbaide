@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from dbaide.charts.embed import merge_chart_specs, remap_chart_refs
 from dbaide.agent.toolkit.result_preview import preview_rows
 from dbaide.agent.toolkit.support import _err
 from dbaide.models import AssistantResponse
@@ -162,9 +163,12 @@ def _merge_child_state(parent, child, response: AssistantResponse) -> None:
         if key not in parent.run_state.schemas:
             parent.run_state.schemas[key] = list(columns)
             parent.run_state.schema_db[key] = child.run_state.schema_db.get(key, "")
+    for fact in child.run_state.clarifications:
+        if fact and fact not in parent.run_state.clarifications:
+            parent.run_state.clarifications.append(fact)
+    _merge_child_charts(parent, response)
     for item in child.run_state.executed_sqls:
-        if item not in parent.run_state.executed_sqls:
-            parent.run_state.executed_sqls.append(dict(item))
+        _append_child_execution(parent, item)
     if response.sql and not parent.run_state.sql:
         parent.run_state.sql = response.sql
 
@@ -187,5 +191,41 @@ def _response_payload(task: str, response: AssistantResponse) -> dict[str, Any]:
         "result_preview": rows,
         "row_preview": row_meta,
         "warnings": list(response.warnings or []),
+        "charts": list(response.charts or []),
         "executed_sqls": list(response.executed_sqls or []),
+        "pending_question": response.pending_question,
+        "pending_options": list(response.pending_options or []),
     }
+
+
+def _append_child_execution(parent, item: dict[str, Any]) -> None:
+    if not isinstance(item, dict):
+        return
+    key = _execution_key(item)
+    existing = {_execution_key(entry) for entry in (parent.run_state.executed_sqls or []) if isinstance(entry, dict)}
+    if key in existing:
+        return
+    entry = dict(item)
+    entry["index"] = len(parent.run_state.executed_sqls or []) + 1
+    parent.run_state.executed_sqls.append(entry)
+
+
+def _execution_key(item: dict[str, Any]) -> tuple[str, str, str, str, str]:
+    return (
+        str(item.get("sql") or "").strip(),
+        str(item.get("purpose") or "").strip(),
+        str(item.get("database") or "").strip(),
+        str(item.get("tool") or "").strip(),
+        str(item.get("artifact_id") or "").strip(),
+    )
+
+
+def _merge_child_charts(parent, response: AssistantResponse) -> None:
+    parent_charts = [dict(item) for item in (parent.run_state.charts or []) if isinstance(item, dict)]
+    child_charts, id_map = merge_chart_specs(parent_charts, response.charts)
+    if not child_charts:
+        return
+    if id_map:
+        response.answer = remap_chart_refs(response.answer, id_map)
+    response.charts = child_charts
+    parent.run_state.charts = parent_charts + child_charts
