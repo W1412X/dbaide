@@ -41,6 +41,26 @@ def test_openai_client_rejects_non_http_base_url():
             provider="openai_compatible", base_url="file:///tmp/model", api_key="k", model="m"))
 
 
+def test_parse_repairs_unescaped_quote_in_answer():
+    raw = '{"action":"finish","answer":"The result is "good" overall"}'
+    obj = _client()._parse_json_object(raw)
+    assert obj["action"] == "finish"
+    assert "good" in obj["answer"]
+
+
+def test_parse_repairs_unescaped_quotes_in_markdown_table():
+    raw = '{"action":"finish","answer":"| col |\n| "value" | "other" |"}'
+    obj = _client()._parse_json_object(raw)
+    assert obj["action"] == "finish"
+    assert "value" in obj["answer"]
+
+
+def test_parse_handles_fenced_block_with_content_before_and_after():
+    raw = 'Here is the JSON:\n```json\n{"action":"call_tool","tool":"x","args":{}}\n```\nDone.'
+    obj = _client()._parse_json_object(raw)
+    assert obj["action"] == "call_tool"
+
+
 def test_streamer_handles_literal_newline_in_answer():
     out = []
     s = JsonFieldStreamer(out.append, field="answer")

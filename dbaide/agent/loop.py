@@ -26,7 +26,7 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger("dbaide.agent.loop")
 
-DECISION_RETRIES = 1
+DECISION_RETRIES = 2
 # Both names bind to the same execute handler; the loop must treat them alike.
 _EXECUTE_TOOLS = frozenset({"execute_sql"})
 

@@ -801,7 +801,8 @@ def test_decision_raises_on_transient_llm_call_failure(tmp_path):
     with pytest.raises(LoopDecisionError, match="temporary outage"):
         loop._decide(LoopState(question="q", database="", execute_allowed=True), [])
 
-    assert orch.llm.calls == 1
+    from dbaide.agent.loop import DECISION_RETRIES
+    assert orch.llm.calls == DECISION_RETRIES
 
 
 def test_decision_does_not_retry_cancelled_llm_call(tmp_path):

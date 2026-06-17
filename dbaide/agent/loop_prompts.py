@@ -149,11 +149,12 @@ class DecisionPromptBuilder:
             "</tools>\n\n"
 
             "<response-format>\n"
-            "Return JSON only. Include memory_updates so the next round has compressed context:\n"
-            '  {"action":"call_tool","tool":"...","args":{...},"thought":"...",'
-            '"result_assessment":"what the previous result showed and what you conclude",'
-            '"memory_updates":{"verified":[],"findings":[],"hypotheses":[],"excluded_paths":[],"open_questions":[]},"next_action_hint":"..."}\n'
-            '  {"action":"finish","answer":"markdown answer for the user","memory_updates":{...}}\n'
+            "Return a single JSON object. Examples:\n"
+            '  {"action":"call_tool","tool":"...","args":{...},"thought":"...","result_assessment":"..."}\n'
+            '  {"action":"finish","answer":"markdown answer for the user"}\n'
+            "Optional: add memory_updates to persist observations across rounds:\n"
+            '  "memory_updates":{"verified":["fact"],"findings":["observation"],"excluded_paths":[{"target":"t","reason":"r"}]}\n'
+            "Fields: verified, findings, hypotheses, excluded_paths, open_questions — all optional arrays.\n"
             "</response-format>\n\n"
 
             "<batching>\n"

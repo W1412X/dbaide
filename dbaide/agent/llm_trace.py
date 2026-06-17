@@ -98,10 +98,10 @@ class RecordingLLMClient(LLMClient):
         finally:
             self._record("complete_json", messages, locals().get("out"), (time.perf_counter() - t) * 1000)
 
-    def complete_text(self, messages: list[LLMMessage]) -> str:
+    def complete_text(self, messages: list[LLMMessage], *, json_mode: bool = False) -> str:
         t = time.perf_counter()
         try:
-            out = self.inner.complete_text(messages)
+            out = self.inner.complete_text(messages, json_mode=json_mode)
             return out
         finally:
             self._record("complete_text", messages, locals().get("out"), (time.perf_counter() - t) * 1000)
@@ -119,10 +119,11 @@ class RecordingLLMClient(LLMClient):
             self._record("complete_json_stream", messages, locals().get("out"), (time.perf_counter() - t) * 1000)
 
     def complete_text_stream(self, messages: list[LLMMessage],
-                             on_chunk: "Callable[[str], None]") -> str:
+                             on_chunk: "Callable[[str], None]",
+                             *, json_mode: bool = False) -> str:
         t = time.perf_counter()
         try:
-            out = self.inner.complete_text_stream(messages, on_chunk)
+            out = self.inner.complete_text_stream(messages, on_chunk, json_mode=json_mode)
             return out
         finally:
             self._record("complete_text_stream", messages, locals().get("out"), (time.perf_counter() - t) * 1000)

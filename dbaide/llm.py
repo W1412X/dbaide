@@ -36,7 +36,7 @@ class LLMClient:
     def complete_json(self, messages: list[LLMMessage], *, schema_hint: str = "") -> dict[str, Any]:
         raise NotImplementedError
 
-    def complete_text(self, messages: list[LLMMessage]) -> str:
+    def complete_text(self, messages: list[LLMMessage], *, json_mode: bool = False) -> str:
         raise NotImplementedError
 
     def supports_streaming(self) -> bool:
@@ -49,11 +49,12 @@ class LLMClient:
         return self.complete_json(messages, schema_hint=schema_hint)
 
     def complete_text_stream(self, messages: list[LLMMessage],
-                             on_chunk: "Callable[[str], None]") -> str:
+                             on_chunk: "Callable[[str], None]",
+                             *, json_mode: bool = False) -> str:
         """Stream the completion, calling ``on_chunk`` with each text delta; returns
         the full text. Base fallback: do a normal completion and emit it as one chunk
         (so callers can always use this API)."""
-        text = self.complete_text(messages)
+        text = self.complete_text(messages, json_mode=json_mode)
         if text:
             on_chunk(text)
         return text
@@ -63,7 +64,7 @@ class NullLLMClient(LLMClient):
     def complete_json(self, messages: list[LLMMessage], *, schema_hint: str = "") -> dict[str, Any]:
         raise RuntimeError("No LLM model configured. Configure a model before running agent reasoning.")
 
-    def complete_text(self, messages: list[LLMMessage]) -> str:
+    def complete_text(self, messages: list[LLMMessage], *, json_mode: bool = False) -> str:
         raise RuntimeError("No LLM model configured. Configure a model before running agent reasoning.")
 
 
@@ -90,15 +91,20 @@ class OpenAICompatibleClient(LLMClient):
             )
 
     def complete_json(self, messages: list[LLMMessage], *, schema_hint: str = "") -> dict[str, Any]:
-        text = self.complete_text(messages + ([LLMMessage("system", schema_hint)] if schema_hint else []))
+        text = self.complete_text(
+            messages + ([LLMMessage("system", schema_hint)] if schema_hint else []),
+            json_mode=True,
+        )
         return self._parse_json_object(text)
 
-    def complete_text(self, messages: list[LLMMessage]) -> str:
-        payload = {
+    def complete_text(self, messages: list[LLMMessage], *, json_mode: bool = False) -> str:  # type: ignore[override]
+        payload: dict[str, Any] = {
             "model": self.cfg.model,
             "messages": [{"role": m.role, "content": m.content} for m in messages],
             "temperature": 0,
         }
+        if json_mode:
+            payload["response_format"] = {"type": "json_object"}
         body = json.dumps(payload).encode("utf-8")
         req = urllib.request.Request(
             f"{self.base_url}/chat/completions",
@@ -156,11 +162,13 @@ class OpenAICompatibleClient(LLMClient):
         parse the accumulated text as a JSON object — same contract as complete_json,
         but lets a caller surface a field live."""
         msgs = messages + ([LLMMessage("system", schema_hint)] if schema_hint else [])
-        text = self.complete_text_stream(msgs, on_chunk=on_text_chunk or (lambda _d: None))
+        text = self.complete_text_stream(msgs, on_chunk=on_text_chunk or (lambda _d: None),
+                                         json_mode=True)
         return self._parse_json_object(text)
 
     def complete_text_stream(self, messages: list[LLMMessage],
-                             on_chunk: "Callable[[str], None]") -> str:
+                             on_chunk: "Callable[[str], None]",
+                             *, json_mode: bool = False) -> str:
         """Stream the chat completion via SSE (``stream: true``), emitting each content
         delta through ``on_chunk`` and returning the accumulated text. Any streaming
         failure falls back to a normal (non-streamed) completion so the answer is never
@@ -171,6 +179,8 @@ class OpenAICompatibleClient(LLMClient):
             "temperature": 0,
             "stream": True,
         }
+        if json_mode:
+            payload["response_format"] = {"type": "json_object"}
         req = urllib.request.Request(
             f"{self.base_url}/chat/completions",
             data=json.dumps(payload).encode("utf-8"),
@@ -210,28 +220,90 @@ class OpenAICompatibleClient(LLMClient):
         # Fallback: a normal completion, emitted as a single chunk.
         # Discard any partial streamed chunks — the non-stream response is
         # authoritative and complete_turn will snap the final answer.
-        text = self.complete_text(messages)
+        text = self.complete_text(messages, json_mode=json_mode)
         if text:
             on_chunk(text)
         return text or "".join(parts)
 
     def _parse_json_object(self, text: str) -> dict[str, Any]:
-        stripped = text.strip()
-        if stripped.startswith("```"):
-            stripped = stripped.strip("`")
-            if stripped.lower().startswith("json"):
-                stripped = stripped[4:].strip()
-        start = stripped.find("{")
-        end = stripped.rfind("}")
-        if start >= 0 and end > start:
-            stripped = stripped[start : end + 1]
+        stripped = _extract_json_block(text)
         # strict=False tolerates literal control characters (raw newlines/tabs) inside
         # string values — models routinely emit multi-line markdown answers with real
         # newlines rather than escaped \n, which strict JSON would reject.
-        result = json.loads(stripped, strict=False)
+        try:
+            result = json.loads(stripped, strict=False)
+        except (json.JSONDecodeError, ValueError):
+            repaired = _repair_json_string(stripped)
+            if repaired is not None:
+                result = json.loads(repaired, strict=False)
+            else:
+                raise
         if not isinstance(result, dict):
             raise ValueError(f"Expected JSON object, got {type(result).__name__}")
         return result
+
+
+def _extract_json_block(text: str) -> str:
+    """Strip markdown fences and locate the outermost JSON object."""
+    stripped = text.strip()
+    if stripped.startswith("```"):
+        lines = stripped.split("\n")
+        if lines[0].strip().rstrip("`").lower() in ("```", "```json"):
+            lines = lines[1:]
+        if lines and lines[-1].strip() == "```":
+            lines = lines[:-1]
+        stripped = "\n".join(lines).strip()
+    start = stripped.find("{")
+    end = stripped.rfind("}")
+    if start >= 0 and end > start:
+        stripped = stripped[start : end + 1]
+    return stripped
+
+
+def _repair_json_string(text: str) -> str | None:
+    """Best-effort repair for unescaped quotes inside JSON string values.
+
+    Models often produce ``"answer": "some "quoted" text"`` — a raw ``"`` inside
+    a string value.  Walk the JSON char-by-char, track whether we are inside a
+    string, and escape any ``"`` that appears where a valid JSON token (comma,
+    colon, ``}``, ``]``) is NOT expected.  Returns the repaired text, or None if
+    the structure is too broken to salvage.
+    """
+    try:
+        n = len(text)
+        out: list[str] = []
+        i = 0
+        while i < n:
+            ch = text[i]
+            if ch == '"':
+                out.append('"')
+                i += 1
+                while i < n:
+                    c = text[i]
+                    if c == '\\' and i + 1 < n:
+                        out.append(c)
+                        out.append(text[i + 1])
+                        i += 2
+                        continue
+                    if c == '"':
+                        rest = text[i + 1:].lstrip()
+                        if not rest or rest[0] in ('}', ']', ',', ':'):
+                            out.append('"')
+                            i += 1
+                            break
+                        out.append('\\"')
+                        i += 1
+                        continue
+                    out.append(c)
+                    i += 1
+            else:
+                out.append(ch)
+                i += 1
+        repaired = "".join(out)
+        json.loads(repaired, strict=False)
+        return repaired
+    except Exception:
+        return None
 
 
 def build_llm_client(cfg: ModelConfig) -> LLMClient:
