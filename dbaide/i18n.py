@@ -472,8 +472,8 @@ _STRINGS: dict[str, dict[str, str]] = {
     "schema.view_doc": {"en": "View doc", "zh": "查看文档"},
     "schema.enrich": {"en": "Enrich doc (summary + samples)", "zh": "补充文档（摘要 + 采样）"},
     "schema.status_base": {
-        "en": "Structure only (from the catalog). Right-click → Enrich for summary/samples.",
-        "zh": "仅结构（来自 catalog）。右键 → 补充文档 可加摘要/采样。",
+        "en": "Structure only (from the catalog). Use ⋯ → Enrich for summary/samples.",
+        "zh": "仅结构（来自 catalog）。点击 ⋯ → 补充文档 可加摘要/采样。",
     },
     "schema.status_enriched": {"en": "Enriched (summary + samples)", "zh": "已补充（摘要 + 采样）"},
     "schema.status_stale": {

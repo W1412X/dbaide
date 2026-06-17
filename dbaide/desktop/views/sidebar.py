@@ -199,8 +199,7 @@ class Sidebar(QWidget):
         self.tree.itemDoubleClicked.connect(self._double_clicked)
         self.tree.itemExpanded.connect(self._on_tree_expanded)
         self.tree.itemCollapsed.connect(self._on_tree_collapsed)
-        self.tree.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
-        self.tree.customContextMenuRequested.connect(self._context_menu)
+        self.tree.setContextMenuPolicy(Qt.ContextMenuPolicy.NoContextMenu)
         schema_layout.addWidget(self.tree, 1)
         split.addWidget(schema_panel)
 
@@ -843,7 +842,7 @@ class Sidebar(QWidget):
         return holder
 
     def _more_button(self, data: dict[str, Any], t) -> QToolButton:
-        from PyQt6.QtWidgets import QMenu
+        from PyQt6.QtWidgets import QApplication, QMenu
         from dbaide.desktop.components.menu import _style_menu
 
         path = str(data.get("path") or "")
@@ -854,16 +853,41 @@ class Sidebar(QWidget):
             btn.setEnabled(False)
             self._node_busy_buttons[path] = btn
             return btn
+        kind = data.get("kind")
         menu = QMenu(btn)
         _style_menu(menu)
+        if kind == "table":
+            menu.addAction(t("schema.open_data"), lambda d=data: self.schema_selected.emit(d))
+        if kind in ("database", "table") and data.get("path"):
+            menu.addAction(t("schema.view_doc"), lambda d=data: self.schema_preview.emit(d))
+        if kind in ("database", "table"):
+            menu.addAction(t("schema.enrich"), lambda d=data: self.enrich_requested.emit(d))
         menu.addAction(t("schema.edit_note"), lambda d=data: self.edit_note.emit(d))
-        if data.get("kind") in ("database", "table"):
+        if kind in ("database", "table"):
             menu.addAction(t("schema.refresh_node"), lambda d=data: self.refresh_requested.emit(d))
-        kind = data.get("kind")
         if kind == "table":
             menu.addAction(t("schema.backup_table"), lambda d=data: self.backup_requested.emit(d))
         elif kind == "database":
             menu.addAction(t("schema.backup_database"), lambda d=data: self.backup_requested.emit(d))
+        if kind == "table":
+            gen = menu.addMenu(t("schema.generate_sql"))
+            _style_menu(gen)
+            for gkind, key in (
+                ("select_star", "schema.gen_select_star"),
+                ("select_columns", "schema.gen_select_columns"),
+                ("count", "schema.gen_count"),
+                ("insert", "schema.gen_insert"),
+                ("update", "schema.gen_update"),
+            ):
+                gen.addAction(t(key), lambda _c=False, k=gkind, d=data: self.generate_sql.emit(d, k))
+        menu.addSeparator()
+        name = str(data.get("name") or "")
+        menu.addAction(t("schema.copy_name"),
+                       lambda: QApplication.clipboard().setText(name))
+        if path:
+            qualified = ".".join(path.split(".")[1:]) or name
+            menu.addAction(t("schema.copy_qualified"),
+                           lambda: QApplication.clipboard().setText(qualified))
         btn.setMenu(menu)
         btn.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
         return btn
@@ -939,50 +963,7 @@ class Sidebar(QWidget):
         # Same as a single click (kept for muscle memory).
         self._row_activated(item, _column)
 
-    def _context_menu(self, pos) -> None:
-        item = self.tree.itemAt(pos)
-        if item is None:
-            return
-        data = item.data(0, Qt.ItemDataRole.UserRole)
-        if not (isinstance(data, dict) and data.get("name")):
-            return
-        from PyQt6.QtWidgets import QApplication, QMenu
-        from dbaide.desktop.components.menu import _style_menu
-        from dbaide.i18n import t
-        kind = data.get("kind")
-        menu = QMenu(self)
-        _style_menu(menu)
-        if kind == "table":
-            menu.addAction(t("schema.open_data"), lambda: self.schema_selected.emit(data))
-        if kind in ("database", "table") and data.get("path"):
-            menu.addAction(t("schema.view_doc"), lambda: self.schema_preview.emit(data))
-        if kind in ("database", "table"):
-            menu.addAction(t("schema.enrich"), lambda: self.enrich_requested.emit(data))
-        if kind in ("database", "table", "column"):
-            menu.addAction(t("schema.edit_note"), lambda: self.edit_note.emit(data))
-        if kind == "table":
-            gen = menu.addMenu(t("schema.generate_sql"))
-            _style_menu(gen)
-            for gkind, key in (
-                ("select_star", "schema.gen_select_star"),
-                ("select_columns", "schema.gen_select_columns"),
-                ("count", "schema.gen_count"),
-                ("insert", "schema.gen_insert"),
-                ("update", "schema.gen_update"),
-            ):
-                gen.addAction(t(key), lambda _checked=False, k=gkind: self.generate_sql.emit(data, k))
-            menu.addSeparator()
-        # Copy name — available for any named node (table, column, database).
-        name = str(data.get("name") or "")
-        menu.addAction(t("schema.copy_name"),
-                       lambda: QApplication.clipboard().setText(name))
-        path = str(data.get("path") or "")
-        if path:
-            # Qualified name = the dotted path minus the connection prefix.
-            qualified = ".".join(path.split(".")[1:]) or name
-            menu.addAction(t("schema.copy_qualified"),
-                           lambda: QApplication.clipboard().setText(qualified))
-        menu.exec(self.tree.viewport().mapToGlobal(pos))
+
 
 
 def _as_int(value: object) -> int | None:

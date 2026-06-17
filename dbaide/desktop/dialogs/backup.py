@@ -303,16 +303,14 @@ class BackupManager(QWidget):
         self._grid.setAlternatingRowColors(True)
         self._grid.verticalHeader().setDefaultSectionSize(30)
 
-        # Column widths: table=stretch, database, date, rows, size, format=narrow
         hdr = self._grid.horizontalHeader()
-        hdr.setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
-        hdr.setSectionResizeMode(1, QHeaderView.ResizeMode.Interactive)
-        hdr.setSectionResizeMode(2, QHeaderView.ResizeMode.Interactive)
-        hdr.setSectionResizeMode(3, QHeaderView.ResizeMode.ResizeToContents)
-        hdr.setSectionResizeMode(4, QHeaderView.ResizeMode.ResizeToContents)
-        hdr.setSectionResizeMode(5, QHeaderView.ResizeMode.ResizeToContents)
-        hdr.resizeSection(1, 120)
-        hdr.resizeSection(2, 150)
+        hdr.setStretchLastSection(False)
+        hdr.setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)      # Table
+        hdr.setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)      # Database
+        hdr.setSectionResizeMode(2, QHeaderView.ResizeMode.Stretch)      # Date
+        hdr.setSectionResizeMode(3, QHeaderView.ResizeMode.ResizeToContents)  # Rows
+        hdr.setSectionResizeMode(4, QHeaderView.ResizeMode.ResizeToContents)  # Size
+        hdr.setSectionResizeMode(5, QHeaderView.ResizeMode.ResizeToContents)  # Format
 
         self._grid.setStyleSheet(
             f"QTableWidget {{ background: {Theme.SURFACE}; border: 1px solid {Theme.BORDER};"
@@ -338,6 +336,12 @@ class BackupManager(QWidget):
 
     def refresh(self) -> None:
         from dbaide.backup import BackupRegistry
+
+        prev_row = -1
+        indexes = self._grid.selectionModel().selectedRows()
+        if indexes:
+            prev_row = indexes[0].row()
+
         registry = BackupRegistry()
         self._records = registry.list_backups()
         self._grid.setRowCount(len(self._records))
@@ -362,8 +366,11 @@ class BackupManager(QWidget):
         has = len(self._records) > 0
         self._grid.setVisible(has)
         self._empty.setVisible(not has)
-        self._delete_btn.setEnabled(False)
-        self._open_btn.setEnabled(False)
+        if has and 0 <= prev_row < len(self._records):
+            self._grid.selectRow(prev_row)
+        else:
+            self._delete_btn.setEnabled(False)
+            self._open_btn.setEnabled(False)
 
     def _on_selection(self) -> None:
         has = bool(self._grid.selectionModel().hasSelection())
