@@ -1,0 +1,6 @@
+# Electron frontend backend dependencies
+# Install: pip install -r requirements-electron.txt
+
+-r requirements.txt
+fastapi>=0.115.0
+uvicorn>=0.34.0

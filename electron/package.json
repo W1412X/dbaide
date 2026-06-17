@@ -1,0 +1,60 @@
+{
+  "name": "dbaide",
+  "version": "0.3.2",
+  "description": "DBAide — AI-powered database assistant",
+  "main": "src/main/index.js",
+  "scripts": {
+    "dev": "concurrently \"vite --config src/renderer/vite.config.js\" \"wait-on http://localhost:5173 && electron .\"",
+    "dev:renderer": "vite --config src/renderer/vite.config.js",
+    "build:renderer": "vite build --config src/renderer/vite.config.js",
+    "build": "npm run build:renderer && electron-builder",
+    "pack": "npm run build:renderer && electron-builder --dir"
+  },
+  "dependencies": {
+    "electron-store": "^10.0.0"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-vue": "^5.2.0",
+    "concurrently": "^9.1.0",
+    "electron": "^35.1.0",
+    "electron-builder": "^26.0.0",
+    "sass": "^1.89.0",
+    "vite": "^6.3.0",
+    "vue": "^3.5.0",
+    "vue-router": "^4.5.0",
+    "pinia": "^3.0.0",
+    "wait-on": "^8.0.0",
+    "@vueuse/core": "^13.0.0",
+    "lucide-vue-next": "^0.521.0"
+  },
+  "build": {
+    "appId": "com.dbaide.app",
+    "productName": "DBAide",
+    "directories": {
+      "output": "dist"
+    },
+    "files": [
+      "src/main/**/*",
+      "src/renderer/dist/**/*"
+    ],
+    "extraResources": [
+      {
+        "from": "../dbaide",
+        "to": "backend",
+        "filter": ["**/*.py", "**/*.json", "**/*.yaml"]
+      }
+    ],
+    "mac": {
+      "target": ["dmg", "zip"],
+      "icon": "build/icon.icns"
+    },
+    "win": {
+      "target": ["nsis", "zip"],
+      "icon": "build/icon.ico"
+    },
+    "linux": {
+      "target": ["AppImage", "deb"],
+      "icon": "build/icon.png"
+    }
+  }
+}
