@@ -703,6 +703,29 @@ QCheckBox::indicator:disabled, QRadioButton::indicator:disabled {{
     background: {T.PANEL_2};
     border-color: {T.BORDER_SOFT};
 }}
+QTabBar[subtabBar="true"] {{
+    background: {T.PANEL};
+    border: none;
+    border-radius: 6px;
+    padding: 2px;
+}}
+QTabBar[subtabBar="true"]::tab {{
+    background: transparent;
+    padding: 0;
+    border: none;
+    border-radius: 4px;
+    margin: 0 1px;
+    min-width: 26px;
+    max-width: 26px;
+    min-height: 22px;
+    max-height: 22px;
+}}
+QTabBar[subtabBar="true"]::tab:selected {{
+    background: {T.PANEL_3};
+}}
+QTabBar[subtabBar="true"]::tab:hover:!selected {{
+    background: {T.PANEL_2};
+}}
 """
 
 

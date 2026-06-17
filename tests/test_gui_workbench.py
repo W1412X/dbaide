@@ -177,8 +177,8 @@ def test_table_document_opens_structure_without_query(qapp):
     doc = TableDocument("c", "db", "orders")
     doc.query_requested.connect(lambda p: fired.append(p))
     doc.open([{"name": "id", "data_type": "INTEGER", "primary_key": True}])
-    assert doc.tabs.currentIndex() == doc._structure_index
-    assert doc.tabs.tabBar().drawBase() is False
+    assert doc.bar.currentIndex() == doc._structure_index
+    assert doc.bar.drawBase() is False
     assert doc._data_loaded is False
     assert fired == []  # opening a table must NOT auto-query
 
@@ -201,9 +201,9 @@ def test_reopen_table_keeps_subtab(qapp):
     wb = _wb(qapp)
     doc = wb.open_table("c", "db", "orders", [])
     doc.focus_data()
-    assert doc.tabs.currentIndex() == doc._data_index
+    assert doc.bar.currentIndex() == doc._data_index
     wb.open_table("c", "db", "orders", [])  # re-open → bring forward, keep sub-tab
-    assert doc.tabs.currentIndex() == doc._data_index
+    assert doc.bar.currentIndex() == doc._data_index
 
 
 def test_structure_panel_indexes(qapp):
