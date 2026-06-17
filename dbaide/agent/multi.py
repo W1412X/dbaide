@@ -25,13 +25,15 @@ class MultiInstanceAssistant:
     events. Cross-instance joins are not attempted.
     """
 
-    def __init__(self, targets: list[InstanceTarget], llm: LLMClient | None = None, *, default_limit: int = 100, timeout_seconds: int = 60) -> None:
+    def __init__(self, targets: list[InstanceTarget], llm: LLMClient | None = None, *,
+                 default_limit: int = 100, timeout_seconds: int = 60, model_config=None) -> None:
         if not targets:
             raise ValueError("MultiInstanceAssistant requires at least one target")
         self.targets = targets
         self.llm = llm
         self.default_limit = default_limit
         self.timeout_seconds = timeout_seconds
+        self.model_config = model_config
 
     def ask(self, question: str, *, execute: bool = True) -> AssistantResponse:
         answers: list[str] = []
@@ -45,12 +47,10 @@ class MultiInstanceAssistant:
                 instance=target.config.name,
             )
             adapter = build_adapter(target.config, policy=policy, caller="agent")
-            session = Session(
-                connection=target.config,
-                default_limit=self.default_limit,
-                timeout_seconds=self.timeout_seconds,
-            )
-            assistant = DataAssistant(adapter, session, self.llm)
+            session = Session.from_policy(target.config, policy,
+                                         default_limit=self.default_limit,
+                                         timeout_seconds=self.timeout_seconds)
+            assistant = DataAssistant(adapter, session, self.llm, model_config=self.model_config)
             try:
                 response = assistant.ask(question, database=target.database, execute=execute)
             except Exception as exc:

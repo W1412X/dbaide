@@ -840,7 +840,8 @@ class DesktopService:
             payload, connection_name=conn.name, database=database,
             session_turns=session_turns, active_criteria=active_criteria,
         )
-        engine = WorkflowEngine(conn, self._safe_llm(), self.store, self.join_catalog)
+        engine = WorkflowEngine(conn, self._safe_llm(), self.store, self.join_catalog,
+                                model_config=self.cfg.model())
         progress_cb = payload.get("progress")
         cancel_check = payload.get("cancel_check")
         result = engine.run(

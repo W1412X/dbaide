@@ -42,11 +42,13 @@ class WorkflowEngine:
         llm: LLMClient | None = None,
         asset_store: AssetStore | None = None,
         join_catalog: JoinCatalogStore | None = None,
+        model_config: "Any | None" = None,
     ) -> None:
         self.connection = connection
         self.llm = llm
         self.asset_store = asset_store or AssetStore()
         self.join_catalog = join_catalog or JoinCatalogStore()
+        self._model_config = model_config
         self._adapter = None
         self._session = None
 
@@ -268,14 +270,10 @@ class WorkflowEngine:
         return result
 
     def _build_assistant(self, request: WorkflowRequest) -> DataAssistant:
+        from dataclasses import fields as dc_fields
         adapter = self._get_adapter()
         base_session = self._get_session()
-        session = Session(
-            connection=base_session.connection,
-            default_limit=base_session.default_limit,
-            timeout_seconds=base_session.timeout_seconds,
-            agent_max_steps=base_session.agent_max_steps,
-        )
+        session = Session(**{f.name: getattr(base_session, f.name) for f in dc_fields(base_session)})
         if request.limit:
             session.default_limit = max(1, int(request.limit))
         if request.timeout_seconds:
@@ -286,6 +284,7 @@ class WorkflowEngine:
             self.llm,
             asset_store=self.asset_store,
             join_catalog=self.join_catalog,
+            model_config=self._model_config,
         )
 
     def _get_adapter(self):

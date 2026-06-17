@@ -60,6 +60,7 @@ class AskOrchestrator:
         join_catalog: JoinCatalogStore | None = None,
         annotations: AnnotationStore | None = None,
         progress: Callable[[Any], None] | None = None,
+        model_config: Any = None,
     ) -> None:
         self.adapter = adapter
         self.session = session
@@ -75,6 +76,7 @@ class AskOrchestrator:
                 llm = RecordingLLMClient(llm)
                 self.llm_recorder = llm
         self.llm = llm
+        self.model_config = model_config
         self.asset_store = asset_store or AssetStore()
         self.join_catalog = join_catalog or JoinCatalogStore()
         self.annotations = annotations or AnnotationStore()
@@ -250,10 +252,16 @@ class AskOrchestrator:
         except Exception as exc:
             logger.warning("agent_loop_failed: %s", exc, exc_info=True)
             self.run_state.fail_reason = f"exception: {exc}"
+            from dbaide.agent.sql_executions import response_sql_exports
+            selected_sql, executed_sqls = response_sql_exports(self.run_state)
             return AssistantResponse(
                 answer=_i18n_t("agent.loop_failed"),
+                sql=selected_sql,
+                result=self.run_state.query_result,
                 disclosures=self._new_disclosures(disclosures),
                 warnings=[_i18n_t("agent.loop_failed_reason", reason=str(exc))],
+                charts=list(self.run_state.charts or []) or None,
+                executed_sqls=executed_sqls or None,
             )
 
     def _run_multi(self, question: str, intents, *, database: str, execute: bool) -> AssistantResponse:
@@ -310,6 +318,8 @@ class AskOrchestrator:
                     "answer": rp.answer,
                     "sql": rp.sql,
                     "disclosures": list(rp.disclosures or []),
+                    "charts": list(rp.charts or []),
+                    "executed_sqls": list(rp.executed_sqls or []),
                 }
                 for it, rp in done_results
             ],
@@ -329,6 +339,8 @@ class AskOrchestrator:
                     answer=d.get("answer") or "",
                     sql=d.get("sql") or "",
                     disclosures=list(d.get("disclosures") or []),
+                    charts=list(d.get("charts") or []) or None,
+                    executed_sqls=list(d.get("executed_sqls") or []) or None,
                 ),
             )
             for d in (multi.get("done") or [])
@@ -374,6 +386,8 @@ class AskOrchestrator:
         sections: list[str] = []
         warnings: list[str] = []
         disclosures: list[str] = []
+        all_charts: list[dict[str, Any]] = []
+        all_executed_sqls: list[dict[str, Any]] = []
         primary: AssistantResponse | None = None
         answer_language = detect_user_language(question)
         empty_answer = "（无回答）" if answer_language == "zh" else "(no answer)"
@@ -384,8 +398,10 @@ class AskOrchestrator:
             )
             warnings.extend(resp.warnings or [])
             disclosures.extend(resp.disclosures or [])
+            all_charts.extend(resp.charts or [])
+            all_executed_sqls.extend(resp.executed_sqls or [])
             if primary is None and resp.result is not None:
-                primary = resp  # keep the first concrete result for the SQL tab
+                primary = resp
         if not disclosures and disclosures_before is not None:
             disclosures = self._new_disclosures(disclosures_before)
         answer = "\n\n".join(sections)
@@ -395,6 +411,8 @@ class AskOrchestrator:
             result=(primary.result if primary else None),
             disclosures=disclosures,
             warnings=warnings,
+            charts=all_charts or None,
+            executed_sqls=all_executed_sqls or None,
         )
 
     # ─── Schema ─────────────────────────────────────────────────────────────

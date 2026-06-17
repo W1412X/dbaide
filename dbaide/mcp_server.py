@@ -374,7 +374,7 @@ def handle_ask(arguments: dict) -> dict:
         llm = build_llm_client(cfg.model())
         store = AssetStore()
 
-        result = WorkflowEngine(connection, llm=llm, asset_store=store).run(
+        result = WorkflowEngine(connection, llm=llm, asset_store=store, model_config=cfg.model()).run(
             WorkflowRequest(
                 question=question,
                 connection_name=connection.name,

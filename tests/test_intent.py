@@ -6,9 +6,10 @@ import re
 import sqlite3
 
 from dbaide.adapters import build_adapter
-from dbaide.agent.intent import IntentDecomposer
+from dbaide.agent.intent import IntentDecomposer, SubIntent
 from dbaide.agent.orchestrator import AskOrchestrator
 from dbaide.agent.progressive_schema import DiscoveryResult, SchemaHit
+from dbaide.models import AssistantResponse
 from dbaide.agent.trace_model import TraceModel
 from dbaide.assets import AssetBuilder, AssetStore
 from dbaide.joins import JoinCatalogStore
@@ -165,3 +166,29 @@ def test_single_intent_records_decomposition_without_wrapping_loop(tmp_path):
         and str(e.get("node_id", "")).startswith("intent:i")
         for e in events
     )
+
+
+def test_aggregate_merges_charts_and_executed_sqls():
+    """_aggregate must merge charts and executed_sqls from all sub-intents."""
+    conn = ConnectionConfig(name="t", type="sqlite", path=":memory:")
+    orch = AskOrchestrator(build_adapter(conn), Session(connection=conn), NullLLMClient())
+
+    intent_a = SubIntent(id="i1", type="data_query", text="q1", language="en")
+    intent_b = SubIntent(id="i2", type="data_query", text="q2", language="en")
+    resp_a = AssistantResponse(
+        answer="A1",
+        charts=[{"type": "bar", "title": "chart1"}],
+        executed_sqls=[{"sql": "SELECT 1", "purpose": "test"}],
+    )
+    resp_b = AssistantResponse(
+        answer="A2",
+        charts=[{"type": "line", "title": "chart2"}],
+        executed_sqls=[{"sql": "SELECT 2", "purpose": "test2"}],
+    )
+    result = orch._aggregate("q1 and q2", [(intent_a, resp_a), (intent_b, resp_b)])
+    assert len(result.charts) == 2
+    assert result.charts[0]["title"] == "chart1"
+    assert result.charts[1]["title"] == "chart2"
+    assert len(result.executed_sqls) == 2
+    assert result.executed_sqls[0]["sql"] == "SELECT 1"
+    assert result.executed_sqls[1]["sql"] == "SELECT 2"

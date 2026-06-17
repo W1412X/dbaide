@@ -572,8 +572,9 @@ def dispatch_model(args: argparse.Namespace, cfg: ConfigManager) -> int:
         if m.provider == "none":
             print(f"model '{m.name}' has provider=none — nothing to test.", file=sys.stderr)
             return 1
+        from dbaide.llm import LLMMessage
         llm = build_llm_client(m)
-        result = llm.complete("Say 'hello' in one word.")
+        result = llm.complete_text([LLMMessage("user", "Say 'hello' in one word.")])
         print(f"ok: {m.name} (provider={m.provider}, model={m.model})")
         print(f"response: {str(result).strip()[:200]}")
         return 0
@@ -610,6 +611,10 @@ def dispatch_config(args: argparse.Namespace, cfg: ConfigManager) -> int:
                 value = float(args.value)
             except ValueError:
                 value = args.value
+        if key == "compress_threshold" and isinstance(value, float) and value < 1.0:
+            print(f"hint: compress_threshold is an integer percentage (50–95), not a ratio."
+                  f" Did you mean {int(value * 100)}?", file=sys.stderr)
+            return 1
         defaults[key] = value
         cfg.set_resource_defaults(defaults)
         print(f"set {key} = {value}")
@@ -1416,7 +1421,7 @@ def run_workflow_cli(cfg: ConfigManager, args: argparse.Namespace):
         # targets[0] and returned its trace/JSON, inconsistent with the answer).
         assistant = build_any_assistant(cfg, args)
         response = assistant.ask(args.question, database=args.database, execute=True)
-        return WorkflowResult(
+        result = WorkflowResult(
             status=WorkflowStatus.COMPLETED,
             question=args.question,
             connection_name=", ".join(t.config.name for t in targets),
@@ -1427,9 +1432,13 @@ def run_workflow_cli(cfg: ConfigManager, args: argparse.Namespace):
             execution_result=response.result,
             warnings=response.warnings,
         )
+        result.charts = list(response.charts or [])
+        result.executed_sqls = list(response.executed_sqls or [])
+        return result
 
     target = targets[0]
-    return WorkflowEngine(target.config, llm=safe_llm(cfg), asset_store=AssetStore()).run(
+    return WorkflowEngine(target.config, llm=safe_llm(cfg), asset_store=AssetStore(),
+                          model_config=cfg.model()).run(
         WorkflowRequest(
             question=args.question,
             connection_name=target.config.name,
@@ -1474,10 +1483,12 @@ def build_any_assistant(cfg: ConfigManager, args: argparse.Namespace):
         session = Session.from_policy(
             conn, policy, default_limit=args.limit, timeout_seconds=args.timeout,
         )
-        assistant = DataAssistant(adapter, session, llm)
+        model_cfg = cfg.model()
+        assistant = DataAssistant(adapter, session, llm, model_config=model_cfg)
         return _SingleAssistantWithDatabase(assistant, targets[0].database)
     return _MultiAssistantWithDatabase(
-        MultiInstanceAssistant(targets, llm, default_limit=args.limit, timeout_seconds=args.timeout)
+        MultiInstanceAssistant(targets, llm, default_limit=args.limit, timeout_seconds=args.timeout,
+                               model_config=cfg.model())
     )
 
 

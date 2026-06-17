@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Callable
+from typing import Any, Callable
 
 from dbaide.adapters.base import DatabaseAdapter
 from dbaide.agent.orchestrator import AgentContext, AgentStep, AskOrchestrator, format_inspect
@@ -32,6 +32,7 @@ class DataAssistant:
         asset_store: AssetStore | None = None,
         join_catalog: JoinCatalogStore | None = None,
         progress: Callable[[str], None] | None = None,
+        model_config: Any = None,
     ) -> None:
         self._orchestrator = AskOrchestrator(
             adapter,
@@ -40,6 +41,7 @@ class DataAssistant:
             asset_store=asset_store,
             join_catalog=join_catalog,
             progress=progress,
+            model_config=model_config,
         )
         self.adapter = adapter
         self.session = session
