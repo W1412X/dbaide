@@ -859,6 +859,11 @@ class Sidebar(QWidget):
         menu.addAction(t("schema.edit_note"), lambda d=data: self.edit_note.emit(d))
         if data.get("kind") in ("database", "table"):
             menu.addAction(t("schema.refresh_node"), lambda d=data: self.refresh_requested.emit(d))
+        kind = data.get("kind")
+        if kind == "table":
+            menu.addAction(t("schema.backup_table"), lambda d=data: self.backup_requested.emit(d))
+        elif kind == "database":
+            menu.addAction(t("schema.backup_database"), lambda d=data: self.backup_requested.emit(d))
         btn.setMenu(menu)
         btn.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
         return btn
@@ -955,10 +960,6 @@ class Sidebar(QWidget):
             menu.addAction(t("schema.enrich"), lambda: self.enrich_requested.emit(data))
         if kind in ("database", "table", "column"):
             menu.addAction(t("schema.edit_note"), lambda: self.edit_note.emit(data))
-        if kind == "table":
-            menu.addAction(t("schema.backup_table"), lambda: self.backup_requested.emit(data))
-        if kind == "database":
-            menu.addAction(t("schema.backup_database"), lambda: self.backup_requested.emit(data))
         if kind == "table":
             gen = menu.addMenu(t("schema.generate_sql"))
             _style_menu(gen)

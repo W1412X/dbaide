@@ -7,7 +7,8 @@ import sys
 from pathlib import Path
 from typing import Any
 
-from PyQt6.QtCore import QThread, Qt, pyqtSignal
+from PyQt6.QtCore import QSize, QThread, Qt, pyqtSignal
+from PyQt6.QtGui import QColor, QFont
 from PyQt6.QtWidgets import (
     QComboBox,
     QDialog,
@@ -19,20 +20,39 @@ from PyQt6.QtWidgets import (
     QSpinBox,
     QTableWidget,
     QTableWidgetItem,
+    QToolButton,
     QVBoxLayout,
     QWidget,
 )
 
+from dbaide.desktop.components.icons import svg_icon
 from dbaide.desktop.theme import Theme
 from dbaide.i18n import t
+
+
+def _icon_btn(icon_name: str, tooltip: str, *, size: int = 16) -> QToolButton:
+    btn = QToolButton()
+    btn.setIcon(svg_icon(icon_name, color=Theme.MUTED, size=size, width=1.6))
+    btn.setIconSize(QSize(size, size))
+    btn.setToolTip(tooltip)
+    btn.setCursor(Qt.CursorShape.PointingHandCursor)
+    btn.setFixedSize(size + 8, size + 8)
+    btn.setStyleSheet(
+        f"QToolButton {{ background: transparent; border: none; border-radius: 4px;"
+        f" padding: 0; margin: 0; min-width: 0; min-height: 0; }}"
+        f"QToolButton:hover {{ background: {Theme.PANEL_2}; }}"
+        f"QToolButton:pressed {{ background: {Theme.PANEL_3}; }}"
+        f"QToolButton:disabled {{ opacity: 0.3; }}"
+    )
+    return btn
 
 
 # ── Backup worker thread ─────────────────────────────────────────────────────
 
 
 class _BackupWorker(QThread):
-    progress = pyqtSignal(str, int, object)  # table, done_rows, total_estimate
-    finished = pyqtSignal(list)  # list of result dicts
+    progress = pyqtSignal(str, int, object)
+    finished = pyqtSignal(list)
     error = pyqtSignal(str)
 
     def __init__(self, config, database: str, table: str, scope: str,
@@ -76,6 +96,12 @@ class _BackupWorker(QThread):
 # ── Backup Dialog ─────────────────────────────────────────────────────────────
 
 
+_INPUT_STYLE = (
+    f"background: {Theme.PANEL}; border: 1px solid {Theme.BORDER};"
+    f" border-radius: 6px; padding: 3px 8px; color: {Theme.TEXT}; font-size: 12px;"
+)
+
+
 class BackupDialog(QDialog):
     def __init__(self, config, database: str, table: str = "",
                  scope: str = "table", parent=None) -> None:
@@ -87,107 +113,112 @@ class BackupDialog(QDialog):
         self._worker: _BackupWorker | None = None
 
         self.setWindowTitle(t("backup.title"))
-        self.setMinimumWidth(360)
-        self.setStyleSheet(f"background: {Theme.SURFACE}; color: {Theme.TEXT};")
+        self.setFixedWidth(320)
+        self.setStyleSheet(
+            f"QDialog {{ background: {Theme.SURFACE}; color: {Theme.TEXT}; }}"
+            f"QLabel {{ background: transparent; }}"
+        )
 
         layout = QVBoxLayout(self)
-        layout.setSpacing(12)
-        layout.setContentsMargins(20, 16, 20, 16)
+        layout.setSpacing(10)
+        layout.setContentsMargins(16, 14, 16, 14)
 
-        # Target label
+        # Target label — small, muted
         if scope == "table":
             target = f"{database}.{table}" if database else table
         else:
             target = database
-        title = QLabel(f"{t('backup.title')}: {target}")
-        title.setStyleSheet(f"font-size: 14px; font-weight: 600; color: {Theme.TEXT};")
-        layout.addWidget(title)
+        target_label = QLabel(target)
+        target_label.setStyleSheet(
+            f"font-size: 13px; font-weight: 600; color: {Theme.TEXT};"
+            f" padding-bottom: 2px;"
+        )
+        layout.addWidget(target_label)
 
-        # Format selector
-        fmt_row = QHBoxLayout()
-        fmt_label = QLabel(t("backup.format"))
-        fmt_label.setFixedWidth(90)
+        # Inline form: Format | Batch | Threads in a compact grid
+        form = QWidget()
+        form.setStyleSheet("background: transparent;")
+        form_layout = QHBoxLayout(form)
+        form_layout.setContentsMargins(0, 0, 0, 0)
+        form_layout.setSpacing(8)
+
+        # Format
+        fmt_col = QVBoxLayout()
+        fmt_col.setSpacing(2)
+        fl = QLabel(t("backup.format"))
+        fl.setStyleSheet(f"font-size: 10px; color: {Theme.MUTED};")
         self._fmt_combo = QComboBox()
         self._fmt_combo.addItems(["csv", "sql", "sqlite"])
-        self._fmt_combo.setFixedWidth(120)
-        self._fmt_combo.setStyleSheet(
-            f"QComboBox {{ background: {Theme.PANEL}; border: 1px solid {Theme.BORDER};"
-            f" border-radius: 6px; padding: 4px 8px; }}"
-        )
-        fmt_row.addWidget(fmt_label)
-        fmt_row.addWidget(self._fmt_combo)
-        fmt_row.addStretch()
-        layout.addLayout(fmt_row)
+        self._fmt_combo.setFixedHeight(26)
+        self._fmt_combo.setStyleSheet(f"QComboBox {{ {_INPUT_STYLE} }}")
+        fmt_col.addWidget(fl)
+        fmt_col.addWidget(self._fmt_combo)
+        form_layout.addLayout(fmt_col, 1)
 
         # Batch size
-        batch_row = QHBoxLayout()
-        batch_label = QLabel(t("backup.batch_size"))
-        batch_label.setFixedWidth(90)
+        batch_col = QVBoxLayout()
+        batch_col.setSpacing(2)
+        bl = QLabel(t("backup.batch_size"))
+        bl.setStyleSheet(f"font-size: 10px; color: {Theme.MUTED};")
         self._batch_spin = QSpinBox()
         self._batch_spin.setRange(100, 100_000)
         self._batch_spin.setValue(5000)
         self._batch_spin.setSingleStep(1000)
-        self._batch_spin.setFixedWidth(120)
-        self._batch_spin.setStyleSheet(
-            f"QSpinBox {{ background: {Theme.PANEL}; border: 1px solid {Theme.BORDER};"
-            f" border-radius: 6px; padding: 4px 8px; }}"
-        )
-        batch_row.addWidget(batch_label)
-        batch_row.addWidget(self._batch_spin)
-        batch_row.addStretch()
-        layout.addLayout(batch_row)
+        self._batch_spin.setFixedHeight(26)
+        self._batch_spin.setStyleSheet(f"QSpinBox {{ {_INPUT_STYLE} }}")
+        batch_col.addWidget(bl)
+        batch_col.addWidget(self._batch_spin)
+        form_layout.addLayout(batch_col, 1)
 
-        # Threads (only for database scope)
+        # Threads (database scope only)
         if scope == "database":
-            thread_row = QHBoxLayout()
-            thread_label = QLabel(t("backup.threads"))
-            thread_label.setFixedWidth(90)
+            th_col = QVBoxLayout()
+            th_col.setSpacing(2)
+            tl = QLabel(t("backup.threads"))
+            tl.setStyleSheet(f"font-size: 10px; color: {Theme.MUTED};")
             self._thread_spin = QSpinBox()
             self._thread_spin.setRange(1, 16)
             self._thread_spin.setValue(4)
-            self._thread_spin.setFixedWidth(120)
-            self._thread_spin.setStyleSheet(
-                f"QSpinBox {{ background: {Theme.PANEL}; border: 1px solid {Theme.BORDER};"
-                f" border-radius: 6px; padding: 4px 8px; }}"
-            )
-            thread_row.addWidget(thread_label)
-            thread_row.addWidget(self._thread_spin)
-            thread_row.addStretch()
-            layout.addLayout(thread_row)
+            self._thread_spin.setFixedHeight(26)
+            self._thread_spin.setStyleSheet(f"QSpinBox {{ {_INPUT_STYLE} }}")
+            th_col.addWidget(tl)
+            th_col.addWidget(self._thread_spin)
+            form_layout.addLayout(th_col, 1)
         else:
             self._thread_spin = None
 
-        # Status label
-        self._status = QLabel("")
-        self._status.setStyleSheet(f"font-size: 12px; color: {Theme.MUTED};")
-        self._status.setWordWrap(True)
-        layout.addWidget(self._status)
+        layout.addWidget(form)
 
-        # Buttons
-        btn_row = QHBoxLayout()
-        btn_row.addStretch()
+        # Bottom row: status + start button
+        bottom = QHBoxLayout()
+        bottom.setSpacing(8)
+        self._status = QLabel("")
+        self._status.setStyleSheet(f"font-size: 11px; color: {Theme.MUTED}; background: transparent;")
+        self._status.setWordWrap(True)
+        bottom.addWidget(self._status, 1)
+
         self._start_btn = QPushButton(t("backup.start"))
-        self._start_btn.setFixedWidth(120)
+        self._start_btn.setFixedHeight(28)
+        self._start_btn.setFixedWidth(90)
         self._start_btn.setStyleSheet(
             f"QPushButton {{ background: {Theme.ACCENT}; color: white;"
-            f" border: none; border-radius: 6px; padding: 8px 16px; font-weight: 500; }}"
+            f" border: none; border-radius: 6px; padding: 0 12px;"
+            f" font-size: 12px; font-weight: 500; }}"
             f"QPushButton:hover {{ background: {Theme.ACCENT_HOVER}; }}"
             f"QPushButton:disabled {{ background: {Theme.PANEL_2}; color: {Theme.MUTED}; }}"
         )
         self._start_btn.clicked.connect(self._start_backup)
-        btn_row.addWidget(self._start_btn)
-        layout.addLayout(btn_row)
+        bottom.addWidget(self._start_btn)
+        layout.addLayout(bottom)
 
     def _start_backup(self) -> None:
         self._start_btn.setEnabled(False)
         fmt = self._fmt_combo.currentText()
         batch_size = self._batch_spin.value()
         threads = self._thread_spin.value() if self._thread_spin else 1
-
         self._status.setText(t("backup.running").format(
             target=f"{self._database}.{self._table}" if self._table else self._database,
         ))
-
         self._worker = _BackupWorker(
             self._config, self._database, self._table, self._scope,
             fmt, batch_size, threads,
@@ -205,12 +236,12 @@ class BackupDialog(QDialog):
             self._status.setText(f"{table}: {done:,} rows")
 
     def _on_finished(self, results: list) -> None:
-        errors = [r for r in results if r.get("error")]
         ok = [r for r in results if not r.get("error")]
+        errors = [r for r in results if r.get("error")]
         total_rows = sum(r.get("row_count", 0) for r in ok)
         msg = t("backup.done").format(count=len(ok), rows=f"{total_rows:,}")
         if errors:
-            msg += f"\n{len(errors)} table(s) failed."
+            msg += f"\n{len(errors)} failed"
         self._status.setText(msg)
         self._start_btn.setEnabled(True)
 
@@ -229,35 +260,32 @@ class BackupManager(QWidget):
         layout.setContentsMargins(16, 12, 16, 12)
         layout.setSpacing(8)
 
-        # Header
+        # Header row: title + icon buttons
         header = QHBoxLayout()
+        header.setSpacing(6)
         title = QLabel(t("backup.manager"))
-        title.setStyleSheet(f"font-size: 15px; font-weight: 600; color: {Theme.TEXT};")
+        title.setStyleSheet(f"font-size: 14px; font-weight: 600; color: {Theme.TEXT};")
         header.addWidget(title)
         header.addStretch()
 
-        self._delete_btn = QPushButton(t("backup.delete"))
-        self._delete_btn.setFixedWidth(80)
+        self._refresh_btn = _icon_btn("refresh", t("data.refresh"))
+        self._refresh_btn.clicked.connect(self.refresh)
+        header.addWidget(self._refresh_btn)
+
+        self._open_btn = _icon_btn("folder-open", t("backup.open_folder"))
+        self._open_btn.setEnabled(False)
+        self._open_btn.clicked.connect(self._open_folder)
+        header.addWidget(self._open_btn)
+
+        self._delete_btn = _icon_btn("trash", t("backup.delete"))
         self._delete_btn.setEnabled(False)
-        self._delete_btn.setStyleSheet(
-            f"QPushButton {{ background: {Theme.PANEL}; color: {Theme.TEXT};"
-            f" border: 1px solid {Theme.BORDER}; border-radius: 6px; padding: 4px 12px; }}"
-            f"QPushButton:hover {{ background: {Theme.PANEL_2}; }}"
-            f"QPushButton:disabled {{ background: {Theme.PANEL}; color: {Theme.MUTED_2}; }}"
-        )
         self._delete_btn.clicked.connect(self._delete_selected)
         header.addWidget(self._delete_btn)
 
-        self._open_btn = QPushButton(t("backup.open_folder"))
-        self._open_btn.setFixedWidth(100)
-        self._open_btn.setEnabled(False)
-        self._open_btn.setStyleSheet(self._delete_btn.styleSheet())
-        self._open_btn.clicked.connect(self._open_folder)
-        header.addWidget(self._open_btn)
         layout.addLayout(header)
 
         # Table
-        columns = [
+        col_headers = [
             t("backup.col.table"),
             t("backup.col.database"),
             t("backup.col.date"),
@@ -265,29 +293,43 @@ class BackupManager(QWidget):
             t("backup.col.size"),
             t("backup.col.format"),
         ]
-        self._table = QTableWidget(0, len(columns))
-        self._table.setHorizontalHeaderLabels(columns)
-        self._table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
-        self._table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
-        self._table.setSelectionMode(QTableWidget.SelectionMode.SingleSelection)
-        self._table.verticalHeader().setVisible(False)
-        self._table.horizontalHeader().setStretchLastSection(True)
-        self._table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Interactive)
-        self._table.setStyleSheet(
+        self._grid = QTableWidget(0, len(col_headers))
+        self._grid.setHorizontalHeaderLabels(col_headers)
+        self._grid.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
+        self._grid.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
+        self._grid.setSelectionMode(QTableWidget.SelectionMode.SingleSelection)
+        self._grid.verticalHeader().setVisible(False)
+        self._grid.setShowGrid(False)
+        self._grid.setAlternatingRowColors(True)
+        self._grid.verticalHeader().setDefaultSectionSize(30)
+
+        # Column widths: table=stretch, database, date, rows, size, format=narrow
+        hdr = self._grid.horizontalHeader()
+        hdr.setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
+        hdr.setSectionResizeMode(1, QHeaderView.ResizeMode.Interactive)
+        hdr.setSectionResizeMode(2, QHeaderView.ResizeMode.Interactive)
+        hdr.setSectionResizeMode(3, QHeaderView.ResizeMode.ResizeToContents)
+        hdr.setSectionResizeMode(4, QHeaderView.ResizeMode.ResizeToContents)
+        hdr.setSectionResizeMode(5, QHeaderView.ResizeMode.ResizeToContents)
+        hdr.resizeSection(1, 120)
+        hdr.resizeSection(2, 150)
+
+        self._grid.setStyleSheet(
             f"QTableWidget {{ background: {Theme.SURFACE}; border: 1px solid {Theme.BORDER};"
-            f" border-radius: 8px; gridline-color: {Theme.BORDER}; }}"
-            f"QTableWidget::item {{ padding: 4px 8px; }}"
+            f" border-radius: 8px; }}"
+            f"QTableWidget::item {{ padding: 2px 8px; border: none; }}"
             f"QTableWidget::item:selected {{ background: {Theme.PANEL_2}; color: {Theme.TEXT}; }}"
-            f"QHeaderView::section {{ background: {Theme.PANEL}; color: {Theme.MUTED};"
-            f" border: none; border-bottom: 1px solid {Theme.BORDER}; padding: 6px 8px;"
-            f" font-weight: 500; }}"
+            f"QTableWidget::item:alternate {{ background: {Theme.PANEL}; }}"
+            f"QHeaderView::section {{ background: {Theme.SURFACE}; color: {Theme.MUTED};"
+            f" border: none; border-bottom: 1px solid {Theme.BORDER}; padding: 4px 8px;"
+            f" font-size: 11px; font-weight: 500; }}"
         )
-        self._table.selectionModel().selectionChanged.connect(self._on_selection)
-        layout.addWidget(self._table)
+        self._grid.selectionModel().selectionChanged.connect(self._on_selection)
+        layout.addWidget(self._grid)
 
         # Empty state
         self._empty = QLabel(t("backup.empty"))
-        self._empty.setStyleSheet(f"color: {Theme.MUTED}; padding: 32px;")
+        self._empty.setStyleSheet(f"color: {Theme.MUTED}; padding: 32px; font-size: 12px;")
         self._empty.setAlignment(Qt.AlignmentFlag.AlignCenter)
         layout.addWidget(self._empty)
 
@@ -298,27 +340,38 @@ class BackupManager(QWidget):
         from dbaide.backup import BackupRegistry
         registry = BackupRegistry()
         self._records = registry.list_backups()
-        self._table.setRowCount(len(self._records))
+        self._grid.setRowCount(len(self._records))
         for row, rec in enumerate(self._records):
-            self._table.setItem(row, 0, QTableWidgetItem(rec.table))
-            self._table.setItem(row, 1, QTableWidgetItem(rec.database))
-            self._table.setItem(row, 2, QTableWidgetItem(rec.timestamp))
-            self._table.setItem(row, 3, QTableWidgetItem(f"{rec.row_count:,}"))
-            self._table.setItem(row, 4, QTableWidgetItem(_fmt_size(rec.file_size)))
-            self._table.setItem(row, 5, QTableWidgetItem(rec.format))
+            self._grid.setItem(row, 0, QTableWidgetItem(rec.table))
+            self._grid.setItem(row, 1, QTableWidgetItem(rec.database))
+            self._grid.setItem(row, 2, QTableWidgetItem(rec.timestamp))
+
+            rows_item = QTableWidgetItem(f"{rec.row_count:,}")
+            rows_item.setTextAlignment(int(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter))
+            self._grid.setItem(row, 3, rows_item)
+
+            size_item = QTableWidgetItem(_fmt_size(rec.file_size))
+            size_item.setTextAlignment(int(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter))
+            self._grid.setItem(row, 4, size_item)
+
+            fmt_item = QTableWidgetItem(rec.format.upper())
+            fmt_item.setForeground(QColor(Theme.MUTED))
+            fmt_item.setFont(QFont("", -1, -1))
+            self._grid.setItem(row, 5, fmt_item)
+
         has = len(self._records) > 0
-        self._table.setVisible(has)
+        self._grid.setVisible(has)
         self._empty.setVisible(not has)
         self._delete_btn.setEnabled(False)
         self._open_btn.setEnabled(False)
 
     def _on_selection(self) -> None:
-        has = bool(self._table.selectionModel().hasSelection())
+        has = bool(self._grid.selectionModel().hasSelection())
         self._delete_btn.setEnabled(has)
         self._open_btn.setEnabled(has)
 
     def _selected_record(self) -> Any | None:
-        indexes = self._table.selectionModel().selectedRows()
+        indexes = self._grid.selectionModel().selectedRows()
         if not indexes:
             return None
         row = indexes[0].row()

@@ -882,7 +882,7 @@ _STRINGS: dict[str, dict[str, str]] = {
     "backup.done": {"en": "Backup complete: {count} table(s), {rows} rows", "zh": "备份完成：{count} 个表，{rows} 行"},
     "backup.failed": {"en": "Backup failed: {error}", "zh": "备份失败：{error}"},
     "backup.manager": {"en": "Backups", "zh": "备份管理"},
-    "backup.empty": {"en": "No backups yet. Right-click a table or database to back up.", "zh": "暂无备份。右键表或库即可备份。"},
+    "backup.empty": {"en": "No backups yet. Use the ⋯ menu on a table or database to back up.", "zh": "暂无备份。点击表或库的 ⋯ 菜单即可备份。"},
     "backup.delete": {"en": "Delete", "zh": "删除"},
     "backup.delete_confirm": {"en": "Delete this backup? The file will be removed.", "zh": "删除此备份？文件将被移除。"},
     "backup.col.table": {"en": "Table", "zh": "表"},

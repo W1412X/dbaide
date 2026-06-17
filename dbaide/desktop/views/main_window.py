@@ -1522,6 +1522,7 @@ class MainWindow(QMainWindow):
                 w.refresh()
 
     def open_backup_manager(self) -> None:
+        self.tabbar.setCurrentIndex(1)
         tabs = self.workbench.tabs
         for i in range(tabs.count()):
             w = tabs.widget(i)
