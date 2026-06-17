@@ -7,7 +7,7 @@ import sys
 from pathlib import Path
 from typing import Any
 
-from PyQt6.QtCore import QSize, QThread, Qt, pyqtSignal
+from PyQt6.QtCore import QSize, Qt, pyqtSignal
 from PyQt6.QtGui import QColor, QFont
 from PyQt6.QtWidgets import (
     QComboBox,
@@ -47,52 +47,6 @@ def _icon_btn(icon_name: str, tooltip: str, *, size: int = 16) -> QToolButton:
     return btn
 
 
-# ── Backup worker thread ─────────────────────────────────────────────────────
-
-
-class _BackupWorker(QThread):
-    progress = pyqtSignal(str, int, object)
-    finished = pyqtSignal(list)
-    error = pyqtSignal(str)
-
-    def __init__(self, config, database: str, table: str, scope: str,
-                 fmt: str, batch_size: int, threads: int) -> None:
-        super().__init__()
-        self._config = config
-        self._database = database
-        self._table = table
-        self._scope = scope
-        self._fmt = fmt
-        self._batch_size = batch_size
-        self._threads = threads
-
-    def run(self) -> None:
-        try:
-            from dbaide.backup import BackupEngine
-            engine = BackupEngine(self._config)
-
-            def on_progress(table, done, total):
-                self.progress.emit(table, done, total)
-
-            if self._scope == "table":
-                result = engine.backup_table(
-                    self._database, self._table,
-                    fmt=self._fmt, batch_size=self._batch_size,
-                    on_progress=on_progress,
-                )
-                self.finished.emit([result])
-            else:
-                results = engine.backup_database(
-                    self._database,
-                    fmt=self._fmt, batch_size=self._batch_size,
-                    threads=self._threads,
-                    on_progress=on_progress,
-                )
-                self.finished.emit(results)
-        except Exception as exc:
-            self.error.emit(str(exc))
-
-
 # ── Backup Dialog ─────────────────────────────────────────────────────────────
 
 
@@ -103,14 +57,21 @@ _INPUT_STYLE = (
 
 
 class BackupDialog(QDialog):
-    def __init__(self, config, database: str, table: str = "",
-                 scope: str = "table", parent=None) -> None:
+    """Compact backup configuration dialog.
+
+    Accepts a ``service`` (DesktopService) and ``connection_name`` so that all
+    business logic runs through ``service.dispatch("backup_run", ...)``.
+    """
+
+    def __init__(self, service, connection_name: str, database: str,
+                 table: str = "", scope: str = "table", parent=None) -> None:
         super().__init__(parent)
-        self._config = config
+        self._service = service
+        self._connection_name = connection_name
         self._database = database
         self._table = table
         self._scope = scope
-        self._worker: _BackupWorker | None = None
+        self._worker = None
 
         self.setWindowTitle(t("backup.title"))
         self.setFixedWidth(320)
@@ -123,7 +84,6 @@ class BackupDialog(QDialog):
         layout.setSpacing(10)
         layout.setContentsMargins(16, 14, 16, 14)
 
-        # Target label — small, muted
         if scope == "table":
             target = f"{database}.{table}" if database else table
         else:
@@ -135,14 +95,13 @@ class BackupDialog(QDialog):
         )
         layout.addWidget(target_label)
 
-        # Inline form: Format | Batch | Threads in a compact grid
+        # Inline form: Format | Batch | Threads
         form = QWidget()
         form.setStyleSheet("background: transparent;")
         form_layout = QHBoxLayout(form)
         form_layout.setContentsMargins(0, 0, 0, 0)
         form_layout.setSpacing(8)
 
-        # Format
         fmt_col = QVBoxLayout()
         fmt_col.setSpacing(2)
         fl = QLabel(t("backup.format"))
@@ -155,7 +114,6 @@ class BackupDialog(QDialog):
         fmt_col.addWidget(self._fmt_combo)
         form_layout.addLayout(fmt_col, 1)
 
-        # Batch size
         batch_col = QVBoxLayout()
         batch_col.setSpacing(2)
         bl = QLabel(t("backup.batch_size"))
@@ -170,7 +128,6 @@ class BackupDialog(QDialog):
         batch_col.addWidget(self._batch_spin)
         form_layout.addLayout(batch_col, 1)
 
-        # Threads (database scope only)
         if scope == "database":
             th_col = QVBoxLayout()
             th_col.setSpacing(2)
@@ -213,29 +170,43 @@ class BackupDialog(QDialog):
 
     def _start_backup(self) -> None:
         self._start_btn.setEnabled(False)
-        fmt = self._fmt_combo.currentText()
-        batch_size = self._batch_spin.value()
-        threads = self._thread_spin.value() if self._thread_spin else 1
-        self._status.setText(t("backup.running").format(
-            target=f"{self._database}.{self._table}" if self._table else self._database,
-        ))
-        self._worker = _BackupWorker(
-            self._config, self._database, self._table, self._scope,
-            fmt, batch_size, threads,
-        )
-        self._worker.progress.connect(self._on_progress)
-        self._worker.finished.connect(self._on_finished)
-        self._worker.error.connect(self._on_error)
-        self._worker.start()
+        target = f"{self._database}.{self._table}" if self._table else self._database
+        self._status.setText(t("backup.running").format(target=target))
 
-    def _on_progress(self, table: str, done: int, total: object) -> None:
+        from PyQt6.QtCore import QThreadPool
+        from dbaide.desktop.workers import ServiceWorker
+
+        payload = {
+            "connection_name": self._connection_name,
+            "database": self._database,
+            "table": self._table,
+            "scope": self._scope,
+            "format": self._fmt_combo.currentText(),
+            "batch_size": self._batch_spin.value(),
+            "threads": self._thread_spin.value() if self._thread_spin else 1,
+        }
+        self._worker = ServiceWorker(self._service, "backup_run", payload)
+        self._worker.signals.progress.connect(self._on_progress)
+        self._worker.signals.done.connect(self._on_finished)
+        self._worker.signals.failed.connect(self._on_error)
+        QThreadPool.globalInstance().start(self._worker)
+
+    def _on_progress(self, data: object) -> None:
+        if not isinstance(data, dict):
+            return
+        tbl = data.get("table", "")
+        done = data.get("done", 0)
+        total = data.get("total")
         if total:
             pct = min(int(done / int(total) * 100), 100)
-            self._status.setText(f"{table}: {done:,}/{int(total):,} ({pct}%)")
+            self._status.setText(f"{tbl}: {done:,}/{int(total):,} ({pct}%)")
         else:
-            self._status.setText(f"{table}: {done:,} rows")
+            self._status.setText(f"{tbl}: {done:,} rows")
 
-    def _on_finished(self, results: list) -> None:
+    def _on_finished(self, _action: str, result: object) -> None:
+        if not isinstance(result, dict):
+            return
+        results = result.get("results", [])
         ok = [r for r in results if not r.get("error")]
         errors = [r for r in results if r.get("error")]
         total_rows = sum(r.get("row_count", 0) for r in ok)
@@ -245,8 +216,8 @@ class BackupDialog(QDialog):
         self._status.setText(msg)
         self._start_btn.setEnabled(True)
 
-    def _on_error(self, error: str) -> None:
-        self._status.setText(t("backup.failed").format(error=error))
+    def _on_error(self, exc: object) -> None:
+        self._status.setText(t("backup.failed").format(error=str(exc)))
         self._start_btn.setEnabled(True)
 
 
@@ -254,8 +225,16 @@ class BackupDialog(QDialog):
 
 
 class BackupManager(QWidget):
-    def __init__(self, parent=None) -> None:
+    """Backup list manager.
+
+    Accepts an optional ``service`` (DesktopService) to route all data access
+    through the service layer.  Falls back to direct BackupRegistry calls when
+    no service is provided (e.g. in tests).
+    """
+
+    def __init__(self, service=None, parent=None) -> None:
         super().__init__(parent)
+        self._service = service
         layout = QVBoxLayout(self)
         layout.setContentsMargins(16, 12, 16, 12)
         layout.setSpacing(8)
@@ -305,12 +284,12 @@ class BackupManager(QWidget):
 
         hdr = self._grid.horizontalHeader()
         hdr.setStretchLastSection(False)
-        hdr.setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)      # Table
-        hdr.setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)      # Database
-        hdr.setSectionResizeMode(2, QHeaderView.ResizeMode.Stretch)      # Date
-        hdr.setSectionResizeMode(3, QHeaderView.ResizeMode.ResizeToContents)  # Rows
-        hdr.setSectionResizeMode(4, QHeaderView.ResizeMode.ResizeToContents)  # Size
-        hdr.setSectionResizeMode(5, QHeaderView.ResizeMode.ResizeToContents)  # Format
+        hdr.setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
+        hdr.setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
+        hdr.setSectionResizeMode(2, QHeaderView.ResizeMode.Stretch)
+        hdr.setSectionResizeMode(3, QHeaderView.ResizeMode.ResizeToContents)
+        hdr.setSectionResizeMode(4, QHeaderView.ResizeMode.ResizeToContents)
+        hdr.setSectionResizeMode(5, QHeaderView.ResizeMode.ResizeToContents)
 
         self._grid.setStyleSheet(
             f"QTableWidget {{ background: {Theme.SURFACE}; border: 1px solid {Theme.BORDER};"
@@ -331,34 +310,49 @@ class BackupManager(QWidget):
         self._empty.setAlignment(Qt.AlignmentFlag.AlignCenter)
         layout.addWidget(self._empty)
 
-        self._records: list[Any] = []
+        self._records: list[dict[str, Any]] = []
         self.refresh()
 
-    def refresh(self) -> None:
+    def _fetch_records(self) -> list[dict[str, Any]]:
+        if self._service:
+            result = self._service.dispatch("backup_list")
+            return result.get("records", [])
         from dbaide.backup import BackupRegistry
+        registry = BackupRegistry()
+        records = registry.list_backups()
+        return [_record_to_dict(r) for r in records]
 
+    def _do_delete(self, backup_id: int) -> None:
+        if self._service:
+            self._service.dispatch("backup_delete", {"id": backup_id})
+        else:
+            from dbaide.backup import BackupRegistry
+            BackupRegistry().delete(backup_id)
+
+    def refresh(self) -> None:
         prev_row = -1
         indexes = self._grid.selectionModel().selectedRows()
         if indexes:
             prev_row = indexes[0].row()
 
-        registry = BackupRegistry()
-        self._records = registry.list_backups()
+        self._records = self._fetch_records()
         self._grid.setRowCount(len(self._records))
         for row, rec in enumerate(self._records):
-            self._grid.setItem(row, 0, QTableWidgetItem(rec.table))
-            self._grid.setItem(row, 1, QTableWidgetItem(rec.database))
-            self._grid.setItem(row, 2, QTableWidgetItem(rec.timestamp))
+            self._grid.setItem(row, 0, QTableWidgetItem(str(rec.get("table", ""))))
+            self._grid.setItem(row, 1, QTableWidgetItem(str(rec.get("database", ""))))
+            self._grid.setItem(row, 2, QTableWidgetItem(str(rec.get("timestamp", ""))))
 
-            rows_item = QTableWidgetItem(f"{rec.row_count:,}")
+            row_count = int(rec.get("row_count", 0))
+            rows_item = QTableWidgetItem(f"{row_count:,}")
             rows_item.setTextAlignment(int(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter))
             self._grid.setItem(row, 3, rows_item)
 
-            size_item = QTableWidgetItem(_fmt_size(rec.file_size))
+            file_size = int(rec.get("file_size", 0))
+            size_item = QTableWidgetItem(_fmt_size(file_size))
             size_item.setTextAlignment(int(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter))
             self._grid.setItem(row, 4, size_item)
 
-            fmt_item = QTableWidgetItem(rec.format.upper())
+            fmt_item = QTableWidgetItem(str(rec.get("format", "")).upper())
             fmt_item.setForeground(QColor(Theme.MUTED))
             fmt_item.setFont(QFont("", -1, -1))
             self._grid.setItem(row, 5, fmt_item)
@@ -377,7 +371,7 @@ class BackupManager(QWidget):
         self._delete_btn.setEnabled(has)
         self._open_btn.setEnabled(has)
 
-    def _selected_record(self) -> Any | None:
+    def _selected_record(self) -> dict[str, Any] | None:
         indexes = self._grid.selectionModel().selectedRows()
         if not indexes:
             return None
@@ -391,22 +385,37 @@ class BackupManager(QWidget):
         reply = QMessageBox.question(self, t("backup.delete"), t("backup.delete_confirm"))
         if reply != QMessageBox.StandardButton.Yes:
             return
-        from dbaide.backup import BackupRegistry
-        registry = BackupRegistry()
-        registry.delete(rec.id)
+        self._do_delete(int(rec.get("id", 0)))
         self.refresh()
 
     def _open_folder(self) -> None:
         rec = self._selected_record()
         if rec is None:
             return
-        folder = str(Path(rec.file_path).parent)
+        file_path = str(rec.get("file_path", ""))
+        if not file_path:
+            return
+        folder = str(Path(file_path).parent)
         if sys.platform == "darwin":
             subprocess.Popen(["open", folder])
         elif sys.platform == "win32":
             os.startfile(folder)  # type: ignore[attr-defined]
         else:
             subprocess.Popen(["xdg-open", folder])
+
+
+def _record_to_dict(rec: Any) -> dict[str, Any]:
+    """Convert a BackupRecord namedtuple to a plain dict."""
+    return {
+        "id": rec.id,
+        "table": rec.table,
+        "database": rec.database,
+        "timestamp": rec.timestamp,
+        "row_count": rec.row_count,
+        "file_size": rec.file_size,
+        "format": rec.format,
+        "file_path": rec.file_path,
+    }
 
 
 def _fmt_size(n: int) -> str:

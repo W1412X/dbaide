@@ -59,6 +59,9 @@ ACTION_METHODS: tuple[tuple[str, str], ...] = (
     ("export_connection", "export_connection"),
     ("import_connection", "import_connection"),
     ("export_all", "export_all"),
+    ("backup_run", "backup_run"),
+    ("backup_list", "backup_list"),
+    ("backup_delete", "backup_delete"),
 )
 
 

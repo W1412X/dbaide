@@ -64,7 +64,7 @@ class ServiceWorker(QRunnable):
         try:
             if self.action in (
                 "build_assets", "ask", "project_instance", "refresh_instance", "enrich_table",
-                "execute_sql", "explain_sql", "browse_table", "count_table",
+                "execute_sql", "explain_sql", "browse_table", "count_table", "backup_run",
             ):
                 self.payload.setdefault("progress", self._emit_progress)
                 self.payload.setdefault("cancel_check", self._check_cancelled)

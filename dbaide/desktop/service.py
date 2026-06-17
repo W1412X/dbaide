@@ -1707,5 +1707,51 @@ class DesktopService:
         self.cfg.reload()
         return {"connections": conn_count, "models": model_count}
 
+    # ── Backup ────────────────────────────────────────────────────────────────
+
+    def backup_run(self, payload: dict[str, Any]) -> dict[str, Any]:
+        from dbaide.backup import BackupEngine
+        conn = self.cfg.get_connection(str(payload.get("connection_name") or ""))
+        engine = BackupEngine(conn)
+        database = str(payload.get("database") or "")
+        table = str(payload.get("table") or "")
+        fmt = str(payload.get("format") or "csv")
+        batch_size = int(payload.get("batch_size") or 5000)
+        threads = int(payload.get("threads") or 4)
+        progress = payload.get("progress")
+
+        def on_progress(tbl: str, done: int, total: object) -> None:
+            if progress:
+                progress({"table": tbl, "done": done, "total": total})
+
+        scope = str(payload.get("scope") or "table")
+        if scope == "table":
+            result = engine.backup_table(
+                database, table,
+                fmt=fmt, batch_size=batch_size,
+                on_progress=on_progress,
+            )
+            return {"results": [result]}
+        results = engine.backup_database(
+            database,
+            fmt=fmt, batch_size=batch_size,
+            threads=threads,
+            on_progress=on_progress,
+        )
+        return {"results": results}
+
+    def backup_list(self, _payload: dict[str, Any] | None = None) -> dict[str, Any]:
+        from dbaide.backup import BackupRegistry
+        registry = BackupRegistry()
+        records = registry.list_backups()
+        return {"records": [_to_dict(r) for r in records]}
+
+    def backup_delete(self, payload: dict[str, Any]) -> dict[str, Any]:
+        from dbaide.backup import BackupRegistry
+        registry = BackupRegistry()
+        backup_id = int(payload.get("id") or 0)
+        registry.delete(backup_id)
+        return {"deleted": backup_id}
+
     def _safe_llm(self):
         return build_llm_client(self.cfg.model())

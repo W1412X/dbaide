@@ -1509,8 +1509,7 @@ class MainWindow(QMainWindow):
         else:
             return
         from dbaide.desktop.dialogs.backup import BackupDialog
-        config = self.service.cfg.get_connection(conn)
-        dlg = BackupDialog(config, database, table, scope=scope, parent=self)
+        dlg = BackupDialog(self.service, conn, database, table, scope=scope, parent=self)
         dlg.exec()
         self._ensure_backup_manager_refreshed()
 
@@ -1530,7 +1529,7 @@ class MainWindow(QMainWindow):
                 tabs.setCurrentIndex(i)
                 return
         from dbaide.desktop.dialogs.backup import BackupManager
-        mgr = BackupManager()
+        mgr = BackupManager(service=self.service)
         idx = tabs.addTab(mgr, _i18n_t("backup.manager"))
         tabs.setCurrentIndex(idx)
 
