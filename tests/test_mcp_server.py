@@ -39,6 +39,14 @@ class TestToolDefinitions:
     def test_ask_has_handler(self):
         assert "ask" in mcp._TOOL_HANDLERS
 
+    def test_all_tools_have_readonly_annotation(self):
+        all_tools = [mcp.ASK_TOOL] + mcp._ATOMIC_TOOLS
+        for tool in all_tools:
+            assert "annotations" in tool, f"{tool['name']} missing annotations"
+            assert tool["annotations"].get("readOnlyHint") is True, (
+                f"{tool['name']} missing readOnlyHint"
+            )
+
 
 class TestModeFiltering:
     """Verify tools/list respects the active mode."""
@@ -67,18 +75,21 @@ class TestModeFiltering:
 
     def test_mode_enforcement_ask(self):
         mcp._active_mode = "ask"
-        with pytest.raises(ValueError, match="not available in 'ask' mode"):
-            mcp.handle_tools_call({"name": "execute_sql", "arguments": {"sql": "SELECT 1"}})
+        result = mcp.handle_tools_call({"name": "execute_sql", "arguments": {"sql": "SELECT 1"}})
+        assert result.get("isError") is True
+        assert "not available in 'ask' mode" in result["content"][0]["text"]
 
     def test_mode_enforcement_tools(self):
         mcp._active_mode = "tools"
-        with pytest.raises(ValueError, match="not available in 'tools' mode"):
-            mcp.handle_tools_call({"name": "ask", "arguments": {"question": "test"}})
+        result = mcp.handle_tools_call({"name": "ask", "arguments": {"question": "test"}})
+        assert result.get("isError") is True
+        assert "not available in 'tools' mode" in result["content"][0]["text"]
 
-    def test_unknown_tool_raises(self):
+    def test_unknown_tool_returns_error(self):
         mcp._active_mode = "full"
-        with pytest.raises(ValueError, match="Unknown tool"):
-            mcp.handle_tools_call({"name": "nonexistent", "arguments": {}})
+        result = mcp.handle_tools_call({"name": "nonexistent", "arguments": {}})
+        assert result.get("isError") is True
+        assert "Unknown tool" in result["content"][0]["text"]
 
 
 class TestInitialize:
@@ -87,6 +98,15 @@ class TestInitialize:
         assert result["protocolVersion"] == mcp.PROTOCOL_VERSION
         assert result["serverInfo"]["name"] == "dbaide"
         assert "tools" in result["capabilities"]
+
+    def test_initialize_has_instructions(self):
+        result = mcp.handle_initialize({})
+        assert "instructions" in result
+        assert "read-only" in result["instructions"]
+
+    def test_ping(self):
+        result = mcp.handle_ping({})
+        assert result == {}
 
 
 class TestSerialize:

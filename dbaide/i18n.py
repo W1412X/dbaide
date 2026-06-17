@@ -48,6 +48,7 @@ _STRINGS: dict[str, dict[str, str]] = {
     "data.sort_asc": {"en": "Sort ascending ↑", "zh": "升序 ↑"},
     "data.sort_desc": {"en": "Sort descending ↓", "zh": "降序 ↓"},
     "data.sort_clear": {"en": "Clear sort", "zh": "取消排序"},
+    "tab.doc": {"en": "Doc", "zh": "文档"},
     "tab.structure": {"en": "Structure", "zh": "结构"},
     "tab.history": {"en": "History", "zh": "历史"},
     "workbench.new_query": {"en": "New SQL editor", "zh": "新建 SQL 编辑器"},
@@ -933,6 +934,9 @@ _STRINGS: dict[str, dict[str, str]] = {
     "result.copy_row": {"en": "Copy row (JSON)", "zh": "复制整行（JSON）"},
     "result.value_viewer": {"en": "Value viewer", "zh": "值查看器"},
     "result.export_title": {"en": "Export results", "zh": "导出结果"},
+    "result.export_scope_title": {"en": "Export scope", "zh": "导出范围"},
+    "result.export_current_page": {"en": "Current page", "zh": "当前页"},
+    "result.export_all_rows": {"en": "All rows (no LIMIT)", "zh": "全部数据（不限行数）"},
     "result.autofit_column": {"en": "Auto-fit column", "zh": "自适应列宽"},
     "result.autofit_all": {"en": "Auto-fit all columns", "zh": "自适应所有列宽"},
     "result.showing": {

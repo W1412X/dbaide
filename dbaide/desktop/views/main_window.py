@@ -132,6 +132,9 @@ class MainWindow(QMainWindow):
 
     def _check_for_updates_at_startup(self) -> None:
         self._start_release_check()
+        self._release_timer = QTimer(self)
+        self._release_timer.timeout.connect(self._start_release_check)
+        self._release_timer.start(30 * 60 * 1000)
 
     def _start_release_check(self) -> None:
         if self._release_check_in_progress:
@@ -441,9 +444,11 @@ class MainWindow(QMainWindow):
         self.workbench.browse_requested.connect(self._browse_from)
         self.workbench.count_requested.connect(self._count_from)
         self.workbench.ddl_requested.connect(self._ddl_from)
+        self.workbench.export_all_requested.connect(self._export_all_from)
         self.workbench.doc_closed.connect(self._on_doc_closed)
         self.workbench.navigate_table.connect(self._open_table_by_name)
         self.workbench.navigate_fk.connect(self._navigate_fk)
+        self.workbench.doc_requested.connect(self._load_table_doc)
         self.stack.addWidget(self.ask_tab)    # mode 0 — Assistant
         self.stack.addWidget(self.workbench)  # mode 1 — Workbench
         center_layout.addWidget(self.stack, 1)
@@ -1726,6 +1731,51 @@ class MainWindow(QMainWindow):
         self._active_data_doc = doc
         self.oneoff_controller.run_action("count_table", payload)
 
+    def _export_all_from(self, doc, payload: dict[str, Any]) -> None:
+        """Export all rows (no LIMIT) for the current table/filter and save to file."""
+        fmt = str(payload.pop("format", "csv"))
+
+        def on_loaded(result: dict[str, Any]) -> None:
+            rows = result.get("rows") or []
+            columns = result.get("columns") or []
+            if not rows:
+                self.toast(_i18n_t("data.no_rows"))
+                return
+            from dbaide.rendering.table import export_csv, export_json
+            from PyQt6.QtWidgets import QFileDialog
+            table_name = str(payload.get("table") or "table")
+            if fmt == "json":
+                content = export_json(rows, columns)
+                ext, filt = "json", "JSON (*.json)"
+            else:
+                content = export_csv(rows, columns)
+                ext, filt = "csv", "CSV (*.csv)"
+            path, _ = QFileDialog.getSaveFileName(
+                self, _i18n_t("result.export_title"), f"{table_name}.{ext}", filt,
+            )
+            if path:
+                try:
+                    with open(path, "w", encoding="utf-8", newline="") as fh:
+                        fh.write(content)
+                    self.toast(_i18n_t("result.export_title") + f" → {path}")
+                except OSError as exc:
+                    self.toast(str(exc))
+
+        self._run_background("export_table_all", payload, on_loaded)
+
+    def _load_table_doc(self, path: str) -> None:
+        """Load asset markdown for a TableDocument's doc sub-tab."""
+        if not path:
+            return
+
+        def on_loaded(res: dict[str, Any]) -> None:
+            parts = path.split(".")
+            if len(parts) >= 3:
+                conn, db, table = parts[0], parts[1], ".".join(parts[2:])
+                self.workbench.update_table_doc(conn, db, table, res.get("markdown") or "")
+
+        self._run_background("asset_markdown", {"path": path}, on_loaded)
+
     def _ddl_from(self, doc, payload: dict[str, Any]) -> None:
         """Fetch the table's real CREATE TABLE DDL in the background and feed it to the
         document's Structure panel (non-blocking; the generated skeleton shows until)."""
@@ -1822,6 +1872,27 @@ class MainWindow(QMainWindow):
         path = str(data.get("path") or "")
         if not path:
             return
+        kind = str(data.get("kind") or "")
+        if kind == "table":
+            _instance, database, table, _column = self._schema_path_parts(data)
+            if database and table:
+                conn = self.current_connection()
+                self.tabbar.setCurrentIndex(1)
+                if self.workbench.focus_table_doc(conn, database, table):
+                    return
+                self.workbench.open_table(
+                    conn, database, table, data.get("children") or [],
+                    relations={
+                        "foreign_keys": data.get("foreign_keys") or [],
+                        "referenced_by": data.get("referenced_by") or [],
+                    },
+                    indexes=data.get("indexes") or [],
+                    dialect=self._dialect(),
+                )
+                doc = self.workbench.tabs.currentWidget()
+                if hasattr(doc, "focus_doc"):
+                    doc.focus_doc()
+                return
         self._show_asset(path)
 
     def _edit_note(self, node: dict[str, Any]) -> None:

@@ -152,6 +152,9 @@ class MenuButton(QToolButton):
     def add_separator(self) -> None:
         self._menu.addSeparator()
 
+    def clear_actions(self) -> None:
+        self._menu.clear()
+
 
 class PillSelect(QToolButton):
     """Codex-style compact context pill with inline dropdown."""

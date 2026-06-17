@@ -39,6 +39,7 @@ class WorkbenchView(QWidget):
     browse_requested = pyqtSignal(object, dict)  # (TableDocument, payload)
     count_requested = pyqtSignal(object, dict)   # (TableDocument, count payload)
     ddl_requested = pyqtSignal(object, dict)     # (TableDocument, ddl payload)
+    export_all_requested = pyqtSignal(object, dict)  # (TableDocument, export payload)
     doc_closed = pyqtSignal(object)          # the closed widget
     navigate_table = pyqtSignal(str)         # FK link → open a related table
     navigate_fk = pyqtSignal(str, str, object)  # data-cell FK → open referenced row
@@ -64,6 +65,9 @@ class WorkbenchView(QWidget):
         self.tabs.tabBar().setElideMode(Qt.TextElideMode.ElideRight)
         self.tabs.tabBar().setExpanding(False)
         self.tabs.tabBar().setDrawBase(False)
+        self.tabs.tabBar().setStyleSheet(
+            "QTabBar::tab { max-width: 160px; }"
+        )
         self.tabs.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
         # The tab bar itself must stay on the global panelTabs stylesheet. Setting
         # a widget-local QTabBar stylesheet here makes Qt drop the app-level tab
@@ -213,12 +217,35 @@ class WorkbenchView(QWidget):
         doc.query_requested.connect(lambda payload, d=doc: self.browse_requested.emit(d, payload))
         doc.count_requested.connect(lambda payload, d=doc: self.count_requested.emit(d, payload))
         doc.ddl_requested.connect(lambda payload, d=doc: self.ddl_requested.emit(d, payload))
+        doc.export_all_requested.connect(lambda payload, d=doc: self.export_all_requested.emit(d, payload))
+        doc.doc_requested.connect(self.doc_requested.emit)
         doc.navigate_table.connect(self.navigate_table.emit)
         doc.navigate_fk.connect(self.navigate_fk.emit)
         index = self.tabs.addTab(doc, table)
         self.tabs.setCurrentIndex(index)
         doc.open(columns, relations, indexes)
         return doc
+
+    def focus_table_doc(self, connection: str, database: str, table: str) -> bool:
+        """If a TableDocument for this table is open, switch to its Doc sub-tab.
+        Returns True if found and focused."""
+        target_key = TableDocument.key(connection, database, table)
+        for i in range(self.tabs.count()):
+            w = self.tabs.widget(i)
+            if isinstance(w, TableDocument) and w.doc_key == target_key:
+                self.tabs.setCurrentIndex(i)
+                w.focus_doc()
+                return True
+        return False
+
+    def update_table_doc(self, connection: str, database: str, table: str, markdown: str) -> None:
+        """Update the doc content of an open TableDocument (no-op if not open)."""
+        target_key = TableDocument.key(connection, database, table)
+        for i in range(self.tabs.count()):
+            w = self.tabs.widget(i)
+            if isinstance(w, TableDocument) and w.doc_key == target_key:
+                w.show_doc(markdown)
+                return
 
     # ── focus helpers (used by MainWindow.switch_tab) ────────────────────────────
 

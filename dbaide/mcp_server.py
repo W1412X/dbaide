@@ -51,7 +51,8 @@ ASK_TOOL = {
     "name": "ask",
     "description": (
         "Ask a natural-language question about the database. "
-        "DBAide generates SQL, executes it, and returns a formatted answer with the query used."
+        "DBAide generates SQL, executes it, and returns a formatted answer with the query used. "
+        "All operations are read-only."
     ),
     "inputSchema": {
         "type": "object",
@@ -71,11 +72,23 @@ ASK_TOOL = {
         },
         "required": ["question"],
     },
+    "annotations": {"title": "Ask Database", "readOnlyHint": True, "openWorldHint": False},
 }
 
 # ── Mode B: atomic database tools ─────────────────────────────────────────
 
+_RO = {"readOnlyHint": True, "openWorldHint": False}
+
 _ATOMIC_TOOLS: list[dict[str, Any]] = [
+    {
+        "name": "list_connections",
+        "description": (
+            "List all configured database connections with name, type, host, and database. "
+            "Call this first to discover available connections before using other tools."
+        ),
+        "inputSchema": {"type": "object", "properties": {}},
+        "annotations": {**_RO, "title": "List Connections"},
+    },
     {
         "name": "list_databases",
         "description": "List all databases/schemas available in the connection.",
@@ -85,17 +98,22 @@ _ATOMIC_TOOLS: list[dict[str, Any]] = [
                 "conn": {"type": "string", "description": "Connection name (omit for default)"},
             },
         },
+        "annotations": {**_RO, "title": "List Databases"},
     },
     {
         "name": "list_tables",
-        "description": "List all tables in a database.",
+        "description": (
+            "List all tables in a database. "
+            "If database is omitted, lists tables in the connection's default database."
+        ),
         "inputSchema": {
             "type": "object",
             "properties": {
                 "conn": {"type": "string", "description": "Connection name (omit for default)"},
-                "database": {"type": "string", "description": "Database/schema name"},
+                "database": {"type": "string", "description": "Database/schema name (omit for connection default)"},
             },
         },
+        "annotations": {**_RO, "title": "List Tables"},
     },
     {
         "name": "describe_table",
@@ -112,6 +130,7 @@ _ATOMIC_TOOLS: list[dict[str, Any]] = [
             },
             "required": ["table"],
         },
+        "annotations": {**_RO, "title": "Describe Table"},
     },
     {
         "name": "inspect_metadata",
@@ -136,17 +155,19 @@ _ATOMIC_TOOLS: list[dict[str, Any]] = [
                 "conn": {"type": "string", "description": "Connection name (omit for default)"},
             },
         },
+        "annotations": {**_RO, "title": "Inspect Metadata"},
     },
     {
         "name": "execute_sql",
         "description": (
-            "Execute a read-only SQL query and return the results. "
-            "All queries are validated for safety (no writes) before execution."
+            "Execute a read-only SQL query and return the results as JSON (columns + rows). "
+            "Only SELECT queries are allowed; INSERT/UPDATE/DELETE/DROP are rejected. "
+            "All queries are validated for safety before execution."
         ),
         "inputSchema": {
             "type": "object",
             "properties": {
-                "sql": {"type": "string", "description": "SQL query to execute"},
+                "sql": {"type": "string", "description": "SQL SELECT query to execute"},
                 "database": {"type": "string", "description": "Database/schema name"},
                 "limit": {"type": "integer", "description": "Max rows to return (default 100)"},
                 "timeout_seconds": {"type": "integer", "description": "Query timeout in seconds"},
@@ -154,6 +175,7 @@ _ATOMIC_TOOLS: list[dict[str, Any]] = [
             },
             "required": ["sql"],
         },
+        "annotations": {**_RO, "title": "Execute SQL"},
     },
     {
         "name": "validate_sql",
@@ -166,6 +188,7 @@ _ATOMIC_TOOLS: list[dict[str, Any]] = [
             },
             "required": ["sql"],
         },
+        "annotations": {**_RO, "title": "Validate SQL"},
     },
     {
         "name": "explain_sql",
@@ -179,13 +202,15 @@ _ATOMIC_TOOLS: list[dict[str, Any]] = [
             },
             "required": ["sql"],
         },
+        "annotations": {**_RO, "title": "Explain SQL"},
     },
     {
         "name": "column_stats",
         "description": (
-            "Get type-aware statistics for table columns: min, max, null_rate, "
-            "distinct_count, top_values. All requested columns are computed in a "
-            "single table scan."
+            "Get specific statistical metrics for selected columns: "
+            "choose from min, max, null_rate, distinct_count, min_len, max_len, empty_rate, top_values. "
+            "Use this when you need particular metrics for particular columns. "
+            "For a full overview of all columns, use profile_table instead."
         ),
         "inputSchema": {
             "type": "object",
@@ -193,11 +218,11 @@ _ATOMIC_TOOLS: list[dict[str, Any]] = [
                 "table": {"type": "string", "description": "Table name"},
                 "columns": {
                     "type": "array", "items": {"type": "string"},
-                    "description": "Columns to profile (omit for all)",
+                    "description": "Columns to analyze (omit for all)",
                 },
                 "metrics": {
                     "type": "array", "items": {"type": "string"},
-                    "description": "Metrics: min, max, null_rate, distinct_count, min_len, max_len, empty_rate, top_values",
+                    "description": "Metrics to compute: min, max, null_rate, distinct_count, min_len, max_len, empty_rate, top_values",
                 },
                 "database": {"type": "string"},
                 "top_k": {"type": "integer", "description": "Top-K values to return (default 10)"},
@@ -205,12 +230,14 @@ _ATOMIC_TOOLS: list[dict[str, Any]] = [
             },
             "required": ["table"],
         },
+        "annotations": {**_RO, "title": "Column Stats"},
     },
     {
         "name": "profile_table",
         "description": (
-            "Profile all or selected columns of a table: row count, null count, "
-            "distinct count, min/max values, top values, data distribution."
+            "Get a comprehensive profile of all columns in a table at once: "
+            "row count, null count, distinct count, min/max, top values, and data types. "
+            "Use this for an overview. For targeted metrics on specific columns, use column_stats."
         ),
         "inputSchema": {
             "type": "object",
@@ -226,10 +253,11 @@ _ATOMIC_TOOLS: list[dict[str, Any]] = [
             },
             "required": ["table"],
         },
+        "annotations": {**_RO, "title": "Profile Table"},
     },
     {
         "name": "sample_rows",
-        "description": "Return sample rows from a table.",
+        "description": "Return a sample of rows from a table to preview its data.",
         "inputSchema": {
             "type": "object",
             "properties": {
@@ -240,11 +268,7 @@ _ATOMIC_TOOLS: list[dict[str, Any]] = [
             },
             "required": ["table"],
         },
-    },
-    {
-        "name": "list_connections",
-        "description": "List all configured database connections.",
-        "inputSchema": {"type": "object", "properties": {}},
+        "annotations": {**_RO, "title": "Sample Rows"},
     },
 ]
 
@@ -653,6 +677,13 @@ def handle_initialize(params: dict) -> dict:
         "protocolVersion": PROTOCOL_VERSION,
         "capabilities": {"tools": {}},
         "serverInfo": {"name": SERVER_NAME, "version": _server_version()},
+        "instructions": (
+            "DBAide is a read-only database assistant. All tools are safe to call — "
+            "no data is modified. Typical workflow: "
+            "list_connections → list_databases → list_tables → describe_table → execute_sql. "
+            "Use column_stats for targeted metrics on specific columns, "
+            "or profile_table for a comprehensive overview of all columns."
+        ),
     }
 
 
@@ -669,20 +700,29 @@ def handle_tools_call(params: dict) -> dict:
     name = params.get("name", "")
     handler = _TOOL_HANDLERS.get(name)
     if handler is None:
-        raise ValueError(f"Unknown tool: {name}")
+        return _text_content(f"Unknown tool: {name}", is_error=True)
 
     if _active_mode == "ask" and name != "ask":
-        raise ValueError(f"Tool '{name}' is not available in 'ask' mode")
+        return _text_content(
+            f"Tool '{name}' is not available in 'ask' mode", is_error=True,
+        )
     if _active_mode == "tools" and name == "ask":
-        raise ValueError(f"Tool 'ask' is not available in 'tools' mode")
+        return _text_content(
+            f"Tool 'ask' is not available in 'tools' mode", is_error=True,
+        )
 
     arguments = params.get("arguments") or {}
     return handler(arguments)
 
 
+def handle_ping(_params: dict) -> dict:
+    return {}
+
+
 HANDLERS = {
     "initialize": handle_initialize,
     "notifications/initialized": None,
+    "ping": handle_ping,
     "tools/list": handle_tools_list,
     "tools/call": handle_tools_call,
 }
@@ -713,7 +753,7 @@ def serve(*, mode: str = "full") -> None:
         format="%(levelname)s %(name)s: %(message)s",
     )
 
-    signal.signal(signal.SIGTERM, lambda *_: raise_exit())
+    signal.signal(signal.SIGTERM, lambda *_: signal.raise_signal(signal.SIGINT))
 
     try:
         for line in sys.stdin:
@@ -748,10 +788,6 @@ def serve(*, mode: str = "full") -> None:
         pass
     except (BrokenPipeError, OSError):
         pass
-
-
-def raise_exit() -> None:
-    raise SystemExit(0)
 
 
 if __name__ == "__main__":

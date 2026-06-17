@@ -14,6 +14,7 @@ from PyQt6.QtWidgets import QTabWidget, QVBoxLayout, QWidget
 
 from dbaide.desktop.theme import workbench_tab_stylesheet
 from dbaide.desktop.views.data_browser import DataBrowser
+from dbaide.desktop.views.doc_tab import DocTab
 from dbaide.desktop.views.structure_panel import StructurePanel
 
 
@@ -21,12 +22,17 @@ class TableDocument(QWidget):
     query_requested = pyqtSignal(dict)
     count_requested = pyqtSignal(dict)
     ddl_requested = pyqtSignal(dict)   # fetch the real CREATE TABLE DDL from the DB
+    export_all_requested = pyqtSignal(dict)  # export full result (no LIMIT)
     navigate_table = pyqtSignal(str)  # bubbled from the Structure panel's FK links
     navigate_fk = pyqtSignal(str, str, object)  # (ref_table, ref_column, value)
+
+    doc_requested = pyqtSignal(str)  # asset path — request markdown load
 
     def __init__(self, connection: str, database: str, table: str, *, dialect: str = "generic", parent=None) -> None:
         super().__init__(parent)
         from dbaide.i18n import t
+        from dbaide.desktop.components.icons import svg_icon
+        from dbaide.desktop.theme import Theme
         self.connection = connection
         self.database = database
         self.table = table
@@ -37,6 +43,7 @@ class TableDocument(QWidget):
 
         self.tabs = QTabWidget()
         self.tabs.setDocumentMode(True)
+        self.tabs.setTabsClosable(False)
         self.tabs.tabBar().setProperty("panelTabs", True)
         self.tabs.tabBar().setDrawBase(False)
         self.tabs.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
@@ -44,13 +51,18 @@ class TableDocument(QWidget):
         self.data = DataBrowser()
         self.data.query_requested.connect(self.query_requested.emit)
         self.data.count_requested.connect(self.count_requested.emit)
+        self.data.export_all_requested.connect(self.export_all_requested.emit)
         self.data.navigate_fk.connect(self.navigate_fk.emit)
         self.structure = StructurePanel()
         self.structure.navigate_table.connect(self.navigate_table.emit)
-        # Structure first — opening a table shows its (offline, instant) structure;
-        # the Data tab issues its query lazily, only when the user actually opens it.
+        self.doc_tab = DocTab(table)
+        self._doc_loaded = False
+        self._doc_index = self.tabs.addTab(self.doc_tab, t("tab.doc"))
+        self.tabs.setTabIcon(self._doc_index, svg_icon("file-text", color=Theme.TEXT_2, size=13))
         self._structure_index = self.tabs.addTab(self.structure, t("tab.structure"))
+        self.tabs.setTabIcon(self._structure_index, svg_icon("columns", color=Theme.TEXT_2, size=13))
         self._data_index = self.tabs.addTab(self.data, t("tab.data"))
+        self.tabs.setTabIcon(self._data_index, svg_icon("table", color=Theme.TEXT_2, size=13))
         self._data_loaded = False
         self._ddl_loaded = False
         self.tabs.currentChanged.connect(self._on_subtab)
@@ -94,6 +106,8 @@ class TableDocument(QWidget):
     def _on_subtab(self, index: int) -> None:
         if index == self._data_index:
             self._ensure_data()
+        elif index == self._doc_index:
+            self._ensure_doc()
 
     def _ensure_data(self) -> None:
         """Issue the first data query the first time the Data tab is opened."""
@@ -101,9 +115,28 @@ class TableDocument(QWidget):
             self._data_loaded = True
             self.data.open_table(self.connection, self.database, self.table, dialect=self._dialect)
 
+    def _ensure_doc(self) -> None:
+        """Request the asset markdown the first time the Doc tab is opened."""
+        if not self._doc_loaded:
+            self._doc_loaded = True
+            path = self._asset_path()
+            if path:
+                self.doc_requested.emit(path)
+
+    def _asset_path(self) -> str:
+        parts = [p for p in (self.connection, self.database, self.table) if p]
+        return ".".join(parts) if len(parts) >= 2 else ""
+
+    def show_doc(self, markdown: str) -> None:
+        self.doc_tab.set_content(self.table, markdown)
+
     def focus_data(self) -> None:
         self.tabs.setCurrentIndex(self._data_index)
         self._ensure_data()
+
+    def focus_doc(self) -> None:
+        self.tabs.setCurrentIndex(self._doc_index)
+        self._ensure_doc()
 
     def browse_with_filter(self, where: str) -> None:
         """Open the Data tab and load it filtered (used by FK navigation)."""

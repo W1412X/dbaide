@@ -38,6 +38,7 @@ _PAGE_SIZES = ("50", "100", "200", "500")
 class DataBrowser(QWidget):
     query_requested = pyqtSignal(dict)  # browse_table payload
     count_requested = pyqtSignal(dict)  # count_table payload (on-demand exact total)
+    export_all_requested = pyqtSignal(dict)  # export full result (no LIMIT)
     navigate_fk = pyqtSignal(str, str, object)  # (ref_table, ref_column, value)
 
     def __init__(self, parent=None) -> None:
@@ -143,6 +144,16 @@ class DataBrowser(QWidget):
         # Fold the grid's Export into this single pager row (no separate, sparse
         # toolbar row above the table) — denser layout.
         self.grid.set_toolbar_visible(False)
+        # Replace the grid's save-to-file actions with scope-aware variants that
+        # let the user choose "current page" vs "all rows (no LIMIT)".
+        self.grid.export_menu.clear_actions()
+        self.grid.export_menu.add_action(t("result.copy_csv"), self.grid.copy_csv)
+        self.grid.export_menu.add_action(t("result.copy_json"), self.grid.copy_json)
+        self.grid.export_menu.add_action(t("result.copy_markdown"), self.grid.copy_markdown)
+        self.grid.export_menu.add_action(t("result.copy_insert"), self.grid.copy_insert)
+        self.grid.export_menu.add_separator()
+        self.grid.export_menu.add_action(t("result.save_csv"), lambda: self._save_with_scope("csv"))
+        self.grid.export_menu.add_action(t("result.save_json"), lambda: self._save_with_scope("json"))
         bar.addWidget(self.grid.export_menu)
         pl.addLayout(bar)
 
@@ -151,8 +162,10 @@ class DataBrowser(QWidget):
         self._filter.setPlaceholderText(t("data.filter_placeholder"))
         self._filter.setClearButtonEnabled(True)
         self._filter.returnPressed.connect(self._on_filter)
-        # leading magnifier-ish handled by placeholder; keep it simple/compact
-        self._filter.setFixedHeight(26)
+        self._filter.setFixedHeight(28)
+        self._filter.setStyleSheet(
+            f"QLineEdit {{ padding: 0 12px; }}"
+        )
         # Word-level completion of column names (and a few WHERE keywords) — a plain
         # QLineEdit completer matches the whole line, so we drive the completer on the
         # current word ourselves.
@@ -258,6 +271,11 @@ class DataBrowser(QWidget):
         else:
             self._busy.stop()
             self._refresh.setIcon(svg_icon("refresh", color=Theme.TEXT_2, size=15))
+            rows = self.grid.table.rowCount()
+            if rows > 0:
+                self._update_range_label(rows)
+            elif self._table:
+                self._range.setText(self._t("data.no_rows"))
         self._set_controls_enabled(not running)
 
     def browse_filtered(self, connection: str, database: str, table: str, where: str,
@@ -442,3 +460,33 @@ class DataBrowser(QWidget):
         self._order_by, self._order_dir = "", "asc"
         self._offset = 0
         self._reload()
+
+    # ── export with scope ─────────────────────────────────────────────────────
+
+    def _save_with_scope(self, fmt: str) -> None:
+        """Ask the user whether to export the current page or all rows, then save."""
+        from PyQt6.QtWidgets import QMessageBox
+        dlg = QMessageBox(self)
+        dlg.setWindowTitle(self._t("result.export_scope_title"))
+        dlg.setText(self._t("result.export_scope_title"))
+        page_btn = dlg.addButton(self._t("result.export_current_page"), QMessageBox.ButtonRole.AcceptRole)
+        all_btn = dlg.addButton(self._t("result.export_all_rows"), QMessageBox.ButtonRole.ActionRole)
+        dlg.addButton(QMessageBox.StandardButton.Cancel)
+        dlg.setDefaultButton(page_btn)
+        dlg.exec()
+        clicked = dlg.clickedButton()
+        if clicked is page_btn:
+            if fmt == "csv":
+                self.grid.save_csv()
+            else:
+                self.grid.save_json()
+        elif clicked is all_btn:
+            self.export_all_requested.emit({
+                "connection_name": self._conn,
+                "database": self._db,
+                "table": self._table,
+                "where": self._where,
+                "order_by": self._order_by,
+                "order_dir": self._order_dir,
+                "format": fmt,
+            })

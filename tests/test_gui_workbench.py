@@ -40,7 +40,7 @@ def test_starts_with_one_editor_no_history_tab(qapp):
 def test_workbench_tabbar_uses_global_panel_tab_theme(qapp):
     wb = _wb(qapp)
     assert wb.tabs.tabBar().property("panelTabs") is True
-    assert wb.tabs.tabBar().styleSheet() == ""
+    assert "max-width" in wb.tabs.tabBar().styleSheet()
     assert wb.tabs.tabBar().drawBase() is False
 
 

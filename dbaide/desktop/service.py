@@ -1101,6 +1101,34 @@ class DesktopService:
             count = 0
         return {"count": count, "table": table, "where": where}
 
+    def export_table_all(self, payload: dict[str, Any]) -> dict[str, Any]:
+        """Export all rows (no LIMIT/OFFSET) for a table with optional WHERE/ORDER BY.
+
+        Used by the "Export all rows" option in the data browser."""
+        conn = self.cfg.get_connection(str(payload.get("connection_name") or "") or None)
+        self._guard_busy(conn.name)
+        database = str(payload.get("database") or "")
+        table = str(payload.get("table") or "")
+        if not table:
+            raise ValueError("table is required")
+        order_by = str(payload.get("order_by") or "").strip()
+        order_dir = "DESC" if str(payload.get("order_dir") or "asc").lower() == "desc" else "ASC"
+        where = str(payload.get("where") or "").strip()
+        dialect = self._table_dialect(conn)
+
+        sql = self._select_from(table, where, dialect)
+        if order_by:
+            from dbaide.adapters.base import quote_identifier
+            sql += f" ORDER BY {quote_identifier(order_by, dialect)} {order_dir}"
+
+        tools = self._query_tools(conn)
+        result = tools.execute_sql(sql, database=database, limit=50_000)
+        return {
+            "columns": result.columns,
+            "rows": result.rows or [],
+            "row_count": result.row_count,
+        }
+
     def table_ddl(self, payload: dict[str, Any]) -> dict[str, Any]:
         """The table's real CREATE TABLE DDL straight from the database — exact for
         SQLite (sqlite_master) and MySQL (SHOW CREATE TABLE), reconstructed from the

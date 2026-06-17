@@ -62,6 +62,7 @@ ACTION_METHODS: tuple[tuple[str, str], ...] = (
     ("backup_run", "backup_run"),
     ("backup_list", "backup_list"),
     ("backup_delete", "backup_delete"),
+    ("export_table_all", "export_table_all"),
 )
 
 
