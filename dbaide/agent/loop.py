@@ -350,7 +350,7 @@ class AskAgentLoop:
                 formatted = _format_tool_result(approved_risk_tool, result)
                 messages.append(LLMMessage("user", f"[Tool result: {approved_risk_tool}]\n{formatted}"))
             else:
-                reason = result.error or brief or "confirmed_execution_failed"
+                reason = (result.error.message if result.error else "") or brief or "confirmed_execution_failed"
                 return self._build_failed_response(orch, reason, disclosures_before or [])
 
         step_no = int(resume_state.get("step_base") or 0) if resume_state else 0
@@ -586,11 +586,6 @@ class AskAgentLoop:
                 # Leave only 1 step so the model must finish on next iteration
                 runtime.force_remaining(1)
 
-        # Track SQL artifacts for chart-tool lookup
-        data = result.data if isinstance(result.data, dict) else {}
-        if result.ok and isinstance(data, dict) and data.get("artifact_id"):
-            pass  # sql_tools.py handles add_sql_artifact internally
-
         done_detail = brief
         executed_sql = _executed_sql(tool_name, orch, result)
         if executed_sql:
@@ -612,6 +607,7 @@ class AskAgentLoop:
             done_event["result_data"] = result.data
         if executed_sql:
             done_event["sql"] = executed_sql
+            data = result.data if isinstance(result.data, dict) else {}
             if data.get("purpose"):
                 done_event["purpose"] = str(data["purpose"])
             if data.get("row_count") is not None:
@@ -796,6 +792,17 @@ class AskAgentLoop:
         new_tokens = sum(estimate_tokens(m.content) for m in messages)
         logger.info("context_compress_done: %d → %d tokens (round %d)",
                     total_tokens, new_tokens, self._compress_count)
+
+        # Convergence guard: if compression didn't reduce tokens by at least 10%,
+        # further LLM compressions are unlikely to help — fall back to hard truncation.
+        if new_tokens > total_tokens * 0.9 and new_tokens > threshold:
+            logger.warning("context_compress_stall: compression reduced only %d → %d tokens, "
+                           "falling back to hard truncation", total_tokens, new_tokens)
+            keep = max(2, len(messages) - 2)
+            while sum(estimate_tokens(m.content) for m in messages) > threshold and keep > 2:
+                keep -= 1
+                messages[2:len(messages) - keep] = [LLMMessage("user",
+                    f"[Context note: earlier messages truncated to fit context budget.]")]
 
     def _build_failed_response(
         self, orch: AskOrchestrator, reason: str, disclosures_before: list[str],
@@ -1174,9 +1181,30 @@ def _fmt_generate_sql(data: Any) -> str:
         parts.append(f"Validation warnings: {data['validation_warnings']}")
     if data.get("rationale"):
         parts.append(f"Rationale: {str(data['rationale'])[:500]}")
-    # If fast-executed, include the result data inline
+    # If fast-executed, include result data inline (skip SQL line to avoid duplication)
     if data.get("rows") is not None or data.get("row_count") is not None:
-        parts.append(_fmt_sql_result(data))
+        result_parts: list[str] = []
+        row_count = data.get("row_count")
+        if row_count is not None:
+            truncated = " (TRUNCATED — more rows exist)" if data.get("truncated") else ""
+            result_parts.append(f"Rows: {row_count}{truncated}")
+        columns = data.get("columns")
+        if columns:
+            result_parts.append(f"Columns: {', '.join(str(c) for c in columns)}")
+        rows = data.get("rows")
+        if isinstance(rows, list) and rows:
+            min_rows = min(5, len(rows))
+            max_rows = min(20, len(rows))
+            rows_text = json.dumps(rows[:max_rows], ensure_ascii=False, default=str)
+            if len(rows_text) > 4000 and max_rows > min_rows:
+                rows_text = json.dumps(rows[:min_rows], ensure_ascii=False, default=str)
+                if len(rows_text) > 4000:
+                    rows_text = rows_text[:4000] + "…"
+                result_parts.append(f"Data (first {min_rows} of {len(rows)} rows):\n{rows_text}")
+            else:
+                result_parts.append(f"Data:\n{rows_text}")
+        if result_parts:
+            parts.append("\n".join(result_parts))
     text = "\n".join(parts)
     return text if text else _fmt_generic(data)
 

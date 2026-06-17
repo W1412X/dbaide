@@ -812,10 +812,17 @@ def test_loop_allows_repeated_tool_call(tmp_path):
     session.agent_max_steps = 8
     orch = AskOrchestrator(build_adapter(cfg), session, RepeatLLM())
 
+    events: list = []
+    orch.progress = lambda e: events.append(e)
+
     resp = AskAgentLoop(orch).run("describe orders", database="main", execute=True)
 
-    # The loop ran multiple steps (tool results go into conversation, not work_log)
+    # The loop ran multiple steps (tool results go into conversation, not work_log).
+    # Budget exhaustion produces a response; the repeated calls appear as progress events.
     assert resp is not None
+    tool_done = [e for e in events if isinstance(e, dict)
+                 and e.get("stage") == "describe_table" and e.get("status") == "completed"]
+    assert len(tool_done) >= 2, "repeated tool calls should produce multiple completed events"
 
 
 def test_total_step_budget_stops_repeated_bad_sql_loop(tmp_path):
