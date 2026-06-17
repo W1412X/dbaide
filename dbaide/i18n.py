@@ -284,6 +284,7 @@ _STRINGS: dict[str, dict[str, str]] = {
     "settings.integrations.installed": {"en": "Installed", "zh": "已安装"},
     "settings.integrations.install_all": {"en": "Install All", "zh": "全部安装"},
     "settings.integrations.uninstall": {"en": "Uninstall", "zh": "卸载"},
+    "settings.integrations.reinstall": {"en": "Reinstall", "zh": "重装"},
     "settings.integrations.error": {
         "en": "Integration error: {error}",
         "zh": "集成操作失败：{error}",

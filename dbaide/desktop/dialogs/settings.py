@@ -514,7 +514,7 @@ class SettingsDialog(ChromeDialog):
     def _build_integrations_page(self) -> QWidget:
         from dbaide.i18n import t
         from dbaide.desktop.components.inputs import Combo
-        from dbaide.skill import TOOL_REGISTRY, SUPPORTED_TOOLS, is_installed, installed_mode, VALID_MODES
+        from dbaide.skill import TOOL_REGISTRY, SUPPORTED_TOOLS, installed_mode, VALID_MODES
 
         page = QWidget()
         layout = QVBoxLayout(page)
@@ -525,44 +525,42 @@ class SettingsDialog(ChromeDialog):
             t("settings.integrations.subtitle"),
         ))
 
-        # ── Mode selector bar ──────────────────────────────────────────
-        mode_bar = QWidget()
-        mode_layout = QHBoxLayout(mode_bar)
-        mode_layout.setContentsMargins(0, 0, 0, 0)
-        mode_layout.setSpacing(8)
+        # ── Top bar: mode selector + install all + help ────────────────
+        bar = QWidget()
+        bar.setStyleSheet(
+            f"QWidget {{ background: {Theme.PANEL}; border-radius: 8px; }}"
+        )
+        bar_layout = QHBoxLayout(bar)
+        bar_layout.setContentsMargins(12, 8, 12, 8)
+        bar_layout.setSpacing(10)
 
         mode_label = QLabel(t("settings.integrations.mode"))
-        mode_label.setStyleSheet(f"color: {Theme.TEXT}; font-size: 13px; font-weight: 600;")
-        mode_layout.addWidget(mode_label)
+        mode_label.setStyleSheet(
+            f"color: {Theme.TEXT_2}; font-size: 12px; background: transparent;"
+        )
+        bar_layout.addWidget(mode_label)
 
         self._mode_combo = Combo()
         self._mode_combo.setFixedHeight(26)
-        self._mode_combo.setFixedWidth(200)
-        _MODE_LABELS = {
+        self._mode_combo.setFixedWidth(180)
+        self._mode_labels = {
             "full": t("settings.integrations.mode.full"),
             "ask": t("settings.integrations.mode.ask"),
             "tools": t("settings.integrations.mode.tools"),
         }
         for mode_key in VALID_MODES:
-            self._mode_combo.addItem(_MODE_LABELS[mode_key], mode_key)
-        mode_layout.addWidget(self._mode_combo)
+            self._mode_combo.addItem(self._mode_labels[mode_key], mode_key)
+        self._mode_combo.currentIndexChanged.connect(self._on_mode_combo_changed)
+        bar_layout.addWidget(self._mode_combo)
 
-        mode_desc = QLabel(t("settings.integrations.mode.desc"))
-        mode_desc.setStyleSheet(f"color: {Theme.MUTED}; font-size: 11px;")
-        mode_desc.setWordWrap(True)
-        mode_layout.addWidget(mode_desc, 1)
+        bar_layout.addStretch(1)
 
-        layout.addWidget(mode_bar)
-
-        # ── Action bar ─────────────────────────────────────────────────
-        bar = QWidget()
-        bar_layout = QHBoxLayout(bar)
-        bar_layout.setContentsMargins(0, 0, 0, 0)
-        bar_layout.setSpacing(8)
-        install_all_btn = compact_button(t("settings.integrations.install_all"), primary=True, width=100)
+        install_all_btn = compact_button(
+            t("settings.integrations.install_all"), primary=True, width=100,
+        )
         install_all_btn.clicked.connect(self._on_install_all_integrations)
         bar_layout.addWidget(install_all_btn)
-        bar_layout.addStretch(1)
+
         help_btn = IconToolButton(
             svg_icon("circle-help", color=Theme.MUTED, size=16),
             t("settings.integrations.help_tooltip"),
@@ -570,8 +568,10 @@ class SettingsDialog(ChromeDialog):
         help_btn.setObjectName("integrationsHelpBtn")
         help_btn.setIconSize(QSize(16, 16))
         help_btn.setFixedSize(22, 22)
+        help_btn.setStyleSheet("background: transparent;")
         help_btn.clicked.connect(self._show_integrations_help)
         bar_layout.addWidget(help_btn)
+
         layout.addWidget(bar)
 
         # ── Tool list ──────────────────────────────────────────────────
@@ -598,7 +598,9 @@ class SettingsDialog(ChromeDialog):
 
             name_label = QLabel(tool.capitalize())
             name_label.setFixedWidth(80)
-            name_label.setStyleSheet(f"color: {Theme.TEXT}; font-size: 13px; font-weight: 600;")
+            name_label.setStyleSheet(
+                f"color: {Theme.TEXT}; font-size: 13px; font-weight: 600;"
+            )
             rl.addWidget(name_label)
 
             path_label = QLabel(f"~/{config_rel}")
@@ -606,17 +608,17 @@ class SettingsDialog(ChromeDialog):
             rl.addWidget(path_label, 1)
 
             mode_tag = QLabel()
-            mode_tag.setFixedWidth(50)
+            mode_tag.setFixedWidth(46)
+            mode_tag.setFixedHeight(18)
             mode_tag.setAlignment(Qt.AlignmentFlag.AlignCenter)
-            mode_tag.setStyleSheet(f"color: {Theme.MUTED}; font-size: 10px;")
             rl.addWidget(mode_tag)
 
             status_label = QLabel()
-            status_label.setFixedWidth(30)
+            status_label.setFixedWidth(20)
             status_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
             rl.addWidget(status_label)
 
-            action_btn = compact_button("", width=72)
+            action_btn = compact_button("", width=80)
             action_btn.setFixedHeight(24)
             rl.addWidget(action_btn)
 
@@ -624,23 +626,32 @@ class SettingsDialog(ChromeDialog):
                 "status": status_label,
                 "mode_tag": mode_tag,
                 "btn": action_btn,
+                "installed_mode": cur_mode,
             }
-            self._refresh_integration_row(tool, cur_mode is not None, cur_mode)
-            action_btn.clicked.connect(lambda _checked=False, t=tool: self._on_toggle_integration(t))
+            self._refresh_integration_row(tool)
+            action_btn.clicked.connect(
+                lambda checked, t=tool: self._on_toggle_integration(t)
+            )
 
             card_layout.addWidget(row)
             if i < len(SUPPORTED_TOOLS) - 1:
                 sep = QFrame()
                 sep.setFrameShape(QFrame.Shape.HLine)
-                sep.setStyleSheet(f"background: {Theme.BORDER_SOFT}; max-height: 1px;")
+                sep.setStyleSheet(
+                    f"background: {Theme.BORDER_SOFT}; max-height: 1px;"
+                )
                 card_layout.addWidget(sep)
 
         layout.addWidget(card)
         layout.addStretch(1)
         return page
 
-    def _selected_mode(self) -> str:
+    def _get_integration_mode(self) -> str:
         return self._mode_combo.currentData() or "full"
+
+    def _on_mode_combo_changed(self, _index: int) -> None:
+        for tool in self._integration_rows:
+            self._refresh_integration_row(tool)
 
     def _show_integrations_help(self) -> None:
         from dbaide.i18n import t
@@ -652,49 +663,75 @@ class SettingsDialog(ChromeDialog):
             max_body_height=520,
         )
 
-    def _refresh_integration_row(self, tool: str, installed: bool, mode: str | None = None) -> None:
+    def _refresh_integration_row(self, tool: str) -> None:
         from dbaide.i18n import t
+
         info = self._integration_rows[tool]
+        cur_mode = info["installed_mode"]
+        installed = cur_mode is not None
+        combo_mode = self._get_integration_mode()
+
         if installed:
             info["status"].setText("✓")
-            info["status"].setStyleSheet("color: #22c55e; font-size: 13px; font-weight: 700;")
-            info["btn"].setText(t("settings.integrations.uninstall"))
-            info["mode_tag"].setText(mode or "full")
-            info["mode_tag"].setStyleSheet(f"color: {Theme.ACCENT}; font-size: 10px; font-weight: 600;")
+            info["status"].setStyleSheet(
+                "color: #22c55e; font-size: 13px; font-weight: 700;"
+            )
+            info["mode_tag"].setText(cur_mode)
+            info["mode_tag"].setStyleSheet(
+                f"color: {Theme.ACCENT}; font-size: 10px; font-weight: 600;"
+                f"background: {Theme.PANEL_2}; border-radius: 4px;"
+                f"padding: 1px 4px;"
+            )
+            if cur_mode == combo_mode:
+                info["btn"].setText(t("settings.integrations.uninstall"))
+            else:
+                info["btn"].setText(t("settings.integrations.reinstall"))
         else:
             info["status"].setText("—")
-            info["status"].setStyleSheet(f"color: {Theme.MUTED}; font-size: 13px;")
-            info["btn"].setText(t("settings.integrations.install"))
+            info["status"].setStyleSheet(
+                f"color: {Theme.MUTED}; font-size: 13px;"
+            )
             info["mode_tag"].setText("")
-            info["mode_tag"].setStyleSheet(f"color: {Theme.MUTED}; font-size: 10px;")
+            info["mode_tag"].setStyleSheet("background: transparent;")
+            info["btn"].setText(t("settings.integrations.install"))
 
     def _on_toggle_integration(self, tool: str) -> None:
-        from dbaide.skill import is_installed, setup_tool, uninstall_tool, installed_mode
+        from dbaide.skill import setup_tool, uninstall_tool
         from dbaide.i18n import t
 
+        info = self._integration_rows[tool]
+        cur_mode = info["installed_mode"]
+        combo_mode = self._get_integration_mode()
+
         try:
-            if is_installed(tool):
+            if cur_mode is not None and cur_mode == combo_mode:
                 uninstall_tool(tool)
-                self._refresh_integration_row(tool, False)
+                info["installed_mode"] = None
             else:
-                mode = self._selected_mode()
-                setup_tool(tool, mode=mode)
-                self._refresh_integration_row(tool, True, mode)
+                setup_tool(tool, mode=combo_mode)
+                info["installed_mode"] = combo_mode
+            self._refresh_integration_row(tool)
         except Exception as exc:
-            dialog_warn(self, "DBAide", t("settings.integrations.error", error=str(exc)))
+            dialog_warn(
+                self, "DBAide",
+                t("settings.integrations.error", error=str(exc)),
+            )
 
     def _on_install_all_integrations(self) -> None:
         from dbaide.skill import setup_all, installed_mode
         from dbaide.i18n import t
 
-        mode = self._selected_mode()
+        mode = self._get_integration_mode()
         try:
             setup_all(mode=mode)
         except Exception as exc:
-            dialog_warn(self, "DBAide", t("settings.integrations.error", error=str(exc)))
+            dialog_warn(
+                self, "DBAide",
+                t("settings.integrations.error", error=str(exc)),
+            )
         for tool in self._integration_rows:
-            cur = installed_mode(tool)
-            self._refresh_integration_row(tool, cur is not None, cur)
+            self._integration_rows[tool]["installed_mode"] = installed_mode(tool)
+            self._refresh_integration_row(tool)
 
     def _build_general_page(self) -> QWidget:
         from PyQt6.QtWidgets import QFormLayout
