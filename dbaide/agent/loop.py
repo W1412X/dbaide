@@ -115,6 +115,63 @@ class AskAgentLoop:
             event["parent_id"] = self._agent_loop_node_id
         return event
 
+    def _speculative_prefetch(
+        self, orch: AskOrchestrator, question: str, database: str,
+    ) -> ToolResult | None:
+        """Pre-fire retrieve_schema_context before the first LLM decision.
+
+        The result is injected into the transcript so the agent's first decision
+        already sees schema evidence, saving one full LLM round-trip on most
+        data queries.  Returns None on failure — the main loop continues
+        normally and the agent will call the tool itself.
+        """
+        if not question.strip():
+            return None
+        scope = orch.schema_scope if orch.schema_scope else None
+        tool_ctx = ToolContext(
+            workflow_id=self._trace_parent or "prefetch",
+            connection=orch.session.connection,
+            adapter=orch.adapter,
+            asset_store=orch.asset_store,
+            session=orch.session,
+            trace_sink=self._trace_sink,
+            cancel_check=orch.cancel_check,
+        )
+        args: dict[str, Any] = {"request": question, "database": database}
+        if scope:
+            args["scope"] = scope
+        try:
+            return self.registry.invoke("retrieve_schema_context", args, tool_ctx)
+        except Exception:
+            return None
+
+    def _inject_prefetch(
+        self, orch: AskOrchestrator, state: LoopState,
+        transcript: list[str], result: ToolResult,
+    ) -> None:
+        """Write a successful prefetch result into memory + transcript."""
+        data = result.data if isinstance(result.data, dict) else {}
+        orch.run_state.memory.record_work(
+            action="retrieve_schema_context",
+            args={"request": state.question, "database": state.database},
+            ok=True,
+            summary=brief_tool_summary("retrieve_schema_context", result),
+            purpose="speculative prefetch",
+            data=data,
+        )
+        _rpl = getattr(orch.session, "result_preview_limit", _DEFAULT_RESULT_PREVIEW_LIMIT)
+        summary = _summarize_tool_result("retrieve_schema_context", result, limit=_rpl)
+        transcript.append(f"Tool `retrieve_schema_context` → {summary}")
+        orch.run_state.schema_prefetched = True
+        self.progress(self._ns_step(progress_event(
+            stage="retrieve_schema_context",
+            title="Schema prefetch",
+            status="completed",
+            kind="tool",
+            detail=summary[:200],
+            step=0,
+        )))
+
     def run(
         self,
         question: str,
@@ -232,12 +289,15 @@ class AskAgentLoop:
         else:
             orch._reset_loop_state(question, database, execute, answer_language=answer_language)
             orch.schema.disclose_instance()
+            prefetch_result = self._speculative_prefetch(orch, question, database)
             state = LoopState(
                 question=question,
                 database=database,
                 execute_allowed=execute,
                 answer_language=orch.run_state.answer_language,
             )
+            if prefetch_result and prefetch_result.ok:
+                self._inject_prefetch(orch, state, transcript, prefetch_result)
             self.progress(
                 progress_event(
                     stage="loop",

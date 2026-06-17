@@ -74,6 +74,7 @@ class RunState:
     # discovery in the same run broadens, so a wrong/insufficient pin can't trap the
     # agent into searching only the attached scope forever.
     scope_used: bool = False
+    schema_prefetched: bool = False
 
     @staticmethod
     def schema_key(database: str, table: str) -> str:
