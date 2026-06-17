@@ -178,7 +178,6 @@ def test_table_document_opens_structure_without_query(qapp):
     doc.query_requested.connect(lambda p: fired.append(p))
     doc.open([{"name": "id", "data_type": "INTEGER", "primary_key": True}])
     assert doc.bar.currentIndex() == doc._structure_index
-    assert doc.bar.drawBase() is False
     assert doc._data_loaded is False
     assert fired == []  # opening a table must NOT auto-query
 

@@ -5,18 +5,18 @@ gets its own ``TableDocument`` in the Workbench, so several tables can stay open
 at once. The Data grid drives ``query_requested`` (re-emitted up to MainWindow);
 Structure is rendered instantly from the schema columns already in memory.
 
-The sub-tab selector is a compact icon-only segment bar — visually distinct from
-the outer Workbench tab row so the two levels don't look like stacked tabs.
+The sub-tab selector is a compact icon-only segment bar built from QToolButtons —
+visually distinct from the outer Workbench tab row, with zero wasted space.
 """
 from __future__ import annotations
 
 from typing import Any
 
-from PyQt6.QtCore import QSize, pyqtSignal
+from PyQt6.QtCore import QSize, Qt, pyqtSignal
 from PyQt6.QtWidgets import (
     QHBoxLayout,
     QStackedWidget,
-    QTabBar,
+    QToolButton,
     QVBoxLayout,
     QWidget,
 )
@@ -24,6 +24,63 @@ from PyQt6.QtWidgets import (
 from dbaide.desktop.views.data_browser import DataBrowser
 from dbaide.desktop.views.doc_tab import DocTab
 from dbaide.desktop.views.structure_panel import StructurePanel
+
+
+class _SegmentBar(QWidget):
+    """Compact icon-only segment control — three tight pill buttons."""
+    currentChanged = pyqtSignal(int)
+
+    def __init__(self, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        from dbaide.desktop.theme import Theme
+        self._buttons: list[QToolButton] = []
+        self._current = -1
+        lay = QHBoxLayout(self)
+        lay.setContentsMargins(2, 2, 2, 2)
+        lay.setSpacing(2)
+        self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
+        self.setObjectName("segmentBar")
+        self.setStyleSheet(
+            f"QWidget#segmentBar {{ background: {Theme.PANEL}; border-radius: 6px; }}"
+        )
+
+    def addSegment(self, icon, tooltip: str) -> int:
+        from dbaide.desktop.theme import Theme
+        btn = QToolButton()
+        btn.setIcon(icon)
+        btn.setToolTip(tooltip)
+        btn.setCheckable(True)
+        btn.setIconSize(QSize(14, 14))
+        btn.setFixedSize(22, 22)
+        btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        btn.setStyleSheet(
+            f"QToolButton {{ background: transparent; border: none; border-radius: 4px;"
+            f" padding: 0; margin: 0; min-width: 22px; max-width: 22px;"
+            f" min-height: 22px; max-height: 22px; }}"
+            f"QToolButton:checked {{ background: {Theme.PANEL_3}; }}"
+            f"QToolButton:hover:!checked {{ background: {Theme.PANEL_2}; }}"
+        )
+        idx = len(self._buttons)
+        btn.clicked.connect(lambda _, i=idx: self._select(i))
+        self._buttons.append(btn)
+        self.layout().addWidget(btn)
+        return idx
+
+    def _select(self, index: int) -> None:
+        if self._current == index:
+            self._buttons[index].setChecked(True)
+            return
+        for i, b in enumerate(self._buttons):
+            b.setChecked(i == index)
+        self._current = index
+        self.currentChanged.emit(index)
+
+    def currentIndex(self) -> int:
+        return self._current
+
+    def setCurrentIndex(self, index: int) -> None:
+        if 0 <= index < len(self._buttons):
+            self._select(index)
 
 
 class TableDocument(QWidget):
@@ -50,30 +107,26 @@ class TableDocument(QWidget):
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(0)
 
-        # -- Compact icon-only segment bar (not a QTabWidget — avoids stacked-tabs look) --
-        self.bar = QTabBar()
-        self.bar.setProperty("subtabBar", True)
-        self.bar.setExpanding(False)
-        self.bar.setDrawBase(False)
-        self.bar.setIconSize(QSize(14, 14))
+        # -- Compact icon-only segment bar --
+        self.bar = _SegmentBar()
 
         self.doc_tab = DocTab(table)
         self._doc_loaded = False
-        self._doc_index = self.bar.addTab(svg_icon("file-text", color=Theme.TEXT_2, size=14), "")
-        self.bar.setTabToolTip(self._doc_index, t("tab.doc"))
+        self._doc_index = self.bar.addSegment(
+            svg_icon("file-text", color=Theme.TEXT_2, size=14), t("tab.doc"))
 
         self.structure = StructurePanel()
         self.structure.navigate_table.connect(self.navigate_table.emit)
-        self._structure_index = self.bar.addTab(svg_icon("columns", color=Theme.TEXT_2, size=14), "")
-        self.bar.setTabToolTip(self._structure_index, t("tab.structure"))
+        self._structure_index = self.bar.addSegment(
+            svg_icon("list-tree", color=Theme.TEXT_2, size=14), t("tab.structure"))
 
         self.data = DataBrowser()
         self.data.query_requested.connect(self.query_requested.emit)
         self.data.count_requested.connect(self.count_requested.emit)
         self.data.export_all_requested.connect(self.export_all_requested.emit)
         self.data.navigate_fk.connect(self.navigate_fk.emit)
-        self._data_index = self.bar.addTab(svg_icon("table", color=Theme.TEXT_2, size=14), "")
-        self.bar.setTabToolTip(self._data_index, t("tab.data"))
+        self._data_index = self.bar.addSegment(
+            svg_icon("rows-3", color=Theme.TEXT_2, size=14), t("tab.data"))
 
         self._data_loaded = False
         self._ddl_loaded = False
@@ -86,7 +139,6 @@ class TableDocument(QWidget):
 
         self.bar.currentChanged.connect(self._on_bar_changed)
 
-        # Layout: segment bar flush-left in a thin toolbar row, content below.
         bar_row = QHBoxLayout()
         bar_row.setContentsMargins(6, 4, 0, 2)
         bar_row.addWidget(self.bar)
