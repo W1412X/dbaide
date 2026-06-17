@@ -205,7 +205,7 @@ class AskTab(QWidget):
             errors=result.get("errors") or None,
             workflow_id=workflow_id,
             ok=ok,
-            actions_widget=self._build_actions(answer, result.get("cli_command")),
+            actions_widget=self._build_actions(answer, result.get("cli_command"), result.get("selected_sql")),
             charts=result.get("charts") or None,
         )
 
@@ -258,16 +258,17 @@ class AskTab(QWidget):
                 trace_events=turn.get("trace") or [],
                 ok=status not in ("failed", "cancelled"),
                 actions_widget=self._build_actions(
-                    str(turn.get("answer_markdown") or ""), None,
+                    str(turn.get("answer_markdown") or ""), None, turn.get("selected_sql"),
                 ),
                 charts=turn.get("charts") or None,
             )
 
     # ── helpers ───────────────────────────────────────────────────────────────
 
-    def _build_actions(self, answer: str, cli_command: str | None) -> QWidget | None:
+    def _build_actions(self, answer: str, cli_command: str | None, selected_sql: str | None = None) -> QWidget | None:
         answer = str(answer or "").strip()
-        if not answer and not cli_command:
+        selected_sql = str(selected_sql or "").strip()
+        if not answer and not cli_command and not selected_sql:
             return None
         from dbaide.desktop.components.icon_button import IconToolButton
         from dbaide.desktop.components.icons import svg_icon
@@ -278,6 +279,8 @@ class AskTab(QWidget):
         items: list[tuple[str, str]] = []
         if answer:
             items.append((_t("ask.copy_answer"), answer))
+        if selected_sql:
+            items.append((_t("ask.copy_sql"), selected_sql))
         if cli_command:
             items.append((_t("ask.copy_cli"), str(cli_command)))
         if not items:

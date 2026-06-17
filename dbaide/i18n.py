@@ -965,6 +965,7 @@ _STRINGS: dict[str, dict[str, str]] = {
     "ask.search_results": {"en": "Found {n} matches for `{query}`:", "zh": "找到 {n} 条与 `{query}` 匹配的结果："},
     "ask.copied": {"en": "Copied", "zh": "已复制"},
     "ask.copy_answer": {"en": "Copy answer", "zh": "复制回复"},
+    "ask.copy_sql": {"en": "Copy SQL", "zh": "复制 SQL"},
     "ask.copy_cli": {"en": "Copy CLI", "zh": "复制 CLI"},
     "ask.more_actions": {"en": "More", "zh": "更多"},
     # ── Conversation inline labels ───────────────────────────────────────

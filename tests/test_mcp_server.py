@@ -92,6 +92,12 @@ class TestModeFiltering:
         assert result.get("isError") is True
         assert "Unknown tool" in result["content"][0]["text"]
 
+    def test_tools_call_rejects_non_object_arguments(self):
+        mcp._active_mode = "full"
+        result = mcp.handle_tools_call({"name": "execute_sql", "arguments": "SELECT 1"})
+        assert result.get("isError") is True
+        assert "arguments must be an object" in result["content"][0]["text"]
+
 
 class TestInitialize:
     def test_initialize_response(self):

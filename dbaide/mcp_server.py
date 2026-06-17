@@ -754,6 +754,8 @@ def handle_tools_call(params: dict) -> dict:
         )
 
     arguments = params.get("arguments") or {}
+    if not isinstance(arguments, dict):
+        return _text_content("Tool arguments must be an object", is_error=True)
     return handler(arguments)
 
 

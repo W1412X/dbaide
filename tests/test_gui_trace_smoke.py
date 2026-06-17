@@ -564,6 +564,16 @@ def test_answer_actions_none_when_empty(qapp):
     assert tab._build_actions("", "") is None
 
 
+def test_sql_only_action_builds_menu_button(qapp):
+    from PyQt6.QtWidgets import QToolButton
+    from dbaide.desktop.views.ask_tab import AskTab
+
+    tab = AskTab()
+    btn = tab._build_actions("", None, "SELECT 1")
+    assert btn is not None
+    assert isinstance(btn, QToolButton)
+
+
 def test_complete_turn_renders_answer_only(qapp):
     from dbaide.desktop.components.conversation import ConversationView, _MarkdownBlock
 
