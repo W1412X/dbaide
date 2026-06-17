@@ -92,12 +92,13 @@ class QueryTools:
         sql: str,
         *,
         database: str = "",
-        limit: int = 100,
+        limit: int | None = None,
         timeout_seconds: int | None = None,
         preflight_explain: bool = False,
         confirmed: bool = False,
     ) -> QueryResult:
-        report = self.validate_sql_report(sql, add_limit=True, limit=limit)
+        effective_limit = self.sql_guard.default_limit if limit is None else max(1, int(limit))
+        report = self.validate_sql_report(sql, add_limit=True, limit=effective_limit)
         if not report.ok:
             raise ValueError("; ".join(report.issues))
         if report.requires_confirmation and not confirmed:
@@ -113,7 +114,7 @@ class QueryTools:
             except (ValueError, RuntimeError, OSError):
                 pass
         result = self.adapter.execute_readonly(
-            normalized, database=database, limit=limit, timeout_seconds=timeout_seconds or self.timeout_seconds,
+            normalized, database=database, limit=effective_limit, timeout_seconds=timeout_seconds or self.timeout_seconds,
         )
         self.context.record_execution(result.sql, instance=self.instance, database=database)
         return result

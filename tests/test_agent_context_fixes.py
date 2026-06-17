@@ -1293,6 +1293,47 @@ def test_profile_table_windows_columns_and_signals_pagination(tmp_path):
     assert r2.data["more_columns"] is False
 
 
+def test_profile_table_caps_explicit_columns_and_column_stats_top_k(tmp_path):
+    import sqlite3
+    from dbaide.adapters import build_adapter
+    from dbaide.agent.orchestrator import AskOrchestrator
+    from dbaide.agent.toolkit import build_tool_registry
+    from dbaide.models import ConnectionConfig
+    from dbaide.session import Session
+    from dbaide.tools.registry import ToolContext
+
+    db = tmp_path / "profile_caps.db"
+    cols = ", ".join(f"c{i} INTEGER" for i in range(40))
+    con = sqlite3.connect(db)
+    con.execute(f"CREATE TABLE wide(id INTEGER PRIMARY KEY, {cols})")
+    con.execute("INSERT INTO wide(id) VALUES (1)")
+    con.commit()
+    con.close()
+    cfg = ConnectionConfig(name="local", type="sqlite", path=str(db))
+    orch = AskOrchestrator(build_adapter(cfg), Session(connection=cfg), _MockLLM())
+    orch._reset_loop_state("q", "", True)
+    reg = build_tool_registry(orch)
+
+    requested = [f"c{i}" for i in range(40)]
+    prof = reg.invoke("profile_table", {"table": "wide", "columns": requested}, ToolContext())
+    assert prof.ok
+    assert prof.data["column_count"] == 32
+    assert prof.data["total_columns"] == 40
+    assert prof.data["more_columns"] is True
+    assert "remaining `columns`" in prof.data["note"]
+
+    seen = {}
+
+    def fake_column_stats(table, columns=None, *, metrics=None, database="", top_k=10):
+        seen["top_k"] = top_k
+        return [{"column": "c0", "data_type": "INTEGER", "kind": "numeric", "stats": {}}]
+
+    orch.profile.column_stats = fake_column_stats  # type: ignore[assignment]
+    stats = reg.invoke("column_stats", {"table": "wide", "columns": ["c0"], "top_k": 9999}, ToolContext())
+    assert stats.ok
+    assert seen["top_k"] == 100
+
+
 def test_inspect_metadata_signals_table_cap(tmp_path):
     import sqlite3
     from dbaide.adapters import build_adapter

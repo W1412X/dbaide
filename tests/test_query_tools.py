@@ -56,12 +56,26 @@ def test_mysql_validation_rejects_full_outer_join():
     assert any("FULL OUTER JOIN" in issue for issue in report.issues)
 
 
+def test_execute_sql_uses_configured_default_limit_when_omitted():
+    ctx = DisclosureContext()
+    ctx.record_tables([TableInfo(name="users")], instance="local", database="main")
+    adapter = ExplainSpyAdapter(ConnectionConfig(name="local", type="sqlite", path="/tmp/test.db"))
+    query = QueryTools(adapter, ctx, default_limit=17)
+
+    query.execute_sql("SELECT id FROM users", database="main")
+
+    assert adapter.executed_sql.endswith("LIMIT 17")
+    assert adapter.executed_limit == 17
+
+
 class ExplainSpyAdapter(DatabaseAdapter):
     dialect = "sqlite"
 
     def __init__(self, config):
         super().__init__(config)
         self.explained_sql = ""
+        self.executed_sql = ""
+        self.executed_limit = None
 
     def test(self) -> None:
         return None
@@ -76,6 +90,8 @@ class ExplainSpyAdapter(DatabaseAdapter):
         return []
 
     def _execute_readonly_impl(self, sql: str, *, database: str = "", limit: int | None = None, timeout_seconds: int = 10):
+        self.executed_sql = sql
+        self.executed_limit = limit
         return rows_to_result([], sql=sql)
 
     def explain(self, sql: str, *, database: str = "", timeout_seconds: int = 10):

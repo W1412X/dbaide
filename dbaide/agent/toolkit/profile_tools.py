@@ -7,6 +7,9 @@ from dbaide.tools.registry import ToolContext, ToolRegistry, ToolResult
 from dbaide.tools.specs import PROFILE_TABLE, COLUMN_STATS
 from dbaide.agent.toolkit.support import _err, _normalize_tool_table, _safe_int, _string_list
 
+_MAX_PROFILE_COLUMNS = 32
+_MAX_TOP_K = 100
+
 
 def register(registry: ToolRegistry, orchestrator) -> None:
     def _profile_table(args: dict[str, Any], _ctx: ToolContext) -> ToolResult:
@@ -20,7 +23,9 @@ def register(registry: ToolRegistry, orchestrator) -> None:
         # Profiling scans the table per column, so an unbounded auto-profile is costly;
         # window the columns but report the total and how to page so none is hidden.
         if explicit:
-            columns, total_columns, more = explicit, len(explicit), False
+            total_columns = len(explicit)
+            columns = explicit[:_MAX_PROFILE_COLUMNS]
+            more = len(columns) < total_columns
         else:
             cols = orchestrator.schema.describe_table(table, database=database)
             if not cols:
@@ -28,7 +33,7 @@ def register(registry: ToolRegistry, orchestrator) -> None:
                 return ToolResult(ok=False, error=_err("profile_table", f"table not found or has no readable columns: {target}"))
             all_names = [c.name for c in cols]
             total_columns = len(all_names)
-            limit = max(1, _safe_int(args.get("column_limit"), 8))
+            limit = min(_MAX_PROFILE_COLUMNS, max(1, _safe_int(args.get("column_limit"), 8)))
             columns = all_names[offset:offset + limit]
             more = (offset + len(columns)) < total_columns
         profiles = orchestrator.profile.profile_table(table, list(columns), database=database)
@@ -45,11 +50,17 @@ def register(registry: ToolRegistry, orchestrator) -> None:
             "profiles": [_profile_to_dict(profile) for profile in profiles],
         }
         if more:
-            data["note"] = (
-                f"Profiled columns {offset + 1}–{offset + len(columns)} of {total_columns}. "
-                f"Pass column_offset={offset + len(columns)} for the next page, or list explicit "
-                f"`columns` — the un-profiled columns were NOT computed."
-            )
+            if explicit:
+                data["note"] = (
+                    f"Profiled the first {len(columns)} of {total_columns} explicitly requested columns. "
+                    "Call profile_table again with the remaining `columns` — they were NOT computed."
+                )
+            else:
+                data["note"] = (
+                    f"Profiled columns {offset + 1}–{offset + len(columns)} of {total_columns}. "
+                    f"Pass column_offset={offset + len(columns)} for the next page, or list explicit "
+                    f"`columns` — the un-profiled columns were NOT computed."
+                )
         return ToolResult(ok=True, data=data)
 
     def _column_stats(args: dict[str, Any], _ctx: ToolContext) -> ToolResult:
@@ -60,7 +71,7 @@ def register(registry: ToolRegistry, orchestrator) -> None:
         database, table = _normalize_tool_table(orchestrator, table, database)
         columns = _string_list(args.get("columns")) or None
         metrics = _string_list(args.get("metrics")) or None
-        top_k = max(1, _safe_int(args.get("top_k"), 10))
+        top_k = min(_MAX_TOP_K, max(1, _safe_int(args.get("top_k"), 10)))
         try:
             stats = orchestrator.profile.column_stats(
                 table, columns, metrics=metrics, database=database, top_k=top_k,
