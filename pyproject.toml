@@ -30,3 +30,7 @@ include = ["dbaide*"]
 
 [tool.setuptools.package-data]
 "dbaide.desktop" = ["assets/*.png", "assets/tool_icons/*.png"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+norecursedirs = ["codex", ".*", "build", "dist", "node_modules"]

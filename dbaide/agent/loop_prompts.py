@@ -104,6 +104,13 @@ class DecisionPromptBuilder:
             "No SQL tool ends the run — call action=finish only when the intent is fully answered.\n"
             "</sql-execution>\n\n"
 
+            "<subagents>\n"
+            "Use run_subagent only for separable, bounded subtasks where an independent "
+            "DBAide agent should gather evidence or verify a claim while you remain the "
+            "main decision maker. Do not delegate simple one-tool lookups. Treat the child "
+            "answer as evidence: incorporate it, resolve conflicts, and finish yourself.\n"
+            "</subagents>\n\n"
+
             "<metadata>\n"
             "For database metadata questions (table/column existence, indexes, FKs, DDL-like "
             "structure), use inspect_metadata/list_tables/describe_table instead of querying "
@@ -172,6 +179,8 @@ class DecisionPromptBuilder:
             "- describe_table is the lowest pre-built level; for column values, use column_stats(metrics=[\"top_values\"]).\n"
             "- Charts: call render_chart after execute_sql. Split charts when measures differ in "
             "unit/scale/meaning. Embed with {{chart:N}} in your finish answer.\n"
+            "- Subagents: call run_subagent for independent research/verification subtasks; "
+            "use the returned answer/SQL/preview as evidence, then continue or finish.\n"
             "- Annotations: when the user states a durable fact about an object, call annotate_object.\n"
             f"- {lang_directive}\n"
             "</tool-guidance>"

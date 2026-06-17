@@ -28,6 +28,8 @@ import signal
 import sys
 from typing import Any
 
+from dbaide.agent.toolkit.result_preview import bounded_json_text, preview_rows
+
 logger = logging.getLogger("dbaide.mcp")
 
 # ── Protocol constants ──────────────────────────────────────────────────────
@@ -538,15 +540,21 @@ def handle_execute_sql(arguments: dict) -> dict:
             sql, database=database, limit=limit,
             timeout_seconds=timeout,
         )
+        rows, preview_meta = preview_rows(
+            list(result.rows or []),
+            columns=list(result.columns or []),
+            max_rows=min(limit, 50),
+        )
         data = {
             "columns": result.columns,
-            "rows": result.rows,
+            "rows": rows,
+            "row_preview": preview_meta,
             "row_count": result.row_count,
             "truncated": result.truncated,
             "elapsed_ms": round(result.elapsed_ms, 2),
             "sql": result.sql,
         }
-        return _text_content(json.dumps(data, ensure_ascii=False, default=str, indent=2))
+        return _text_content(bounded_json_text(data))
     except (ValueError, PermissionError) as exc:
         return _text_content(f"Rejected: {exc}", is_error=True)
     except Exception as exc:
@@ -604,7 +612,7 @@ def handle_column_stats(arguments: dict) -> dict:
 
         _, _, _, profile = _ctx.get(conn)
         stats = profile.column_stats(table, columns, metrics=metrics, database=database, top_k=top_k)
-        return _text_content(json.dumps(stats, ensure_ascii=False, default=str, indent=2))
+        return _text_content(bounded_json_text(stats))
     except Exception as exc:
         return _text_content(f"Error: {exc}", is_error=True)
 
@@ -622,7 +630,7 @@ def handle_profile_table(arguments: dict) -> dict:
         _, _, _, profile = _ctx.get(conn)
         profiles = profile.profile_table(table, columns, database=database, top_k=top_k)
         items = [_serialize(p) for p in profiles]
-        return _text_content(json.dumps(items, ensure_ascii=False, default=str, indent=2))
+        return _text_content(bounded_json_text(items))
     except Exception as exc:
         return _text_content(f"Error: {exc}", is_error=True)
 
@@ -638,13 +646,19 @@ def handle_sample_rows(arguments: dict) -> dict:
 
         _, _, _, profile = _ctx.get(conn)
         result = profile.sample_rows(table, database=database, limit=limit)
+        rows, preview_meta = preview_rows(
+            list(result.rows or []),
+            columns=list(result.columns or []),
+            max_rows=min(limit, 50),
+        )
         data = {
             "columns": result.columns,
-            "rows": result.rows,
+            "rows": rows,
+            "row_preview": preview_meta,
             "row_count": result.row_count,
             "sql": result.sql,
         }
-        return _text_content(json.dumps(data, ensure_ascii=False, default=str, indent=2))
+        return _text_content(bounded_json_text(data))
     except Exception as exc:
         return _text_content(f"Error: {exc}", is_error=True)
 

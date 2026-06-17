@@ -58,6 +58,32 @@ def test_ask_user_tool_sets_pending(tmp_path):
     assert orch.run_state.pending_options == ["A", "B"]
 
 
+def test_ask_user_tool_normalizes_dict_options_to_labels(tmp_path):
+    db = tmp_path / "app.db"
+    sqlite3.connect(db).execute("CREATE TABLE assets (id INTEGER PRIMARY KEY, status TEXT)")
+    conn = ConnectionConfig(name="local", type="sqlite", path=str(db))
+    orch = AskOrchestrator(build_adapter(conn), Session(connection=conn), ClarifyMockLLM())
+    registry = build_tool_registry(orch)
+    orch._reset_loop_state("stats", "", True)
+
+    result = registry.invoke(
+        "ask_user",
+        {
+            "question": "Which interpretation?",
+            "options": [
+                {"value": "health", "label": "设备健康指数"},
+                {"value": "other"},
+            ],
+        },
+        ToolContext(),
+    )
+
+    assert result.ok
+    assert orch.run_state.pending_options == ["设备健康指数", "other"]
+    assert result.data["options"] == ["设备健康指数", "other"]
+    assert result.data["raw_options"][0]["value"] == "health"
+
+
 def test_ask_user_has_no_keyword_gate(tmp_path):
     db = tmp_path / "app.db"
     sqlite3.connect(db).execute("CREATE TABLE orders (id INTEGER PRIMARY KEY, shipping_country TEXT)")

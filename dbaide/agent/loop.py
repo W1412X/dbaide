@@ -23,6 +23,7 @@ from dbaide.agent.loop_prompts import DecisionPromptBuilder, estimate_tokens, to
 from dbaide.agent.llm_trace import llm_stage
 from dbaide.agent.runtime import AgentRuntime
 from dbaide.agent.toolkit import build_tool_registry, loop_tool_specs
+from dbaide.agent.toolkit.result_preview import preview_rows
 from dbaide.core.cancellation import CancelledError
 from dbaide.core.events import TraceEvent
 from dbaide.llm import LLMMessage
@@ -946,6 +947,7 @@ _TOOL_FORMATTERS: dict[str, str] = {
     "list_tables": "_list_items",
     "list_databases": "_list_items",
     "ask_user": "_ask_user",
+    "run_subagent": "_subagent",
 }
 
 
@@ -996,20 +998,24 @@ def _fmt_sql_result(data: Any) -> str:
         parts.append(f"Columns: {', '.join(str(c) for c in columns)}")
     rows = data.get("rows")
     if isinstance(rows, list) and rows:
-        # Always show at least 5 rows; scale up to 20 if within budget
-        min_rows = min(5, len(rows))
-        max_rows = min(20, len(rows))
-        rows_text = json.dumps(rows[:max_rows], ensure_ascii=False, default=str)
-        if len(rows_text) > 4000 and max_rows > min_rows:
-            # Retry with fewer rows, but always keep at least min_rows
-            rows_text = json.dumps(rows[:min_rows], ensure_ascii=False, default=str)
-            if len(rows_text) > 4000:
-                rows_text = rows_text[:4000] + "…"
-            parts.append(f"Data (first {min_rows} of {len(rows)} rows):\n{rows_text}")
-        else:
-            parts.append(f"Data:\n{rows_text}")
-            if len(rows) > max_rows:
-                parts.append(f"(showing {max_rows} of {len(rows)} rows)")
+        row_meta = data.get("row_preview") if isinstance(data.get("row_preview"), dict) else {}
+        preview = rows
+        if not row_meta:
+            preview, row_meta = preview_rows(
+                rows,
+                columns=data.get("columns") if isinstance(data.get("columns"), list) else None,
+                max_rows=20,
+            )
+        rows_text = json.dumps(preview, ensure_ascii=False, default=str)
+        cell_cap = row_meta.get("max_cell_chars", 500)
+        parts.append(f"Data (first {len(preview)} row(s), cells capped at {cell_cap} chars):\n{rows_text}")
+        notes = []
+        if row_meta.get("row_preview_truncated"):
+            notes.append(f"showing {row_meta.get('rows_previewed')} of {row_meta.get('rows_returned')} returned rows")
+        if row_meta.get("cell_truncated"):
+            notes.append(f"{row_meta.get('truncated_cells')} cell(s) truncated")
+        if notes:
+            parts.append("(" + "; ".join(notes) + ")")
     for key in ("artifact_id", "purpose", "warnings", "elapsed_ms", "fast_executed"):
         if data.get(key) is not None:
             parts.append(f"{key}: {data[key]}")
@@ -1083,18 +1089,47 @@ def _fmt_profile(data: Any) -> str:
         parts.append(f"Table: {data.get('database', '')}.{data['table']}" if data.get("database") else f"Table: {data['table']}")
     if data.get("row_count") is not None:
         parts.append(f"Row count: {data['row_count']}")
-    stats = data.get("column_stats") or data.get("stats")
+    stats = data.get("columns") or data.get("profiles") or data.get("column_stats") or data.get("stats")
     if isinstance(stats, list):
         for s in stats[:20]:
             if isinstance(s, dict):
                 name = s.get("column") or s.get("name", "?")
-                parts.append(f"  {name}: nulls={s.get('null_count', '?')}, distinct={s.get('distinct_count', '?')}, min={s.get('min', '?')}, max={s.get('max', '?')}")
+                metric_source = s.get("stats") if isinstance(s.get("stats"), dict) else s
+                metric_bits = _metric_bits(metric_source)
+                if metric_bits:
+                    parts.append(f"  {name}: " + ", ".join(metric_bits))
+                else:
+                    parts.append(f"  {name}: {json.dumps(s, ensure_ascii=False, default=str)}")
         if len(stats) > 20:
             parts.append(f"  …+{len(stats) - 20} columns")
     text = "\n".join(parts)
     if not text:
         return _fmt_generic(data)
     return text
+
+
+def _metric_bits(stats: dict[str, Any]) -> list[str]:
+    bits: list[str] = []
+    aliases = {
+        "null_count": "nulls",
+        "distinct_count": "distinct",
+        "min_value": "min",
+        "max_value": "max",
+    }
+    for key in (
+        "null_count", "distinct_count", "min_value", "max_value",
+        "null_rate", "empty_rate", "min", "max", "min_len", "max_len",
+    ):
+        if key in stats and stats.get(key) is not None:
+            bits.append(f"{aliases.get(key, key)}={stats.get(key)}")
+    top_values = stats.get("top_values")
+    if isinstance(top_values, list) and top_values:
+        preview = top_values[:5]
+        bits.append("top_values=" + json.dumps(preview, ensure_ascii=False, default=str))
+    note = stats.get("note")
+    if note:
+        bits.append(f"note={note}")
+    return bits
 
 
 def _fmt_join(data: Any) -> str:
@@ -1215,6 +1250,25 @@ def _fmt_ask_user(data: Any) -> str:
     if data.get("options"):
         parts.append(f"Options: {data['options']}")
     return "\n".join(parts) if parts else _fmt_generic(data)
+
+
+def _fmt_subagent(data: Any) -> str:
+    if not isinstance(data, dict):
+        return _fmt_generic(data)
+    parts: list[str] = []
+    if data.get("task"):
+        parts.append(f"Task: {data['task']}")
+    if data.get("status"):
+        parts.append(f"Status: {data['status']}")
+    if data.get("answer"):
+        parts.append(f"Answer:\n{data['answer']}")
+    if data.get("sql"):
+        parts.append(f"SQL:\n{data['sql']}")
+    if data.get("result_preview"):
+        parts.append("Result preview:\n" + json.dumps(data["result_preview"], ensure_ascii=False, default=str))
+    if data.get("warnings"):
+        parts.append(f"Warnings: {data['warnings']}")
+    return "\n\n".join(parts) if parts else _fmt_generic(data)
 
 
 def _list_update_items(value: Any) -> list[Any]:

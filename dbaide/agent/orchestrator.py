@@ -71,6 +71,8 @@ class AskOrchestrator:
         # the retrieve_turn / list_earlier_turns tools.
         self.session_turns: list[dict[str, Any]] = []
         self.active_criteria: list[str] = []
+        self.subagent_depth: int = 0
+        self.max_subagent_depth: int = 1
 
         self.schema = SchemaTools(adapter, session.disclosure, instance=self.instance, assets=self.asset_store)
         self.profile = ProfileTools(adapter, session.disclosure, instance=self.instance, assets=self.asset_store)

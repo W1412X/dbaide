@@ -422,6 +422,37 @@ ASK_USER = ToolSpec(
     safe_for_auto_call=True,
 )
 
+RUN_SUBAGENT = ToolSpec(
+    name="run_subagent",
+    description=(
+        "Delegate a bounded, independent database subtask to a child DBAide agent "
+        "with the same connection, schema scope, confirmed criteria, and read-only "
+        "tooling. Use for separable research/verification work whose result the main "
+        "agent will incorporate, not for simple one-step tool calls. The child may "
+        "inspect schema, generate/execute read-only SQL if execute=true, and returns a "
+        "compact answer, SQL, warnings, and a row-preserving preview."
+    ),
+    input_schema={
+        "task": {"type": "string", "required": True, "description": "specific subtask for the child agent"},
+        "context": {"type": "string", "description": "extra constraints/evidence to include"},
+        "database": {"type": "string", "description": "defaults to current working database"},
+        "execute": {"type": "boolean", "default": True, "description": "allow child read-only SQL execution"},
+        "max_steps": {"type": "integer", "description": "child step budget, capped by the parent session"},
+    },
+    output_schema={
+        "task": "string",
+        "status": "string",
+        "answer": "string",
+        "sql": "string",
+        "result_preview": "list[dict]",
+        "row_preview": "dict",
+        "warnings": "list[string]",
+    },
+    permission_level=SAFE_METADATA,
+    timeout_seconds=120,
+    safe_for_auto_call=True,
+)
+
 RENDER_CHART = ToolSpec(
     name="render_chart",
     description=(

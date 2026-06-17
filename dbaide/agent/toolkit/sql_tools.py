@@ -25,6 +25,7 @@ from dbaide.agent.toolkit.support import (
     _requested_table_names, _ambiguous_requested_tables,
     _requested_table_labels,
 )
+from dbaide.agent.toolkit.result_preview import preview_rows
 
 logger = logging.getLogger("dbaide.agent.toolkit")
 
@@ -88,6 +89,11 @@ def _try_fast_execute(orchestrator, draft, disclosed, database) -> ToolResult | 
     orchestrator.run_state.sql_feedback = ""
     artifact_id = _next_sql_artifact_id(orchestrator.run_state.memory)
     result_summary = _result_summary(result)
+    rows_preview, preview_meta = preview_rows(
+        list(result.rows or []),
+        columns=list(result.columns or []),
+        max_rows=20,
+    )
     purpose = normalize_sql_purpose("")
     orchestrator.run_state.memory.add_sql_artifact(SQLArtifact(
         id=artifact_id,
@@ -127,7 +133,8 @@ def _try_fast_execute(orchestrator, draft, disclosed, database) -> ToolResult | 
             "rationale": draft.rationale,
             "confidence": draft.confidence,
             "columns": result.columns,
-            "rows": result.rows[:20],
+            "rows": rows_preview,
+            "row_preview": preview_meta,
             "row_count": result.row_count,
             "truncated": result.truncated,
             "elapsed_ms": result.elapsed_ms,
@@ -424,6 +431,11 @@ def register(registry: ToolRegistry, orchestrator) -> None:
             artifact_id = save_as or _next_sql_artifact_id(orchestrator.run_state.memory)
             result_summary = _result_summary(result)
             norm_purpose = normalize_sql_purpose(purpose)
+            rows_preview, preview_meta = preview_rows(
+                list(result.rows or []),
+                columns=list(result.columns or []),
+                max_rows=20,
+            )
             orchestrator.run_state.memory.add_sql_artifact(SQLArtifact(
                 id=artifact_id,
                 purpose=norm_purpose,
@@ -460,7 +472,8 @@ def register(registry: ToolRegistry, orchestrator) -> None:
                 ok=True,
                 data={
                     "columns": result.columns,
-                    "rows": result.rows[:20],
+                    "rows": rows_preview,
+                    "row_preview": preview_meta,
                     "row_count": result.row_count,
                     "truncated": result.truncated,
                     "elapsed_ms": result.elapsed_ms,
