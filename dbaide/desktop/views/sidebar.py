@@ -36,6 +36,7 @@ class Sidebar(QWidget):
     edit_note = pyqtSignal(dict)  # edit the user note for a db/table/column node
     refresh_requested = pyqtSignal(dict)  # refresh a db/table from the live catalog
     enrich_requested = pyqtSignal(dict)  # build the optional enrichment for a db/table node
+    backup_requested = pyqtSignal(dict)  # trigger backup for a table/database node
 
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
@@ -954,6 +955,10 @@ class Sidebar(QWidget):
             menu.addAction(t("schema.enrich"), lambda: self.enrich_requested.emit(data))
         if kind in ("database", "table", "column"):
             menu.addAction(t("schema.edit_note"), lambda: self.edit_note.emit(data))
+        if kind == "table":
+            menu.addAction(t("schema.backup_table"), lambda: self.backup_requested.emit(data))
+        if kind == "database":
+            menu.addAction(t("schema.backup_database"), lambda: self.backup_requested.emit(data))
         if kind == "table":
             gen = menu.addMenu(t("schema.generate_sql"))
             _style_menu(gen)

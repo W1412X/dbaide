@@ -20,6 +20,25 @@ from dbaide.desktop.theme import Theme
 # Word(s) immediately before a trailing dot, e.g. "orders" or "analysis.orders".
 _QUALIFIED_DOT = re.compile(r"((?:[A-Za-z_][\w]*)(?:\.[A-Za-z_][\w]*)*)\.(\w*)$")
 
+# Extract table aliases: FROM table [AS] alias, JOIN table [AS] alias, FROM a, b [AS] alias
+_ALIAS_RE = re.compile(
+    r"(?:FROM|JOIN|,)\s+"
+    r"((?:[`\"]?[A-Za-z_]\w*[`\"]?)(?:\.[`\"]?[A-Za-z_]\w*[`\"]?)*)"
+    r"\s+(?:AS\s+)?([A-Za-z_]\w*)",
+    re.IGNORECASE,
+)
+
+# Keywords that should never be treated as aliases.
+_NOT_ALIAS = frozenset({
+    "where", "on", "and", "or", "not", "in", "is", "null", "like", "between",
+    "set", "values", "into", "select", "from", "join", "left", "right", "inner",
+    "outer", "cross", "full", "natural", "using", "order", "group", "having",
+    "limit", "offset", "union", "except", "intersect", "as", "case", "when",
+    "then", "else", "end", "exists", "asc", "desc", "distinct", "all", "any",
+    "with", "recursive", "returning", "insert", "update", "delete", "create",
+    "alter", "drop", "index", "table", "view", "true", "false", "if",
+})
+
 
 class _LineNumberArea(QWidget):
     def __init__(self, editor: "SqlEditor") -> None:
@@ -239,10 +258,32 @@ class SqlEditor(QPlainTextEdit):
 
     # ── completion plumbing ─────────────────────────────────────────────────--
 
+    def _in_string(self) -> bool:
+        """True when the cursor sits inside a SQL string literal ('…' or "…")."""
+        text = self.toPlainText()[: self.textCursor().position()]
+        in_single = in_double = False
+        i = 0
+        while i < len(text):
+            ch = text[i]
+            if ch == "'" and not in_double:
+                if in_single and i + 1 < len(text) and text[i + 1] == "'":
+                    i += 2
+                    continue
+                in_single = not in_single
+            elif ch == '"' and not in_single:
+                in_double = not in_double
+            i += 1
+        return in_single or in_double
+
     def _current_prefix(self) -> str:
+        """Word fragment from word-start to cursor (not the full WordUnderCursor)."""
         tc = self.textCursor()
-        tc.select(QTextCursor.SelectionType.WordUnderCursor)
-        return tc.selectedText()
+        pos = tc.positionInBlock()
+        text = tc.block().text()[:pos]
+        i = len(text) - 1
+        while i >= 0 and (text[i].isalnum() or text[i] == "_"):
+            i -= 1
+        return text[i + 1 :]
 
     def _insert_completion(self, completion: str) -> None:
         if self._completer.widget() is not self:
@@ -250,12 +291,19 @@ class SqlEditor(QPlainTextEdit):
         token = str(completion or "").split(" · ", 1)[0].strip()
         if not token:
             return
+        prefix = self._current_prefix()
         tc = self.textCursor()
-        tc.select(QTextCursor.SelectionType.WordUnderCursor)
+        tc.movePosition(
+            QTextCursor.MoveOperation.Left,
+            QTextCursor.MoveMode.KeepAnchor,
+            len(prefix),
+        )
         tc.insertText(token)
         self.setTextCursor(tc)
 
     def _force_completion(self) -> None:
+        if self._in_string():
+            return
         tc = self.textCursor()
         before = tc.block().text()[: tc.positionInBlock()]
         scoped_words, scoped_mode = self._scoped_words(before)
@@ -296,6 +344,10 @@ class SqlEditor(QPlainTextEdit):
             self._force_completion()
             return
         super().keyPressEvent(event)
+
+        if self._in_string():
+            popup.hide()
+            return
 
         # Cascading context after a dot: "<table>." → that table's columns (also
         # handles "<db>.<table>." since we look at the word before the last dot);
@@ -349,8 +401,19 @@ class SqlEditor(QPlainTextEdit):
             labels.append(f"{col} · {dtype}" if dtype else col)
         return labels
 
+    def _parse_aliases(self) -> dict[str, str]:
+        """Extract ``{alias_lower: table_ref}`` from the current SQL text."""
+        aliases: dict[str, str] = {}
+        for m in _ALIAS_RE.finditer(self.toPlainText()):
+            table_ref = m.group(1).strip('`"')
+            alias = m.group(2)
+            if alias.lower() not in _NOT_ALIAS:
+                aliases[alias.lower()] = table_ref
+        return aliases
+
     def _scoped_words(self, before: str) -> tuple[list[str] | None, str]:
-        """`<db>.` → tables; `<table>.` / `<db.table>.` → columns with types."""
+        """`<db>.` → tables; `<table>.` / `<db.table>.` → columns with types;
+        `<alias>.` → aliased table's columns."""
         match = _QUALIFIED_DOT.search(before)
         if not match:
             return None, ""
@@ -371,6 +434,13 @@ class SqlEditor(QPlainTextEdit):
             if db is not None:
                 tables = self._tables_by_database.get(db) or self._tables
                 return tables, f"db:{db}"
+
+            alias_table = self._parse_aliases().get(qualifier.lower())
+            if alias_table:
+                real = self._match_table(alias_table.split(".")[-1])
+                if real is not None:
+                    key = alias_table if alias_table in self._columns_by_qualified else real
+                    return self._column_labels(key), f"alias:{qualifier}"
         return None, ""
 
     def _match_table(self, word: str) -> str | None:

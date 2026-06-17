@@ -375,6 +375,7 @@ class MainWindow(QMainWindow):
         self.topbar.build_assets.connect(self.build_assets)
         self.topbar.settings.connect(lambda: self.open_settings("connections"))
         self.topbar.joins_requested.connect(self.open_joins)
+        self.topbar.backup_requested.connect(self.open_backup_manager)
         self.topbar.sync_schema_requested.connect(self.sync_schema)
         self.topbar.copy_conversation_requested.connect(self.copy_conversation)
         self.topbar.export_debug_requested.connect(self.export_debug_bundle)
@@ -404,6 +405,7 @@ class MainWindow(QMainWindow):
         self.sidebar.edit_note.connect(self._edit_note)
         self.sidebar.refresh_requested.connect(self._refresh_schema_node)
         self.sidebar.enrich_requested.connect(self._enrich_node)
+        self.sidebar.backup_requested.connect(self._backup_node)
         self.sidebar.semantic_search_requested.connect(self.search_assets)
         self.sidebar.settings_requested.connect(lambda: self.open_settings("connections"))
         self.sidebar.chats.new_requested.connect(self.new_session)
@@ -1491,6 +1493,45 @@ class MainWindow(QMainWindow):
             self.toast(_i18n_t("toast.enrich_failed", error=str(exc)))
 
         self._run_background(action, payload, on_done, on_error=on_fail, on_progress=on_progress)
+
+    def _backup_node(self, node: dict[str, Any]) -> None:
+        conn = self.current_connection()
+        if not conn:
+            self.toast(_i18n_t("toast.select_connection"))
+            return
+        kind = str(node.get("kind") or "")
+        _instance, database, table, _column = self._schema_path_parts(node)
+        if kind == "table" and table:
+            scope = "table"
+        elif kind == "database" and database:
+            scope = "database"
+            table = ""
+        else:
+            return
+        from dbaide.desktop.dialogs.backup import BackupDialog
+        config = self.service.cfg.get_connection(conn)
+        dlg = BackupDialog(config, database, table, scope=scope, parent=self)
+        dlg.exec()
+        self._ensure_backup_manager_refreshed()
+
+    def _ensure_backup_manager_refreshed(self) -> None:
+        tabs = self.workbench.tabs
+        for i in range(tabs.count()):
+            w = tabs.widget(i)
+            if w is not None and type(w).__name__ == "BackupManager":
+                w.refresh()
+
+    def open_backup_manager(self) -> None:
+        tabs = self.workbench.tabs
+        for i in range(tabs.count()):
+            w = tabs.widget(i)
+            if w is not None and type(w).__name__ == "BackupManager":
+                tabs.setCurrentIndex(i)
+                return
+        from dbaide.desktop.dialogs.backup import BackupManager
+        mgr = BackupManager()
+        idx = tabs.addTab(mgr, _i18n_t("backup.manager"))
+        tabs.setCurrentIndex(idx)
 
     def _settings_delete_connection(self, dialog: SettingsDialog, name: str) -> None:
         def on_done(_result: object) -> None:

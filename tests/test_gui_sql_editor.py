@@ -191,3 +191,118 @@ def test_cascading_completion_db_table_column(qapp):
     assert e._scoped_words("FROM analysis.orders.")[0] == ["id · INTEGER", "amount · INTEGER"]
     assert e._scoped_words("WHERE sys_user.del")[0] == ["user_id · BIGINT", "del_flag · CHAR"]
     assert e._scoped_words("SELECT id") == (None, "")                        # no dotted scope
+
+
+def test_alias_completion_from_clause(qapp):
+    """FROM orders o  →  o. completes with order columns."""
+    from dbaide.desktop.components.sql_editor import SqlEditor
+    e = SqlEditor()
+    e.set_schema({
+        "tables": ["orders", "users"],
+        "columns_by_table": {"orders": ["id", "amount"], "users": ["id", "email"]},
+        "column_types": {"orders.id": "INTEGER", "orders.amount": "DECIMAL"},
+    })
+    e.setPlainText("SELECT o.id FROM orders o")
+    words, mode = e._scoped_words("SELECT o.")
+    assert mode.startswith("alias:")
+    assert "id · INTEGER" in words
+    assert "amount · DECIMAL" in words
+
+
+def test_alias_completion_as_syntax(qapp):
+    """FROM users AS u  →  u. completes with user columns."""
+    from dbaide.desktop.components.sql_editor import SqlEditor
+    e = SqlEditor()
+    e.set_schema({
+        "tables": ["users"],
+        "columns_by_table": {"users": ["id", "email"]},
+    })
+    e.setPlainText("SELECT u.email FROM users AS u")
+    words, mode = e._scoped_words("SELECT u.")
+    assert words is not None
+    assert "email" in words
+
+
+def test_alias_completion_join(qapp):
+    """JOIN table alias  →  alias. completes."""
+    from dbaide.desktop.components.sql_editor import SqlEditor
+    e = SqlEditor()
+    e.set_schema({
+        "tables": ["orders", "products"],
+        "columns_by_table": {"orders": ["id"], "products": ["name", "price"]},
+    })
+    e.setPlainText("SELECT p.name FROM orders o JOIN products p ON p.id = o.id")
+    words, _ = e._scoped_words("SELECT p.")
+    assert words is not None
+    assert "name" in words
+
+
+def test_alias_keyword_not_treated_as_alias(qapp):
+    """SQL keywords after FROM should not be treated as aliases."""
+    from dbaide.desktop.components.sql_editor import SqlEditor
+    e = SqlEditor()
+    e.set_schema({
+        "tables": ["orders"],
+        "columns_by_table": {"orders": ["id"]},
+    })
+    e.setPlainText("SELECT * FROM orders WHERE id = 1")
+    words, _ = e._scoped_words("WHERE.")
+    assert words is None
+
+
+def test_in_string_suppresses_completion(qapp):
+    """Completion must not fire inside a string literal."""
+    from dbaide.desktop.components.sql_editor import SqlEditor
+    e = SqlEditor()
+    e.setPlainText("SELECT * FROM t WHERE name = 'sel")
+    tc = e.textCursor()
+    tc.movePosition(QTextCursor.MoveOperation.End)
+    e.setTextCursor(tc)
+    assert e._in_string() is True
+
+
+def test_not_in_string_after_closing_quote(qapp):
+    from dbaide.desktop.components.sql_editor import SqlEditor
+    e = SqlEditor()
+    e.setPlainText("SELECT * FROM t WHERE name = 'hello' AND sel")
+    tc = e.textCursor()
+    tc.movePosition(QTextCursor.MoveOperation.End)
+    e.setTextCursor(tc)
+    assert e._in_string() is False
+
+
+def test_in_string_escaped_quote(qapp):
+    """SQL escaped '' inside a string doesn't close it."""
+    from dbaide.desktop.components.sql_editor import SqlEditor
+    e = SqlEditor()
+    e.setPlainText("SELECT * WHERE x = 'it''s stil")
+    tc = e.textCursor()
+    tc.movePosition(QTextCursor.MoveOperation.End)
+    e.setTextCursor(tc)
+    assert e._in_string() is True
+
+
+def test_prefix_mid_word(qapp):
+    """Cursor in the middle of a word: prefix is only up to cursor."""
+    from dbaide.desktop.components.sql_editor import SqlEditor
+    e = SqlEditor()
+    e.setPlainText("SELECT username FROM t")
+    tc = e.textCursor()
+    # Position cursor after "user" in "username" (offset 11)
+    tc.setPosition(11)
+    e.setTextCursor(tc)
+    assert e._current_prefix() == "user"
+
+
+def test_insert_completion_mid_word_preserves_suffix(qapp):
+    """Completing mid-word should not clobber text after the cursor."""
+    from dbaide.desktop.components.sql_editor import SqlEditor
+    e = SqlEditor()
+    e.set_schema({"tables": ["users"], "columns_by_table": {}})
+    e.setPlainText("SELECT usename FROM t")
+    # Cursor after "use" in "usename" (position 10)
+    tc = e.textCursor()
+    tc.setPosition(10)
+    e.setTextCursor(tc)
+    e._insert_completion("users")
+    assert e.toPlainText() == "SELECT usersname FROM t"

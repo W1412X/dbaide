@@ -293,6 +293,38 @@ def build_parser() -> argparse.ArgumentParser:
     imp = sub.add_parser("import", help="Import from a DBAide export file")
     imp.add_argument("file", help="Path to the export JSON file")
 
+    # ── Backup ──────────────────────────────────────────────────────────────
+    bk = sub.add_parser("backup", help="Backup tables, databases, or instances to local files")
+    bsub = bk.add_subparsers(dest="backup_command", required=True)
+
+    bk_table = bsub.add_parser("table", help="Backup a single table")
+    bk_table.add_argument("conn", help="Connection name")
+    bk_table.add_argument("database", help="Database name")
+    bk_table.add_argument("table", help="Table name")
+    bk_table.add_argument("--format", dest="fmt", choices=["csv", "sql", "sqlite"], default="csv")
+    bk_table.add_argument("--batch-size", type=int, default=5000)
+
+    bk_db = bsub.add_parser("db", help="Backup all tables in a database")
+    bk_db.add_argument("conn", help="Connection name")
+    bk_db.add_argument("database", help="Database name")
+    bk_db.add_argument("--format", dest="fmt", choices=["csv", "sql", "sqlite"], default="csv")
+    bk_db.add_argument("--batch-size", type=int, default=5000)
+    bk_db.add_argument("--threads", type=int, default=4)
+
+    bk_inst = bsub.add_parser("instance", help="Backup all databases in a connection")
+    bk_inst.add_argument("conn", help="Connection name")
+    bk_inst.add_argument("--format", dest="fmt", choices=["csv", "sql", "sqlite"], default="csv")
+    bk_inst.add_argument("--batch-size", type=int, default=5000)
+    bk_inst.add_argument("--threads", type=int, default=4)
+
+    bk_list = bsub.add_parser("list", help="List backup history")
+    bk_list.add_argument("--conn", default="")
+    bk_list.add_argument("--database", default="")
+    bk_list.add_argument("--table", default="")
+
+    bk_del = bsub.add_parser("delete", help="Delete a backup by ID")
+    bk_del.add_argument("id", type=int, help="Backup ID")
+
     # ── MCP server & setup (AI agent integration) ────────────────────────────
     mcp = sub.add_parser("mcp", help="Start the MCP (Model Context Protocol) server on stdio")
     mcp.add_argument("--mode", choices=["full", "ask", "tools"], default="full",
@@ -482,6 +514,8 @@ def dispatch(args: argparse.Namespace, cfg: ConfigManager) -> int:
         return dispatch_export(args, cfg)
     if args.command == "import":
         return dispatch_import(args, cfg)
+    if args.command == "backup":
+        return dispatch_backup(args, cfg)
     if args.command == "mcp":
         return dispatch_mcp(args, cfg)
     if args.command == "setup":
@@ -864,6 +898,94 @@ def dispatch_import(args: argparse.Namespace, cfg: ConfigManager) -> int:
 
     print("import complete.")
     return 0
+
+
+def dispatch_backup(args: argparse.Namespace, cfg: ConfigManager) -> int:
+    from dbaide.backup import BackupEngine, BackupRegistry
+
+    def _progress(table: str, done: int, total: int | None) -> None:
+        if total:
+            pct = min(done / total * 100, 100)
+            print(f"\r  {table}: {done:,}/{total:,} rows ({pct:.0f}%)", end="", flush=True)
+        else:
+            print(f"\r  {table}: {done:,} rows", end="", flush=True)
+
+    registry = BackupRegistry()
+
+    if args.backup_command == "list":
+        records = registry.list_backups(
+            connection=args.conn, database=args.database, table=args.table,
+        )
+        if not records:
+            print("No backups found.")
+            return 0
+        print(f"{'ID':<6} {'Connection':<14} {'Database':<14} {'Table':<18} {'Date':<20} {'Rows':>10} {'Size':>10} {'Fmt'}")
+        print("-" * 105)
+        for r in records:
+            size = _fmt_size(r.file_size)
+            print(f"{r.id:<6} {r.connection:<14} {r.database:<14} {r.table:<18} {r.timestamp:<20} {r.row_count:>10,} {size:>10} {r.format}")
+        return 0
+
+    if args.backup_command == "delete":
+        if registry.delete(args.id):
+            print(f"Backup {args.id} deleted.")
+        else:
+            print(f"Backup {args.id} not found.", file=sys.stderr)
+            return 1
+        return 0
+
+    conn = cfg.get_connection(args.conn)
+    engine = BackupEngine(conn, registry)
+
+    if args.backup_command == "table":
+        print(f"Backing up {args.database}.{args.table} ({args.fmt})...")
+        result = engine.backup_table(args.database, args.table,
+                                     fmt=args.fmt, batch_size=args.batch_size,
+                                     on_progress=_progress)
+        print()
+        _print_backup_result(result)
+        return 0
+
+    if args.backup_command == "db":
+        print(f"Backing up database {args.database} ({args.fmt}, {args.threads} threads)...")
+        results = engine.backup_database(args.database, fmt=args.fmt,
+                                         batch_size=args.batch_size,
+                                         threads=args.threads,
+                                         on_progress=_progress)
+        print()
+        for r in results:
+            _print_backup_result(r)
+        print(f"\n{len(results)} table(s) backed up.")
+        return 0
+
+    if args.backup_command == "instance":
+        print(f"Backing up instance {args.conn} ({args.fmt}, {args.threads} threads)...")
+        results = engine.backup_instance(fmt=args.fmt, batch_size=args.batch_size,
+                                         threads=args.threads,
+                                         on_progress=_progress)
+        print()
+        for r in results:
+            _print_backup_result(r)
+        print(f"\n{len(results)} table(s) backed up.")
+        return 0
+
+    raise AssertionError(args.backup_command)
+
+
+def _print_backup_result(result: dict) -> None:
+    if result.get("error"):
+        print(f"  FAIL  {result.get('database', '')}.{result.get('table', '')}: {result['error']}")
+        return
+    size = _fmt_size(result.get("file_size", 0))
+    print(f"  OK    {result['database']}.{result['table']}  {result['row_count']:,} rows  {size}  → {result['file_path']}")
+
+
+def _fmt_size(n: int) -> str:
+    if n < 1024:
+        return f"{n} B"
+    if n < 1024 * 1024:
+        return f"{n / 1024:.1f} KB"
+    return f"{n / (1024 * 1024):.1f} MB"
 
 
 def dispatch_mcp(args: argparse.Namespace, _cfg: ConfigManager) -> int:
