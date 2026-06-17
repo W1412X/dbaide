@@ -274,7 +274,7 @@ class DataBrowser(QWidget):
             rows = self.grid.table.rowCount()
             if rows > 0:
                 self._update_range_label(rows)
-            elif self._table:
+            else:
                 self._range.setText(self._t("data.no_rows"))
         self._set_controls_enabled(not running)
 

@@ -67,6 +67,8 @@ class _SegmentBar(QWidget):
         return idx
 
     def _select(self, index: int) -> None:
+        if not (0 <= index < len(self._buttons)):
+            return
         if self._current == index:
             self._buttons[index].setChecked(True)
             return

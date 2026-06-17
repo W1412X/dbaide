@@ -503,7 +503,7 @@ def handle_inspect_metadata(arguments: dict) -> dict:
 
             if include_indexes:
                 try:
-                    indexes = adapter.list_indexes(t.name, database=database)
+                    indexes = adapter.indexes(t.name, database=database)
                     entry["indexes"] = [_serialize(idx) for idx in indexes]
                 except Exception:
                     entry["indexes"] = []
