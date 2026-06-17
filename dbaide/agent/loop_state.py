@@ -114,6 +114,7 @@ def dump_loop_state(
             "clarify_questions": orchestrator.run_state.clarify_questions,
             "memory": orchestrator.run_state.memory.to_dict(),
             "scope_used": bool(orchestrator.run_state.scope_used),
+            "schema_prefetched": bool(orchestrator.run_state.schema_prefetched),
             "query_result": query_result_to_dict(orchestrator.run_state.query_result),
             "charts": list(orchestrator.run_state.charts or []),
             "executed_sqls": [
@@ -190,6 +191,7 @@ def restore_loop_state(orchestrator: Any, snapshot: dict[str, Any]) -> tuple[lis
     orchestrator.run_state.clarify_questions = str(payload.get("clarify_questions") or "")
     orchestrator.run_state.memory = AgentMemory.from_dict(payload.get("memory"))
     orchestrator.run_state.scope_used = bool(payload.get("scope_used", False))
+    orchestrator.run_state.schema_prefetched = bool(payload.get("schema_prefetched", False))
     orchestrator.run_state.query_result = query_result_from_dict(payload.get("query_result"))
     charts_payload = payload.get("charts")
     orchestrator.run_state.charts = [

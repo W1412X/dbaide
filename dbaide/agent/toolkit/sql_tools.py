@@ -246,6 +246,7 @@ def register(registry: ToolRegistry, orchestrator) -> None:
                 )
                 if fast is not None:
                     return fast
+                orchestrator.run_state.sql_feedback = ""
             return ToolResult(
                 ok=True,
                 data={

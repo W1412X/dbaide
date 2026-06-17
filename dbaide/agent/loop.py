@@ -163,14 +163,17 @@ class AskAgentLoop:
         summary = _summarize_tool_result("retrieve_schema_context", result, limit=_rpl)
         transcript.append(f"Tool `retrieve_schema_context` → {summary}")
         orch.run_state.schema_prefetched = True
-        self.progress(self._ns_step(progress_event(
+        prefetch_node = f"{self._trace_parent}:prefetch" if self._trace_parent else "prefetch"
+        ev = progress_event(
             stage="retrieve_schema_context",
             title="Schema prefetch",
             status="completed",
             kind="tool",
             detail=summary[:200],
-            step=0,
-        )))
+        )
+        ev["node_id"] = prefetch_node
+        ev["parent_id"] = self._agent_loop_node_id or self._trace_parent
+        self.progress(ev)
 
     def run(
         self,
