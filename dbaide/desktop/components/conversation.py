@@ -980,6 +980,9 @@ class TurnBlock(QFrame):
         self._footer.hide()
         self._layout.addWidget(self._footer)
         self._trace_model_cache: "TraceModel | None" = None
+        self._elapsed_timer = QTimer(self)
+        self._elapsed_timer.setInterval(1000)
+        self._elapsed_timer.timeout.connect(self._tick_elapsed)
 
     def set_user(self, text: str, *, meta: str = "", attachments: list[dict] | None = None) -> None:
         self._header.show()
@@ -1020,6 +1023,8 @@ class TurnBlock(QFrame):
         if self._trace_open():
             self._trace_box.append_live_event(event)
         self._ingest_live_stats(event)
+        if not self._elapsed_timer.isActive():
+            self._elapsed_timer.start()
 
     def set_trace(self, events: list[dict[str, Any]]) -> None:
         """Final, authoritative trace for this turn (from the persisted result)."""
@@ -1027,6 +1032,11 @@ class TurnBlock(QFrame):
         if self._trace_open():
             self._trace_box.set_events(self.trace_state.events, live=False)
         self._rebuild_stats(events)
+
+    def _tick_elapsed(self) -> None:
+        """Refresh the stats footer every second so the elapsed time ticks independently."""
+        if self._trace_model_cache is not None:
+            self._render_stats(self._trace_model_cache)
 
     def _ingest_live_stats(self, event: dict[str, Any]) -> None:
         """Feed a single event to the cached trace model for realtime display."""
@@ -1039,6 +1049,7 @@ class TurnBlock(QFrame):
 
     def _rebuild_stats(self, events: list[dict[str, Any]]) -> None:
         from dbaide.agent.trace_model import TraceModel
+        self._elapsed_timer.stop()
         model = TraceModel()
         for ev in events or []:
             if isinstance(ev, dict):
@@ -1428,10 +1439,12 @@ class ConversationView(QScrollArea):
             self._current_record["answer"] = answer
             if charts:
                 self._current_record["charts"] = list(charts)
-        turn.status.set_done(ok=ok, step_count=len(events), events=events)
         # Hand the authoritative trace to the turn so its inline view (if/when the
         # user expands the chip) shows the finalized run, not just what streamed.
+        # Build the model first so we can derive the real tool-step count.
         turn.set_trace(events)
+        step_count = len(turn._trace_model_cache.steps) if turn._trace_model_cache else len(events)
+        turn.status.set_done(ok=ok, step_count=step_count, events=events)
 
         # Clean author label — just "DBAide" (the internal workflow id is noise in the
         # message header, Codex-style; keep it reachable as a tooltip and in the trace).
@@ -1501,7 +1514,9 @@ class ConversationView(QScrollArea):
     def finish_turn_error(self, message: str) -> None:
         if self._current_turn:
             events = list((self._current_record or {}).get("events") or [])
-            self._current_turn.status.set_done(ok=False, step_count=len(events), events=events)
+            self._current_turn.set_trace(events)
+            sc = len(self._current_turn._trace_model_cache.steps) if self._current_turn._trace_model_cache else len(events)
+            self._current_turn.status.set_done(ok=False, step_count=sc, events=events)
             self._current_turn.append_content(
                 _MarkdownBlock(message, title="Error", boxed=True, accent=Theme.RED)
             )

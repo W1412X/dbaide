@@ -5,9 +5,9 @@ from __future__ import annotations
 import math
 from typing import Any
 
-from PyQt6.QtCore import Qt, QMargins
+from PyQt6.QtCore import QSize, Qt, QMargins
 from PyQt6.QtGui import QBrush, QColor, QCursor, QFont, QPainter, QPen
-from PyQt6.QtWidgets import QFrame, QLabel, QSizePolicy, QToolTip, QVBoxLayout, QWidget
+from PyQt6.QtWidgets import QFrame, QLabel, QScrollArea, QSizePolicy, QToolTip, QVBoxLayout, QWidget
 
 from dbaide.charts.labels import category_axis_layout
 from dbaide.charts.spec import chart_spec_from_dict
@@ -556,6 +556,7 @@ class ChartBlock(QFrame):
         from dbaide.i18n import t
 
         self.setObjectName("chartBlock")
+        self.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Preferred)
         self.setStyleSheet(
             f"""
             QFrame#chartBlock {{
@@ -605,3 +606,18 @@ class ChartBlock(QFrame):
             err.setWordWrap(True)
             err.setStyleSheet(f"color: {Theme.RED}; background: transparent;")
             layout.addWidget(err)
+
+    def _viewport_width(self) -> int:
+        """Walk up the widget tree to find the enclosing QScrollArea viewport width."""
+        w = self.parentWidget()
+        while w is not None:
+            if isinstance(w, QScrollArea):
+                return w.viewport().width()
+            w = w.parentWidget()
+        return 0
+
+    def resizeEvent(self, event) -> None:  # noqa: N802
+        super().resizeEvent(event)
+        vw = self._viewport_width()
+        if vw > 0:
+            self.setMaximumWidth(vw)
