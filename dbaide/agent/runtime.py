@@ -88,6 +88,10 @@ class AgentRuntime:
         self.check_budget()
         self._step_count += 1
 
+    def force_remaining(self, n: int) -> None:
+        """Set step count so that at most *n* steps remain."""
+        self._step_count = max(self._step_count, self.max_steps - max(1, n))
+
     def elapsed_ms(self) -> float:
         """Get elapsed time in milliseconds."""
         return (time.perf_counter() - self._start_time) * 1000

@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import Any, Callable
 
 from dbaide.adapters.base import DatabaseAdapter
-from dbaide.agent.orchestrator import AgentContext, AgentStep, AskOrchestrator, format_inspect
+from dbaide.agent.orchestrator import AskOrchestrator, format_inspect
 from dbaide.assets import AssetStore
 from dbaide.joins import JoinCatalogStore
 from dbaide.llm import LLMClient
@@ -13,8 +13,6 @@ from dbaide.models import AssistantResponse
 from dbaide.session import Session
 
 __all__ = [
-    "AgentContext",
-    "AgentStep",
     "DataAssistant",
     "format_inspect",
 ]

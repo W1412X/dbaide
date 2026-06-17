@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass, field
 from typing import Any, Callable
 
 from dbaide.adapters.base import DatabaseAdapter
@@ -19,32 +18,11 @@ from dbaide.assets import AssetStore
 from dbaide.connection_identity import connection_fingerprint
 from dbaide.i18n import detect_user_language, normalize, t as _i18n_t
 from dbaide.llm import LLMClient, NullLLMClient
-from dbaide.models import AssistantResponse, TaskType
+from dbaide.models import AssistantResponse
 from dbaide.session import Session
 from dbaide.tools import DiagnoseTools, ProfileTools, QueryTools, SchemaTools
 
 logger = logging.getLogger("dbaide.orchestrator")
-
-
-@dataclass(slots=True)
-class AgentStep:
-    name: str
-    status: str = "pending"
-    detail: str = ""
-    elapsed_ms: float = 0.0
-    metadata: dict[str, Any] = field(default_factory=dict)
-
-
-@dataclass(slots=True)
-class AgentContext:
-    question: str = ""
-    database: str = ""
-    task: TaskType | None = None
-    table: str = ""
-    columns: list[str] = field(default_factory=list)
-    sql: str = ""
-    error: str = ""
-    steps: list[AgentStep] = field(default_factory=list)
 
 
 class AskOrchestrator:
@@ -454,18 +432,8 @@ class AskOrchestrator:
         attach_notes_to_hits(self, discovery)
         return discovery
 
-    # ─── Profile ────────────────────────────────────────────────────────────
-
-    # ─── SQL diagnose / rewrite ─────────────────────────────────────────────
-
-    # ─── Data query ─────────────────────────────────────────────────────────
-
-    # ─── Helpers ────────────────────────────────────────────────────────────
-
     def _new_disclosures(self, before: list[str]) -> list[str]:
         return self.session.disclosure.events[len(before):]
-
-
 
 
 

@@ -583,7 +583,7 @@ class AskAgentLoop:
             escalation = _inject_stuck_loop_hint(state, messages)
             if escalation == "escalate":
                 # Leave only 1 step so the model must finish on next iteration
-                runtime._step_count = max(runtime._step_count, runtime.max_steps - 1)
+                runtime.force_remaining(1)
 
         # Track SQL artifacts for chart-tool lookup
         data = result.data if isinstance(result.data, dict) else {}
