@@ -18,7 +18,7 @@ LOOP_DECISION_TOOL_NAMES = frozenset({
     "list_joins", "validate_joins",
     "generate_sql", "validate_sql", "execute_sql",
     "explain_sql", "profile_table", "column_stats",
-    "ask_user", "annotate_object", "retrieve_memory_item",
+    "ask_user", "annotate_object",
     "retrieve_turn", "list_earlier_turns",
     "render_chart",
 })

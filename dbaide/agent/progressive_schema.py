@@ -92,9 +92,10 @@ class ProgressiveSchemaAgent:
                 if scoped.hits:
                     scoped.trace.insert(0, "Prioritised user-provided schema scope.")
                     return scoped
-                result = DiscoveryResult(question=question)
-                result.trace.append("User scope yielded no assets — falling back to full discovery.")
                 self._emit_progress(progress, parent, "", "Scope empty — broadening to full discovery")
+                fallback = self._discover_from_assets(question, progress=progress, parent=parent, column_detail=column_detail)
+                fallback.trace.insert(0, "User scope yielded no assets — falling back to full discovery.")
+                return fallback
             return self._discover_from_assets(question, progress=progress, parent=parent, column_detail=column_detail)
         if schema_tools is not None:
             return self._discover_from_live(schema_tools, question, progress=progress, parent=parent)

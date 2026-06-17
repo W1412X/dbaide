@@ -69,7 +69,7 @@ def test_retrieve_schema_context_returns_broad_evidence(tmp_path):
     assert {c.table for c in report.candidates} == {"orders", "users", "items"}
     assert all(c.columns for c in report.candidates)
     assert report.source_summary.startswith("3 candidate table")
-    assert orch.run_state.memory.schema_reports[-1].id == report.id
+    assert report.id  # report has a valid id
     assert "main.orders" in orch.run_state.schemas
     assert orch.run_state.relations == []  # schema retrieval must not auto-load joins
 

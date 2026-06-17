@@ -354,8 +354,8 @@ PROFILE_TABLE = ToolSpec(
         "Profile columns of a table. Pass `columns` to profile exactly those. If you "
         "omit `columns`, it profiles a WINDOW of the table's columns (default the first "
         "`column_limit`, from `column_offset`) — it does NOT profile every column, and "
-        "the un-profiled ones are not computed (retrieve_memory_item cannot recover "
-        "them). The result reports `total_columns`; when total_columns exceeds the "
+        "the un-profiled ones are not computed. "
+        "The result reports `total_columns`; when total_columns exceeds the "
         "window, page with column_offset=<next index> or name the columns explicitly so "
         "no column is silently skipped."
     ),
@@ -449,27 +449,6 @@ RENDER_CHART = ToolSpec(
     },
     permission_level=SAFE_METADATA,
     timeout_seconds=60,
-    safe_for_auto_call=True,
-)
-
-RETRIEVE_MEMORY_ITEM = ToolSpec(
-    name="retrieve_memory_item",
-    description=(
-        "Retrieve archived raw evidence from compressed working memory by ref. "
-        "Use when prompt memory has a raw ref (for example mem:3, w2, schema:1, sql:1) "
-        "and the compressed summary is not enough. This avoids repeating database tools "
-        "only to recover details already observed."
-    ),
-    input_schema={"ref": {"type": "string", "required": True, "description": "mem:N, wN, schema:N, sql:N"}},
-    output_schema={
-        "id": "string",
-        "action": "string",
-        "summary": "string",
-        "source_refs": "list[string]",
-        "payload": "dict",
-    },
-    permission_level=SAFE_METADATA,
-    timeout_seconds=5,
     safe_for_auto_call=True,
 )
 

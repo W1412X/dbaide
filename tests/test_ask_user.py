@@ -205,7 +205,8 @@ def test_loop_state_roundtrip(tmp_path):
     orch._reset_loop_state("q", "main", True)
     orch.run_state.sql = "SELECT 1"
     orch.run_state.pending_question = "ignored on restore"
-    snapshot = dump_loop_state(orch, transcript=["Tool `x` → ok"], execute_allowed=False)
+    from dbaide.llm import LLMMessage
+    snapshot = dump_loop_state(orch, messages=[LLMMessage("user", "Tool `x` → ok")], execute_allowed=False)
     restore_loop_state(orch, snapshot)
     assert orch.run_state.question == "q"
     assert orch.run_state.sql == "SELECT 1"

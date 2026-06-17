@@ -1,55 +1,26 @@
-"""Compressed working memory for the Ask agent.
+"""Minimal agent memory for the conversation-stream architecture.
 
-The loop uses one LLM as the only decision maker. Tools gather evidence; this
-module keeps a compact, action-oriented memory of what has already been tried,
-what it produced, what was excluded, and which artifacts can be reused. The
-prompt should show the model the work history and current evidence, not dump raw
-tool output every round.
+The agent loop now maintains a growing ``messages: list[LLMMessage]`` that the
+model sees directly — no more compressed prompt_block() rendering.  This module
+keeps only the *structured side-state* that the conversation stream alone cannot
+carry: SQL artifacts (chart-tool lookup), confirmed facts (cross-run criteria),
+excluded paths (cross-run avoidance), and verified facts (cross-run knowledge).
+
+Schema evidence reports and join reports are kept as lightweight ID-tracking
+collections so ``next_prefixed_id`` can avoid collisions; their *content* lives
+in the conversation stream as tool-result messages.
 """
 
 from __future__ import annotations
 
-import json
 from dataclasses import asdict, dataclass, field
 from typing import Any
 
 
-MAX_WORK_STEPS = 512
-MAX_FINDINGS = 512
-MAX_OPEN_QUESTIONS = 128
+MAX_SQL_ARTIFACTS = 128
 MAX_EXCLUDED = 256
 MAX_SCHEMA_REPORTS = 64
 MAX_JOIN_REPORTS = 64
-MAX_SQL_ARTIFACTS = 128
-MAX_RESOLVED_QUESTIONS = 128
-MAX_ARCHIVE_INDEX = 128
-PROMPT_SLICE_WORK = 48
-PROMPT_SLICE_FINDINGS = 48
-PROMPT_SLICE_SCHEMA = 12
-PROMPT_SLICE_JOIN = 12
-PROMPT_SLICE_SQL = 24
-PROMPT_SLICE_FACTS = 48
-PROMPT_SLICE_LEDGER = 48
-
-
-@dataclass(slots=True)
-class WorkStep:
-    id: str
-    action: str
-    purpose: str = ""
-    input_summary: str = ""
-    result_summary: str = ""
-    judgment: str = ""
-    artifact_refs: list[str] = field(default_factory=list)
-    raw_ref: str = ""
-    status: str = "completed"
-
-
-@dataclass(slots=True)
-class Finding:
-    text: str
-    source: str = ""
-    confidence: str = "observed"
 
 
 @dataclass(slots=True)
@@ -110,34 +81,22 @@ class SQLArtifact:
 
 
 @dataclass(slots=True)
-class MemoryArchiveItem:
-    id: str
-    action: str
-    summary: str = ""
-    source_refs: list[str] = field(default_factory=list)
-    payload: dict[str, Any] = field(default_factory=dict)
-
-
-@dataclass(slots=True)
 class AgentMemory:
     goal: str = ""
     intent: str = ""
     constraints: list[str] = field(default_factory=list)
-    work_log: list[WorkStep] = field(default_factory=list)
-    findings: list[Finding] = field(default_factory=list)
-    open_questions: list[str] = field(default_factory=list)
+
+    # Cross-run knowledge transfer
+    confirmed_facts: list[str] = field(default_factory=list)
+    verified_facts: list[str] = field(default_factory=list)
     excluded_paths: list[ExcludedPath] = field(default_factory=list)
-    hypotheses: list[str] = field(default_factory=list)
+
+    # Structured artifacts (chart-tool lookup needs sql_artifacts)
+    sql_artifacts: list[SQLArtifact] = field(default_factory=list)
+
+    # ID-tracking collections (content lives in conversation stream)
     schema_reports: list[SchemaEvidenceReport] = field(default_factory=list)
     join_reports: list[JoinEvidenceReport] = field(default_factory=list)
-    sql_artifacts: list[SQLArtifact] = field(default_factory=list)
-    confirmed_facts: list[str] = field(default_factory=list)
-    action_ledger: list[str] = field(default_factory=list)
-    resolved_questions: list[str] = field(default_factory=list)
-    next_action_hint: str = ""
-    archive: list[MemoryArchiveItem] = field(default_factory=list)
-    next_work_index: int = 1
-    next_archive_index: int = 1
 
     def reset_goal(self, question: str, *, database: str = "", execute_allowed: bool = True) -> None:
         self.goal = str(question or "").strip()
@@ -147,164 +106,12 @@ class AgentMemory:
             f"SQL execution: {'allowed' if execute_allowed else 'disabled'}",
         ]
 
-    def record_work(
-        self,
-        *,
-        action: str,
-        args: dict[str, Any] | None = None,
-        ok: bool = True,
-        summary: str = "",
-        purpose: str = "",
-        artifacts: list[str] | None = None,
-        data: dict[str, Any] | None = None,
-    ) -> None:
-        step_id = f"w{self.next_work_index}"
-        self.next_work_index += 1
-        input_summary = _compact_json(args or {}, limit=360)
-        result_summary = _trim(summary, 700)
-        artifact_refs = list(artifacts or [])
-        raw_ref = self.archive_raw(
-            action=action,
-            summary=result_summary,
-            source_refs=[step_id, *artifact_refs],
-            payload={
-                "work_step": step_id,
-                "action": action,
-                "args": args or {},
-                "ok": ok,
-                "summary": summary,
-                "artifact_refs": artifact_refs,
-                "data": data if isinstance(data, dict) else {},
-            },
-        )
-        self.work_log.append(WorkStep(
-            id=step_id,
-            action=action,
-            purpose=_trim(purpose, 240),
-            input_summary=input_summary,
-            result_summary=result_summary,
-            status="completed" if ok else "failed",
-            artifact_refs=artifact_refs,
-            raw_ref=raw_ref,
-        ))
-        self.work_log = self.work_log[-MAX_WORK_STEPS:]
-        ledger_key = f"{action}:{input_summary}"
-        if ledger_key not in self.action_ledger:
-            self.action_ledger.append(ledger_key)
-            self.action_ledger = self.action_ledger[-MAX_WORK_STEPS:]
-        if ok and isinstance(data, dict):
-            self.learn_tool_result(action=action, args=args or {}, data=data, summary=result_summary)
+    def add_sql_artifact(self, artifact: SQLArtifact) -> None:
+        self.sql_artifacts.append(artifact)
+        self.sql_artifacts = self.sql_artifacts[-MAX_SQL_ARTIFACTS:]
 
-    def archive_raw(
-        self,
-        *,
-        action: str,
-        summary: str = "",
-        source_refs: list[str] | None = None,
-        payload: dict[str, Any] | None = None,
-    ) -> str:
-        """Store original evidence outside the prompt and return a stable ref.
-
-        The prompt sees only compact summaries plus this id. The agent can call
-        retrieve_memory_item(ref=...) to inspect the full payload when the summary is
-        insufficient. Archive entries are intentionally not trimmed with the prompt
-        sections; losing raw evidence would make compression non-auditable.
-        """
-        ref = f"mem:{self.next_archive_index}"
-        self.next_archive_index += 1
-        refs = [str(x).strip() for x in (source_refs or []) if str(x).strip()]
-        self.archive.append(MemoryArchiveItem(
-            id=ref,
-            action=str(action or "").strip(),
-            summary=_trim(summary, 500),
-            source_refs=refs,
-            payload=payload or {},
-        ))
-        return ref
-
-    def retrieve_archive(self, ref: str) -> MemoryArchiveItem | None:
-        needle = str(ref or "").strip()
-        if not needle:
-            return None
-        for item in reversed(self.archive):
-            if item.id == needle or needle in item.source_refs:
-                return item
-        return None
-
-    def note_last_judgment(self, text: str) -> None:
-        """Attach the model's read of the most recent step's result to that step.
-
-        Called at the start of the next round (the previous tool call is the last
-        work step), so the work log carries did-what → result → how-it-was-judged
-        instead of leaving the interpretation in a disconnected note.
-        """
-        text = _trim(text, 300)
-        if text and self.work_log:
-            self.work_log[-1].judgment = text
-
-    def add_hypothesis(self, text: str) -> None:
-        text = _trim(text, 500)
-        if text and text not in self.hypotheses:
-            self.hypotheses.append(text)
-            self.hypotheses = self.hypotheses[-MAX_FINDINGS:]
-
-    def add_finding(self, text: str, *, source: str = "", confidence: str = "observed") -> None:
-        text = _trim(text, 500)
-        if not text:
-            return
-        key = text.lower()
-        if any(f.text.lower() == key for f in self.findings):
-            return
-        self.findings.append(Finding(text=text, source=source, confidence=confidence))
-        self.findings = self.findings[-MAX_FINDINGS:]
-
-    def mark_verified(self, text: str, *, source: str = "") -> None:
-        """Record a conclusion the agent has verified with tool evidence.
-
-        Verified findings render in the [Confirmed & Verified] section, kept apart
-        from merely observed notes so the model can tell "settled" from "noticed".
-        If the same text was already noted at a weaker confidence, upgrade it in
-        place rather than dropping the upgrade to a dedup no-op.
-        """
-        text = _trim(text, 500)
-        if not text:
-            return
-        key = text.lower()
-        for f in self.findings:
-            if f.text.lower() == key:
-                f.confidence = "verified"
-                if source and not f.source:
-                    f.source = source
-                return
-        self.findings.append(Finding(text=text, source=source, confidence="verified"))
-        self.findings = self.findings[-MAX_FINDINGS:]
-
-    def add_open_question(self, text: str) -> None:
-        text = _trim(text, 400)
-        if text and text not in self.open_questions:
-            self.open_questions.append(text)
-            self.open_questions = self.open_questions[-MAX_OPEN_QUESTIONS:]
-
-    def resolve_open_question(self, text: str) -> None:
-        if not text:
-            return
-        needle = text.strip().lower()
-        removed = [q for q in self.open_questions if q.strip().lower() == needle]
-        self.open_questions = [q for q in self.open_questions if q.strip().lower() != needle]
-        for q in removed:
-            self.add_resolved_question(q, "answered by user/tool evidence")
-
-    def add_resolved_question(self, question: str, resolution: str) -> None:
-        question = _trim(question, 300)
-        resolution = _trim(resolution, 360)
-        if not question:
-            return
-        entry = f"{question} -> {resolution}" if resolution else question
-        if entry not in self.resolved_questions:
-            self.resolved_questions.append(entry)
-            self.resolved_questions = self.resolved_questions[-MAX_RESOLVED_QUESTIONS:]
-
-    def add_exclusion(self, target: str, reason: str, *, evidence_ref: str = "", source_priority: str = "evidence") -> None:
+    def add_exclusion(self, target: str, reason: str, *, evidence_ref: str = "",
+                      source_priority: str = "evidence") -> None:
         target = _trim(target, 180)
         reason = _trim(reason, 400)
         if not target or not reason:
@@ -315,356 +122,19 @@ class AgentMemory:
         self.excluded_paths.append(ExcludedPath(target, reason, evidence_ref, source_priority))
         self.excluded_paths = self.excluded_paths[-MAX_EXCLUDED:]
 
+    def mark_verified(self, text: str) -> None:
+        text = _trim(text, 500)
+        if text and text not in self.verified_facts:
+            self.verified_facts.append(text)
+            self.verified_facts = self.verified_facts[-256:]
+
     def add_schema_report(self, report: SchemaEvidenceReport) -> None:
         self.schema_reports.append(report)
         self.schema_reports = self.schema_reports[-MAX_SCHEMA_REPORTS:]
-        active = [c for c in report.candidates if c.status == "active"]
-        excluded = [c for c in report.candidates if c.status != "active"]
-        self.add_finding(
-            f"Schema report {report.id}: {len(active)} active candidate table(s), "
-            f"{len(excluded)} inactive/missing candidate(s).",
-            source=report.id,
-        )
-        for c in excluded:
-            self.add_exclusion(
-                f"{c.database}.{c.table}" if c.database else c.table,
-                c.exclusion_reason or c.status,
-                evidence_ref=report.id,
-                source_priority="user_note" if c.notes else "evidence",
-            )
+
     def add_join_report(self, report: JoinEvidenceReport) -> None:
         self.join_reports.append(report)
         self.join_reports = self.join_reports[-MAX_JOIN_REPORTS:]
-        sources = sorted({str(r.get("source") or "unknown") for r in report.relations})
-        self.add_finding(
-            f"Join report {report.id}: {len(report.relations)} relation candidate(s) for "
-            f"{', '.join(report.tables)}; sources={', '.join(sources) or 'none'}.",
-            source=report.id,
-        )
-
-    def add_sql_artifact(self, artifact: SQLArtifact) -> None:
-        self.sql_artifacts.append(artifact)
-        self.sql_artifacts = self.sql_artifacts[-MAX_SQL_ARTIFACTS:]
-        capped = " — TRUNCATED at the row cap; more rows exist (aggregate or narrow)" if artifact.truncated else ""
-        self.add_finding(
-            f"SQL artifact {artifact.id}: {artifact.row_count} row(s){capped}, "
-            f"columns={', '.join(artifact.columns[:8])}{_more_suffix(len(artifact.columns), 8, 'column(s)')}. "
-            f"{artifact.result_summary}",
-            source=artifact.id,
-        )
-
-    def learn_tool_result(self, *, action: str, args: dict[str, Any], data: dict[str, Any],
-                          summary: str = "") -> None:
-        if action == "describe_table":
-            self._learn_described_table(args, data)
-        elif action == "inspect_metadata":
-            self._learn_metadata_result(data)
-        elif action in {"retrieve_schema_context", "discover_schema"}:
-            self._learn_schema_result(data)
-        elif action == "column_stats":
-            self._learn_column_stats(args, data)
-        elif action == "profile_table":
-            self._learn_profile_table(args, data)
-        elif action == "validate_joins":
-            self._learn_validated_joins(data)
-        elif action in {"execute_sql"}:
-            if data.get("pending") or data.get("blocked"):
-                return
-            sql = str(data.get("sql") or args.get("sql") or "").strip()
-            rows = data.get("row_count")
-            capped = " — TRUNCATED at the row cap; more rows exist" if data.get("truncated") else ""
-            self.add_finding(
-                f"Executed SQL returned {rows if rows is not None else '?'} row(s){capped}: {_trim(sql, 220)}",
-                source=str(data.get("artifact_id") or action),
-            )
-
-    def _learn_described_table(self, args: dict[str, Any], data: dict[str, Any]) -> None:
-        database = str(data.get("database") or args.get("database") or "").strip()
-        table = str(data.get("table") or args.get("table") or "").strip()
-        label = f"{database}.{table}" if database else table
-        columns = _column_names(data.get("columns") or [])
-        if not label or not columns:
-            return
-        self.add_finding(
-            f"Described {label}: columns include {_cols_with_overflow(columns, 40)}; "
-            f"indexes={len(data.get('indexes') or [])}, fks={len(data.get('foreign_keys') or [])}.",
-            source=f"describe_table:{label}",
-        )
-
-    def _learn_schema_result(self, data: dict[str, Any]) -> None:
-        report_id = str(data.get("report_id") or "").strip()
-        candidates = [c for c in data.get("candidates") or [] if isinstance(c, dict)]
-        hits = [h for h in data.get("hits") or [] if isinstance(h, dict)]
-        if hits and not candidates:
-            labels: list[str] = []
-            noted_labels: list[str] = []
-            for hit in hits:
-                database = str(hit.get("database") or "").strip()
-                table = str(hit.get("table") or hit.get("name") or "").strip()
-                path = str(hit.get("path") or "").strip()
-                label = f"{database}.{table}" if database and table else (path or table)
-                if label:
-                    labels.append(label)
-                    note = str(hit.get("note") or "").strip()
-                    if note:
-                        noted_labels.append(f"{label}: {_trim(note, 120)}")
-            if labels:
-                self.add_finding(
-                    f"Schema discovery found: {', '.join(labels[:10])}{_more_suffix(len(labels), 10, 'table(s)')}.",
-                    source=report_id or "discover_schema",
-                )
-            for item in noted_labels[:8]:
-                self.add_finding(f"User-note schema discovery hit: {item}", source=report_id or "discover_schema")
-            if len(noted_labels) > 8:
-                self.add_finding(
-                    f"(+{len(noted_labels) - 8} more user-note schema hit(s) — retrieve_memory_item for the full set)",
-                    source=report_id or "discover_schema",
-                )
-            return
-        if not candidates:
-            return
-        active_labels: list[str] = []
-        noted_labels: list[str] = []
-        for c in candidates:
-            label = _table_label(c)
-            if not label:
-                continue
-            if str(c.get("status") or "active") == "active":
-                active_labels.append(label)
-            notes = c.get("notes") if isinstance(c.get("notes"), dict) else {}
-            if notes and str(notes.get("table") or "").strip():
-                noted_labels.append(f"{label}: {_trim(str(notes.get('table')), 120)}")
-        if active_labels:
-            self.add_finding(
-                f"Schema evidence {report_id or ''} active candidates: {', '.join(active_labels[:8])}"
-                f"{_more_suffix(len(active_labels), 8, 'table(s)')}.",
-                source=report_id or "schema",
-            )
-        for item in noted_labels:
-            self.add_finding(f"User-note schema evidence: {item}", source=report_id or "schema")
-
-    def _learn_metadata_result(self, data: dict[str, Any]) -> None:
-        tables = [t for t in data.get("tables") or [] if isinstance(t, dict)]
-        matched_columns = [c for c in data.get("matched_columns") or [] if isinstance(c, dict)]
-        labels = [x for x in (_table_label(t) for t in tables) if x]
-        bits: list[str] = []
-        if labels:
-            bits.append(f"tables={', '.join(labels[:8])}{_more_suffix(len(labels), 8, 'table(s)')}")
-        if matched_columns:
-            cols = []
-            for col in matched_columns[:10]:
-                label = _table_label(col)
-                name = str(col.get("name") or "").strip()
-                if label and name:
-                    cols.append(f"{label}.{name}")
-            if cols:
-                bits.append(f"matched_columns={', '.join(cols)}{_more_suffix(len(matched_columns), 10, 'matched column(s)')}")
-        if bits:
-            note = str(data.get("note") or "").strip()
-            self.add_finding(
-                f"Metadata inspection: {'; '.join(bits)}." + (f" {note}" if note else ""),
-                source="inspect_metadata",
-            )
-
-    def _learn_column_stats(self, args: dict[str, Any], data: dict[str, Any]) -> None:
-        database = str(data.get("database") or args.get("database") or "").strip()
-        table = str(data.get("table") or args.get("table") or "").strip()
-        label = f"{database}.{table}" if database else table
-        columns = [c for c in data.get("columns") or [] if isinstance(c, dict)]
-        if not label or not columns:
-            return
-        bits: list[str] = []
-        for col in columns[:8]:
-            name = str(col.get("column") or "").strip()
-            stats = col.get("stats") if isinstance(col.get("stats"), dict) else {}
-            if not name or not stats:
-                continue
-            metric_bits: list[str] = []
-            for key in ("null_rate", "distinct_count", "min", "max", "avg", "min_length", "max_length"):
-                if key in stats:
-                    metric_bits.append(f"{key}={_trim(str(stats.get(key)), 60)}")
-            top = stats.get("top_values")
-            if isinstance(top, list) and top:
-                tv = _top_values_field(top)
-                if tv:
-                    metric_bits.append(tv)
-            if metric_bits:
-                bits.append(f"{name} ({'; '.join(metric_bits[:8])})")
-        if bits:
-            self.add_finding(
-                f"Column stats for {label}: " + " | ".join(bits) + _more_suffix(len(columns), 8, "column(s)"),
-                source=f"column_stats:{label}",
-            )
-
-    def _learn_profile_table(self, args: dict[str, Any], data: dict[str, Any]) -> None:
-        database = str(data.get("database") or args.get("database") or "").strip()
-        table = str(data.get("table") or args.get("table") or "").strip()
-        label = f"{database}.{table}" if database else table
-        profiles = [p for p in data.get("profiles") or [] if isinstance(p, dict)]
-        if not label or not profiles:
-            return
-        bits: list[str] = []
-        for profile in profiles[:8]:
-            column = str(profile.get("column") or "").strip()
-            if not column:
-                continue
-            metrics: list[str] = []
-            for key in ("row_count", "null_count", "distinct_count", "min_value", "max_value"):
-                if profile.get(key) is not None:
-                    metrics.append(f"{key}={_trim(str(profile.get(key)), 60)}")
-            top = profile.get("top_values")
-            if isinstance(top, list) and top:
-                tv = _top_values_field(top)
-                if tv:
-                    metrics.append(tv)
-            if metrics:
-                bits.append(f"{column} ({'; '.join(metrics[:8])})")
-        if bits:
-            line = f"Profile for {label}: " + " | ".join(bits) + _more_suffix(len(profiles), 8, "column(s)")
-            if data.get("more_columns"):
-                # Source truncation: the un-profiled columns were never computed, so
-                # point to the range interface, not retrieve_memory_item.
-                nxt = int(data.get("column_offset") or 0) + len(profiles)
-                line += (f" [only {len(profiles)} of {data.get('total_columns')} columns profiled — "
-                         f"profile_table column_offset={nxt} (or explicit `columns`) for the rest]")
-            self.add_finding(line, source=f"profile_table:{label}")
-
-    def _learn_validated_joins(self, data: dict[str, Any]) -> None:
-        relations = [r for r in data.get("relations") or [] if isinstance(r, dict)]
-        if not relations:
-            return
-        bits: list[str] = []
-        for rel in relations[:6]:
-            left = f"{rel.get('table')}.{rel.get('column')}"
-            right = f"{rel.get('ref_table')}.{rel.get('ref_column')}"
-            confidence = rel.get("confidence")
-            suffix = f" conf={confidence}" if confidence is not None else ""
-            validation = rel.get("validation") if isinstance(rel.get("validation"), dict) else {}
-            match_rate = validation.get("match_rate")
-            if match_rate is not None:
-                suffix += f" match_rate={match_rate}"
-            bits.append(f"{left}->{right}{suffix}")
-        self.add_finding(
-            "Validated join evidence: " + "; ".join(bits) + _more_suffix(len(relations), 6, "relation(s)"),
-            source="validate_joins",
-        )
-
-    def prompt_block(self) -> str:
-        lines: list[str] = []
-        lines += ["[Goal]", self.goal or "(unknown)", ""]
-        if self.constraints:
-            lines += ["[Constraints]", *[f"- {c}" for c in self.constraints], ""]
-        verified = [f for f in self.findings if f.confidence == "verified"]
-        if self.confirmed_facts or verified:
-            lines += [
-                "[Confirmed & Verified] (settled — rely on these; do not re-investigate "
-                "or contradict them without new evidence)"
-            ]
-            lines += [f"- (user-confirmed) {x}" for x in self.confirmed_facts[-PROMPT_SLICE_FACTS:]]
-            for f in verified[-PROMPT_SLICE_FACTS:]:
-                src = f" ({f.source})" if f.source else ""
-                lines.append(f"- (verified) {f.text}{src}")
-            lines.append("")
-        if self.hypotheses:
-            lines += ["[Candidate Hypotheses]", *[f"- {x}" for x in self.hypotheses[-PROMPT_SLICE_FINDINGS:]], ""]
-        if self.work_log:
-            lines += ["[Work Done] (did-what → result → judgment)"]
-            if len(self.work_log) > PROMPT_SLICE_WORK:
-                lines.append(_summarize_dropped_steps(self.work_log[:-PROMPT_SLICE_WORK]))
-            for step in self.work_log[-PROMPT_SLICE_WORK:]:
-                refs_list = [*step.artifact_refs]
-                if step.raw_ref:
-                    refs_list.append(f"raw={step.raw_ref}")
-                refs = f" refs={', '.join(refs_list)}" if refs_list else ""
-                purpose = f" (to {step.purpose})" if step.purpose else ""
-                line = f"- {step.id} {step.action} [{step.status}]{purpose}{refs} → {step.result_summary or '(no result)'}"
-                if step.judgment:
-                    line += f" | judged: {step.judgment}"
-                lines.append(line)
-            lines.append(
-                "Refs above (raw=mem:n, report/artifact ids) hold the full untruncated "
-                "evidence — call retrieve_memory_item(ref=...) when a summary is insufficient."
-            )
-            lines.append("")
-        observed = [f for f in self.findings if f.confidence != "verified"]
-        if observed:
-            lines.append("[Observed Evidence / Model Working Notes]")
-            for f in observed[-PROMPT_SLICE_FINDINGS:]:
-                qualifier = f.confidence if f.confidence != "observed" else "observed"
-                suffix_parts = [part for part in (f.source, qualifier) if part]
-                suffix = f" ({'; '.join(suffix_parts)})" if suffix_parts else ""
-                lines.append(f"- {f.text}{suffix}")
-            lines.append("")
-        if self.resolved_questions:
-            lines += ["[Resolved Questions]", *[f"- {q}" for q in self.resolved_questions[-MAX_RESOLVED_QUESTIONS:]], ""]
-        if self.schema_reports:
-            lines += ["[Schema Evidence]"]
-            for report in self.schema_reports[-PROMPT_SLICE_SCHEMA:]:
-                cand = []
-                shown_candidates = report.candidates[:20]
-                for c in shown_candidates:
-                    label = f"{c.database}.{c.table}" if c.database else c.table
-                    bits = [label, c.status]
-                    if c.notes.get("table"):
-                        bits.append(f"note={_trim(str(c.notes['table']), 90)}")
-                    if c.exclusion_reason:
-                        bits.append(f"excluded={_trim(c.exclusion_reason, 90)}")
-                    col_names = _column_names(c.columns)
-                    if col_names:
-                        bits.append(f"cols={_cols_with_overflow(col_names, 50)}")
-                    if c.row_count is not None:
-                        bits.append(f"rows~{c.row_count}")
-                    if c.indexes:
-                        bits.append(f"indexes={len(c.indexes)}")
-                    if c.foreign_keys:
-                        bits.append(f"declared_fk={len(c.foreign_keys)}")
-                    cand.append(" / ".join(bits))
-                if len(report.candidates) > len(shown_candidates):
-                    cand.append(f"… +{len(report.candidates) - len(shown_candidates)} more candidate table(s)")
-                lines.append(f"- {report.id}: " + "; ".join(cand))
-            lines.append("")
-        if self.join_reports:
-            lines += ["[Join Evidence]"]
-            for report in self.join_reports[-PROMPT_SLICE_JOIN:]:
-                lines.append(
-                    f"- {report.id}: tables={', '.join(report.tables)}; "
-                    f"{len(report.relations)} candidate relation(s); {report.source_summary}"
-                )
-                for rel in report.relations[:5]:
-                    left = f"{rel.get('table')}.{rel.get('column')}"
-                    right = f"{rel.get('ref_table')}.{rel.get('ref_column')}"
-                    lines.append(
-                        f"  - {left} -> {right}; source={rel.get('source')}; "
-                        f"confidence={rel.get('confidence')}; reason={_trim(str(rel.get('reason') or ''), 100)}"
-                    )
-                if len(report.relations) > 5:
-                    lines.append(
-                        f"  … +{len(report.relations) - 5} more relation(s) (retrieve_memory_item for the full set)"
-                    )
-            lines.append("")
-        if self.sql_artifacts:
-            lines += ["[SQL Artifacts]"]
-            for art in self.sql_artifacts[-PROMPT_SLICE_SQL:]:
-                flags = " TRUNCATED(row-capped)" if art.truncated else ""
-                warn = f" warnings={'; '.join(art.warnings[:3])}" if art.warnings else ""
-                lines.append(
-                    f"- {art.id}: purpose={art.purpose or '(not stated)'} rows={art.row_count}{flags} "
-                    f"columns={', '.join(art.columns[:8])}{_more_suffix(len(art.columns), 8, 'column(s)')}{warn} "
-                    f"sql={_trim(art.sql, 220)}"
-                )
-            lines.append("")
-        if self.open_questions:
-            lines += ["[Open Issues]", *[f"- {q}" for q in self.open_questions[-MAX_OPEN_QUESTIONS:]], ""]
-        if self.excluded_paths:
-            lines += ["[Excluded Paths]"]
-            for item in self.excluded_paths[-MAX_EXCLUDED:]:
-                lines.append(f"- {item.target}: {item.reason} ({item.source_priority}; {item.evidence_ref})")
-            lines.append("")
-        if self.action_ledger:
-            lines += ["[Recent Action Ledger]", *[f"- {x}" for x in self.action_ledger[-PROMPT_SLICE_LEDGER:]], ""]
-        if self.next_action_hint:
-            lines += ["[Last Suggested Next Step]", self.next_action_hint, ""]
-        return "\n".join(lines).strip()
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -677,66 +147,41 @@ class AgentMemory:
         mem.goal = str(data.get("goal") or "")
         mem.intent = str(data.get("intent") or "")
         mem.constraints = [str(x) for x in _list_or_empty(data.get("constraints"))]
-        mem.work_log = [_work_step_from_dict(x) for x in _list_or_empty(data.get("work_log")) if isinstance(x, dict)][-MAX_WORK_STEPS:]
-        mem.findings = [_finding_from_dict(x) for x in _list_or_empty(data.get("findings")) if isinstance(x, dict)][-MAX_FINDINGS:]
-        mem.open_questions = [str(x) for x in _list_or_empty(data.get("open_questions"))][-MAX_OPEN_QUESTIONS:]
+        mem.confirmed_facts = [str(x) for x in _list_or_empty(data.get("confirmed_facts"))][-12:]
+        mem.verified_facts = [str(x) for x in _list_or_empty(data.get("verified_facts"))][-256:]
         mem.excluded_paths = [
-            _excluded_path_from_dict(x) for x in _list_or_empty(data.get("excluded_paths")) if isinstance(x, dict)
+            _excluded_path_from_dict(x) for x in _list_or_empty(data.get("excluded_paths"))
+            if isinstance(x, dict)
         ][-MAX_EXCLUDED:]
-        mem.hypotheses = [str(x) for x in _list_or_empty(data.get("hypotheses"))]
+        mem.sql_artifacts = [
+            _sql_artifact_from_dict(x) for x in _list_or_empty(data.get("sql_artifacts"))
+            if isinstance(x, dict)
+        ][-MAX_SQL_ARTIFACTS:]
         mem.schema_reports = [
-            _schema_report_from_dict(x) for x in _list_or_empty(data.get("schema_reports")) if isinstance(x, dict)
+            _schema_report_from_dict(x) for x in _list_or_empty(data.get("schema_reports"))
+            if isinstance(x, dict)
         ][-MAX_SCHEMA_REPORTS:]
         mem.join_reports = [
-            _join_report_from_dict(x) for x in _list_or_empty(data.get("join_reports")) if isinstance(x, dict)
+            _join_report_from_dict(x) for x in _list_or_empty(data.get("join_reports"))
+            if isinstance(x, dict)
         ][-MAX_JOIN_REPORTS:]
-        mem.sql_artifacts = [
-            _sql_artifact_from_dict(x) for x in _list_or_empty(data.get("sql_artifacts")) if isinstance(x, dict)
-        ][-MAX_SQL_ARTIFACTS:]
-        mem.confirmed_facts = [str(x) for x in _list_or_empty(data.get("confirmed_facts"))][-12:]
-        mem.action_ledger = [str(x) for x in _list_or_empty(data.get("action_ledger"))][-MAX_WORK_STEPS:]
-        mem.resolved_questions = [str(x) for x in _list_or_empty(data.get("resolved_questions"))][-MAX_RESOLVED_QUESTIONS:]
-        mem.next_action_hint = str(data.get("next_action_hint") or "")
-        mem.archive = [_archive_item_from_dict(x) for x in _list_or_empty(data.get("archive")) if isinstance(x, dict)][-MAX_ARCHIVE_INDEX:]
-        archive_work_refs = [
-            ref
-            for item in mem.archive
-            for ref in item.source_refs
-        ]
-        inferred_work = _next_index_from_ids([x.id for x in mem.work_log] + archive_work_refs, "w")
-        inferred_archive = _next_index_from_ids([x.id for x in mem.archive], "mem:")
-        mem.next_work_index = max(
-            _positive_int(data.get("next_work_index"), default=inferred_work),
-            inferred_work,
-        )
-        mem.next_archive_index = _positive_int(
-            data.get("next_archive_index"),
-            default=inferred_archive,
-        )
-        mem.next_archive_index = max(mem.next_archive_index, inferred_archive)
         return mem
 
 
-def _work_step_from_dict(data: dict[str, Any]) -> WorkStep:
-    return WorkStep(
-        id=str(data.get("id") or ""),
-        action=str(data.get("action") or ""),
-        purpose=str(data.get("purpose") or ""),
-        input_summary=str(data.get("input_summary") or ""),
-        result_summary=str(data.get("result_summary") or ""),
-        judgment=str(data.get("judgment") or ""),
-        artifact_refs=[str(x) for x in _list_or_empty(data.get("artifact_refs"))],
-        raw_ref=str(data.get("raw_ref") or ""),
-        status=str(data.get("status") or "completed"),
-    )
+def next_prefixed_id(memory: AgentMemory, prefix: str, *, collections: tuple[str, ...] = ()) -> str:
+    """Return a stable next id for compact memory artifacts.
+
+    Scans the specified collections to find the highest existing index for the
+    given prefix, then returns prefix + (max + 1).
+    """
+    ids: list[str] = []
+    for name in collections:
+        for item in getattr(memory, name, []) or []:
+            ids.append(str(getattr(item, "id", "") or ""))
+    return f"{prefix}{_next_index_from_ids(ids, prefix)}"
 
 
-def _finding_from_dict(data: dict[str, Any]) -> Finding:
-    return Finding(
-        text=str(data.get("text") or ""),
-        source=str(data.get("source") or ""),
-        confidence=str(data.get("confidence") or "observed"),
-    )
+# ── Deserialization helpers ──────────────────────────────────────────
 
 
 def _excluded_path_from_dict(data: dict[str, Any]) -> ExcludedPath:
@@ -805,23 +250,16 @@ def _sql_artifact_from_dict(data: dict[str, Any]) -> SQLArtifact:
     )
 
 
-def _archive_item_from_dict(data: dict[str, Any]) -> MemoryArchiveItem:
-    payload = data.get("payload") if isinstance(data.get("payload"), dict) else {}
-    return MemoryArchiveItem(
-        id=str(data.get("id") or ""),
-        action=str(data.get("action") or ""),
-        summary=str(data.get("summary") or ""),
-        source_refs=[str(x) for x in _list_or_empty(data.get("source_refs"))],
-        payload=payload,
-    )
+# ── Primitives ───────────────────────────────────────────────────────
 
 
-def _positive_int(value: Any, *, default: int) -> int:
-    try:
-        out = int(value)
-    except Exception:
-        out = int(default)
-    return max(1, out)
+def _trim(text: str, limit: int) -> str:
+    text = " ".join(str(text or "").split())
+    return text if len(text) <= limit else text[:limit] + "..."
+
+
+def _list_or_empty(value: Any) -> list:
+    return list(value) if isinstance(value, list) else []
 
 
 def _int_or_zero(value: Any) -> int:
@@ -840,10 +278,6 @@ def _optional_int(value: Any) -> int | None:
         return None
 
 
-def _list_or_empty(value: Any) -> list:
-    return list(value) if isinstance(value, list) else []
-
-
 def _next_index_from_ids(ids: list[str], prefix: str) -> int:
     high = 0
     for item in ids:
@@ -855,168 +289,3 @@ def _next_index_from_ids(ids: list[str], prefix: str) -> int:
         except Exception:
             continue
     return high + 1
-
-
-def next_prefixed_id(memory: AgentMemory, prefix: str, *, collections: tuple[str, ...] = ()) -> str:
-    """Return a stable next id for compact memory artifacts.
-
-    Prompt-facing collections are trimmed, but raw archive refs are retained. ID
-    generation therefore scans both current compact collections and archived refs
-    so later evidence cannot reuse an older report/artifact id.
-    """
-    ids: list[str] = []
-    for name in collections:
-        for item in getattr(memory, name, []) or []:
-            ids.append(str(getattr(item, "id", "") or ""))
-    for item in getattr(memory, "archive", []) or []:
-        ids.append(str(getattr(item, "id", "") or ""))
-        ids.extend(str(ref or "") for ref in getattr(item, "source_refs", []) or [])
-        payload = getattr(item, "payload", {}) or {}
-        if isinstance(payload, dict):
-            ids.extend(str(ref or "") for ref in payload.get("artifact_refs") or [])
-            data = payload.get("data") if isinstance(payload.get("data"), dict) else {}
-            if isinstance(data, dict):
-                for key in ("report_id", "artifact_id"):
-                    ids.append(str(data.get(key) or ""))
-    return f"{prefix}{_next_index_from_ids(ids, prefix)}"
-
-
-def _summarize_dropped_steps(steps: list[WorkStep]) -> str:
-    """Roll older work steps that fell out of the prompt window into one line.
-
-    Compression must not lose what was attempted or which schema objects were
-    touched, so this keeps the action counts, the failure count, and the distinct
-    db/table names referenced by the dropped steps (their full
-    columns/profiles/exclusions persist in the evidence sections below and via
-    retrieve_memory_item). It is a narrative backstop, not the detail of record.
-    """
-    if not steps:
-        return ""
-    counts: dict[str, int] = {}
-    for step in steps:
-        counts[step.action] = counts.get(step.action, 0) + 1
-    failed = sum(1 for s in steps if s.status == "failed")
-    labels: list[str] = []
-    seen: set[str] = set()
-    for step in steps:
-        for label in _targets_from_input(step.input_summary):
-            if label not in seen:
-                seen.add(label)
-                labels.append(label)
-    actions = ", ".join(f"{action}×{n}" for action, n in sorted(counts.items(), key=lambda kv: -kv[1]))
-    line = f"Earlier {steps[0].id}–{steps[-1].id} ({len(steps)} steps, summarized): {actions}"
-    if failed:
-        line += f"; {failed} failed"
-    if labels:
-        more = f" (+{len(labels) - 24} more)" if len(labels) > 24 else ""
-        line += f"; objects touched: {', '.join(labels[:24])}{more}"
-    return line
-
-
-def _targets_from_input(input_summary: str) -> list[str]:
-    """Best-effort db/table labels from a step's compact-JSON arg summary."""
-    try:
-        args = json.loads(input_summary)
-    except Exception:
-        return []
-    if not isinstance(args, dict):
-        return []
-    database = str(args.get("database") or "").strip()
-    out: list[str] = []
-
-    def _label(table: str) -> str:
-        table = str(table or "").strip()
-        if not table:
-            return ""
-        return f"{database}.{table}" if database and "." not in table else table
-
-    for key in ("table", "ref_table"):
-        label = _label(args.get(key))
-        if label:
-            out.append(label)
-    tables = args.get("tables")
-    if isinstance(tables, list):
-        for t in tables:
-            label = _label(t if isinstance(t, str) else (t.get("table") if isinstance(t, dict) else ""))
-            if label:
-                out.append(label)
-    return out
-
-
-def _trim(text: str, limit: int) -> str:
-    text = " ".join(str(text or "").split())
-    return text if len(text) <= limit else text[:limit] + "..."
-
-
-def _compact_json(data: Any, *, limit: int) -> str:
-    try:
-        text = json.dumps(data, ensure_ascii=False, default=str)
-    except Exception:
-        text = str(data)
-    return _trim(text, limit)
-
-
-def _column_names(columns: Any) -> list[str]:
-    out: list[str] = []
-    for col in columns or []:
-        if isinstance(col, dict):
-            name = str(col.get("name") or "").strip()
-        else:
-            name = str(getattr(col, "name", "") or "").strip()
-        if name:
-            out.append(name)
-    return out
-
-
-def _more_suffix(total: int, shown: int, noun: str) -> str:
-    """Signal hidden list items AND how to recover them, so truncation is never
-    silent and the model can choose to fetch the full set."""
-    extra = total - shown
-    if extra <= 0:
-        return ""
-    return f" … +{extra} more {noun} (retrieve_memory_item for the full set)"
-
-
-def _top_values_field(top: list, cap: int = 8) -> str:
-    """Render a column's top values, signalling when more distinct values exist.
-    A status/flag value the question hinges on can be the 5th most common; the old
-    [:4] cap hid it with no trace, so the model couldn't know to look further."""
-    vals: list[str] = []
-    for item in top[:cap]:
-        if isinstance(item, dict):
-            vals.append(f"{_trim(str(item.get('value')), 40)}:{item.get('count')}")
-    if not vals:
-        return ""
-    more = (f", … +{len(top) - cap} more distinct value(s) (retrieve_memory_item for the full set)"
-            if len(top) > cap else "")
-    return "top_values=" + ", ".join(vals) + more
-
-
-def _cols_with_overflow(names: list[str], cap: int) -> str:
-    """Join column names for a memory line, SIGNALLING truncation instead of hiding
-    it. Silently dropping columns past a cap once hid the exact column a question
-    hinged on (e.g. nick_name), so the model never knew to look. Normal tables fit
-    under the cap and show in full; wider tables show the overflow + how to recover.
-    """
-    uniq = _key_columns(names)
-    if len(uniq) <= cap:
-        return ", ".join(uniq)
-    return ", ".join(uniq[:cap]) + f" … +{len(uniq) - cap} more (describe_table for full list)"
-
-
-def _key_columns(columns: list[str]) -> list[str]:
-    seen: set[str] = set()
-    out: list[str] = []
-    for column in columns:
-        if column not in seen:
-            seen.add(column)
-            out.append(column)
-    return out
-
-
-def _table_label(candidate: dict[str, Any]) -> str:
-    database = str(candidate.get("database") or "").strip()
-    table = str(candidate.get("table") or "").strip()
-    if not table:
-        return ""
-    return f"{database}.{table}" if database else table

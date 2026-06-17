@@ -97,7 +97,7 @@ class JoinEvidenceRetriever:
                 source_summary="0 relation candidate(s); insufficient table count.",
                 warnings=warnings,
             )
-            self.orch.run_state.memory.add_join_report(report.to_memory_report())
+            # Report content goes into conversation stream as tool result
             return report
 
         node = child_node(base, "join evidence")

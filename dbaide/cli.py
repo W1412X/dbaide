@@ -216,6 +216,7 @@ def build_parser() -> argparse.ArgumentParser:
     m_add.add_argument("--api-key", default="", help="API key (prefer --api-key-env)")
     m_add.add_argument("--model", default="", help="Model name/ID")
     m_add.add_argument("--timeout", type=int, default=60, help="Request timeout in seconds (1-600)")
+    m_add.add_argument("--context-length", default="32k", help="Context window size (e.g. 32k, 128k, 1m)")
     m_add.add_argument("--default", action="store_true", help="Set as the default model")
     m_del = msub.add_parser("delete", help="Delete a model config")
     m_del.add_argument("name")
@@ -532,11 +533,12 @@ def dispatch_model(args: argparse.Namespace, cfg: ConfigManager) -> int:
         if not models:
             print("No models configured. Run `dbaide model add <name> --provider openai_compatible --base-url <url> --model <model>` to add one.")
             return 0
-        print(f"{'Name':<20} {'Provider':<18} {'Model':<30} {'Default'}")
-        print("-" * 75)
+        print(f"{'Name':<20} {'Provider':<18} {'Model':<24} {'Context':<10} {'Default'}")
+        print("-" * 80)
         for name, m in models.items():
             is_default = " *" if name == default else ""
-            print(f"{name:<20} {m.provider:<18} {m.model or '(not set)':<30} {is_default}")
+            ctx = f"{m.context_length // 1000}k" if m.context_length >= 1000 else str(m.context_length)
+            print(f"{name:<20} {m.provider:<18} {m.model or '(not set)':<24} {ctx:<10} {is_default}")
         return 0
 
     if args.model_command == "add":
@@ -548,9 +550,11 @@ def dispatch_model(args: argparse.Namespace, cfg: ConfigManager) -> int:
             api_key=getattr(args, "api_key", ""),
             model=args.model,
             timeout_seconds=args.timeout,
+            context_length=getattr(args, "context_length", "32k"),
         )
         cfg.upsert_model(m, make_default=args.default)
-        print(f"saved model: {args.name} (provider={m.provider}, model={m.model})")
+        ctx = f"{m.context_length // 1000}k" if m.context_length >= 1000 else str(m.context_length)
+        print(f"saved model: {args.name} (provider={m.provider}, model={m.model}, context={ctx})")
         return 0
 
     if args.model_command == "delete":
@@ -600,9 +604,12 @@ def dispatch_config(args: argparse.Namespace, cfg: ConfigManager) -> int:
         defaults = cfg.resource_defaults()
         key = args.key
         try:
-            value: int | str = int(args.value)
+            value: int | float | str = int(args.value)
         except ValueError:
-            value = args.value
+            try:
+                value = float(args.value)
+            except ValueError:
+                value = args.value
         defaults[key] = value
         cfg.set_resource_defaults(defaults)
         print(f"set {key} = {value}")
@@ -766,7 +773,8 @@ def dispatch_export(args: argparse.Namespace, cfg: ConfigManager) -> int:
         for name, conn in cfg.connections().items():
             d = {"name": conn.name, "type": conn.type, "database": conn.database,
                  "host": conn.host, "port": conn.port, "user": conn.user,
-                 "password_env": conn.password_env, "path": conn.path,
+                 "password_env": conn.password_env, "password": conn.password,
+                 "path": conn.path,
                  "load_profile": conn.load_profile, "session_timezone": conn.session_timezone}
             connections.append({k: v for k, v in d.items() if v not in (None, "", 0)})
             j = joins_store._load(name)
@@ -778,7 +786,9 @@ def dispatch_export(args: argparse.Namespace, cfg: ConfigManager) -> int:
         models = []
         for name, m in cfg.models().items():
             md = {"name": m.name, "provider": m.provider, "base_url": m.base_url,
-                  "api_key_env": m.api_key_env, "model": m.model, "timeout_seconds": m.timeout_seconds}
+                  "api_key_env": m.api_key_env, "api_key": m.api_key,
+                  "model": m.model, "timeout_seconds": m.timeout_seconds,
+                  "context_length": m.context_length}
             models.append({k: v for k, v in md.items() if v not in (None, "", 0)})
         payload = {
             "dbaide_export": {"version": 1, "type": "full",
@@ -793,7 +803,8 @@ def dispatch_export(args: argparse.Namespace, cfg: ConfigManager) -> int:
         ann_store = AnnotationStore()
         d = {"name": conn.name, "type": conn.type, "database": conn.database,
              "host": conn.host, "port": conn.port, "user": conn.user,
-             "password_env": conn.password_env, "path": conn.path,
+             "password_env": conn.password_env, "password": conn.password,
+             "path": conn.path,
              "load_profile": conn.load_profile, "session_timezone": conn.session_timezone}
         payload = {
             "dbaide_export": {"version": 1, "type": "connection",

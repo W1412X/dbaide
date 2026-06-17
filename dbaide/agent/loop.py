@@ -1,4 +1,12 @@
-"""LLM tool-calling loop for Ask agent."""
+"""LLM tool-calling loop for Ask agent — conversation-stream architecture.
+
+The model sees a growing ``messages: list[LLMMessage]``. Each tool result is
+appended as a user message with smart per-tool formatting. When the estimated
+token count approaches the context budget, older messages are compressed via an
+LLM summarization call that preserves SQL results, verified facts, schema
+evidence, and excluded paths.  The system prompt (messages[0]) and the initial
+user question (messages[1]) are NEVER compressed.
+"""
 
 from __future__ import annotations
 
@@ -27,26 +35,28 @@ if TYPE_CHECKING:
 logger = logging.getLogger("dbaide.agent.loop")
 
 DECISION_RETRIES = 2
-# Both names bind to the same execute handler; the loop must treat them alike.
 _EXECUTE_TOOLS = frozenset({"execute_sql"})
 
-# Tools the model may emit several of in ONE decision (action="call_tools"), to cut
-# loop round-trips. Deliberately limited to INDEPENDENT, READ-ONLY evidence gathering
-# with no ordering dependency, no user pause, and no state mutation. Everything else
-# — the generate→validate→execute SQL chain, ask_user, and writes (annotate/joins) —
-# stays one-per-decision so its safety gates (risk controller, validation order,
-# pause/resume) and the "decide from the result" loop are preserved.
 BATCHABLE_TOOLS = frozenset({
     "discover_schema", "retrieve_schema_context", "list_databases", "list_tables",
     "describe_table", "inspect_metadata", "retrieve_join_context",
-    "column_stats", "profile_table", "retrieve_memory_item",
+    "column_stats", "profile_table",
     "retrieve_turn", "list_earlier_turns",
 })
 _DEFAULT_MAX_BATCH = 6
-# Tools whose step should carry the exact SQL the system ran/handled, so the trace
-# is a complete, clickable audit of every auto-executed statement.
 _SQL_TOOLS = frozenset({"execute_sql", "explain_sql",
                         "generate_sql", "validate_sql"})
+
+# Default compress threshold (percentage): compress when token estimate exceeds
+# this percentage of context_length.
+_DEFAULT_COMPRESS_THRESHOLD = 80
+# Default context length when model config doesn't specify one.
+_DEFAULT_CONTEXT_LENGTH = 32000
+# Soft cap on individual tool result text in conversation messages (chars).
+_RESULT_SOFT_CAP = 8000
+
+_STUCK_LOOP_THRESHOLD = 3
+_STUCK_LOOP_ESCALATION = 5
 
 
 def _executed_sql(tool_name: str, orch, result) -> str:
@@ -63,15 +73,12 @@ def _risk_reply_confirms(reply: str) -> bool:
     approved = {"execute anyway", "仍然执行"}
     return text in {item.casefold() for item in approved}
 
-_DEFAULT_RESULT_PREVIEW_LIMIT = 1400
-
-# Circuit-breaker: if the same tool fails with the same error this many
-# consecutive times, inject a strong hint so the model stops retrying.
-_STUCK_LOOP_THRESHOLD = 3
-
 
 class LoopDecisionError(RuntimeError):
     """LLM returned an invalid or empty loop decision."""
+    def __init__(self, message: str, *, raw_payload: str = ""):
+        super().__init__(message)
+        self.raw_payload = raw_payload
 
 
 @dataclass(slots=True)
@@ -92,7 +99,7 @@ class LoopState:
 
 
 class AskAgentLoop:
-    """Codex-style tool loop: LLM chooses tools until it finishes with an answer."""
+    """Conversation-stream tool loop: LLM sees a growing message list until it finishes."""
 
     def __init__(self, orchestrator: AskOrchestrator, *, progress: Callable[[str], None] | None = None) -> None:
         self.orchestrator = orchestrator
@@ -105,9 +112,6 @@ class AskAgentLoop:
         self._agent_loop_node_id = ""
 
     def _ns_step(self, event: dict) -> dict:
-        """Namespace a step event under the current intent's trace node (when this
-        run is one of several sub-intents), so step ids don't collide and the steps
-        nest under their intent."""
         if self._trace_parent and event.get("step"):
             event["node_id"] = f"{self._trace_parent}:step:{event['step']}"
             event["parent_id"] = self._agent_loop_node_id or self._trace_parent
@@ -115,16 +119,14 @@ class AskAgentLoop:
             event["parent_id"] = self._agent_loop_node_id
         return event
 
+    def _context_budget(self) -> int:
+        model_cfg = getattr(self.orchestrator, "model_config", None)
+        ctx_len = getattr(model_cfg, "context_length", _DEFAULT_CONTEXT_LENGTH) if model_cfg else _DEFAULT_CONTEXT_LENGTH
+        return max(ctx_len, 8000)
+
     def _speculative_prefetch(
         self, orch: AskOrchestrator, question: str, database: str,
     ) -> ToolResult | None:
-        """Pre-fire retrieve_schema_context before the first LLM decision.
-
-        The result is injected into the transcript so the agent's first decision
-        already sees schema evidence, saving one full LLM round-trip on most
-        data queries.  Returns None on failure — the main loop continues
-        normally and the agent will call the tool itself.
-        """
         if not question.strip():
             return None
         scope = orch.schema_scope if orch.schema_scope else None
@@ -146,30 +148,20 @@ class AskAgentLoop:
             return None
 
     def _inject_prefetch(
-        self, orch: AskOrchestrator, state: LoopState,
-        transcript: list[str], result: ToolResult,
+        self, orch: AskOrchestrator, messages: list[LLMMessage], result: ToolResult,
     ) -> None:
-        """Write a successful prefetch result into memory + transcript."""
-        data = result.data if isinstance(result.data, dict) else {}
-        orch.run_state.memory.record_work(
-            action="retrieve_schema_context",
-            args={"request": state.question, "database": state.database},
-            ok=True,
-            summary=brief_tool_summary("retrieve_schema_context", result),
-            purpose="speculative prefetch",
-            data=data,
-        )
-        _rpl = getattr(orch.session, "result_preview_limit", _DEFAULT_RESULT_PREVIEW_LIMIT)
-        summary = _summarize_tool_result("retrieve_schema_context", result, limit=_rpl)
-        transcript.append(f"Tool `retrieve_schema_context` → {summary}")
+        """Append a successful prefetch result into the conversation."""
+        formatted = _format_tool_result("retrieve_schema_context", result)
+        messages.append(LLMMessage("user", f"[Tool result: retrieve_schema_context]\n{formatted}"))
         orch.run_state.schema_prefetched = True
         prefetch_node = f"{self._trace_parent}:prefetch" if self._trace_parent else "prefetch"
+        summary = brief_tool_summary("retrieve_schema_context", result)
         ev = progress_event(
             stage="retrieve_schema_context",
             title="Schema prefetch",
             status="completed",
             kind="tool",
-            detail=summary[:200],
+            detail=(summary or "")[:200],
         )
         ev["node_id"] = prefetch_node
         ev["parent_id"] = self._agent_loop_node_id or self._trace_parent
@@ -187,35 +179,24 @@ class AskAgentLoop:
         trace_parent: str = "",
         answer_language: str | None = None,
     ) -> AssistantResponse:
-        """Run the tool loop — the single execution path (no staged fallback). Recovers
-        from a bad model decision by retrying within the loop (budget-bounded); if it
-        genuinely can't finish it returns an honest failure response rather than
-        degrading to a weaker pipeline.
-
-        ``trace_parent`` nests this run's step nodes under a parent trace node (used
-        when several sub-intents run in one turn, so each intent's steps group under
-        it and step ids don't collide across intents)."""
         orch = self.orchestrator
         self._trace_parent = trace_parent
         self._agent_loop_node_id = f"{trace_parent}:loop" if trace_parent else "loop"
-        transcript: list[str] = []
+        messages: list[LLMMessage] = []
         approved_risk_sql = ""
         approved_risk_args: dict[str, Any] = {}
         approved_risk_tool = "execute_sql"
 
         if resume_state:
-            transcript, execute = restore_loop_state(orch, resume_state)
+            messages, execute = restore_loop_state(orch, resume_state)
             reply = str(user_reply or question or "").strip()
             if reply:
-                transcript.append(f"User reply: {reply}")
+                messages.append(LLMMessage("user", f"User reply: {reply}"))
                 pending_question = (
                     orch.run_state.clarify_questions
                     or orch.run_state.pending_question
                     or "pending clarification"
                 )
-                # Every ask_user pause is a clarification chosen by the main brain.
-                # Preserve the answered question so later decisions and SQL generation
-                # know what the reply refers to.
                 if pending_question and not orch.run_state.risk_confirmation:
                     fact = (
                         f"User confirmed the following criteria — {pending_question}\n"
@@ -227,7 +208,6 @@ class AskAgentLoop:
                     if fact not in orch.run_state.memory.confirmed_facts:
                         orch.run_state.memory.confirmed_facts.append(fact)
                         orch.run_state.memory.confirmed_facts = orch.run_state.memory.confirmed_facts[-12:]
-                    orch.run_state.memory.resolve_open_question(pending_question)
                     orch.run_state.clarify_questions = ""
                     orch.run_state.pending_question = ""
                     orch.run_state.pending_options = []
@@ -249,7 +229,7 @@ class AskAgentLoop:
                         orch.run_state.pending_question = ""
                         orch.run_state.pending_options = []
                         orch.run_state.pending_questions = []
-                        transcript.append("Risk confirmation: user approved execution.")
+                        messages.append(LLMMessage("user", "Risk confirmation: user approved execution."))
                     else:
                         sql = str(risk.get("sql") or orch.run_state.sql or "").strip()
                         cancelled = "执行已取消。" if orch.run_state.answer_language == "zh" else "Execution cancelled."
@@ -261,14 +241,12 @@ class AskAgentLoop:
                         orch.run_state.pending_question = ""
                         orch.run_state.pending_options = []
                         orch.run_state.pending_questions = []
+                        self.progress(
+                            progress_event(stage="user", title=f"Reply: {reply[:120]}", status="completed", kind="user"),
+                        )
+                        return self._build_response(orch, orch.run_state.answer, disclosures_before or [])
                 self.progress(
                     progress_event(stage="user", title=f"Reply: {reply[:120]}", status="completed", kind="user"),
-                )
-                orch.run_state.memory.record_work(
-                    action="user_reply",
-                    args={"reply": reply},
-                    ok=True,
-                    summary="User replied to a pending confirmation/clarification.",
                 )
             state = LoopState(
                 question=str(resume_state.get("question") or question),
@@ -292,15 +270,23 @@ class AskAgentLoop:
         else:
             orch._reset_loop_state(question, database, execute, answer_language=answer_language)
             orch.schema.disclose_instance()
-            prefetch_result = self._speculative_prefetch(orch, question, database)
             state = LoopState(
                 question=question,
                 database=database,
                 execute_allowed=execute,
                 answer_language=orch.run_state.answer_language,
             )
+            # Build initial conversation: system + user question
+            tools = self.allowed_tool_specs
+            tool_lines = "\n".join(tool_prompt_line(s) for s in tools)
+            execute_note = "allowed" if state.execute_allowed else "disabled"
+            system = self.prompts.system_prompt(state, tool_lines, execute_note)
+            user = self.prompts.initial_user_prompt(state)
+            messages = [LLMMessage("system", system), LLMMessage("user", user)]
+
+            prefetch_result = self._speculative_prefetch(orch, question, database)
             if prefetch_result and prefetch_result.ok:
-                self._inject_prefetch(orch, state, transcript, prefetch_result)
+                self._inject_prefetch(orch, messages, prefetch_result)
             self.progress(
                 progress_event(
                     stage="loop",
@@ -312,6 +298,7 @@ class AskAgentLoop:
                     detail="started",
                 ),
             )
+
         tool_ctx = ToolContext(
             workflow_id=self._trace_parent or "ask",
             connection=orch.session.connection,
@@ -341,64 +328,51 @@ class AskAgentLoop:
                 )),
             )
             result = runtime.call_tool(approved_risk_tool, approved_risk_args or {"sql": approved_risk_sql}, tool_ctx)
-            data = result.data if isinstance(result.data, dict) else {}
-            if result.error:
-                data = dict(data)
-                data["error"] = result.error.to_dict()
-            artifacts = [str(data[key]) for key in ("report_id", "artifact_id") if data.get(key)]
-            orch.run_state.memory.record_work(
-                action=approved_risk_tool,
-                args=approved_risk_args or {"sql": approved_risk_sql},
-                ok=result.ok,
-                summary=brief_tool_summary(approved_risk_tool, result),
-                purpose="execute the SQL the user just confirmed",
-                artifacts=artifacts,
-                data=data if isinstance(data, dict) else None,
-            )
+            brief = brief_tool_summary(approved_risk_tool, result)
             done_event = self._ns_step(progress_event(
                 stage=approved_risk_tool,
                 title=f"{approved_risk_tool} done",
                 status="completed" if result.ok else "failed",
                 kind="tool",
-                detail=brief_tool_summary(approved_risk_tool, result),
+                detail=brief,
                 step=1,
             ))
             if result.ok:
                 done_event["sql"] = approved_risk_sql
+                data = result.data if isinstance(result.data, dict) else {}
                 if data.get("purpose"):
                     done_event["purpose"] = str(data["purpose"])
                 if data.get("row_count") is not None:
                     done_event["row_count"] = data.get("row_count")
             self.progress(done_event)
             if result.ok:
-                _rpl = getattr(orch.session, "result_preview_limit", _DEFAULT_RESULT_PREVIEW_LIMIT)
-                summary = _summarize_tool_result(approved_risk_tool, result, limit=_rpl)
-                transcript.append(f"Tool `{approved_risk_tool}` → {summary}")
+                formatted = _format_tool_result(approved_risk_tool, result)
+                messages.append(LLMMessage("user", f"[Tool result: {approved_risk_tool}]\n{formatted}"))
             else:
-                reason = result.error or brief_tool_summary(approved_risk_tool, result) or "confirmed_execution_failed"
+                reason = result.error or brief or "confirmed_execution_failed"
                 return self._build_failed_response(orch, reason, disclosures_before or [])
 
-        # Step numbering must be CONTINUOUS across an ask_user pause/resume — node
-        # IDs are derived from step_no (decision:N, step:N), and the trace is one
-        # tree, so resuming from 0 would collide with the pre-pause nodes and
-        # overwrite them in TraceModel. Pick up where the prior run paused.
         step_no = int(resume_state.get("step_base") or 0) if resume_state else 0
         if approved_risk_sql:
             step_no += 1
         recorder = getattr(orch, "llm_recorder", None)
-        last_step_start = len(transcript)
+
         while runtime.steps_remaining > 0:
+            # ── Auto-compress if approaching context limit ──
+            self._maybe_compress(orch, messages)
+
             decide_start = recorder.snapshot_len() if recorder else 0
             try:
                 with llm_stage("decide"):
-                    decision = self._decide(state, transcript, last_step_start)
+                    decision = self._decide(messages)
             except LoopDecisionError as exc:
                 logger.warning("loop_decision_failed: %s", exc)
-                transcript.append(
-                    "Error: could not parse a valid decision "
-                    f"({exc}). Return ONLY one JSON object with action='call_tool' "
+                raw_context = f"\nYour last attempt was: {exc.raw_payload}" if exc.raw_payload else ""
+                messages.append(LLMMessage("user",
+                    f"Error: could not parse a valid decision ({exc}).{raw_context}\n"
+                    "Return ONLY one JSON object with action='call_tool' "
                     "(tool + args) or action='finish' (answer)."
-                )
+                ))
                 self.progress(
                     progress_event(
                         stage="decide",
@@ -417,6 +391,10 @@ class AskAgentLoop:
                 continue
 
             self._apply_decision_memory(decision)
+            thought = str(decision.get("thought") or "")[:500]
+            if thought:
+                orch.run_state.thought_trace.append(thought)
+                orch.run_state.thought_trace = orch.run_state.thought_trace[-20:]
             tool_llm_start = recorder.snapshot_len() if recorder else 0
             action = str(decision.get("action") or "").strip().lower()
             decision_calls = recorder.since(decide_start) if recorder is not None else []
@@ -439,19 +417,19 @@ class AskAgentLoop:
             if decision_calls:
                 ev["llm_calls"] = decision_calls
             self.progress(ev)
+
             if action == "finish":
                 answer = str(decision.get("answer") or "").strip()
                 if not answer or answer == "Query complete.":
                     answer = self._answer_from_state(orch)
                 if not answer:
-                    # Don't degrade — push back and let the model actually answer (or
-                    # call a tool to gather what it's missing). Budget-bounded retry.
-                    transcript.append("Error: you called finish with an empty answer. "
-                                      "Provide the markdown answer, or call a tool to get what you need.")
+                    messages.append(LLMMessage("user",
+                        "Error: you called finish with an empty answer. "
+                        "Provide the markdown answer, or call a tool to get what you need."))
                     runtime.consume_step()
                     continue
-                # The decide call that chose to finish runs outside any tool step;
-                # surface it (prompt+response) as its own debug-trace step.
+                # Record the finish decision in the conversation stream
+                messages.append(LLMMessage("assistant", json.dumps(decision, ensure_ascii=False)))
                 if recorder is not None:
                     finish_calls = recorder.since(tool_llm_start)
                     if finish_calls:
@@ -473,29 +451,32 @@ class AskAgentLoop:
                 )
                 return self._build_response(orch, answer, disclosures_before or [])
 
-            last_step_start = len(transcript)
             if action == "call_tools":
                 calls, dropped = self._batch_calls(decision)
                 if dropped:
-                    transcript.append(
+                    messages.append(LLMMessage("user",
                         "Note: these can't be batched (issue them one at a time so each keeps "
                         f"its gate / depends on prior results): {', '.join(dropped)}."
-                    )
+                    ))
                 if not calls:
-                    if not dropped:
-                        transcript.append(
-                            "Error: action 'call_tools' needs a non-empty 'calls' list of "
-                            'independent read-only tools ({"tool":...,"args":...}).'
-                        )
+                    messages.append(LLMMessage("user",
+                        "Error: no batchable tool calls found. Use 'call_tool' (singular) "
+                        "for tools that depend on prior results or require sequential execution."
+                        if dropped else
+                        "Error: action 'call_tools' needs a non-empty 'calls' list of "
+                        'independent read-only tools ({"tool":...,"args":...}).'
+                    ))
                     runtime.consume_step()
                     continue
+                # Append assistant decision BEFORE tool results (correct message ordering)
+                messages.append(LLMMessage("assistant", json.dumps(decision, ensure_ascii=False)))
                 paused = False
                 for call in calls:
                     if runtime.steps_remaining <= 0:
                         break
                     step_no += 1
                     llm_start = recorder.snapshot_len() if recorder is not None else 0
-                    sig = self._run_tool_call(orch, state, transcript, runtime, tool_ctx,
+                    sig = self._run_tool_call(orch, state, messages, runtime, tool_ctx,
                                               decision, call["tool"], call["args"], step_no,
                                               llm_start, recorder)
                     if sig == "pending":
@@ -503,39 +484,40 @@ class AskAgentLoop:
                         break
                 if paused:
                     return self._build_wait_response(
-                        orch, state, transcript, disclosures_before or [], step_base=step_no,
+                        orch, state, messages, disclosures_before or [], step_base=step_no,
                     )
                 continue
 
             if action != "call_tool":
                 logger.warning("loop_unknown_action: %s", action)
-                # Retry rather than bail: tell the model the only valid actions.
-                transcript.append(f"Error: unknown action {action!r}. Use 'call_tool' (one tool), "
-                                  "'call_tools' (several independent read-only tools), or 'finish'.")
+                messages.append(LLMMessage("user",
+                    f"Error: unknown action {action!r}. Use 'call_tool' (one tool), "
+                    "'call_tools' (several independent read-only tools), or 'finish'."))
                 runtime.consume_step()
                 continue
 
             tool_name = str(decision.get("tool") or "").strip()
             if tool_name not in self.allowed_tool_names:
                 allowed = ", ".join(sorted(self.allowed_tool_names))
-                transcript.append(
+                messages.append(LLMMessage("user",
                     f"Error: tool {tool_name!r} is not available in this loop. "
                     f"Use one of the advertised tools: {allowed}."
-                )
-                runtime.consume_step()  # charge budget so a repeated bad name can't loop forever
+                ))
+                runtime.consume_step()
                 continue
 
             args = decision.get("args") if isinstance(decision.get("args"), dict) else {}
             step_no += 1
             llm_start = recorder.snapshot_len() if recorder is not None else 0
-            sig = self._run_tool_call(orch, state, transcript, runtime, tool_ctx, decision,
+            # Append assistant decision to conversation
+            messages.append(LLMMessage("assistant", json.dumps(decision, ensure_ascii=False)))
+            sig = self._run_tool_call(orch, state, messages, runtime, tool_ctx, decision,
                                       tool_name, args, step_no, llm_start, recorder)
             if sig == "pending":
                 return self._build_wait_response(
-                    orch, state, transcript, disclosures_before or [], step_base=step_no,
+                    orch, state, messages, disclosures_before or [], step_base=step_no,
                 )
 
-        # Distinguish running out of the step budget mid-task from a clean finish —
         budget_exhausted = getattr(runtime, "steps_remaining", 1) <= 0
         if orch.run_state.query_result or orch.run_state.answer:
             if orch.run_state.query_result:
@@ -555,12 +537,6 @@ class AskAgentLoop:
         return self._build_failed_response(orch, "step_budget_exhausted", disclosures_before or [])
 
     def _batch_calls(self, decision: dict[str, Any]) -> tuple[list[dict[str, Any]], list[str]]:
-        """Validate an action='call_tools' decision into a safe, ordered list of calls.
-
-        Returns (runnable, dropped): only INDEPENDENT read-only tools that are both
-        advertised and in BATCHABLE_TOOLS are runnable (capped at MAX_BATCH); anything
-        else — SQL execution, ask_user, writes, unknown names — is dropped and named
-        so the model re-issues it on its own turn with its gate intact."""
         raw = decision.get("calls")
         if not isinstance(raw, list):
             return [], []
@@ -580,51 +556,40 @@ class AskAgentLoop:
                 dropped.append(tool)
         return runnable, dropped
 
-    def _run_tool_call(self, orch: AskOrchestrator, state: LoopState, transcript: list[str],
+    def _run_tool_call(self, orch: AskOrchestrator, state: LoopState, messages: list[LLMMessage],
                        runtime: AgentRuntime, tool_ctx: ToolContext, decision: dict[str, Any],
                        tool_name: str, args: dict[str, Any], step_no: int,
                        llm_start: int, recorder: Any) -> str:
-        """Run one tool: emit trace, invoke, record into memory, and emit the done
-        frame. Returns 'pending' (tool paused for the user) or 'ok'. Shared by single
-        and batched dispatch so both paths record/trace identically."""
+        """Run one tool: emit trace, invoke, append result to messages. Returns
+        'pending' (tool paused for the user) or 'ok'."""
         self.progress(self._ns_step(progress_event(
             stage=tool_name, title=f"Calling {tool_name}", status="running", kind="tool",
             detail=str(args)[:200] if args else "", step=step_no,
         )))
-        # Expose this step's trace node so the tool's sub-agents/sub-tools nest under it.
         orch.run_state.trace_node = (f"{self._trace_parent}:step:{step_no}"
                                      if self._trace_parent else f"step:{step_no}")
         with llm_stage(tool_name):
             result = runtime.call_tool(tool_name, args, tool_ctx)
-        _rpl = getattr(orch.session, "result_preview_limit", _DEFAULT_RESULT_PREVIEW_LIMIT)
-        summary = _summarize_tool_result(tool_name, result, limit=_rpl)
+
+        formatted = _format_tool_result(tool_name, result)
         brief = brief_tool_summary(tool_name, result)
-        state.calls.append(ToolCallRecord(tool=tool_name, args=args, ok=result.ok, summary=summary))
-        transcript.append(f"Tool `{tool_name}` → {summary}")
-        # ── Circuit-breaker: detect repeated identical failures ──
-        # If the last N calls are the same tool with the same error, the model
-        # is stuck retrying a validation bug.  Inject explicit guidance so it
-        # stops wasting the step budget.
+        state.calls.append(ToolCallRecord(tool=tool_name, args=args, ok=result.ok, summary=brief))
+
+        # Append tool result to conversation stream
+        messages.append(LLMMessage("user", f"[Tool result: {tool_name}]\n{formatted}"))
+
+        # Circuit-breaker for stuck loops
         if not result.ok:
-            _inject_stuck_loop_hint(state, transcript)
-        artifacts: list[str] = []
-        data_for_memory = result.data if isinstance(result.data, dict) else {}
-        if result.error:
-            data_for_memory = dict(data_for_memory)
-            data_for_memory["error"] = result.error.to_dict()
-        if isinstance(data_for_memory, dict):
-            for key in ("report_id", "artifact_id", "chart_id"):
-                if data_for_memory.get(key):
-                    artifacts.append(str(data_for_memory[key]))
-            if data_for_memory.get("pending"):
-                q = str(data_for_memory.get("question") or orch.run_state.pending_question or "")
-                if q:
-                    orch.run_state.memory.add_open_question(q)
-        orch.run_state.memory.record_work(
-            action=tool_name, args=args, ok=result.ok, summary=brief or summary,
-            purpose=str(decision.get("thought") or "").strip(), artifacts=artifacts,
-            data=data_for_memory if isinstance(data_for_memory, dict) else None,
-        )
+            escalation = _inject_stuck_loop_hint(state, messages)
+            if escalation == "escalate":
+                # Leave only 1 step so the model must finish on next iteration
+                runtime._step_count = max(runtime._step_count, runtime.max_steps - 1)
+
+        # Track SQL artifacts for chart-tool lookup
+        data = result.data if isinstance(result.data, dict) else {}
+        if result.ok and isinstance(data, dict) and data.get("artifact_id"):
+            pass  # sql_tools.py handles add_sql_artifact internally
+
         done_detail = brief
         executed_sql = _executed_sql(tool_name, orch, result)
         if executed_sql:
@@ -636,8 +601,8 @@ class AskAgentLoop:
         ))
         if args:
             done_event["args"] = args
-        if summary and summary != done_detail:
-            done_event["output"] = summary
+        if brief and brief != done_detail:
+            done_event["output"] = brief
         if recorder is not None:
             iter_calls = recorder.since(llm_start)
             if iter_calls:
@@ -646,7 +611,6 @@ class AskAgentLoop:
             done_event["result_data"] = result.data
         if executed_sql:
             done_event["sql"] = executed_sql
-            data = result.data if isinstance(result.data, dict) else {}
             if data.get("purpose"):
                 done_event["purpose"] = str(data["purpose"])
             if data.get("row_count") is not None:
@@ -659,16 +623,183 @@ class AskAgentLoop:
             return "pending"
         return "ok"
 
-    def _fail(self, reason: str) -> None:
-        self.orchestrator.run_state.fail_reason = reason
+    def _apply_decision_memory(self, decision: dict[str, Any]) -> None:
+        """Extract cross-run knowledge from model decisions: verified facts and excluded paths."""
+        mem = self.orchestrator.run_state.memory
+        updates = decision.get("memory_updates") if isinstance(decision.get("memory_updates"), dict) else {}
+        for item in _list_update_items(updates.get("verified")) + _list_update_items(updates.get("confirmed")):
+            if isinstance(item, dict):
+                mem.mark_verified(str(item.get("text") or ""))
+            else:
+                mem.mark_verified(str(item))
+        for item in _list_update_items(updates.get("excluded_paths")) + _list_update_items(updates.get("exclusions")):
+            if isinstance(item, dict):
+                mem.add_exclusion(
+                    str(item.get("target") or ""),
+                    str(item.get("reason") or ""),
+                    evidence_ref=str(item.get("evidence_ref") or "decision"),
+                )
+
+    def _decide(self, messages: list[LLMMessage]) -> dict[str, Any]:
+        """Send the full conversation to the LLM and parse a JSON decision."""
+        self._last_prompt_tokens = sum(estimate_tokens(m.content) for m in messages)
+        schema_hint = ('Return {"action":"call_tool|call_tools|finish","tool":"...","args":{},'
+                       '"calls":[{"tool":"...","args":{}}],"thought":"...","answer":"..."}')
+        orch = self.orchestrator
+
+        last_error = ""
+        last_raw = ""
+        for attempt in range(DECISION_RETRIES):
+            call_messages = list(messages)
+            if last_error:
+                call_messages.append(LLMMessage("user", f"Previous decision invalid: {last_error}. Try again."))
+            try:
+                if orch.cancel_check:
+                    orch.cancel_check()
+                if getattr(orch, "stream_answers", False) and orch.llm.supports_streaming():
+                    streamer = JsonFieldStreamer(self._emit_answer_chunk, field="answer")
+                    def on_chunk(chunk: str) -> None:
+                        if orch.cancel_check:
+                            orch.cancel_check()
+                        streamer.feed(chunk)
+                    payload = orch.llm.complete_json_stream(
+                        call_messages, schema_hint=schema_hint, on_text_chunk=on_chunk
+                    )
+                else:
+                    payload = orch.llm.complete_json(call_messages, schema_hint=schema_hint)
+                if orch.cancel_check:
+                    orch.cancel_check()
+            except ValueError as exc:
+                last_error = f"response was not valid JSON ({exc}); return ONLY a JSON object"
+                last_raw = str(exc)[:300]
+                logger.warning("loop_decide_parse_failed: %s", exc)
+                continue
+            except Exception as exc:
+                if _looks_cancelled(exc):
+                    raise
+                last_error = f"LLM call failed ({type(exc).__name__}: {exc}); retry the decision"
+                logger.warning("loop_decide_call_failed: %s", exc)
+                continue
+            last_raw = json.dumps(payload, ensure_ascii=False, default=str)[:500] if payload else ""
+            if not isinstance(payload, dict) or not payload.get("action"):
+                last_error = "missing action field"
+                continue
+            action = str(payload.get("action")).lower()
+            if action == "finish":
+                return payload
+            if action == "call_tool" and payload.get("tool"):
+                return payload
+            if action == "call_tools" and isinstance(payload.get("calls"), list) and payload.get("calls"):
+                return payload
+            if action in self.allowed_tool_names:
+                args = payload.get("args") if isinstance(payload.get("args"), dict) else {
+                    k: v for k, v in payload.items()
+                    if k not in ("action", "tool", "args", "thought",
+                                 "memory_updates", "answer")
+                }
+                return {**payload, "action": "call_tool", "tool": action, "args": args}
+            last_error = f"invalid action payload: {payload!r}"
+        raise LoopDecisionError(last_error or "no valid decision", raw_payload=last_raw)
+
+    def _maybe_compress(self, orch: AskOrchestrator, messages: list[LLMMessage]) -> None:
+        """Compress older messages if approaching context budget.
+
+        Tracks compression state to avoid infinite re-compression of the same
+        segment and falls back to hard truncation if LLM compression fails
+        repeatedly.
+        """
+        budget = self._context_budget()
+        total_tokens = sum(estimate_tokens(m.content) for m in messages)
+        pct = getattr(orch.session, "compress_threshold", _DEFAULT_COMPRESS_THRESHOLD)
+        pct = max(50, min(95, int(pct)))
+        threshold = int(budget * pct / 100)
+        if total_tokens <= threshold:
+            return
+        if len(messages) <= 3:
+            return
+
+        # Progressive tail preservation: keep more recent messages on first
+        # compression, fewer on re-compression (more aggressive).
+        compress_count = getattr(self, "_compress_count", 0)
+        if compress_count == 0:
+            keep_tail = min(6, len(messages) - 2)
+        elif compress_count == 1:
+            keep_tail = min(4, len(messages) - 2)
+        else:
+            keep_tail = min(2, len(messages) - 2)
+        compress_end = len(messages) - keep_tail
+        if compress_end <= 2:
+            return
+
+        to_compress = messages[2:compress_end]
+        if not to_compress:
+            return
+
+        logger.info("context_compress: %d tokens > %d threshold, compressing %d messages (round %d)",
+                    total_tokens, threshold, len(to_compress), compress_count + 1)
+
+        compress_text = "\n\n---\n\n".join(
+            f"[{m.role}]\n{m.content}" for m in to_compress
+        )
+        compress_prompt = (
+            "Compress the following conversation segment into a structured briefing. "
+            "This briefing will replace the original messages so the agent can continue "
+            "with full context in fewer tokens.\n\n"
+            "CRITICAL — PRESERVE VERBATIM (do NOT abbreviate or omit):\n"
+            "- SQL query results: row data, column names, row counts, sample values\n"
+            "- SQL query text (the actual SELECT/INSERT/... statements)\n"
+            "- Table structures (table names, column names, data types, indexes, FKs)\n"
+            "- Verified facts and excluded paths with reasons\n"
+            "- User-confirmed criteria and business rules\n"
+            "- Join relationships (table.column → ref_table.ref_column)\n"
+            "- Error messages from failed tool calls\n\n"
+            "COMPRESS AGGRESSIVELY (these are expendable):\n"
+            "- Tool call/response formatting overhead (JSON wrappers, metadata)\n"
+            "- Intermediate reasoning steps that led to verified conclusions\n"
+            "- Redundant schema descriptions (keep only the final/correct version)\n"
+            "- Verbose raw JSON payloads (extract key facts only)\n\n"
+            "Format as a dense briefing with sections:\n"
+            "[Schema] table(col1 type, col2 type, ...) ...\n"
+            "[Verified] fact1; fact2; ...\n"
+            "[Excluded] path1: reason; ...\n"
+            "[SQL Results] purpose → N rows, key findings; actual row data ...\n"
+            "[Status] what has been accomplished, what remains\n\n"
+            "--- CONVERSATION TO COMPRESS ---\n\n"
+            f"{compress_text}"
+        )
+        try:
+            summary = orch.llm.complete_text(
+                [LLMMessage("system", "You are a precise conversation compressor for a database assistant."),
+                 LLMMessage("user", compress_prompt)],
+            )
+        except Exception as exc:
+            logger.warning("context_compress_llm_failed (round %d): %s", compress_count + 1, exc)
+            # Fallback: hard truncation — drop the compressible segment entirely,
+            # keeping only a brief note about what was lost.
+            fallback_note = (
+                f"[Context note: {len(to_compress)} earlier messages were dropped due to "
+                f"context limit (compression failed). The agent should rely on verified_facts "
+                f"and excluded_paths in memory for cross-step knowledge.]"
+            )
+            messages[2:compress_end] = [LLMMessage("user", fallback_note)]
+            self._compress_count = compress_count + 1
+            new_tokens = sum(estimate_tokens(m.content) for m in messages)
+            logger.info("context_compress_fallback: %d → %d tokens", total_tokens, new_tokens)
+            return
+
+        summary_msg = LLMMessage("user",
+            f"[Context summary — compressed from {len(to_compress)} earlier messages]\n{summary}"
+        )
+        messages[2:compress_end] = [summary_msg]
+        self._compress_count = compress_count + 1
+        new_tokens = sum(estimate_tokens(m.content) for m in messages)
+        logger.info("context_compress_done: %d → %d tokens (round %d)",
+                    total_tokens, new_tokens, self._compress_count)
 
     def _build_failed_response(
         self, orch: AskOrchestrator, reason: str, disclosures_before: list[str],
     ) -> AssistantResponse:
-        """Honest failure (no degrade): surface whatever real result/answer the loop did
-        produce, otherwise a clear 'couldn't complete' message — with the reason kept in
-        warnings for debugging. Marks the run failed in the trace."""
-        self._fail(reason)
+        orch.run_state.fail_reason = reason
         self.progress(
             progress_event(
                 stage="loop",
@@ -698,128 +829,11 @@ class AskAgentLoop:
         )
 
     def _emit_answer_chunk(self, text: str) -> None:
-        """Forward a streamed slice of the final answer to the UI. Tagged so the UI
-        routes it to the answer block, not the trace."""
         if text:
             self.progress({"kind": "answer_chunk", "text": text})
 
-    def _apply_decision_memory(self, decision: dict[str, Any]) -> None:
-        mem = self.orchestrator.run_state.memory
-        # The model's read of the previous step's result, attached to that step so
-        # the work log records did-what → result → judgment in one place.
-        assessment = str(decision.get("result_assessment") or "").strip()
-        if assessment:
-            mem.note_last_judgment(assessment)
-        updates = decision.get("memory_updates") if isinstance(decision.get("memory_updates"), dict) else {}
-        for item in _list_update_items(updates.get("findings")):
-            if isinstance(item, dict):
-                mem.add_finding(
-                    str(item.get("text") or ""),
-                    source=str(item.get("source") or "model_note"),
-                    confidence="model_note",
-                )
-            else:
-                mem.add_finding(str(item), source="model_note", confidence="model_note")
-        for item in _list_update_items(updates.get("verified")) + _list_update_items(updates.get("confirmed")):
-            if isinstance(item, dict):
-                mem.mark_verified(str(item.get("text") or ""), source=str(item.get("source") or "verified"))
-            else:
-                mem.mark_verified(str(item), source="verified")
-        for item in _list_update_items(updates.get("open_questions")):
-            mem.add_open_question(str(item.get("text") if isinstance(item, dict) else item))
-        for item in _list_update_items(updates.get("hypotheses")):
-            mem.add_hypothesis(str(item.get("text") if isinstance(item, dict) else item))
-        for item in _list_update_items(updates.get("excluded_paths")) + _list_update_items(updates.get("exclusions")):
-            if isinstance(item, dict):
-                mem.add_exclusion(
-                    str(item.get("target") or ""),
-                    str(item.get("reason") or ""),
-                    evidence_ref=str(item.get("evidence_ref") or "decision"),
-                )
-        hint = str(decision.get("next_action_hint") or "").strip()
-        if hint:
-            mem.next_action_hint = hint[:500]
-
-    def _decide(self, state: LoopState, transcript: list[str],
-                 last_step_start: int = 0) -> dict[str, Any]:
-        tools = self.allowed_tool_specs
-        tool_lines = "\n".join(tool_prompt_line(s) for s in tools)
-        execute_note = "allowed" if state.execute_allowed else "disabled"
-
-        latest_results = transcript[last_step_start:]
-        system = self.prompts.system_prompt(state, tool_lines, execute_note)
-        user = self.prompts.user_prompt(state, latest_results)
-        self._last_prompt_tokens = estimate_tokens(system) + estimate_tokens(user)
-
-        last_error = ""
-        for attempt in range(DECISION_RETRIES):
-            messages = [LLMMessage("system", system), LLMMessage("user", user)]
-            if last_error:
-                messages.append(LLMMessage("user", f"Previous decision invalid: {last_error}. Try again."))
-            schema_hint = ('Return {"action":"call_tool|call_tools|finish","tool":"...","args":{},'
-                           '"calls":[{"tool":"...","args":{}}],"thought":"...","answer":"..."}')
-            orch = self.orchestrator
-            try:
-                if orch.cancel_check:
-                    orch.cancel_check()
-                if getattr(orch, "stream_answers", False) and orch.llm.supports_streaming():
-                    # Stream the decision; surface only the "answer" field's tokens live
-                    # so the FINAL answer arrives token-by-token (intermediate call_tool
-                    # decisions have no answer field → nothing streams). The full JSON is
-                    # still parsed below, so the answer is authoritative regardless.
-                    streamer = JsonFieldStreamer(self._emit_answer_chunk, field="answer")
-                    def on_chunk(chunk: str) -> None:
-                        if orch.cancel_check:
-                            orch.cancel_check()
-                        streamer.feed(chunk)
-                    payload = orch.llm.complete_json_stream(
-                        messages, schema_hint=schema_hint, on_text_chunk=on_chunk
-                    )
-                else:
-                    payload = orch.llm.complete_json(messages, schema_hint=schema_hint)
-                if orch.cancel_check:
-                    orch.cancel_check()
-            except ValueError as exc:
-                # Malformed JSON (e.g. bad escaping) — don't abort the whole run; feed the
-                # error back and let the model re-emit valid JSON on the next attempt.
-                last_error = f"response was not valid JSON ({exc}); return ONLY a JSON object"
-                logger.warning("loop_decide_parse_failed: %s", exc)
-                continue
-            except Exception as exc:
-                if _looks_cancelled(exc):
-                    raise
-                last_error = f"LLM call failed ({type(exc).__name__}: {exc}); retry the decision"
-                logger.warning("loop_decide_call_failed: %s", exc)
-                continue
-            if not isinstance(payload, dict) or not payload.get("action"):
-                last_error = "missing action field"
-                continue
-            action = str(payload.get("action")).lower()
-            if action == "finish":
-                return payload
-            if action == "call_tool" and payload.get("tool"):
-                return payload
-            if action == "call_tools" and isinstance(payload.get("calls"), list) and payload.get("calls"):
-                return payload
-            # Tolerate the model naming a tool directly as the action, e.g.
-            # {"action":"ask_user","question":"..."} instead of
-            # {"action":"call_tool","tool":"ask_user","args":{...}}. Coerce it rather
-            # than failing the whole run — this once turned a correct "ask the user"
-            # into a hard failure after the model had done the right thing.
-            if action in self.allowed_tool_names:
-                args = payload.get("args") if isinstance(payload.get("args"), dict) else {
-                    k: v for k, v in payload.items()
-                    if k not in ("action", "tool", "args", "thought", "result_assessment",
-                                 "memory_updates", "next_action_hint", "answer")
-                }
-                return {**payload, "action": "call_tool", "tool": action, "args": args}
-            last_error = f"invalid action payload: {payload!r}"
-        raise LoopDecisionError(last_error or "no valid decision")
-
     def _answer_from_state(self, orch: AskOrchestrator) -> str:
         if orch.run_state.query_result and orch.run_state.sql:
-            # Drop the generic English placeholder — it added a stray line in the
-            # wrong language; only a real rationale (already UI-language) is shown.
             draft_rationale = orch.run_state.sql_rationale or ""
             interpretation = orch.interpreter.interpret(
                 question=orch.run_state.question or "",
@@ -846,7 +860,7 @@ class AskAgentLoop:
         self,
         orch: AskOrchestrator,
         state: LoopState,
-        transcript: list[str],
+        messages: list[LLMMessage],
         disclosures_before: list[str],
         *,
         step_base: int = 0,
@@ -859,15 +873,8 @@ class AskAgentLoop:
             lines.append("Options:")
             lines.extend(f"- {item}" for item in options)
         answer = "\n".join(lines)
-        snapshot = dump_loop_state(orch, transcript=transcript, execute_allowed=state.execute_allowed)
-        # Carry the current step count so resume can keep decision:/step: node IDs
-        # unique across the pause (TraceModel keys nodes by id; duplicate ids would
-        # collapse the resumed steps onto the pre-pause ones).
+        snapshot = dump_loop_state(orch, messages=messages, execute_allowed=state.execute_allowed)
         snapshot["step_base"] = int(step_base)
-        # Nest the wait marker UNDER the ask_user tool step, not at the trace root —
-        # the pause was caused by that tool call, so the hierarchy should read
-        # loop → ask_user step → "Waiting for user clarification". Without an
-        # explicit parent_id this event used to land outside the loop node.
         ask_step_id = (f"{self._trace_parent}:step:{step_base}"
                        if self._trace_parent else f"step:{step_base}")
         wait_event = progress_event(
@@ -879,8 +886,6 @@ class AskAgentLoop:
             node_id=f"{ask_step_id}:waiting",
             parent_id=ask_step_id,
         )
-        # Record the exact clarification so a copied trace shows what was asked and the
-        # candidate options the user chose between (previously absent from copies).
         wait_event["question"] = question
         if options:
             wait_event["options"] = options
@@ -919,60 +924,331 @@ class AskAgentLoop:
         )
 
     def _trace_sink(self, event: TraceEvent) -> None:
-        # Tool loop emits structured progress for tool calls; registry/runtime traces duplicate it.
         if event.actor in {"tool", "runtime"}:
             return
         self.progress(from_trace_event(event))
 
 
-def _summarize_tool_result(tool: str, result: ToolResult, *, limit: int = _DEFAULT_RESULT_PREVIEW_LIMIT) -> str:
-    if not result.ok and result.error:
-        return f"ERROR: {result.error.message}"
+# ── Tool result formatting ───────────────────────────────────────────
+
+_TOOL_FORMATTERS: dict[str, str] = {
+    "execute_sql": "_sql_result",
+    "describe_table": "_describe",
+    "retrieve_schema_context": "_schema",
+    "discover_schema": "_schema",
+    "column_stats": "_profile",
+    "profile_table": "_profile",
+    "validate_joins": "_join",
+    "retrieve_join_context": "_join",
+    "generate_sql": "_generate_sql",
+    "validate_sql": "_validate_sql",
+    "explain_sql": "_explain_sql",
+    "list_tables": "_list_items",
+    "list_databases": "_list_items",
+    "ask_user": "_ask_user",
+}
+
+
+def _format_tool_result(tool: str, result: ToolResult) -> str:
+    """Smart per-tool formatting for conversation messages.
+
+    Unlike blind json.dumps[:1400] truncation, this preserves structure
+    and key information while keeping the result within a reasonable size.
+    """
+    if not result.ok:
+        if result.error:
+            return f"ERROR: {result.error.message}"
+        return "FAILED (no details)"
     data = result.data
     if data is None:
         return "ok (empty)"
+
+    formatter_key = _TOOL_FORMATTERS.get(tool)
+    if formatter_key:
+        fn = globals().get(f"_fmt{formatter_key}")
+        if fn:
+            return fn(data)
+    return _fmt_generic(data)
+
+
+def _fmt_generic(data: Any) -> str:
     text = json.dumps(data, ensure_ascii=False, default=str)
-    if len(text) > limit:
-        return text[:limit] + "…[truncated]"
+    if len(text) > _RESULT_SOFT_CAP:
+        return text[:_RESULT_SOFT_CAP] + f"\n…[truncated from {len(text)} chars]"
     return text
 
 
-def _shorten(text: str, limit: int) -> str:
-    text = " ".join(str(text or "").split())
-    return text if len(text) <= limit else text[:limit] + "…[truncated]"
+def _fmt_sql_result(data: Any) -> str:
+    if not isinstance(data, dict):
+        return _fmt_generic(data)
+    parts: list[str] = []
+    if data.get("sql"):
+        parts.append(f"SQL: {data['sql']}")
+    if data.get("pending") or data.get("blocked"):
+        parts.append(json.dumps(data, ensure_ascii=False, default=str))
+        return "\n".join(parts)
+    row_count = data.get("row_count")
+    if row_count is not None:
+        truncated = " (TRUNCATED — more rows exist)" if data.get("truncated") else ""
+        parts.append(f"Rows: {row_count}{truncated}")
+    columns = data.get("columns")
+    if columns:
+        parts.append(f"Columns: {', '.join(str(c) for c in columns)}")
+    rows = data.get("rows")
+    if isinstance(rows, list) and rows:
+        # Always show at least 5 rows; scale up to 20 if within budget
+        min_rows = min(5, len(rows))
+        max_rows = min(20, len(rows))
+        rows_text = json.dumps(rows[:max_rows], ensure_ascii=False, default=str)
+        if len(rows_text) > 4000 and max_rows > min_rows:
+            # Retry with fewer rows, but always keep at least min_rows
+            rows_text = json.dumps(rows[:min_rows], ensure_ascii=False, default=str)
+            if len(rows_text) > 4000:
+                rows_text = rows_text[:4000] + "…"
+            parts.append(f"Data (first {min_rows} of {len(rows)} rows):\n{rows_text}")
+        else:
+            parts.append(f"Data:\n{rows_text}")
+            if len(rows) > max_rows:
+                parts.append(f"(showing {max_rows} of {len(rows)} rows)")
+    for key in ("artifact_id", "purpose", "warnings", "elapsed_ms", "fast_executed"):
+        if data.get(key) is not None:
+            parts.append(f"{key}: {data[key]}")
+    return "\n".join(parts)
+
+
+def _fmt_describe(data: Any) -> str:
+    if not isinstance(data, dict):
+        return _fmt_generic(data)
+    parts: list[str] = []
+    db = data.get("database", "")
+    table = data.get("table", "")
+    parts.append(f"Table: {db}.{table}" if db else f"Table: {table}")
+    columns = data.get("columns")
+    if isinstance(columns, list):
+        col_lines = []
+        for col in columns:
+            if isinstance(col, dict):
+                name = col.get("name", "")
+                dtype = col.get("data_type", "")
+                pk = " PK" if col.get("primary_key") else ""
+                idx = " IDX" if col.get("indexed") else ""
+                nullable = " NULL" if col.get("nullable") else ""
+                comment = f" -- {col['comment']}" if col.get("comment") else ""
+                note = f" [NOTE: {col['note']}]" if col.get("note") else ""
+                col_lines.append(f"  {name} {dtype}{pk}{idx}{nullable}{comment}{note}")
+        parts.append(f"Columns ({len(columns)}):\n" + "\n".join(col_lines))
+    if data.get("indexes"):
+        parts.append(f"Indexes: {json.dumps(data['indexes'], ensure_ascii=False, default=str)}")
+    if data.get("foreign_keys"):
+        parts.append(f"Foreign keys: {json.dumps(data['foreign_keys'], ensure_ascii=False, default=str)}")
+    if data.get("row_count") is not None:
+        parts.append(f"Estimated rows: {data['row_count']}")
+    return "\n".join(parts)
+
+
+def _fmt_schema(data: Any) -> str:
+    if not isinstance(data, dict):
+        return _fmt_generic(data)
+    parts: list[str] = []
+    if data.get("source_summary"):
+        parts.append(f"Summary: {data['source_summary']}")
+    candidates = data.get("candidates")
+    if isinstance(candidates, list):
+        for c in candidates:
+            if isinstance(c, dict):
+                label = f"{c.get('database', '')}.{c.get('table', '')}" if c.get("database") else c.get("table", "?")
+                status = c.get("status", "active")
+                cols = c.get("columns", [])
+                col_str = ", ".join(str(col.get("name", "")) for col in (cols[:12] if isinstance(cols, list) else []))
+                if isinstance(cols, list) and len(cols) > 12:
+                    col_str += f" …+{len(cols) - 12}"
+                parts.append(f"  {label} ({status}): [{col_str}]")
+    if data.get("missing"):
+        parts.append(f"Missing: {data['missing']}")
+    if data.get("instruction"):
+        parts.append(f"Note: {data['instruction']}")
+    text = "\n".join(parts)
+    if not text:
+        return _fmt_generic(data)
+    if len(text) > _RESULT_SOFT_CAP:
+        return text[:_RESULT_SOFT_CAP] + f"\n…[truncated from {len(text)} chars]"
+    return text
+
+
+def _fmt_profile(data: Any) -> str:
+    if not isinstance(data, dict):
+        return _fmt_generic(data)
+    parts: list[str] = []
+    if data.get("table"):
+        parts.append(f"Table: {data.get('database', '')}.{data['table']}" if data.get("database") else f"Table: {data['table']}")
+    if data.get("row_count") is not None:
+        parts.append(f"Row count: {data['row_count']}")
+    stats = data.get("column_stats") or data.get("stats")
+    if isinstance(stats, list):
+        for s in stats[:20]:
+            if isinstance(s, dict):
+                name = s.get("column") or s.get("name", "?")
+                parts.append(f"  {name}: nulls={s.get('null_count', '?')}, distinct={s.get('distinct_count', '?')}, min={s.get('min', '?')}, max={s.get('max', '?')}")
+        if len(stats) > 20:
+            parts.append(f"  …+{len(stats) - 20} columns")
+    text = "\n".join(parts)
+    if not text:
+        return _fmt_generic(data)
+    return text
+
+
+def _fmt_join(data: Any) -> str:
+    if not isinstance(data, dict):
+        return _fmt_generic(data)
+    parts: list[str] = []
+    if data.get("source_summary"):
+        parts.append(f"Summary: {data['source_summary']}")
+    relations = data.get("relations")
+    if isinstance(relations, list):
+        for rel in relations[:10]:
+            if isinstance(rel, dict):
+                src = f"{rel.get('table', '?')}.{rel.get('column', '?')}"
+                ref = f"{rel.get('ref_table', '?')}.{rel.get('ref_column', '?')}"
+                source = rel.get("source", "?")
+                conf = rel.get("confidence")
+                conf_str = f" conf={conf}" if conf is not None else ""
+                parts.append(f"  {src} → {ref} ({source}{conf_str})")
+        if len(relations) > 10:
+            parts.append(f"  …+{len(relations) - 10} relations")
+    if data.get("warnings"):
+        parts.append(f"Warnings: {data['warnings']}")
+    if data.get("instruction"):
+        parts.append(f"Note: {data['instruction']}")
+    text = "\n".join(parts)
+    if not text:
+        return _fmt_generic(data)
+    return text
+
+
+def _fmt_generate_sql(data: Any) -> str:
+    if not isinstance(data, dict):
+        return _fmt_generic(data)
+    parts: list[str] = []
+    if data.get("sql"):
+        parts.append(f"Generated SQL:\n{data['sql']}")
+    if data.get("confidence") is not None:
+        parts.append(f"Confidence: {data['confidence']}")
+    if data.get("fast_executed"):
+        parts.append("Status: fast-executed (result available)")
+    if data.get("validation_warnings"):
+        parts.append(f"Validation warnings: {data['validation_warnings']}")
+    if data.get("rationale"):
+        parts.append(f"Rationale: {str(data['rationale'])[:500]}")
+    # If fast-executed, include the result data inline
+    if data.get("rows") is not None or data.get("row_count") is not None:
+        parts.append(_fmt_sql_result(data))
+    text = "\n".join(parts)
+    return text if text else _fmt_generic(data)
+
+
+def _fmt_validate_sql(data: Any) -> str:
+    if not isinstance(data, dict):
+        return _fmt_generic(data)
+    parts: list[str] = []
+    ok = data.get("ok")
+    parts.append(f"Valid: {'yes' if ok else 'no'}")
+    if data.get("normalized_sql"):
+        parts.append(f"Normalized SQL: {data['normalized_sql']}")
+    issues = data.get("issues")
+    if isinstance(issues, list) and issues:
+        for issue in issues:
+            if isinstance(issue, dict):
+                parts.append(f"  Issue: {issue.get('message', '?')} ({issue.get('severity', 'error')})")
+            else:
+                parts.append(f"  Issue: {issue}")
+    if data.get("risk_level"):
+        parts.append(f"Risk level: {data['risk_level']}")
+    if data.get("warnings"):
+        parts.append(f"Warnings: {data['warnings']}")
+    if data.get("requires_confirmation"):
+        parts.append("Requires user confirmation before execution.")
+    return "\n".join(parts)
+
+
+def _fmt_explain_sql(data: Any) -> str:
+    if not isinstance(data, dict):
+        return _fmt_generic(data)
+    parts: list[str] = []
+    if data.get("ok") is not None:
+        parts.append(f"OK: {data['ok']}")
+    plan = data.get("plan") or data.get("explain_plan")
+    if plan:
+        plan_text = json.dumps(plan, ensure_ascii=False, default=str) if not isinstance(plan, str) else plan
+        if len(plan_text) > 3000:
+            plan_text = plan_text[:3000] + "…[truncated]"
+        parts.append(f"EXPLAIN plan:\n{plan_text}")
+    if data.get("issues"):
+        parts.append(f"Issues: {data['issues']}")
+    if data.get("suggestions"):
+        parts.append(f"Suggestions: {data['suggestions']}")
+    text = "\n".join(parts)
+    return text if text else _fmt_generic(data)
+
+
+def _fmt_list_items(data: Any) -> str:
+    if isinstance(data, dict):
+        items = data.get("tables") or data.get("databases") or data.get("items")
+        if isinstance(items, list):
+            count = len(items)
+            preview = items[:30]
+            names = [str(x.get("name", x) if isinstance(x, dict) else x) for x in preview]
+            result = f"Count: {count}\nItems: {', '.join(names)}"
+            if count > 30:
+                result += f" …+{count - 30}"
+            return result
+    return _fmt_generic(data)
+
+
+def _fmt_ask_user(data: Any) -> str:
+    if not isinstance(data, dict):
+        return _fmt_generic(data)
+    parts: list[str] = []
+    if data.get("pending"):
+        parts.append("Status: waiting for user response")
+    if data.get("question"):
+        parts.append(f"Question: {data['question']}")
+    if data.get("options"):
+        parts.append(f"Options: {data['options']}")
+    return "\n".join(parts) if parts else _fmt_generic(data)
 
 
 def _list_update_items(value: Any) -> list[Any]:
-    """Only list-valued memory_updates are accepted.
-
-    Model-side shape mistakes should not poison compressed memory by iterating a
-    string/dict as many tiny items. The next decision retry or tool evidence can
-    still provide valid structured updates.
-    """
     return value if isinstance(value, list) else []
 
 
-def _inject_stuck_loop_hint(state: LoopState, transcript: list[str]) -> None:
-    """If the last N calls are the same tool with the same error, inject a
-    transcript hint telling the model it's stuck.
-
-    This prevents the model from wasting the entire step budget retrying a
-    validation bug (e.g. the SchemaGuard EXTRACT/FROM false-positive that
-    caused 66 identical retries in production).
-    """
+def _inject_stuck_loop_hint(state: LoopState, messages: list[LLMMessage]) -> str:
+    """Detect and handle stuck loops. Returns 'escalate' if the model should be
+    force-finished, empty string otherwise."""
+    recent = state.calls
+    # Check escalation threshold first (higher priority)
+    n_esc = _STUCK_LOOP_ESCALATION
+    tail_esc = recent[-n_esc:]
+    if len(tail_esc) >= n_esc and all(not r.ok for r in tail_esc) and len({r.tool for r in tail_esc}) == 1:
+        logger.warning("stuck_loop_escalation tool=%s repeats=%d", tail_esc[0].tool, n_esc)
+        messages.append(LLMMessage("user",
+            f"CRITICAL: tool `{tail_esc[0].tool}` has failed {n_esc} consecutive times. "
+            f"You MUST call finish NOW with an explanation of the limitation. "
+            f"Do not attempt any more tool calls."
+        ))
+        return "escalate"
+    # Check initial hint threshold
     n = _STUCK_LOOP_THRESHOLD
-    recent = state.calls[-n:]
-    if len(recent) < n:
-        return
-    if all(not r.ok for r in recent) and len({r.tool for r in recent}) == 1 and len({r.summary for r in recent}) == 1:
-        logger.warning("stuck_loop_detected tool=%s repeats=%d", recent[0].tool, n)
-        transcript.append(
-            f"WARNING: tool `{recent[0].tool}` has failed {n} consecutive times "
+    tail = recent[-n:]
+    if len(tail) >= n and all(not r.ok for r in tail) and len({r.tool for r in tail}) == 1 and len({r.summary for r in tail}) == 1:
+        logger.warning("stuck_loop_detected tool=%s repeats=%d", tail[0].tool, n)
+        messages.append(LLMMessage("user",
+            f"WARNING: tool `{tail[0].tool}` has failed {n} consecutive times "
             f"with the same error. This is likely a validation limitation, not "
             f"a fixable SQL issue. DO NOT retry the same approach — either try "
             f"a fundamentally different SQL structure, use a different tool, "
             f"or call finish with an explanation of the limitation."
-        )
+        ))
+    return ""
 
 
 def _looks_cancelled(exc: Exception) -> bool:

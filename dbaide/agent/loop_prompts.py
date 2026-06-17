@@ -1,8 +1,9 @@
-"""Prompt construction for the Ask agent loop.
+"""Prompt construction for the Ask agent loop (conversation-stream architecture).
 
-Keeping the long decision prompt outside ``loop.py`` makes the loop easier to
-read as an execution controller while preserving the exact policy surface the
-LLM sees.
+The system prompt is sent once as messages[0]. The initial user message (question,
+context, prior turns) is messages[1]. All subsequent rounds append assistant/user
+messages to the growing conversation — the model sees its own prior decisions and
+full tool results directly.
 """
 
 from __future__ import annotations
@@ -14,16 +15,29 @@ from dbaide.agent.schema_context import decision_notes_block
 from dbaide.i18n import answer_language_directive
 
 
-# Defaults — used when Session values are unavailable (tests, direct construction).
-_DEFAULT_LATEST_RESULT_LIMIT = 4000
 _DEFAULT_PRIOR_TURNS_WINDOW = 3
-PRIOR_TURN_ANSWER_CHARS = 160
-PRIOR_TURN_SQL_CHARS = 160
+PRIOR_TURN_ANSWER_CHARS = 300
+PRIOR_TURN_SQL_CHARS = 300
 
 
 def estimate_tokens(text: str) -> int:
-    """Rough token estimate (~3 chars/token for mixed CJK/Latin content)."""
-    return max(1, len(text) // 3)
+    """Rough token estimate that accounts for CJK content.
+
+    CJK characters are ~1.5 tokens each on average (often 1-2 tokens per char).
+    ASCII/Latin content is ~4 chars per token. JSON/code overhead sits in between.
+    We scan for CJK ranges and weight accordingly rather than using a flat ratio.
+    """
+    if not text:
+        return 1
+    cjk = 0
+    for ch in text:
+        cp = ord(ch)
+        if (0x4E00 <= cp <= 0x9FFF or 0x3400 <= cp <= 0x4DBF
+                or 0xF900 <= cp <= 0xFAFF or 0x2E80 <= cp <= 0x2EFF
+                or 0x3000 <= cp <= 0x303F or 0xFF00 <= cp <= 0xFFEF):
+            cjk += 1
+    ascii_chars = len(text) - cjk
+    return max(1, int(cjk * 1.5 + ascii_chars / 4))
 
 
 class DecisionPromptBuilder:
@@ -34,7 +48,7 @@ class DecisionPromptBuilder:
         lang_directive = answer_language_directive(state.answer_language)
         prefetched = getattr(self.orchestrator.run_state, "schema_prefetched", False)
         prefetch_hint = (
-            "Schema evidence has been pre-fetched and is visible in the latest tool results. "
+            "Schema evidence has been pre-fetched and is visible in the conversation. "
             "Use it directly — do NOT call retrieve_schema_context or discover_schema again "
             "unless the evidence is insufficient.\n"
         ) if prefetched else ""
@@ -43,39 +57,22 @@ class DecisionPromptBuilder:
             "You are DBAide, a database assistant operating in a tool loop.\n"
             "You are the only decision-making brain. Tools collect evidence; they do not decide "
             "which schema, metric, filter, or final answer is correct. Think, act, incorporate the "
-            "result into memory, then choose the next step until the user's single intent is solved.\n"
+            "result, then choose the next step until the user's single intent is solved.\n"
             "</role>\n\n"
 
-            "<rules>\n"
-            "<memory>\n"
-            "Keep global sight of the goal and the compressed working memory; it preserves key facts "
-            "and raw evidence refs (mem:n, work-step/report/SQL-artifact ids). When the visible summary "
-            "lacks a detail you already observed, call retrieve_memory_item(ref=...) instead of re-running "
-            "the tool; don't call it when the summary is already enough.\n"
-            "Only the LATEST tool results appear in the user prompt. For earlier results, rely on the "
-            "working memory summary or call retrieve_memory_item.\n"
-            "</memory>\n\n"
+            "<context>\n"
+            "This conversation is a continuous stream. You see your own prior decisions and full "
+            "tool results as earlier messages. Use this context directly — no need to retrieve "
+            "earlier results. When the context grows large, older messages may be replaced by a "
+            "compressed summary; rely on the summary for historical context.\n"
+            "</context>\n\n"
 
+            "<rules>\n"
             "<errors>\n"
             "Treat failed tool calls as observations, not as the end of the task. Read the error, "
             "then decide whether to use another tool, answer from existing evidence, or ask for "
             "irreducible business intent.\n"
             "</errors>\n\n"
-
-            "<assessment>\n"
-            "Each round, briefly assess the previous tool's result in `result_assessment` (what it "
-            "showed and what you conclude) — it is attached to that step so the work log reads "
-            "did-what → result → judgment.\n"
-            "</assessment>\n\n"
-
-            "<memory-updates>\n"
-            "Maintain memory deliberately via memory_updates each round: put a conclusion you have "
-            "VERIFIED with tool evidence or a user-confirmed fact in `verified` (settled context — "
-            "do not re-investigate); put tentative observations in `findings`, guesses in "
-            "`hypotheses`, ruled-out tables/columns/interpretations in `excluded_paths` (with a "
-            "reason), and remaining unknowns in `open_questions`. This is how you keep track "
-            "of what is confirmed vs. still open across rounds.\n"
-            "</memory-updates>\n\n"
 
             "<schema-discovery>\n"
             "Use retrieve_schema_context first for data questions. It returns schema evidence: "
@@ -96,7 +93,7 @@ class DecisionPromptBuilder:
 
             "<user-notes>\n"
             "User notes are authoritative. If a note says a table/column is deprecated, replaced, "
-            "has a timezone, or defines a status value, obey it and preserve that fact in memory.\n"
+            "has a timezone, or defines a status value, obey it and preserve that fact.\n"
             "</user-notes>\n\n"
 
             "<sql-execution>\n"
@@ -116,24 +113,13 @@ class DecisionPromptBuilder:
             "<clarification>\n"
             "Separate what the DATA CAN REVEAL from what only the USER'S INTENT CAN DECIDE.\n"
             "(a) FACTS the database can reveal — anything determinable from schema, data, or an "
-            "authoritative user note. NEVER ask the user for these; discover them with "
-            "retrieve_schema_context, describe_table, retrieve_join_context, column_stats, or "
-            "focused execute_sql(exploratory=true). When you feel like asking about something "
-            "the schema or data could reveal, first ask whether another tool call could answer it; "
-            "if yes, call that tool instead of ask_user.\n"
+            "authoritative user note. NEVER ask the user for these; discover them with tools.\n"
             "(b) INTENT the data cannot decide — what the question MEANS, not what the database "
-            "contains. A reasonable question often admits several interpretations that produce "
-            "materially different results; when the question text, today's date, the schema, "
-            "the data, and user notes cannot tell which interpretation the user means, the gap "
-            "is a business decision. You MUST resolve it with ask_user — offering concrete "
-            "interpretations as options — BEFORE generating SQL. Never silently pick one default "
-            "and present the result as if it were unambiguous.\n"
-            "Test each assumption: would another reasonable user mean something different, "
-            "would that change the answer, can any tool settle it? Tool → use it. Nothing → ask.\n"
+            "contains. When the question text, today's date, the schema, the data, and user "
+            "notes cannot tell which interpretation the user means, resolve it with ask_user "
+            "— offering concrete interpretations as options — BEFORE generating SQL.\n"
             "Resolve everything discoverable first, then ask ONE consolidated question covering "
             "only the genuinely undecidable choices. Honour Confirmed criteria; never re-ask.\n"
-            "Before each ask_user, reason in `thought`: which assumption is undecidable, why no "
-            "tool can settle it, and how it changes the result.\n"
             "</clarification>\n\n"
 
             "<no-invention>\n"
@@ -149,12 +135,13 @@ class DecisionPromptBuilder:
             "</tools>\n\n"
 
             "<response-format>\n"
-            "Return a single JSON object. Examples:\n"
-            '  {"action":"call_tool","tool":"...","args":{...},"thought":"...","result_assessment":"..."}\n'
+            "Return a single JSON object each round. Examples:\n"
+            '  {"action":"call_tool","tool":"...","args":{...},"thought":"..."}\n'
             '  {"action":"finish","answer":"markdown answer for the user"}\n'
-            "Optional: add memory_updates to persist observations across rounds:\n"
-            '  "memory_updates":{"verified":["fact"],"findings":["observation"],"excluded_paths":[{"target":"t","reason":"r"}]}\n'
-            "Fields: verified, findings, hypotheses, excluded_paths, open_questions — all optional arrays.\n"
+            "Optional fields:\n"
+            '  "memory_updates":{"verified":["fact"],"excluded_paths":[{"target":"t","reason":"r"}]}\n'
+            "memory_updates.verified: facts confirmed with tool evidence (carried across runs).\n"
+            "memory_updates.excluded_paths: ruled-out tables/columns/interpretations.\n"
             "</response-format>\n\n"
 
             "<batching>\n"
@@ -162,7 +149,7 @@ class DecisionPromptBuilder:
             '  {"action":"call_tools","calls":[{"tool":"describe_table","args":{"table":"orders"}},'
             '{"tool":"describe_table","args":{"table":"users"}}],"thought":"..."}\n'
             "Batchable: describe_table, column_stats, profile_table, retrieve_schema_context, "
-            "inspect_metadata, retrieve_join_context, list_tables, retrieve_memory_item.\n"
+            "inspect_metadata, retrieve_join_context, list_tables.\n"
             "NEVER batch: generate_sql → validate_sql → execute_sql (each needs the previous "
             "result), ask_user, or any write.\n"
             "</batching>\n\n"
@@ -190,7 +177,8 @@ class DecisionPromptBuilder:
             "</tool-guidance>"
         )
 
-    def user_prompt(self, state: Any, latest_results: list[str]) -> str:
+    def initial_user_prompt(self, state: Any) -> str:
+        """Build the initial user message — called once at conversation start."""
         pins = _pinned_scope_labels(getattr(self.orchestrator, "schema_scope", None))
         pin_line = (f"User-attached schema (prefer these; retrieve_schema_context on them directly, "
                     f"no broad discovery needed): {', '.join(pins)}\n\n") if pins else ""
@@ -207,11 +195,8 @@ class DecisionPromptBuilder:
         today = date.today().isoformat()
         session = self.orchestrator.session
         prior_window = getattr(session, "prior_turns_window", _DEFAULT_PRIOR_TURNS_WINDOW)
-        result_limit = getattr(session, "latest_result_limit", _DEFAULT_LATEST_RESULT_LIMIT)
         prior_turns_block = _prior_turns_block(self.orchestrator, window_size=prior_window)
         prior_turns_line = f"{prior_turns_block}\n\n" if prior_turns_block else ""
-
-        latest_block = _latest_results_block(latest_results, limit=result_limit)
 
         return (
             f"User question:\n{state.question}\n\n"
@@ -224,9 +209,7 @@ class DecisionPromptBuilder:
             f"{criteria_line}"
             f"{pin_line}"
             f"{prior_turns_line}"
-            f"Compressed working memory:\n{self.orchestrator.run_state.memory.prompt_block() or '(empty)'}\n\n"
-            f"{latest_block}"
-        )
+        ).rstrip() + "\n"
 
 
 def tool_prompt_line(spec: Any) -> str:
@@ -248,7 +231,6 @@ def tool_prompt_line(spec: Any) -> str:
                     required_parts.append(key)
                 else:
                     optional_parts.append(f"{key}?")
-                # Append inline hint for non-obvious params
                 if desc and len(desc) <= 60:
                     target = required_parts if is_req else optional_parts
                     idx = len(target) - 1
@@ -265,18 +247,6 @@ def tool_prompt_line(spec: Any) -> str:
         fields = ", ".join(output.keys())
         line += f"\n  → {{{fields}}}"
     return line
-
-
-def _latest_results_block(latest_results: list[str], *, limit: int = _DEFAULT_LATEST_RESULT_LIMIT) -> str:
-    """Render only the latest step's tool results (on-demand context).
-
-    Older results are in compressed working memory and can be retrieved via
-    retrieve_memory_item(ref=...).
-    """
-    if not latest_results:
-        return "(first decision — no tool results yet)"
-    items = [_shorten(item, limit) for item in latest_results]
-    return "Latest tool results:\n" + "\n\n".join(items)
 
 
 def _prior_turns_block(orchestrator: Any, *, window_size: int = _DEFAULT_PRIOR_TURNS_WINDOW) -> str:

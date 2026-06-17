@@ -49,7 +49,7 @@ class _StressMock(LLMClient):
         system = messages[0].content if messages else ""
         user = messages[-1].content if messages else ""
         if "operating in a tool loop" in system:
-            return self._loop(system, user)
+            return self._loop(system, messages)
         if "Classify a database assistant" in system:
             return self._route(user)
         if "generate safe read-only SQL" in system:
@@ -75,23 +75,26 @@ class _StressMock(LLMClient):
             table = f'"{bare}"'
         return {"sql": f"SELECT COUNT(*) AS n FROM {table}", "rationale": "count", "confidence": 0.9}
 
-    def _loop(self, system: str, user: str) -> dict[str, Any]:
-        has_user_reply = "user_reply" in user or "User reply:" in user
+    def _loop(self, system: str, messages: list[LLMMessage]) -> dict[str, Any]:
+        all_content = "\n".join(m.content for m in messages)
+        has_user_reply = any("User reply:" in m.content for m in messages if m.role == "user")
         if has_user_reply:
             self.ambiguous = False
-        q = (user.split("User question:", 1)[1].split("Database scope:", 1)[0].strip()
-             if "User question:" in user else user)
-        prior = _count_work_steps(user)
+        # Extract the question from the initial user message (messages[1])
+        initial_user = messages[1].content if len(messages) > 1 else ""
+        q = (initial_user.split("User question:", 1)[1].split("Database scope:", 1)[0].strip()
+             if "User question:" in initial_user else initial_user)
+        tool_results = _collect_tool_results(messages)
         execute_allowed = "execute_sql is allowed" in system
         if any(k in q for k in ("有哪些表", "字段", "在哪里", "结构")):
-            if prior == 0:
+            if "retrieve_schema_context" not in tool_results:
                 return {"action": "call_tool", "tool": "retrieve_schema_context", "args": {"request": q}}
             return {"action": "finish", "answer": "Schema answer."}
         rs = self.orch.run_state
         active_tables = self._active_candidate_tables()
         if not active_tables:
             return {"action": "call_tool", "tool": "retrieve_schema_context", "args": {"request": q}}
-        if self.ambiguous and not has_user_reply and "ask_user" not in user:
+        if self.ambiguous and not has_user_reply and "ask_user" not in tool_results:
             return {
                 "action": "call_tool",
                 "tool": "ask_user",
@@ -100,7 +103,7 @@ class _StressMock(LLMClient):
         if (
             len(active_tables) >= 2
             and not rs.relations
-            and "retrieve_join_context" not in user
+            and "retrieve_join_context" not in tool_results
             and any(k in q for k in ("每个", "关联", "join"))
         ):
             return {
@@ -118,23 +121,22 @@ class _StressMock(LLMClient):
         return {"action": "finish", "answer": ""}
 
     def _active_candidate_tables(self) -> list[str]:
-        reports = self.orch.run_state.memory.schema_reports
-        if not reports:
+        schemas = self.orch.run_state.schemas
+        if not schemas:
             return []
-        out = []
-        for candidate in reports[-1].candidates:
-            if candidate.status == "active":
-                out.append(candidate.table)
-        return out
+        # Extract table names from schema keys like "main.orders"
+        return [key.split(".", 1)[-1] if "." in key else key for key in schemas]
 
 
-def _count_work_steps(user: str) -> int:
-    """Count completed work steps from the compressed working memory."""
-    count = 0
-    for line in user.split("\n"):
-        if re.match(r"^\s*- w\d+ \w+", line):
-            count += 1
-    return count
+def _collect_tool_results(messages: list[LLMMessage]) -> set[str]:
+    """Collect tool names from [Tool result: X] messages in the conversation."""
+    tools: set[str] = set()
+    for m in messages:
+        if m.role == "user" and m.content.startswith("[Tool result: "):
+            name = m.content.split("]", 1)[0].replace("[Tool result: ", "").strip()
+            if name:
+                tools.add(name)
+    return tools
 
 
 _SCHEMAS = {
@@ -216,10 +218,9 @@ def test_join_question_exercises_multi_table_path(_connections):
     orch = AskOrchestrator(build_adapter(cfg), Session(connection=cfg), mock)
     ref["orch"] = orch
     resp = AskAgentLoop(orch).run("统计每个用户的订单数", execute=True)
-    active = [c for c in orch.run_state.memory.schema_reports[-1].candidates if c.status == "active"]
-    assert len(active) >= 2
+    # In conversation-stream architecture, schemas are tracked in run_state.schemas
+    assert len(orch.run_state.schemas) >= 2                    # at least 2 tables discovered
     assert len(orch.run_state.relations or []) >= 1            # FK retrieved by join evidence tool
-    assert orch.run_state.memory.join_reports                  # separate relation evidence path
     assert resp.result is not None
 
 
@@ -282,8 +283,9 @@ def test_user_notes_reach_the_sql_writer(_connections, tmp_path):
 
 class _AnnotateMock(_StressMock):
     """Drives the agent to save a note via annotate_object, then finish."""
-    def _loop(self, system, user):
-        if "Tool `annotate_object`" not in user:
+    def _loop(self, system, messages):
+        tool_results = _collect_tool_results(messages)
+        if "annotate_object" not in tool_results:
             return {"action": "call_tool", "tool": "annotate_object",
                     "args": {"scope": "table", "table": "orders", "note": "frozen: use orders_v2"}}
         return {"action": "finish", "answer": "Saved the note."}
@@ -307,11 +309,12 @@ def test_agent_annotate_object_persists(_connections, tmp_path):
 
 class _ProfileMock(_StressMock):
     """Drives the profile path: describe_table → column_stats → finish."""
-    def _loop(self, system, user):
-        if "Tool `describe_table`" not in user:
+    def _loop(self, system, messages):
+        tool_results = _collect_tool_results(messages)
+        if "describe_table" not in tool_results:
             return {"action": "call_tool", "tool": "describe_table",
                     "args": {"table": "orders", "database": "main"}}
-        if "Tool `column_stats`" not in user:
+        if "column_stats" not in tool_results:
             return {"action": "call_tool", "tool": "column_stats",
                     "args": {"table": "orders", "database": "main"}}
         return {"action": "finish", "answer": "Profile done."}
@@ -348,8 +351,9 @@ class _DiagnoseMock(_StressMock):
     """Drives the explain/diagnose path: explain_sql on a given query, then finish."""
     SQL = "SELECT * FROM orders WHERE total > 100"
 
-    def _loop(self, system, user):
-        if "explain_sql" not in user:
+    def _loop(self, system, messages):
+        tool_results = _collect_tool_results(messages)
+        if "explain_sql" not in tool_results:
             return {"action": "call_tool", "tool": "explain_sql", "args": {"sql": self.SQL}}
         return {
             "action": "finish",

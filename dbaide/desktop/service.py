@@ -83,6 +83,7 @@ def _model_payload(model: ModelConfig) -> dict[str, Any]:
         "has_api_key": bool(model.api_key or model.api_key_env),
         "model": model.model,
         "timeout_seconds": model.timeout_seconds,
+        "context_length": model.context_length,
     }
 
 
@@ -231,6 +232,7 @@ class DesktopService:
             api_key=api_key,
             model=str(payload.get("model") or ""),
             timeout_seconds=int(payload.get("timeout_seconds") or payload.get("timeout") or 60),
+            context_length=payload.get("context_length") or 32000,
         )
         _validate_model_config(model)
         self.cfg.upsert_model(model, make_default=bool(payload.get("make_default", False)))
@@ -1234,6 +1236,7 @@ class DesktopService:
             api_key=api_key,
             model=str(payload.get("model") or ""),
             timeout_seconds=int(payload.get("timeout_seconds") or payload.get("timeout") or 60),
+            context_length=payload.get("context_length") or 32000,
         )
         _validate_model_config(model)
         llm = build_llm_client(model)
@@ -1628,6 +1631,7 @@ class DesktopService:
                 "base_url": model.base_url, "api_key_env": model.api_key_env,
                 "api_key": model.api_key,
                 "model": model.model, "timeout_seconds": model.timeout_seconds,
+                "context_length": model.context_length,
             }
             m_dict = {k: v for k, v in m_dict.items() if v not in (None, "", 0)}
             m_dict.setdefault("name", name)

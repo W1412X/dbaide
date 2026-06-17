@@ -48,7 +48,6 @@ class ResourcePolicy:
     agent_max_steps: int = 64            # tool-loop iterations before the agent must answer
     prior_turns_window: int = 3          # how many prior session turns to show in the agent prompt
     max_batch_tools: int = 6             # max parallel tool calls the agent may issue per decision
-    result_preview_limit: int = 1400     # max chars of each tool result shown to the model
     latest_result_limit: int = 4000      # max chars of the latest step's full result in the prompt
 
     # Cost gates.
@@ -57,6 +56,10 @@ class ResourcePolicy:
 
     # Join sampling (rows sampled from the left table when probing a join).
     join_sample_size: int = 150
+
+    # Context compression trigger: compress when token estimate exceeds this
+    # percentage of the model's context_length. Range 50–95; default 80.
+    compress_threshold: int = 80
 
     def merged_with(self, overrides: dict[str, Any]) -> "ResourcePolicy":
         """Return a copy with any recognised numeric/string overrides applied."""
@@ -91,7 +94,7 @@ LOAD_PROFILES: dict[str, ResourcePolicy] = {
         agent_max_steps=64,
         prior_turns_window=3,
         max_batch_tools=6,
-        result_preview_limit=1400,
+
         latest_result_limit=4000,
         big_table_rows=1_000_000,
         explain_max_rows=5_000_000,
@@ -107,7 +110,7 @@ LOAD_PROFILES: dict[str, ResourcePolicy] = {
         agent_max_steps=64,
         prior_turns_window=3,
         max_batch_tools=6,
-        result_preview_limit=1400,
+
         latest_result_limit=4000,
         big_table_rows=5_000_000,
         explain_max_rows=20_000_000,
@@ -123,7 +126,7 @@ LOAD_PROFILES: dict[str, ResourcePolicy] = {
         agent_max_steps=64,
         prior_turns_window=5,
         max_batch_tools=6,
-        result_preview_limit=2000,
+
         latest_result_limit=6000,
         big_table_rows=50_000_000,
         explain_max_rows=200_000_000,

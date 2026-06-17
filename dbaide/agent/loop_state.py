@@ -8,9 +8,10 @@ from typing import Any
 from dbaide.agent.memory import AgentMemory
 from dbaide.agent.progressive_schema import DiscoveryResult, SchemaHit
 from dbaide.i18n import normalize
+from dbaide.llm import LLMMessage
 from dbaide.models import ColumnInfo, QueryResult
 
-LOOP_STATE_VERSION = 3
+LOOP_STATE_VERSION = 4
 
 
 def column_to_dict(col: ColumnInfo) -> dict[str, Any]:
@@ -73,10 +74,21 @@ def _schema_hit_from_dict(data: dict[str, Any]) -> SchemaHit:
     )
 
 
+def _message_to_dict(msg: LLMMessage) -> dict[str, str]:
+    return {"role": msg.role, "content": msg.content}
+
+
+def _message_from_dict(data: dict[str, Any]) -> LLMMessage:
+    return LLMMessage(
+        role=str(data.get("role") or "user"),
+        content=str(data.get("content") or ""),
+    )
+
+
 def dump_loop_state(
     orchestrator: Any,
     *,
-    transcript: list[str],
+    messages: list[LLMMessage],
     execute_allowed: bool,
 ) -> dict[str, Any]:
     """Capture loop context so a later user reply can resume the same run."""
@@ -91,7 +103,7 @@ def dump_loop_state(
         "database": orchestrator.run_state.database,
         "execute_allowed": execute_allowed,
         "answer_language": orchestrator.run_state.answer_language,
-        "transcript": list(transcript),
+        "messages": [_message_to_dict(m) for m in messages],
         "run_state": {
             "discovery": discovery_to_dict(orchestrator.run_state.discovery),
             "table": orchestrator.run_state.table,
@@ -115,6 +127,7 @@ def dump_loop_state(
             "memory": orchestrator.run_state.memory.to_dict(),
             "scope_used": bool(orchestrator.run_state.scope_used),
             "schema_prefetched": bool(orchestrator.run_state.schema_prefetched),
+            "thought_trace": list(orchestrator.run_state.thought_trace or []),
             "query_result": query_result_to_dict(orchestrator.run_state.query_result),
             "charts": list(orchestrator.run_state.charts or []),
             "executed_sqls": [
@@ -152,14 +165,22 @@ def query_result_from_dict(data: dict[str, Any] | None) -> QueryResult | None:
     )
 
 
-def restore_loop_state(orchestrator: Any, snapshot: dict[str, Any]) -> tuple[list[str], bool]:
-    """Restore orchestrator loop fields. Returns (transcript, execute_allowed)."""
+def restore_loop_state(orchestrator: Any, snapshot: dict[str, Any]) -> tuple[list[LLMMessage], bool]:
+    """Restore orchestrator loop fields. Returns (messages, execute_allowed)."""
     snapshot = snapshot if isinstance(snapshot, dict) else {}
     orchestrator.run_state.question = str(snapshot.get("question") or "")
     orchestrator.run_state.database = str(snapshot.get("database") or "")
     orchestrator.run_state.answer_language = normalize(snapshot.get("answer_language") or "en")
     execute_allowed = bool(snapshot.get("execute_allowed", True))
-    transcript = [str(x) for x in _list_or_empty(snapshot.get("transcript"))]
+
+    # Restore messages (conversation stream)
+    raw_messages = snapshot.get("messages")
+    if isinstance(raw_messages, list):
+        messages = [_message_from_dict(m) for m in raw_messages if isinstance(m, dict)]
+    else:
+        # Backward compat: old snapshots had "transcript" — build minimal messages
+        messages = []
+
     payload = snapshot.get("run_state") if isinstance(snapshot.get("run_state"), dict) else {}
 
     orchestrator.run_state.discovery = discovery_from_dict(payload.get("discovery"))
@@ -192,6 +213,7 @@ def restore_loop_state(orchestrator: Any, snapshot: dict[str, Any]) -> tuple[lis
     orchestrator.run_state.memory = AgentMemory.from_dict(payload.get("memory"))
     orchestrator.run_state.scope_used = bool(payload.get("scope_used", False))
     orchestrator.run_state.schema_prefetched = bool(payload.get("schema_prefetched", False))
+    orchestrator.run_state.thought_trace = [str(x) for x in _list_or_empty(payload.get("thought_trace"))]
     orchestrator.run_state.query_result = query_result_from_dict(payload.get("query_result"))
     charts_payload = payload.get("charts")
     orchestrator.run_state.charts = [
@@ -208,7 +230,7 @@ def restore_loop_state(orchestrator: Any, snapshot: dict[str, Any]) -> tuple[lis
             database=orchestrator.run_state.database,
             execute_allowed=execute_allowed,
         )
-    return transcript, execute_allowed
+    return messages, execute_allowed
 
 
 def _float_or_none(value: Any) -> float | None:

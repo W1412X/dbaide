@@ -5,6 +5,7 @@ from dbaide.agent.loop import LoopState, ToolCallRecord, _inject_stuck_loop_hint
 from dbaide.agent.toolkit.support import _safe_int, _safe_float, _tables_in_sql
 from dbaide.core.workflow import _extract_tables as workflow_extract_tables
 from dbaide.context.disclosure import DisclosureContext
+from dbaide.llm import LLMMessage
 from dbaide.models import TableInfo
 
 
@@ -321,11 +322,11 @@ class TestStuckLoopCircuitBreaker:
             ToolCallRecord(tool="execute_sql", args={"sql": "SELECT 1"}, ok=False, summary="ERROR: undisclosed table: x"),
         ]
         state = self._make_state(calls)
-        transcript: list[str] = []
-        _inject_stuck_loop_hint(state, transcript)
-        assert len(transcript) == 1
-        assert "WARNING" in transcript[0]
-        assert "execute_sql" in transcript[0]
+        messages: list[LLMMessage] = []
+        _inject_stuck_loop_hint(state, messages)
+        assert len(messages) == 1
+        assert "WARNING" in messages[0].content
+        assert "execute_sql" in messages[0].content
 
     def test_no_hint_with_only_two_failures(self):
         calls = [
@@ -333,9 +334,9 @@ class TestStuckLoopCircuitBreaker:
             ToolCallRecord(tool="execute_sql", args={"sql": "SELECT 1"}, ok=False, summary="ERROR: x"),
         ]
         state = self._make_state(calls)
-        transcript: list[str] = []
-        _inject_stuck_loop_hint(state, transcript)
-        assert len(transcript) == 0
+        messages: list[LLMMessage] = []
+        _inject_stuck_loop_hint(state, messages)
+        assert len(messages) == 0
 
     def test_no_hint_when_errors_differ(self):
         calls = [
@@ -344,9 +345,9 @@ class TestStuckLoopCircuitBreaker:
             ToolCallRecord(tool="execute_sql", args={"sql": "SELECT 1"}, ok=False, summary="ERROR: undisclosed table: x"),
         ]
         state = self._make_state(calls)
-        transcript: list[str] = []
-        _inject_stuck_loop_hint(state, transcript)
-        assert len(transcript) == 0
+        messages: list[LLMMessage] = []
+        _inject_stuck_loop_hint(state, messages)
+        assert len(messages) == 0
 
     def test_no_hint_when_tools_differ(self):
         calls = [
@@ -355,9 +356,9 @@ class TestStuckLoopCircuitBreaker:
             ToolCallRecord(tool="execute_sql", args={"sql": "SELECT 1"}, ok=False, summary="ERROR: x"),
         ]
         state = self._make_state(calls)
-        transcript: list[str] = []
-        _inject_stuck_loop_hint(state, transcript)
-        assert len(transcript) == 0
+        messages: list[LLMMessage] = []
+        _inject_stuck_loop_hint(state, messages)
+        assert len(messages) == 0
 
     def test_no_hint_when_last_call_succeeds(self):
         calls = [
@@ -366,10 +367,10 @@ class TestStuckLoopCircuitBreaker:
             ToolCallRecord(tool="execute_sql", args={"sql": "SELECT 1"}, ok=True, summary="ok"),
         ]
         state = self._make_state(calls)
-        transcript: list[str] = []
-        _inject_stuck_loop_hint(state, transcript)
+        messages: list[LLMMessage] = []
+        _inject_stuck_loop_hint(state, messages)
         # Last call succeeded, so all 3 are NOT all failures
-        assert len(transcript) == 0
+        assert len(messages) == 0
 
 
 class TestSafeTypeConversion:

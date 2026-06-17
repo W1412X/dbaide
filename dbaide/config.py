@@ -23,7 +23,7 @@ _CONNECTION_KEYS = {
     "name", "type", "database", "host", "port", "user", "password_env", "password", "path",
     "load_profile", "session_timezone",
 }
-_MODEL_KEYS = {"name", "provider", "base_url", "api_key_env", "api_key", "model", "timeout_seconds"}
+_MODEL_KEYS = {"name", "provider", "base_url", "api_key_env", "api_key", "model", "timeout_seconds", "context_length"}
 
 
 def _config_version(data: dict[str, Any]) -> int:

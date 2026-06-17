@@ -17,6 +17,30 @@ _VALID_TYPES = {"sqlite", "mysql", "mariadb", "postgres", "postgresql"}
 _VALID_LOAD_PROFILES = {"production", "staging", "dev"}
 _VALID_MODEL_PROVIDERS = {"none", "openai_compatible"}
 
+_TOKEN_UNITS = {"k": 1_000, "m": 1_000_000}
+
+
+def parse_token_count(value: Any) -> int:
+    """Parse a token count with optional k/m suffix. Examples: 32000, '128k', '1m'."""
+    if isinstance(value, (int, float)):
+        try:
+            return max(1, int(value))
+        except (ValueError, OverflowError):
+            return 0
+    text = str(value or "").strip().lower()
+    if not text:
+        return 0
+    for suffix, multiplier in _TOKEN_UNITS.items():
+        if text.endswith(suffix):
+            try:
+                return max(1, int(float(text[:-len(suffix)]) * multiplier))
+            except (ValueError, OverflowError):
+                return 0
+    try:
+        return max(1, int(float(text)))
+    except (ValueError, OverflowError):
+        return 0
+
 
 class ConnectionConfig:
     """Database connection configuration."""
@@ -73,6 +97,7 @@ class ModelConfig:
         api_key: str = "",
         model: str = "",
         timeout_seconds: int = 60,
+        context_length: int = 32000,
     ) -> None:
         self.name = name
         self.provider = str(provider or "none").strip().lower()
@@ -84,8 +109,12 @@ class ModelConfig:
         self.api_key_env = str(api_key_env or "")
         self.api_key = str(api_key or "")
         self.model = str(model or "")
+        self.context_length = max(4000, parse_token_count(context_length) or 32000)
         # Clamp timeout to valid range
-        timeout_seconds = int(timeout_seconds)
+        try:
+            timeout_seconds = int(timeout_seconds)
+        except (ValueError, OverflowError, TypeError):
+            timeout_seconds = 60
         if timeout_seconds < 1:
             self.timeout_seconds = 1
         elif timeout_seconds > 600:

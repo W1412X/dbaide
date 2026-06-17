@@ -95,12 +95,19 @@ class ModelForm(QWidget):
         self.timeout.setMaximumWidth(120)
         self.timeout.setRange(5, 600)
         self.timeout.setValue(60)
+        self.context_length = QSpinBox()
+        self.context_length.setFixedHeight(26)
+        self.context_length.setMaximumWidth(120)
+        self.context_length.setRange(4, 2048)
+        self.context_length.setValue(32)
+        self.context_length.setSuffix(" k")
         form.addRow(form_label(t("model.profile")), self.profile_name)
         form.addRow(form_label(t("model.provider")), self.provider)
         form.addRow(form_label(t("model.base_url")), self.base_url)
         form.addRow(form_label(t("model.api_key")), self.api_key)
         form.addRow(form_label(t("model.model_id")), self.model_id)
         form.addRow(form_label(t("model.timeout")), self.timeout)
+        form.addRow(form_label(t("model.context_length")), self.context_length)
         scroll.setWidget(inner)
         outer.addWidget(scroll)
 
@@ -111,6 +118,8 @@ class ModelForm(QWidget):
         self.base_url.setText(str(payload.get("base_url") or ""))
         self.model_id.setText(str(payload.get("model") or ""))
         self.timeout.setValue(int(payload.get("timeout_seconds") or 60))
+        ctx_k = max(4, int(payload.get("context_length") or 32000) // 1000)
+        self.context_length.setValue(ctx_k)
         self.api_key.clear()
         if payload.get("has_api_key"):
             self.api_key.setPlaceholderText(_pt("settings.api_key_saved"))
@@ -125,6 +134,7 @@ class ModelForm(QWidget):
         self.api_key.setPlaceholderText(_pt("settings.api_key_placeholder"))
         self.model_id.clear()
         self.timeout.setValue(60)
+        self.context_length.setValue(32)
 
     def payload(self, *, make_default: bool = False) -> dict:
         payload = {
@@ -133,6 +143,7 @@ class ModelForm(QWidget):
             "base_url": self.base_url.text().strip(),
             "model": self.model_id.text().strip(),
             "timeout_seconds": self.timeout.value(),
+            "context_length": self.context_length.value() * 1000,
             "make_default": make_default,
         }
         if self.api_key.text().strip():
@@ -175,8 +186,8 @@ class SettingsDialog(ChromeDialog):
             ("agent_max_steps", 1, 100),
             ("prior_turns_window", 0, 20),
             ("max_batch_tools", 1, 16),
-            ("result_preview_limit", 200, 10000),
             ("latest_result_limit", 500, 20000),
+            ("compress_threshold", 50, 95),
         )),
         ("res.group.build", (
             ("build_max_workers", 1, 32),

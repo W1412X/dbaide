@@ -152,7 +152,6 @@ class SchemaEvidenceRetriever:
             missing=missing,
             source_summary=source_summary,
         )
-        self.orch.run_state.memory.add_schema_report(report.to_memory_report())
         return report
 
     def _candidate(

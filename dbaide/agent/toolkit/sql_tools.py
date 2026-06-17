@@ -3,7 +3,6 @@ from __future__ import annotations
 
 import hashlib
 import inspect
-import json
 import logging
 from typing import Any
 
@@ -38,8 +37,9 @@ def _can_fast_execute(orchestrator, draft, disclosed) -> bool:
         return False
     if draft.confidence is not None and draft.confidence < 0.8:
         return False
-    if orchestrator.run_state.memory.open_questions:
-        return False
+    # In conversation-stream architecture, the model's own context serves as the
+    # "open questions" tracker. If it calls generate_sql with high confidence,
+    # we trust its judgment that no questions remain.
     return True
 
 

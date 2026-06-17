@@ -53,13 +53,15 @@ def test_decomposer_caps_and_falls_back_on_garbage():
     assert len(IntentDecomposer(_DecompMock({"nope": 1})).decompose("q")) == 1  # fallback
 
 
-def _count_steps(user: str) -> int:
-    count = 0
-    for line in user.split("\n"):
-        s = line.strip()
-        if re.match(r"^- w\d+ \w+", s):
-            count += 1
-    return count
+def _collect_tool_results(messages) -> list[str]:
+    """Collect tool names from [Tool result: X] messages in order."""
+    tools: list[str] = []
+    for m in messages:
+        if m.role == "user" and m.content.startswith("[Tool result: "):
+            name = m.content.split("]", 1)[0].replace("[Tool result: ", "").strip()
+            if name:
+                tools.append(name)
+    return tools
 
 
 # ── multi-intent end-to-end ──────────────────────────────────────────────────
@@ -67,15 +69,16 @@ def _count_steps(user: str) -> int:
 class MultiMock(LLMClient):
     def complete_json(self, messages, *, schema_hint=""):
         system = messages[0].content if messages else ""
-        user = messages[-1].content if messages else ""
         if system.startswith("You decompose"):
             return {"intents": [
                 {"type": "schema_explore", "text": "what columns does orders have"},
                 {"type": "data_query", "text": "count paid orders"},
             ]}
         if "tool loop" in system.lower():
-            q = user.split("User question:", 1)[1].split("Database scope:", 1)[0].strip() if "User question:" in user else user
-            n = _count_steps(user)
+            initial_user = messages[1].content if len(messages) > 1 else ""
+            q = initial_user.split("User question:", 1)[1].split("Database scope:", 1)[0].strip() if "User question:" in initial_user else initial_user
+            tool_results = _collect_tool_results(messages)
+            n = len(tool_results)
             if "columns" in q:
                 return {"action": "finish", "answer": "orders has id, amount, status."} if n else \
                        {"action": "call_tool", "tool": "discover_schema", "args": {"question": q}}

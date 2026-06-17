@@ -80,46 +80,49 @@ class AgentMockLLM(LLMClient):
 
     def _loop_decision(self, messages: list[LLMMessage]) -> dict[str, Any]:
         system = messages[0].content if messages else ""
-        user = messages[-1].content if messages else ""
-        question = _extract_loop_question(user)
-        prior = _count_completed_steps(user)
+        # Extract question from the initial user message (messages[1])
+        initial_user = messages[1].content if len(messages) > 1 else ""
+        question = _extract_loop_question(initial_user)
+        tool_results = _collect_tool_results(messages)
+        prior = len(tool_results)
         execute_allowed = "execute_sql is allowed" in system
 
         if any(k in question for k in ("产线", "有哪些表", "在哪里", "schema", "字段", "email")):
-            if prior == 0:
+            if "retrieve_schema_context" not in tool_results:
                 return {
                     "action": "call_tool",
                     "tool": "retrieve_schema_context",
                     "args": {"request": question},
                     "thought": "Retrieve relevant schema evidence",
                 }
-            return {"action": "finish", "answer": self._synthesize(user)}
+            all_content = "\n".join(m.content for m in messages)
+            return {"action": "finish", "answer": self._synthesize(all_content)}
 
         if any(k in question for k in ("订单", "统计", "查")):
-            if prior == 0:
+            if "discover_schema" not in tool_results and "retrieve_schema_context" not in tool_results:
                 return {
                     "action": "call_tool",
                     "tool": "discover_schema",
                     "args": {"question": question},
                     "thought": "Find relevant tables",
                 }
-            if prior == 1:
+            if "describe_table" not in tool_results:
                 return {
                     "action": "call_tool",
                     "tool": "describe_table",
                     "args": {"table": "orders", "database": ""},
                     "thought": "Describe orders table",
                 }
-            if prior == 2:
+            if "generate_sql" not in tool_results:
                 return {
                     "action": "call_tool",
                     "tool": "generate_sql",
                     "args": {"question": question, "table": "orders", "database": ""},
                     "thought": "Generate SQL",
                 }
-            if prior == 3:
+            if "validate_sql" not in tool_results:
                 return {"action": "call_tool", "tool": "validate_sql", "args": {}, "thought": "Validate SQL"}
-            if prior == 4 and execute_allowed:
+            if execute_allowed and "execute_sql" not in tool_results:
                 return {"action": "call_tool", "tool": "execute_sql", "args": {}, "thought": "Execute SQL"}
             return {"action": "finish", "answer": "Query complete."}
 
@@ -145,18 +148,15 @@ def _extract_question(user: str) -> str:
     return block.strip()
 
 
-def _count_completed_steps(user: str) -> int:
-    """Count completed work steps from the compressed working memory.
-
-    The memory's [Work Done] section lists lines like:
-        - w1 describe_table [ok] → ...
-        - w2 generate_sql [ok] → ...
-    """
-    count = 0
-    for line in user.split("\n"):
-        if re.match(r"^\s*- w\d+ \w+", line):
-            count += 1
-    return count
+def _collect_tool_results(messages: list[LLMMessage]) -> set[str]:
+    """Collect tool names from [Tool result: X] messages in the conversation."""
+    tools: set[str] = set()
+    for m in messages:
+        if m.role == "user" and m.content.startswith("[Tool result: "):
+            name = m.content.split("]", 1)[0].replace("[Tool result: ", "").strip()
+            if name:
+                tools.add(name)
+    return tools
 
 
 def _object_relevant(name: str, question: str, context: str = "") -> bool:

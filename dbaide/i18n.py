@@ -425,8 +425,9 @@ _STRINGS: dict[str, dict[str, str]] = {
     "res.join_sample_size": {"en": "Join sample size (rows)", "zh": "关联采样行数"},
     "res.prior_turns_window": {"en": "Prior turns in context", "zh": "上下文中的历史轮数"},
     "res.max_batch_tools": {"en": "Max parallel tool calls", "zh": "最大并行工具调用数"},
-    "res.result_preview_limit": {"en": "Result preview limit (chars)", "zh": "结果预览上限（字符）"},
+
     "res.latest_result_limit": {"en": "Latest result limit (chars)", "zh": "最新结果上限（字符）"},
+    "res.compress_threshold": {"en": "Compress threshold (%)", "zh": "压缩触发阈值（%）"},
     "res.max_concurrent_runs": {"en": "Max concurrent runs", "zh": "最大并发运行数"},
     "res.per_run_note": {
         "en": "How many sessions may run at once. The limits below apply to each run individually.",
@@ -840,6 +841,7 @@ _STRINGS: dict[str, dict[str, str]] = {
     "model.api_key": {"en": "API Key", "zh": "API Key"},
     "model.model_id": {"en": "Model ID", "zh": "模型 ID"},
     "model.timeout": {"en": "Timeout (s)", "zh": "超时（秒）"},
+    "model.context_length": {"en": "Context length (k)", "zh": "上下文长度（k）"},
     # Right-panel header menu
     "toast.trace_copied": {"en": "Trace copied to clipboard", "zh": "当前轨迹已复制到剪贴板"},
     "toast.conversation_copied": {"en": "Conversation trace copied", "zh": "整个对话轨迹已复制"},

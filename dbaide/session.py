@@ -17,8 +17,8 @@ class Session:
     agent_max_steps: int = 64
     prior_turns_window: int = 3
     max_batch_tools: int = 6
-    result_preview_limit: int = 1400
     latest_result_limit: int = 4000
+    compress_threshold: int = 80
 
     @classmethod
     def from_policy(cls, connection: ConnectionConfig, policy, **kwargs) -> "Session":
@@ -28,6 +28,6 @@ class Session:
         kwargs.setdefault("agent_max_steps", policy.agent_max_steps)
         kwargs.setdefault("prior_turns_window", policy.prior_turns_window)
         kwargs.setdefault("max_batch_tools", policy.max_batch_tools)
-        kwargs.setdefault("result_preview_limit", policy.result_preview_limit)
         kwargs.setdefault("latest_result_limit", policy.latest_result_limit)
+        kwargs.setdefault("compress_threshold", policy.compress_threshold)
         return cls(connection=connection, **kwargs)

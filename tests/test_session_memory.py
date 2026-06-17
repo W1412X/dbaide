@@ -56,7 +56,7 @@ def test_prior_turns_render_in_user_prompt_with_qa_and_sql(tmp_path):
          "selected_sql": "SELECT city, count(*) FROM orders GROUP BY city",
          "status": "completed", "clarifications": []},
     ]
-    prompt = DecisionPromptBuilder(orch).user_prompt(_state("now follow up"), [])
+    prompt = DecisionPromptBuilder(orch).initial_user_prompt(_state("now follow up"))
 
     assert "[Prior turns in this session]" in prompt
     # Both turns are visible (window=3, total=2), with Q/A/SQL summaries.
@@ -76,7 +76,7 @@ def test_prior_turns_signal_earlier_when_window_overflows(tmp_path):
         {"question": f"q{i}", "answer_markdown": f"a{i}", "selected_sql": "", "status": "completed"}
         for i in range(7)
     ]
-    prompt = DecisionPromptBuilder(orch).user_prompt(_state("q"), [])
+    prompt = DecisionPromptBuilder(orch).initial_user_prompt(_state("q"))
 
     # Window is 3 of 7 — the prompt must say so AND name how to page back.
     assert "showing 3 of 7" in prompt
@@ -184,7 +184,7 @@ def test_prior_turns_header_hint_uses_offset_zero(tmp_path):
          "status": "completed"}
         for i in range(5)
     ]
-    prompt = DecisionPromptBuilder(orch).user_prompt(_state("q"), [])
+    prompt = DecisionPromptBuilder(orch).initial_user_prompt(_state("q"))
     # Should suggest offset=0, NOT offset=<window_size>
     assert "list_earlier_turns(offset=0)" in prompt
     assert "list_earlier_turns(offset=3)" not in prompt
@@ -226,7 +226,7 @@ def test_no_prior_turns_block_when_session_empty(tmp_path):
     orch = _orch(tmp_path)
     orch._reset_loop_state("first question", "", True)
     orch.session_turns = []
-    prompt = DecisionPromptBuilder(orch).user_prompt(_state("first question"), [])
+    prompt = DecisionPromptBuilder(orch).initial_user_prompt(_state("first question"))
     assert "[Prior turns in this session]" not in prompt
 
 

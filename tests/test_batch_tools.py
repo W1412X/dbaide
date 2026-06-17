@@ -54,14 +54,27 @@ class _BatchLLM(LLMClient):
 def test_batch_runs_independent_reads_and_drops_gated_tools(tmp_path):
     orch = _orch(tmp_path, _BatchLLM())
     loop = AskAgentLoop(orch)
-    resp = loop.run("describe orders and users", execute=False)
+
+    # Track actual tool invocations via the runtime
+    tool_calls: list[str] = []
+    from dbaide.agent.runtime import AgentRuntime
+    _orig_call = AgentRuntime.call_tool
+
+    def _capture(self, name, args, ctx):
+        tool_calls.append(name)
+        return _orig_call(self, name, args, ctx)
+
+    AgentRuntime.call_tool = _capture
+    try:
+        resp = loop.run("describe orders and users", execute=False)
+    finally:
+        AgentRuntime.call_tool = _orig_call
 
     assert resp is not None and resp.status == "completed"
-    actions = [s.action for s in orch.run_state.memory.work_log]
     # Both describe_table calls in the one batch ran...
-    assert actions.count("describe_table") == 2
+    assert tool_calls.count("describe_table") == 2
     # ...and the gated execute_sql was NOT run from inside the batch.
-    assert "execute_sql" not in actions
+    assert "execute_sql" not in tool_calls
     # Only ONE decision produced the two reads (the round-trip we saved).
     assert orch.llm.decisions == 2  # the batch decision + the finish decision
 

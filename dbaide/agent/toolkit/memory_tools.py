@@ -1,12 +1,7 @@
-"""Working-memory retrieval tools.
+"""Session-turn retrieval tools.
 
-Two scopes here, same progressive-disclosure pattern:
-
-- `retrieve_memory_item`: within-turn — fetch archived raw evidence by ref
-  (mem:n, w2, schema:1, sql:1) when the compressed summary is insufficient.
-- `retrieve_turn` / `list_earlier_turns`: across turns of this chat session —
-  fetch a prior turn's full clarifications/SQL/answer/disclosed tables, or page
-  back to turns before the default visible window.
+Provides cross-turn access: fetch a prior turn's full clarifications/SQL/answer/
+disclosed tables, or page back to turns before the default visible window.
 """
 from __future__ import annotations
 
@@ -14,18 +9,13 @@ from typing import Any
 
 from dbaide.agent.toolkit.support import _err, _string_list
 from dbaide.tools.registry import ToolContext, ToolRegistry, ToolResult
-from dbaide.tools.specs import LIST_EARLIER_TURNS, RETRIEVE_MEMORY_ITEM, RETRIEVE_TURN
+from dbaide.tools.specs import LIST_EARLIER_TURNS, RETRIEVE_TURN
 
-# How many of the most-recent completed turns the user prompt summarises by
-# default. Mirrors loop_prompts.PRIOR_TURNS_WINDOW; kept local so a tool call
-# without an explicit `offset` defaults to the right cut-off.
 _DEFAULT_PRIOR_WINDOW = 3
 _LIST_EARLIER_DEFAULT_LIMIT = 5
 
 
 def _resolve_turn_index(orchestrator, turn_id: str) -> int:
-    """Map a tN turn_id back to the 0-based index in orchestrator.session_turns.
-    Returns -1 if the id is malformed or out of range."""
     raw = str(turn_id or "").strip().lower()
     if not raw.startswith("t"):
         return -1
@@ -45,24 +35,6 @@ def _answer_summary(text: str, limit: int = 160) -> str:
 
 
 def register(registry: ToolRegistry, orchestrator) -> None:
-    def _retrieve_memory_item(args: dict[str, Any], _ctx: ToolContext) -> ToolResult:
-        ref = str(args.get("ref") or "").strip()
-        if not ref:
-            return ToolResult(ok=False, error=_err("retrieve_memory_item", "ref is required"))
-        item = orchestrator.run_state.memory.retrieve_archive(ref)
-        if item is None:
-            return ToolResult(ok=False, error=_err("retrieve_memory_item", f"memory ref not found: {ref}"))
-        return ToolResult(
-            ok=True,
-            data={
-                "id": item.id,
-                "action": item.action,
-                "summary": item.summary,
-                "source_refs": list(item.source_refs),
-                "payload": item.payload,
-            },
-        )
-
     def _retrieve_turn(args: dict[str, Any], _ctx: ToolContext) -> ToolResult:
         turn_id = str(args.get("turn_id") or "").strip()
         idx = _resolve_turn_index(orchestrator, turn_id)
@@ -79,8 +51,6 @@ def register(registry: ToolRegistry, orchestrator) -> None:
         turn = orchestrator.session_turns[idx]
         include = _string_list(args.get("include"))
         all_fields = {"question", "status", "clarifications", "sql", "answer", "tables"}
-        # Empty include → return everything; otherwise filter to a whitelist so
-        # callers can shave their context window when they only need one field.
         wanted = set(include) if include else all_fields
         invalid = sorted(wanted - all_fields)
         if invalid:
@@ -128,9 +98,6 @@ def register(registry: ToolRegistry, orchestrator) -> None:
             limit = _LIST_EARLIER_DEFAULT_LIMIT
         offset = max(0, offset)
         limit = max(1, limit)
-        # The default prompt window already shows the last N turns; this tool
-        # pages turns BEFORE that window. If the caller passes offset=0 with no
-        # other hint, surface the full earlier range up to (total - window).
         end = min(offset + limit, total)
         slice_ = turns[offset:end]
         out = []
@@ -149,6 +116,5 @@ def register(registry: ToolRegistry, orchestrator) -> None:
             "window_size": getattr(orchestrator.session, "prior_turns_window", _DEFAULT_PRIOR_WINDOW),
         })
 
-    registry.register(RETRIEVE_MEMORY_ITEM, _retrieve_memory_item)
     registry.register(RETRIEVE_TURN, _retrieve_turn)
     registry.register(LIST_EARLIER_TURNS, _list_earlier_turns)

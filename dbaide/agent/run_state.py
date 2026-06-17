@@ -67,6 +67,8 @@ class RunState:
     clarify_questions: str = ""
 
     fail_reason: str = ""
+    # Model reasoning trace — one entry per decision for UI display and resume.
+    thought_trace: list[str] = field(default_factory=list)
     charts: list[dict[str, Any]] = field(default_factory=list)
     # Every successful execute_sql in this run (order preserved).
     executed_sqls: list[dict[str, Any]] = field(default_factory=list)

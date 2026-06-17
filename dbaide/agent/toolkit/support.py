@@ -122,7 +122,8 @@ def _collect_disclosed_schemas(
             columns = _find_schema_columns(orchestrator, name, db)
             if columns is None:
                 columns = orchestrator.schema.describe_table(name, database=db)
-                _remember_table_schema(orchestrator, name, db, columns)
+                if columns:
+                    _remember_table_schema(orchestrator, name, db, columns)
             if columns:
                 selected.append((db, name, columns))
         return selected
@@ -142,7 +143,8 @@ def _collect_disclosed_schemas(
     columns = _find_schema_columns(orchestrator, table, db)
     if columns is None:
         columns = orchestrator.schema.describe_table(table, database=db)
-        _remember_table_schema(orchestrator, table, db, columns)
+        if columns:
+            _remember_table_schema(orchestrator, table, db, columns)
     if not columns:
         return []
     return [(db, table, columns)]
@@ -222,7 +224,7 @@ def _tables_in_sql(sql: str) -> list[str]:
     tables: list[str] = []
     for index, token in enumerate(tokens[:-1]):
         if token.lower() in {"from", "join"}:
-            table = tokens[index + 1].strip('"`[]')
-            if table and table.lower() not in {"select", "where"} and table not in tables:
+            table = tokens[index + 1].strip('"`[]()').strip()
+            if table and table.lower() not in {"select", "where", ""} and not table.startswith("(") and table not in tables:
                 tables.append(table)
     return tables
