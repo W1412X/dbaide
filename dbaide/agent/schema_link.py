@@ -132,6 +132,9 @@ class SchemaEvidenceRetriever:
             if candidate.status == "active" and candidate.columns:
                 cols = [_column_from_payload(c) for c in candidate.columns]
                 self.orch.run_state.remember_table_schema(table, db, cols)
+                self.orch.schema.context.record_columns(
+                    table, cols, instance=self.orch.instance, database=db,
+                )
             if candidate.status != "active":
                 actions.append(f"kept inactive/missing evidence for {db}.{table}")
             else:

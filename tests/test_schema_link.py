@@ -212,6 +212,29 @@ def test_trace_is_a_true_call_tree(tmp_path):
     assert discover is not None and discover.parent_id == "step:1"
 
 
+def test_retrieve_registers_candidates_in_disclosure_context(tmp_path):
+    """Regression: retrieve() must register candidates in session.disclosure
+    (not just run_state.schemas) so SchemaGuard accepts SQL referencing them."""
+    from dbaide.validation.schema_guard import SchemaGuard
+
+    orch = _orch(tmp_path, hits=["orders", "users", "items"])
+    SchemaEvidenceRetriever(orch).retrieve("total paid order amount")
+
+    disclosure = orch.session.disclosure
+    for table in ("orders", "users", "items"):
+        key = f"shop.main.{table}"
+        assert key in disclosure.tables, (
+            f"{table} registered in run_state but missing from disclosure"
+        )
+
+    guard = SchemaGuard()
+    result = guard.validate(
+        "SELECT u.name, SUM(o.amount) FROM main.orders o JOIN main.users u ON u.id = o.user_id GROUP BY u.name",
+        disclosure,
+    )
+    assert result.ok, f"SchemaGuard rejected disclosed tables: {result.issues}"
+
+
 def test_normalize_db_table_splits_qualified_name():
     from dbaide.agent.schema_context import normalize_db_table
 
