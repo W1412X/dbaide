@@ -87,3 +87,40 @@ def test_sanitize_unquoted_event_handlers():
     assert "onload" not in sanitize_markdown_html('<svg onload=alert(1)>')
     assert "onclick" not in sanitize_markdown_html('<a onclick="alert(1)">x</a>')
     assert "onmouseover" not in sanitize_markdown_html("<div onmouseover='alert(1)'>x</div>")
+
+
+def test_md_escape_cell_handles_pipes_and_newlines():
+    from dbaide.rendering.table import md_escape_cell
+
+    assert md_escape_cell("a | b") == "a \\| b"
+    assert md_escape_cell("line1\nline2") == "line1<br>line2"
+    assert md_escape_cell("c:\\path") == "c:\\\\path"
+    # private alias kept for backwards compatibility
+    from dbaide.rendering.table import _md_escape
+    assert _md_escape is md_escape_cell
+
+
+def test_developer_tools_markdown_escapes_multiline_comment():
+    """A column comment with a newline/pipe must not break the schema-doc Markdown
+    table (each data row must keep exactly 6 cells → 7 pipes)."""
+    from dbaide.tools.dev import DeveloperTools
+
+    class _StubStore:
+        def instance_doc(self, instance): return None
+        def database_docs(self, instance): return [{"name": "main", "description": ""}]
+        def table_docs(self, instance, db): return [{"name": "t", "description": ""}]
+        def column_docs(self, instance, db, table):
+            return [{"name": "note", "data_type": "text",
+                     "source_comment": "first line\nsecond | piped line"}]
+        def database_dir(self, instance, db):
+            import pathlib
+            return pathlib.Path("/nonexistent")
+        def read_json(self, path): return None
+
+    md = DeveloperTools(_StubStore()).markdown("ci")
+    data_rows = [ln for ln in md.splitlines() if ln.startswith("| note ")]
+    assert data_rows, md
+    import re
+    structural = re.findall(r"(?<!\\)\|", data_rows[0])  # unescaped pipes = cell borders
+    assert len(structural) == 7                 # 6 cells, the comment's '|' is escaped
+    assert "<br>" in data_rows[0]               # newline collapsed, row intact

@@ -67,12 +67,16 @@ def export_csv(rows: list[dict[str, Any]], columns: list[str] | None = None) -> 
     return output.getvalue()
 
 
-def _md_escape(text: str) -> str:
+def md_escape_cell(text: str) -> str:
     """Make a value safe inside a Markdown table cell: escape the column separator and
     collapse newlines (either would otherwise break the table — a raw `|` splits the
     row into extra columns, a newline ends the row early)."""
     return (str(text).replace("\\", "\\\\").replace("|", "\\|")
             .replace("\r\n", "<br>").replace("\n", "<br>").replace("\r", "<br>"))
+
+
+# Backwards-compatible private alias.
+_md_escape = md_escape_cell
 
 
 def export_markdown_table(rows: list[dict[str, Any]], columns: list[str] | None = None) -> str:

@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from dbaide.assets import AssetStore
+from dbaide.rendering.table import md_escape_cell
 
 
 @dataclass(slots=True)
@@ -64,14 +65,17 @@ class DeveloperTools:
                 lines.append("| Column | Type | PK | Indexed | Profile | Summary |")
                 lines.append("| --- | --- | --- | --- | --- | --- |")
                 for col in self.store.column_docs(instance, db_name, table):
+                    # Escape every free-text cell (name/type/comment) for the Markdown
+                    # table: a stray '|' or newline in a column name or comment would
+                    # otherwise split or terminate the row.
                     lines.append(
                         "| {name} | {typ} | {pk} | {indexed} | {profile} | {summary} |".format(
-                            name=col.get("name") or "",
-                            typ=col.get("data_type") or "",
+                            name=md_escape_cell(col.get("name") or ""),
+                            typ=md_escape_cell(col.get("data_type") or ""),
                             pk="✓" if col.get("primary_key") else "",
                             indexed="✓" if col.get("indexed") else "",
                             profile=col.get("profile_status") or "",
-                            summary=str(col.get("source_comment") or "").replace("|", "\\|")[:240],
+                            summary=md_escape_cell(str(col.get("source_comment") or "")[:240]),
                         )
                     )
                 lines.append("")
