@@ -204,7 +204,15 @@ class InlineTrace(QFrame):
 
         self._restore_user_expansion()
         if self._state.follow_live:
-            self._tree.scrollToItem(last)
+            # Block the scrollbar's signals: this is a programmatic follow-scroll,
+            # not a user gesture, so it must not flip follow_live off if the last
+            # item lands a few pixels short of the exact bottom.
+            bar = self._tree.verticalScrollBar()
+            bar.blockSignals(True)
+            try:
+                self._tree.scrollToItem(last)
+            finally:
+                bar.blockSignals(False)
         # Spin while anything is still running; stop once everything has resolved.
         if self._running_items:
             self._busy.start()
@@ -295,9 +303,11 @@ class InlineTrace(QFrame):
             self._state.expanded_node_ids.discard(node_id)
 
     def _on_user_scroll(self, value: int) -> None:
+        # Tail behavior: scrolling up pauses auto-follow; scrolling back to the
+        # bottom resumes it. (Programmatic follow-scrolls block this signal, so
+        # only genuine user gestures reach here.)
         bar = self._tree.verticalScrollBar()
-        if value < bar.maximum() - 8:
-            self._state.follow_live = False
+        self._state.follow_live = _follow_at_bottom(value, bar.maximum())
 
     def _item_node_id(self, item: QTreeWidgetItem) -> str:
         data = item.data(0, _NODE_ROLE)
@@ -747,6 +757,14 @@ def _secondary_text(node: TraceNode) -> str:
 
 def _fmt_ms(ms: float) -> str:
     return f"{ms/1000:.1f}s" if ms >= 1000 else f"{ms:.0f}ms"
+
+
+def _follow_at_bottom(value: int, maximum: int, *, slack: int = 8) -> bool:
+    """Tail behavior: auto-follow is on iff the viewport sits at (or within
+    ``slack`` of) the bottom. Scrolling up pauses follow; scrolling back to the
+    bottom resumes it. When there's nothing to scroll (maximum 0) we're at the
+    bottom, so follow stays on."""
+    return value >= maximum - slack
 
 
 def _semibold() -> QFont:

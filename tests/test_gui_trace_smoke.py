@@ -648,6 +648,36 @@ def test_complete_turn_embeds_charts_inline(qapp):
     assert "Before" in first._markdown
 
 
+def test_follow_at_bottom_tail_logic():
+    from dbaide.desktop.components.trace import _follow_at_bottom
+
+    # At/near the bottom → follow on.
+    assert _follow_at_bottom(100, 100) is True
+    assert _follow_at_bottom(95, 100) is True       # within slack
+    # Scrolled up beyond slack → follow paused.
+    assert _follow_at_bottom(10, 100) is False
+    # Nothing to scroll (maximum 0) → at bottom → follow stays on.
+    assert _follow_at_bottom(0, 0) is True
+
+
+def test_trace_follow_pauses_and_resumes_on_scroll(qapp):
+    from dbaide.desktop.components.trace import InlineTrace
+
+    panel = InlineTrace()
+    panel.begin_live()
+    panel.append_live_event(progress_event(stage="loop", title="started", status="running", kind="agent"))
+    assert panel._state.follow_live is True
+
+    bar = panel._tree.verticalScrollBar()
+    # User scrolls up → follow pauses.
+    bar.setMaximum(100)
+    panel._on_user_scroll(0)
+    assert panel._state.follow_live is False
+    # User scrolls back to the bottom → follow resumes (tail behavior).
+    panel._on_user_scroll(100)
+    assert panel._state.follow_live is True
+
+
 def test_config_stream_answers_default_on(tmp_path):
     from dbaide.config import ConfigManager
     cfg = ConfigManager(path=tmp_path / "config.toml")
