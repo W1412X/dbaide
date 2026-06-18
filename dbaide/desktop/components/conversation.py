@@ -1571,6 +1571,14 @@ class ConversationView(QScrollArea):
         return self._current_turn is not None
 
     def finish_turn_error(self, message: str) -> None:
+        # Tear down any in-flight answer streaming first: stop the coalescing timer so
+        # it can't fire after the turn ends, and clear the live block reference so the
+        # NEXT turn's streamed answer doesn't get appended into this errored turn's
+        # block. (complete_turn does the same; the error path must too.)
+        self._chunk_timer.stop()
+        self._chunk_dirty = False
+        self._live_answer = None
+        self._live_answer_text = ""
         if self._current_turn:
             events = list((self._current_record or {}).get("events") or [])
             self._current_turn.set_trace(events)

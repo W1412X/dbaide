@@ -677,6 +677,23 @@ def test_answer_chunks_stream_live_then_finalize(qapp):
     assert v._turns[-1]["answer"] == "42 paid orders"  # full text stored for copy
 
 
+def test_finish_turn_error_clears_live_stream_state(qapp):
+    """A mid-stream error must tear down the live-answer block + chunk timer, so the
+    next turn's streamed answer doesn't render into the errored turn's block."""
+    from dbaide.desktop.components.conversation import ConversationView
+    v = ConversationView()
+    v.begin_turn("q1")
+    v.append_answer_chunk("partial ans")
+    assert v._live_answer is not None
+    v.finish_turn_error("connection dropped")
+    assert v._live_answer is None and v._live_answer_text == ""
+    assert not v._chunk_timer.isActive()
+    # The next turn streams into a FRESH block, not the previous (errored) one.
+    v.begin_turn("q2")
+    v.append_answer_chunk("new answer")
+    assert v._live_answer is not None and v._live_answer_text == "new answer"
+
+
 def test_complete_turn_embeds_charts_inline(qapp):
     from dbaide.desktop.components.chart_block import ChartBlock
     from dbaide.desktop.components.conversation import ConversationView, _MarkdownBlock
