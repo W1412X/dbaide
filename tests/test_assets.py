@@ -29,6 +29,20 @@ def make_db(path):
     conn.close()
 
 
+def test_instance_and_database_dirs_dont_collide_for_cjk_names(tmp_path):
+    """Non-ASCII connection/database names must map to distinct asset dirs. safe_name
+    is ASCII-only and collapses e.g. '订单库' and '客户库' both to 'default', which would
+    make two connections share (and clobber) one asset tree."""
+    store = AssetStore(tmp_path / "assets")
+    a = store.instance_dir("订单库")
+    b = store.instance_dir("客户库")
+    assert a != b                          # distinct CJK connections
+    assert store.instance_dir("shop").name == "shop"   # ASCII names stay readable/stable
+    da = store.database_dir("inst", "分析")
+    db_ = store.database_dir("inst", "报表")
+    assert da != db_                        # distinct CJK databases under one instance
+
+
 def test_asset_builder_creates_hierarchy(tmp_path):
     db = tmp_path / "app.db"
     make_db(db)

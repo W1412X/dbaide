@@ -24,7 +24,12 @@ class AssetStore:
         self.base_dir = Path(root).expanduser()
 
     def instance_dir(self, instance: str) -> Path:
-        return self.base_dir / "instances" / safe_name(instance)
+        # object_component, not safe_name: safe_name is ASCII-only, so non-ASCII
+        # connection names (e.g. Chinese "订单库" and "客户库") both collapse to
+        # "default" and would share one asset dir — their assets/fingerprints would
+        # thrash. object_component appends a short hash when sanitizing changed the
+        # name, keeping ASCII names stable while making CJK/special names unique.
+        return self.base_dir / "instances" / object_component(instance)
 
     def purge_instance(self, instance: str) -> bool:
         """Delete all offline assets for a connection (used when it is removed)."""
@@ -51,7 +56,9 @@ class AssetStore:
         return False
 
     def database_dir(self, instance: str, database: str) -> Path:
-        return self.instance_dir(instance) / "databases" / safe_name(database)
+        # object_component (collision-safe) so non-ASCII database names don't all
+        # collapse to "default" under one instance (see instance_dir).
+        return self.instance_dir(instance) / "databases" / object_component(database)
 
     def table_dir(self, instance: str, database: str, table: str) -> Path:
         return self.database_dir(instance, database) / "tables" / object_component(table)
