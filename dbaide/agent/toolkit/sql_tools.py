@@ -491,14 +491,25 @@ def register(registry: ToolRegistry, orchestrator) -> None:
                 orchestrator.run_state.sql_feedback = str(exc)
             return ToolResult(ok=False, error=_err("execute_sql", str(exc), retryable=False))
         except Exception as exc:
+            timeout_feedback = _sql_timeout_feedback(
+                validation.normalized_sql,
+                database=database,
+                exc=exc,
+                timeout_seconds=timeout_seconds or orchestrator.session.timeout_seconds,
+            ) if _looks_sql_timeout(exc) else ""
             if not exploratory:
-                orchestrator.run_state.sql_feedback = str(exc)
+                orchestrator.run_state.sql_feedback = timeout_feedback or str(exc)
             # Timeout / transient errors MAY be retryable; schema/structural
             # errors likely are not, but it's hard to classify every adapter
             # exception. Mark as retryable so the model can adjust its SQL, but
             # the circuit-breaker in the agent loop will cut off identical
             # repeated failures.
-            return ToolResult(ok=False, error=_err("execute_sql", str(exc), retryable=True))
+            message = timeout_feedback or str(exc)
+            return ToolResult(
+                ok=False,
+                error=_err("execute_sql", message, retryable=True),
+                data={"timeout": True, "optimization_feedback": timeout_feedback} if timeout_feedback else None,
+            )
 
     def _explain_sql(args: dict[str, Any], _ctx: ToolContext) -> ToolResult:
         sql = str(args.get("sql") or orchestrator.run_state.sql or "").strip()
@@ -571,6 +582,62 @@ def _positive_int(value: Any, default: int | None) -> int | None:
     except (TypeError, ValueError):
         return default
     return parsed if parsed > 0 else default
+
+
+def _looks_sql_timeout(exc: Exception) -> bool:
+    text = f"{type(exc).__name__}: {exc}".casefold()
+    markers = (
+        "timeout", "timed out", "deadline", "statement timeout",
+        "max_statement_time", "query execution was interrupted",
+        "lock wait timeout", "execution expired", "query_canceled",
+        "canceling statement",
+    )
+    return any(marker in text for marker in markers)
+
+
+def _sql_timeout_feedback(
+    sql: str,
+    *,
+    database: str,
+    exc: Exception,
+    timeout_seconds: int | None,
+) -> str:
+    """Actionable feedback for the next SQL-writing iteration after a DB timeout."""
+    timeout_text = f"{timeout_seconds}s" if timeout_seconds else "the configured timeout"
+    lines = [
+        f"SQL execution timed out after {timeout_text}: {exc}",
+        "Treat this as a query-plan problem, not as final failure. Rewrite the SQL before retrying.",
+        "General repair rules:",
+        "- Keep indexed columns bare in JOIN/WHERE predicates; move functions to constants or bounds.",
+        "- Push selective date/status filters into each large table before joins.",
+        "- For consistency checks, aggregate each side in small CTEs first, then join the aggregates.",
+        "- Avoid joining full fact tables just to validate existence; use EXISTS, sampled keys, or prefiltered key sets.",
+    ]
+    function_hints = _function_predicate_hints(sql)
+    if function_hints:
+        lines += ["Detected likely non-sargable predicate(s):", *function_hints]
+    if database:
+        lines.append(f"Database scope: {database}")
+    lines.append("Do not simply raise timeout unless the user explicitly asks for a long-running export.")
+    return "\n".join(lines)
+
+
+def _function_predicate_hints(sql: str) -> list[str]:
+    text = " ".join(str(sql or "").split())
+    hints: list[str] = []
+    if "date(convert_tz(" in text.casefold():
+        hints.append(
+            "- DATE(CONVERT_TZ(column,...)) prevents normal index range access. "
+            "Rewrite equality on a local date as a half-open UTC range on the raw timestamp, "
+            "for example delivered_at >= '<local-date 00:00 converted to UTC>' "
+            "AND delivered_at < '<next-local-date 00:00 converted to UTC>'."
+        )
+    if any(token in text.casefold() for token in ("date(", "convert_tz(", "cast(", "substr(", "substring(")):
+        hints.append(
+            "- A function appears around a predicate expression. If it wraps a table column, "
+            "rewrite it so the column remains bare on one side of the comparison."
+        )
+    return hints
 
 
 def _risk_confirmation_question(
