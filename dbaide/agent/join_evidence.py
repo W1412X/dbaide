@@ -86,7 +86,10 @@ class JoinEvidenceRetriever:
         warnings: list[str] = []
         relations: list[dict[str, Any]] = []
 
-        if len({table for _, table in targets}) < 2:
+        # Count distinct (database, table) PAIRS, not bare table names: two same-named
+        # tables in different databases (a cross-DB reconciliation join) are two real
+        # join targets, and `targets` is already deduped by pair in `_targets`.
+        if len(targets) < 2:
             warnings.append("Need at least two tables to retrieve join evidence.")
             report = JoinContextReport(
                 id=report_id,

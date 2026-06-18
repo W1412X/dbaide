@@ -210,3 +210,42 @@ def test_semantic_join_prompt_includes_authoritative_column_notes(tmp_path):
     )
 
     assert "user_note(AUTHORITATIVE)=business user key" in llm.last_user
+
+
+def test_join_evidence_counts_cross_db_same_name_tables_as_two(monkeypatch):
+    """Two same-named tables in different databases are two real join targets — the
+    table-count gate must count (db, table) pairs, not bare names, so a cross-DB
+    reconciliation join isn't rejected as 'insufficient tables'."""
+    from dbaide.agent import join_evidence as je
+
+    # Stub the heavy collection so only the table-count gate is exercised.
+    monkeypatch.setattr(je, "disclosed_schemas_for_tables", lambda orch, targets: [])
+    monkeypatch.setattr(je, "collect_relations", lambda *a, **k: [{"source": "foreign_key"}])
+
+    class _Mem:
+        join_reports: list = []
+        def add_join_report(self, _r): pass
+
+    class _RS:
+        trace_node = ""
+        table_database = ""
+        database = ""
+        question = "reconcile orders across dbs"
+        relations: list = []
+        memory = _Mem()
+        def disclosed_table_keys(self): return []
+
+    class _Adapter:
+        dialect = "postgres"
+
+    class _Orch:
+        run_state = _RS()
+        adapter = _Adapter()
+        def progress(self, _ev): pass
+
+    retriever = je.JoinEvidenceRetriever(_Orch())
+    report = retriever.retrieve("reconcile", tables=["db1.orders", "db2.orders"], database="")
+
+    assert len(report.tables) == 2
+    assert not any("at least two tables" in w for w in report.warnings)
+    assert report.relations == [{"source": "foreign_key"}]
