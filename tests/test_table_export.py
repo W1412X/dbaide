@@ -57,6 +57,39 @@ def test_export_csv_null_vs_empty():
     assert lines[1] == "NULL,"  # NULL rendered as literal, empty string as empty
 
 
+def test_export_csv_neutralizes_formula_injection():
+    """A DB value beginning with a formula char (= + - @ \\t \\r) must be quoted with a
+    leading apostrophe so spreadsheet apps treat it as text, not a formula — but plain
+    numbers (incl. negatives) must stay intact."""
+    import csv as _csv
+    import io as _io
+    from dbaide.rendering.table import export_csv
+
+    rows = [
+        {"v": "=HYPERLINK(\"http://evil\")"},
+        {"v": "+1+2"},
+        {"v": "@SUM(A1)"},
+        {"v": "\tcmd"},
+        {"v": "-5"},          # numeric string → preserved
+        {"v": -42},           # int → preserved
+        {"v": "-3.14"},       # numeric string → preserved
+        {"v": "foo=bar"},     # '=' not leading → preserved
+    ]
+    csv_text = export_csv(rows, ["v"])
+    parsed = [r[0] for r in _csv.reader(_io.StringIO(csv_text))][1:]  # skip header
+    assert parsed[0].startswith("'=")
+    assert parsed[1] == "'+1+2"
+    assert parsed[2] == "'@SUM(A1)"
+    assert parsed[3] == "'\tcmd"
+    assert parsed[4] == "-5"
+    assert parsed[5] == "-42"
+    assert parsed[6] == "-3.14"
+    assert parsed[7] == "foo=bar"
+    # No raw cell may begin with a formula trigger.
+    for cell in parsed:
+        assert not (cell and cell[0] in "=+-@" and not cell.lstrip("+-").replace(".", "").isdigit())
+
+
 def test_export_insert_empty():
     assert export_insert([]) == ""
 

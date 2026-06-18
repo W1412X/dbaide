@@ -5,6 +5,7 @@ import csv
 import io
 import json
 import math
+import re
 from decimal import Decimal
 from typing import Any
 
@@ -152,9 +153,23 @@ def _format_cell(value: Any) -> str:
     return s
 
 
+# Leading characters that spreadsheet apps (Excel / Sheets / LibreOffice) treat as
+# the start of a formula. A DB-sourced value beginning with one of these is a
+# CSV/formula-injection vector (e.g. =HYPERLINK(...), =cmd|'/c calc'!A0, @SUM(...)).
+# \t and \r are included because they can be used to slip past naive front-char checks.
+_CSV_FORMULA_LEAD = frozenset("=+-@\t\r")
+# A purely numeric string (incl. leading +/-, decimals, exponent) is data, not a
+# formula — don't quote "-5" / "+3.1e4", which would corrupt every negative number.
+_CSV_NUMERIC_RE = re.compile(r"[+-]?(?:\d+\.?\d*|\.\d+)(?:[eE][+-]?\d+)?$")
+
+
 def _csv_value(value: Any) -> str:
-    """Format a value for CSV export. NULL is rendered literally so
-    it round-trips distinctly from empty string."""
+    """Format a value for CSV export. NULL is rendered literally so it round-trips
+    distinctly from empty string, and formula-injection-prone cells are neutralized."""
     if value is None:
         return "NULL"
-    return str(value)
+    s = str(value)
+    # Prefix a single quote so the spreadsheet treats the cell as text, not a formula.
+    if s and s[0] in _CSV_FORMULA_LEAD and not _CSV_NUMERIC_RE.match(s):
+        return "'" + s
+    return s
