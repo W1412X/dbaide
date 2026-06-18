@@ -1529,6 +1529,20 @@ def resolve_targets(cfg: ConfigManager, conn_spec: str, database_spec: str) -> l
     return targets
 
 
+def _resolve_choice(reply: str, options: list[str]) -> str:
+    """Map a numeric CLI reply to the shown option's text. The GUI sends the exact
+    button text; the CLI prints numbered options, so '1' should select the first
+    option — including the strict risk-confirm 'Execute anyway' (which otherwise
+    requires typing the localized text verbatim). Non-numeric replies pass through as
+    free-text clarification answers."""
+    text = str(reply or "").strip()
+    if options and text.isdigit():
+        idx = int(text)
+        if 1 <= idx <= len(options):
+            return options[idx - 1]
+    return reply
+
+
 def _chat_turn(assistant, question: str, *, database: str) -> None:
     """Run one interactive chat turn, handling clarification/risk pauses by
     prompting for a reply and resuming, until the agent produces a final answer."""
@@ -1553,6 +1567,7 @@ def _chat_turn(assistant, question: str, *, database: str) -> None:
         if not reply or reply.lower() in EXIT_WORDS:
             print("(cancelled)")
             return
+        reply = _resolve_choice(reply, options)
         response = assistant.ask(
             question, database=database, execute=True,
             resume_state=resume_state, user_reply=reply,

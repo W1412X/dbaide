@@ -140,3 +140,16 @@ def test_export_import_round_trip(tmp_path):
     )
     assert result.returncode == 0, result.stderr
     assert "import complete" in result.stdout
+
+
+def test_resolve_choice_maps_numbered_reply_to_option_text():
+    """The CLI prints numbered options; a numeric reply must map to the option text
+    so '1' confirms a strict risk gate ('Execute anyway'), matching the GUI buttons."""
+    from dbaide.cli import _resolve_choice
+
+    opts = ["Execute anyway", "Cancel"]
+    assert _resolve_choice("1", opts) == "Execute anyway"
+    assert _resolve_choice(" 2 ", opts) == "Cancel"
+    assert _resolve_choice("3", opts) == "3"        # out of range → passthrough
+    assert _resolve_choice("last year", opts) == "last year"  # free text → passthrough
+    assert _resolve_choice("1", []) == "1"          # no options → passthrough
