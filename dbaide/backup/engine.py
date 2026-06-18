@@ -166,7 +166,7 @@ class BackupEngine:
         writer = writer_cls(out_path, col_names, columns_info, **extra_kwargs)
 
         total_estimate = adapter.explain_estimated_rows(
-            f"SELECT * FROM {table}", database=database
+            f"SELECT * FROM {_quote_table(table, adapter.dialect)}", database=database
         )
 
         offset = 0

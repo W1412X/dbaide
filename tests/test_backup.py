@@ -295,3 +295,39 @@ def test_engine_backup_database(tmp_path):
     assert "b" in tables_backed
     total_rows = sum(r["row_count"] for r in results if not r.get("error"))
     assert total_rows == 7
+
+
+def test_engine_backup_table_reserved_name_quotes_estimate_and_query(tmp_path, monkeypatch):
+    """A table whose name needs quoting (a reserved word like 'order') must back up —
+    both the data query AND the row-estimate query must quote the identifier."""
+    import sqlite3
+    from pathlib import Path
+    from dbaide.backup import BackupEngine, BackupRegistry
+    from dbaide.models import ConnectionConfig
+
+    db_path = tmp_path / "src.db"
+    conn = sqlite3.connect(str(db_path))
+    conn.execute('CREATE TABLE "order" (id INTEGER PRIMARY KEY, total REAL)')
+    conn.executemany('INSERT INTO "order" VALUES (?, ?)', [(i, i * 1.5) for i in range(1, 11)])
+    conn.commit()
+    conn.close()
+
+    # Spy on the row-estimate query to prove it quotes the identifier.
+    import dbaide.adapters.sqlite as sqlite_mod
+    estimate_sqls: list[str] = []
+    orig = sqlite_mod.SQLiteAdapter.explain_estimated_rows
+
+    def _spy(self, sql, *, database=""):
+        estimate_sqls.append(sql)
+        return orig(self, sql, database=database)
+
+    monkeypatch.setattr(sqlite_mod.SQLiteAdapter, "explain_estimated_rows", _spy)
+
+    cfg = ConnectionConfig(name="c", type="sqlite", path=str(db_path))
+    engine = BackupEngine(cfg, BackupRegistry(base_dir=tmp_path / "backups"))
+    result = engine.backup_table("", "order", fmt="csv", batch_size=4)
+    # Data query (already quoted) backs up every row of the reserved-word table.
+    assert result["row_count"] == 10
+    assert Path(result["file_path"]).exists()
+    # The estimate query quotes the reserved identifier, never bare `FROM order`.
+    assert estimate_sqls and all('"order"' in s and "FROM order" not in s for s in estimate_sqls)
