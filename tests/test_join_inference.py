@@ -89,6 +89,27 @@ def test_semantic_join_inferencer_validates_columns():
     assert joins[0]["ref_table"] == "assets"
 
 
+def test_validate_joins_allows_self_referential_join():
+    # A self-referential FK across DIFFERENT columns (manager_id → id) is a real
+    # relationship and must survive; only the degenerate id → id is rejected.
+    inferencer = SemanticJoinInferencer(JoinInferMockLLM(), AssetStore(), "local")
+    disclosed = [
+        ("", "employees", [
+            ColumnInfo(name="id", data_type="INTEGER", primary_key=True),
+            ColumnInfo(name="manager_id", data_type="INTEGER"),
+        ]),
+    ]
+    raw = [
+        {"left_table": "employees", "left_column": "manager_id",
+         "right_table": "employees", "right_column": "id", "confidence": 0.9},
+        {"left_table": "employees", "left_column": "id",
+         "right_table": "employees", "right_column": "id", "confidence": 0.9},
+    ]
+    out = inferencer._validate_joins(raw, disclosed, [])
+    assert len(out) == 1
+    assert (out[0]["column"], out[0]["ref_column"]) == ("manager_id", "id")
+
+
 def test_collect_relations_adds_semantic_when_no_fk(tmp_path):
     db = tmp_path / "unlinked.db"
     make_unlinked_db(db)

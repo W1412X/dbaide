@@ -183,7 +183,10 @@ class SemanticJoinInferencer:
                 continue
             if left_table not in table_names or right_table not in table_names:
                 continue
-            if left_table == right_table:
+            # Reject only the degenerate t.a → t.a; allow legitimate self-referential
+            # joins (e.g. employees.manager_id → employees.id, parent_id → id), which
+            # are common hierarchy/chain relationships the business may need.
+            if left_table == right_table and left_col == right_col:
                 continue
             if (left_table, left_col) not in col_index or (right_table, right_col) not in col_index:
                 continue
