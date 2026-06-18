@@ -45,6 +45,14 @@ class SchemaTools:
         self.context.record_databases(databases)
         return databases
 
+    def _filter_scope(self, tables: list[TableInfo], database: str) -> list[TableInfo]:
+        """Drop tables outside the opt-in connection scope from enumeration, so a
+        denied table is not even revealed to exist (and the agent isn't steered toward
+        out-of-allow-list tables). No-op when no scope is configured."""
+        if not self._scope.active:
+            return tables
+        return [t for t in tables if self._scope.allows_table(t.name, database)[0]]
+
     def list_tables(self, database: str = "") -> list[TableInfo]:
         database = database or self._default_asset_database()
         if not database:
@@ -53,17 +61,17 @@ class SchemaTools:
                 db_name = str(db_doc.get("name") or "")
                 docs = self.assets.table_docs(self.instance, db_name, fingerprint=self.fingerprint)
                 if docs:
-                    tables = [self.assets.to_table_info(doc) for doc in docs]
+                    tables = self._filter_scope([self.assets.to_table_info(doc) for doc in docs], db_name)
                     self.context.record_tables(tables, database=db_name)
                     all_tables.extend(tables)
             if all_tables:
                 return all_tables
         docs = self.assets.table_docs(self.instance, database, fingerprint=self.fingerprint) if database else []
         if docs:
-            tables = [self.assets.to_table_info(doc) for doc in docs]
+            tables = self._filter_scope([self.assets.to_table_info(doc) for doc in docs], database)
             self.context.record_tables(tables, database=database)
             return tables
-        tables = self.adapter.list_tables(database=database)
+        tables = self._filter_scope(self.adapter.list_tables(database=database), database)
         self.context.record_tables(tables, database=database)
         return tables
 

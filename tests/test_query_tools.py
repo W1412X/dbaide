@@ -173,3 +173,29 @@ def test_profile_and_schema_tools_enforce_table_scope(tmp_path):
     # In-scope table still works.
     assert pt.sample_rows("orders").row_count == 0
     assert len(st.describe_table("orders")) == 1
+
+
+def test_list_tables_filters_by_scope(tmp_path):
+    """Enumeration must honor the connection scope: a denied table is hidden, and an
+    allow-list shows only allowed tables (no info disclosure / no out-of-scope steering)."""
+    import sqlite3
+    from dbaide.adapters import build_adapter
+    from dbaide.tools.schema import SchemaTools
+
+    db = tmp_path / "scope.db"
+    c = sqlite3.connect(db)
+    for t in ("orders", "customers", "secret"):
+        c.execute(f"CREATE TABLE {t}(id INTEGER)")
+    c.commit(); c.close()
+
+    deny = SchemaTools(build_adapter(ConnectionConfig(
+        name="local", type="sqlite", path=str(db), table_deny=["secret"])), DisclosureContext())
+    assert sorted(t.name for t in deny.list_tables()) == ["customers", "orders"]
+
+    allow = SchemaTools(build_adapter(ConnectionConfig(
+        name="local", type="sqlite", path=str(db), table_allow=["orders"])), DisclosureContext())
+    assert [t.name for t in allow.list_tables()] == ["orders"]
+
+    none = SchemaTools(build_adapter(ConnectionConfig(
+        name="local", type="sqlite", path=str(db))), DisclosureContext())
+    assert sorted(t.name for t in none.list_tables()) == ["customers", "orders", "secret"]
