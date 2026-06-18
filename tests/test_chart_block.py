@@ -203,6 +203,43 @@ def test_chart_block_scatter_non_numeric_x_falls_back_to_order(qapp):
     assert block.layout().count() >= 3
 
 
+def test_stacked_axis_values_uses_per_category_totals():
+    """Unit guard (no QtCharts): stacked axis sizing must use per-category stacked
+    sums, not flat per-series values, so the top of a stack isn't clipped."""
+    from dbaide.desktop.components.chart_block import _stacked_axis_values
+    # categories A,B; stacked totals A=25, B=25 — larger than any single segment (20)
+    vals = _stacked_axis_values([{"values": [10, 20]}, {"values": [15, 5]}], 2)
+    assert max(vals) == 25.0
+    # diverging signs stack apart: positives up, negatives down
+    div = _stacked_axis_values([{"values": [10, 5]}, {"values": [-3, -8]}], 2)
+    assert max(div) == 10.0 and min(div) == -8.0
+
+
+def test_chart_block_stacked_bar_y_axis_fits_total(qapp):
+    """A stacked bar's y-axis must reach the per-category total (25), not the largest
+    individual segment (20), or the top of the stack is clipped."""
+    pytest.importorskip("PyQt6.QtCharts")
+    from PyQt6.QtCore import Qt
+    from PyQt6.QtCharts import QValueAxis
+    from dbaide.desktop.components.chart_block import build_chart_widget
+
+    spec = {
+        "chart_id": "chart:sb",
+        "chart_type": "stacked_bar",
+        "title": "stack",
+        "categories": ["A", "B"],
+        "series": [
+            {"name": "s1", "values": [10, 20]},
+            {"name": "s2", "values": [15, 5]},
+        ],
+        "row_count": 2,
+    }
+    widget = build_chart_widget(spec)
+    chart = widget._view.chart()
+    y_axes = [ax for ax in chart.axes(Qt.Orientation.Vertical) if isinstance(ax, QValueAxis)]
+    assert y_axes and y_axes[0].max() >= 25.0
+
+
 def test_chart_block_scatter_x_axis_fits_numeric_x(qapp):
     """Scatter x-axis must span the actual x values — manually-attached axes don't
     auto-scale, so a large x range would otherwise be clipped to Qt's default [0,10]."""

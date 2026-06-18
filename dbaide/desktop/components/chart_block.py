@@ -51,6 +51,26 @@ def _series_values(item: dict[str, Any], count: int = 0) -> list[float]:
     return values
 
 
+def _stacked_axis_values(series_list: list[dict[str, Any]], count: int) -> list[float]:
+    """Per-category positive/negative stacked extents for value-axis sizing.
+
+    A stacked bar/area reaches the SUM of its segments per category, not the largest
+    individual segment — feeding flat per-series values to the axis would clip the top
+    of every stack. Positive and negative segments stack apart, so return both the
+    per-category positive sum and negative sum; _style_value_axis spans their range."""
+    pos = [0.0] * count
+    neg = [0.0] * count
+    for item in series_list:
+        for i, val in enumerate(_series_values(item, count)):
+            if i >= count:
+                break
+            if val >= 0:
+                pos[i] += val
+            else:
+                neg[i] += val
+    return pos + neg
+
+
 def _format_tooltip_value(value: object) -> str:
     if not isinstance(value, (int, float)):
         return str(value)
@@ -449,7 +469,9 @@ def build_chart_widget(spec_dict: dict[str, Any]) -> QWidget:
         _configure_category_axis(axis_x, raw_categories, title=spec.x_label)
         axis_y = QValueAxis()
         axis_y.setTitleText(_compact_axis_title(_axis_label(spec, "left") or spec.y_label))
-        _style_value_axis(axis_y, all_y, value_format=_axis_format(spec, "left"))
+        # Stacked: axis must fit the per-category stacked total, not the max segment.
+        _style_value_axis(axis_y, _stacked_axis_values(spec.series, len(raw_categories)),
+                          value_format=_axis_format(spec, "left"))
         chart.addAxis(axis_x, Qt.AlignmentFlag.AlignBottom)
         chart.addAxis(axis_y, Qt.AlignmentFlag.AlignLeft)
         bar_series.attachAxis(axis_x)
@@ -563,7 +585,11 @@ def build_chart_widget(spec_dict: dict[str, Any]) -> QWidget:
         _configure_category_axis(axis_x, raw_categories, title=spec.x_label)
         axis_y = QValueAxis()
         axis_y.setTitleText(_compact_axis_title(_axis_label(spec, "left") or spec.y_label))
-        _style_value_axis(axis_y, all_y, value_format=_axis_format(spec, "left"))
+        # Stacked bars reach the per-category total; grouped bars sit side by side (max
+        # individual value is the right extent). Size the axis accordingly.
+        axis_values = (_stacked_axis_values(spec.series, len(raw_categories))
+                       if chart_type == "stacked_bar" else all_y)
+        _style_value_axis(axis_y, axis_values, value_format=_axis_format(spec, "left"))
         chart.addAxis(axis_x, Qt.AlignmentFlag.AlignBottom)
         chart.addAxis(axis_y, Qt.AlignmentFlag.AlignLeft)
         bar_series.attachAxis(axis_x)
