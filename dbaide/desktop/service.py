@@ -1111,23 +1111,31 @@ class DesktopService:
         if order_by:
             from dbaide.adapters.base import quote_identifier
             sql += f" ORDER BY {quote_identifier(order_by, dialect)} {order_dir}"
-        sql += f" LIMIT {page_size} OFFSET {offset}"
+        # Fetch ONE extra row to detect "has more" precisely. The old heuristic
+        # (a full page came back ⇒ has more) wrongly enabled Next on the boundary
+        # where the table size is an exact multiple of page_size, leading to an empty
+        # next page. The extra row is trimmed off before returning.
+        fetch = page_size + 1
+        sql += f" LIMIT {fetch} OFFSET {offset}"
 
         tools = self._query_tools(conn)
-        result = tools.execute_sql(sql, database=database, limit=page_size)
+        result = tools.execute_sql(sql, database=database, limit=fetch)
         rows = result.rows or []
+        has_more = len(rows) > page_size
+        if has_more:
+            rows = rows[:page_size]
         return {
             "columns": result.columns,
             "rows": rows,
-            "row_count": result.row_count,
+            "row_count": len(rows),
             "truncated": result.truncated,
             "sql": result.sql,
             "elapsed_ms": result.elapsed_ms,
-            # Pagination echo (no COUNT(*) — "more" means a full page returned).
+            # Pagination echo (no COUNT(*) — "more" = a real extra row exists).
             "table": table, "database": database,
             "page_size": page_size, "offset": offset,
             "order_by": order_by, "order_dir": order_dir, "where": where,
-            "has_more": len(rows) >= page_size,
+            "has_more": has_more,
         }
 
     def count_table(self, payload: dict[str, Any]) -> dict[str, Any]:

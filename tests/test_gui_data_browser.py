@@ -42,6 +42,17 @@ def test_browse_table_paginates(qapp, tmp_path):
     assert len(p2["rows"]) == 2 and p2["has_more"] is False  # last partial page
 
 
+def test_browse_table_exact_multiple_has_no_phantom_next_page(qapp, tmp_path):
+    # Table size is an exact multiple of page_size: the LAST full page must report
+    # has_more=False (fetch-one-extra), not enable Next onto an empty page.
+    svc = _service(tmp_path, rows=8)
+    p1 = svc.dispatch("browse_table", {"connection_name": "local", "table": "t", "page_size": 4, "offset": 0})
+    assert len(p1["rows"]) == 4 and p1["has_more"] is True
+    p2 = svc.dispatch("browse_table", {"connection_name": "local", "table": "t", "page_size": 4, "offset": 4})
+    assert len(p2["rows"]) == 4 and p2["has_more"] is False  # final page, no phantom next
+    assert p2["row_count"] == 4
+
+
 def test_browse_table_sort_and_filter(qapp, tmp_path):
     svc = _service(tmp_path, rows=9)
     desc = svc.dispatch("browse_table", {"connection_name": "local", "table": "t",
