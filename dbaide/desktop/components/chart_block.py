@@ -84,8 +84,11 @@ def _style_value_axis(axis, values: list[float] | None = None, *, value_format: 
     axis.setGridLineVisible(True)
     axis.setLinePenColor(_hex_color("BORDER"))
     if values:
+        # Always keep the zero baseline within range — bars/areas are drawn from 0,
+        # so an all-negative series (e.g. P&L showing only losses) must still show 0
+        # as the top of the axis, not max(values) which would clip the bars.
         lo = min(0.0, min(values))
-        hi = max(values) if values else 1.0
+        hi = max(0.0, max(values))
         if hi <= lo:
             hi = lo + 1.0
         pad = (hi - lo) * 0.10 or hi * 0.10 or 1.0

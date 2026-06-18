@@ -117,6 +117,48 @@ def test_chart_block_builds_all_right_axis_combo(qapp):
     assert "金额" in value_axes[0].titleText()
 
 
+def test_value_axis_range_always_includes_zero():
+    """Unit-level guard (no QtCharts needed): _style_value_axis must keep the zero
+    baseline within range for any sign mix, so bars drawn from 0 never overflow."""
+    from dbaide.desktop.components.chart_block import _style_value_axis
+
+    class _FakeAxis:
+        range = None
+        def setRange(self, lo, hi): self.range = (lo, hi)
+        def __getattr__(self, _name): return lambda *a, **k: None
+
+    for values in ([-10.0, -25.0, -5.0], [10, 20], [-5, 8], [0, 0, 0]):
+        ax = _FakeAxis()
+        _style_value_axis(ax, values)
+        lo, hi = ax.range
+        assert lo <= 0.0 <= hi, f"zero baseline off-axis for {values}: {ax.range}"
+        assert lo <= min(values) and hi >= max(values), f"data clipped for {values}: {ax.range}"
+
+
+def test_chart_block_all_negative_bars_keep_zero_baseline(qapp):
+    """All-negative bar series (e.g. P&L losses) must keep 0 in the axis range,
+    otherwise bars (drawn from zero) overflow the top of the plot."""
+    pytest.importorskip("PyQt6.QtCharts")
+    from PyQt6.QtCharts import QValueAxis
+    from dbaide.desktop.components.chart_block import build_chart_widget
+
+    spec = {
+        "chart_id": "chart:neg",
+        "chart_type": "bar",
+        "title": "Losses",
+        "categories": ["Q1", "Q2", "Q3"],
+        "series": [{"name": "净利润", "values": [-10.0, -25.0, -5.0], "type": "bar"}],
+        "row_count": 3,
+    }
+    widget = build_chart_widget(spec)
+    chart = widget._view.chart()
+    value_axes = [ax for ax in chart.axes() if isinstance(ax, QValueAxis)]
+    assert value_axes, "expected a value axis"
+    ax = value_axes[0]
+    assert ax.min() <= -25.0  # spans the most-negative bar
+    assert ax.max() >= 0.0     # zero baseline stays on-axis
+
+
 def test_chart_block_combo_splits_bars_by_axis(qapp):
     pytest.importorskip("PyQt6.QtCharts")
     from PyQt6.QtCharts import QBarSeries, QValueAxis
