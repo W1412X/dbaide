@@ -980,7 +980,19 @@ class AskAgentLoop:
                 first_keep = i + 1
                 break
         if first_keep > 1:
-            messages[1:first_keep] = [LLMMessage("user", note)]
+            # Pin the current turn's [turn:N:start] message even if it falls in the
+            # dropped range: it carries the re-injected [Confirmed criteria] / pinned
+            # scope that session_turn_prompt promised the model would honor this turn.
+            replacement: list[LLMMessage] = [LLMMessage("user", note)]
+            start_idx = None
+            for i in range(len(messages) - 1, 0, -1):
+                head = messages[i].content.split("\n", 1)[0]
+                if head.startswith("[turn:") and ":start]" in head:
+                    start_idx = i
+                    break
+            if start_idx is not None and 1 <= start_idx < first_keep:
+                replacement.append(messages[start_idx])
+            messages[1:first_keep] = replacement
             logger.warning("session_compress_hard_truncate: dropped messages[1:%d], "
                            "%d → %d tokens", first_keep, total_tokens,
                            sum(estimate_tokens(m.content) for m in messages))

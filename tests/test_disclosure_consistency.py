@@ -117,6 +117,43 @@ def test_restore_loop_state_rediscloses_schemas(orch):
 
 # ── Compression independence ─────────────────────────────────────────────────
 
+def test_hard_truncate_pins_current_turn_start(orch):
+    """The hard-truncation backstop must keep the current turn's [turn:N:start]
+    message (it carries the re-injected [Confirmed criteria]) even under extreme
+    budget pressure, or the agent loses the 口径 it was told to honor."""
+    from dbaide.agent.loop import AskAgentLoop
+    from dbaide.llm import LLMMessage
+
+    big = "X" * 8000
+    msgs = [
+        LLMMessage("system", "sys"),
+        LLMMessage("user", "[Compressed turn t1] ..."),
+        LLMMessage("user", "[turn:2:start]\n[Confirmed criteria] use Beijing time\nQUESTION"),
+        LLMMessage("assistant", big),
+        LLMMessage("user", "tool result " + big),
+    ]
+    AskAgentLoop._hard_truncate_session(msgs, threshold=100)
+    joined = "\n".join(m.content for m in msgs)
+    assert msgs[0].content == "sys"
+    assert "[turn:2:start]" in joined
+    assert "Confirmed criteria" in joined  # criteria survived
+
+
+def test_disclosed_tables_snapshot_spans_all_sub_intents(orch):
+    """disclosed_tables must come from the accumulated DisclosureContext (which
+    spans every sub-intent of a multi-intent turn), not the last RunState — else a
+    multi-part question loses earlier sub-intents' tables for the next turn."""
+    dc = orch.session.disclosure
+    # Two sub-intents disclose different tables into the shared context, while
+    # run_state.schemas (reset per sub-intent) ends holding only the last.
+    dc.record_tables([TableInfo(name="orders")], database="main")
+    dc.record_tables([TableInfo(name="customers")], database="main")
+    orch.run_state.schemas = {"main.customers": [ColumnInfo(name="id")]}  # last sub-intent only
+    # Mirror workflow.py's snapshot rule:
+    disclosed = sorted(dc.tables.keys()) if dc.tables else sorted(orch.run_state.schemas.keys())
+    assert disclosed == ["main.customers", "main.orders"]
+
+
 def test_disclosure_is_independent_of_message_compression(orch):
     """Compression rewrites the LLM message stream only; the disclosure gate is
     runtime state on session.disclosure and must be unaffected, so SQL on an

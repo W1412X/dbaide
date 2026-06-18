@@ -250,7 +250,18 @@ class WorkflowEngine:
         # tables this turn touched (so the next follow-up can see the context).
         run_state = assistant._orchestrator.run_state  # noqa: SLF001
         result.clarifications = list(getattr(run_state, "clarifications", []) or [])
-        result.disclosed_tables = sorted({str(k) for k in (run_state.schemas or {}).keys()})
+        # Take disclosed tables from the accumulated DisclosureContext, not the
+        # final RunState. A multi-intent turn runs each sub-intent on a fresh
+        # RunState, so run_state.schemas holds only the LAST sub-intent's tables —
+        # but session.disclosure accumulates every sub-intent's (and prior turns')
+        # tables, in the canonical "db.table" ref form the schema guard matches.
+        _session = getattr(assistant._orchestrator, "session", None)  # noqa: SLF001
+        disclosure = getattr(_session, "disclosure", None)
+        disclosed = getattr(disclosure, "tables", None) if disclosure is not None else None
+        if disclosed:
+            result.disclosed_tables = sorted(disclosed.keys())
+        else:
+            result.disclosed_tables = sorted({str(k) for k in (run_state.schemas or {}).keys()})
         result.charts = list(getattr(response, "charts", None) or getattr(run_state, "charts", []) or [])
         executed_sqls = list(getattr(response, "executed_sqls", None) or [])
         result.executed_sqls = executed_sqls
