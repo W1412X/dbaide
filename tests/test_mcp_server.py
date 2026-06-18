@@ -403,6 +403,27 @@ class TestHandlerValidation:
     def test_positive_integer_arguments_are_capped(self):
         assert mcp._positive_int_arg({"limit": 999999}, "limit", 100, maximum=5000) == 5000
 
+    def test_scope_denial_is_reported_as_rejected_not_error(self, monkeypatch):
+        """A table-scope PermissionError on the direct-access tools must surface as
+        'Rejected:' (policy — don't retry), matching execute_sql, not a generic 'Error:'."""
+        class _Denied:
+            def describe_table(self, *a, **k): raise PermissionError("Table not permitted by connection scope: secret")
+            def column_stats(self, *a, **k): raise PermissionError("Table not permitted by connection scope: secret")
+            def profile_table(self, *a, **k): raise PermissionError("Table not permitted by connection scope: secret")
+            def sample_rows(self, *a, **k): raise PermissionError("Table not permitted by connection scope: secret")
+
+        class FakeCtx:
+            def get(self, conn):
+                d = _Denied()
+                return None, d, None, d
+
+        monkeypatch.setattr(mcp, "_ctx", FakeCtx())
+        for handler in (mcp.handle_describe_table, mcp.handle_column_stats,
+                        mcp.handle_profile_table, mcp.handle_sample_rows):
+            result = handler({"table": "secret"})
+            assert result.get("isError") is True
+            assert result["content"][0]["text"].startswith("Rejected:"), handler.__name__
+
     def test_execute_sql_caps_limit_for_noninteractive_mcp(self, monkeypatch):
         seen = {}
 

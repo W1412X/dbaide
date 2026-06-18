@@ -571,6 +571,8 @@ def handle_describe_table(arguments: dict) -> dict:
         columns = schema.describe_table(table, database=database)
         items = [_serialize(c) for c in columns]
         return _text_content(json.dumps(items, ensure_ascii=False, indent=2))
+    except PermissionError as exc:
+        return _text_content(f"Rejected: {exc}", is_error=True)
     except Exception as exc:
         return _text_content(f"Error: {exc}", is_error=True)
 
@@ -742,6 +744,8 @@ def handle_column_stats(arguments: dict) -> dict:
         _, _, _, profile = _ctx.get(conn)
         stats = profile.column_stats(table, columns, metrics=metrics, database=database, top_k=top_k)
         return _text_content(bounded_json_text(stats))
+    except PermissionError as exc:
+        return _text_content(f"Rejected: {exc}", is_error=True)
     except Exception as exc:
         return _text_content(f"Error: {exc}", is_error=True)
 
@@ -760,6 +764,8 @@ def handle_profile_table(arguments: dict) -> dict:
         profiles = profile.profile_table(table, columns, database=database, top_k=top_k)
         items = [_serialize(p) for p in profiles]
         return _text_content(bounded_json_text(items))
+    except PermissionError as exc:
+        return _text_content(f"Rejected: {exc}", is_error=True)
     except Exception as exc:
         return _text_content(f"Error: {exc}", is_error=True)
 
@@ -788,6 +794,8 @@ def handle_sample_rows(arguments: dict) -> dict:
             "sql": result.sql,
         }
         return _data_content(data)
+    except PermissionError as exc:
+        return _text_content(f"Rejected: {exc}", is_error=True)
     except Exception as exc:
         return _text_content(f"Error: {exc}", is_error=True)
 
