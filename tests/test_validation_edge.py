@@ -97,6 +97,15 @@ class TestSQLGuardEdgeCases:
         assert result.ok
         assert "LIMIT" not in result.normalized_sql
 
+    def test_limit_not_swallowed_by_trailing_line_comment(self):
+        # A trailing "-- comment" must not absorb the injected LIMIT (which would
+        # let the query run unbounded). The injected LIMIT must be parseable.
+        from dbaide.validation.sql_guard import _explicit_limit
+
+        result = SQLGuard(default_limit=25).validate("SELECT * FROM t -- get everything")
+        assert result.ok
+        assert _explicit_limit(result.normalized_sql) == 25
+
 
 class TestStripStringsAndComments:
     def test_single_quotes(self):

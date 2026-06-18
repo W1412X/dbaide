@@ -235,11 +235,11 @@ class SQLGuard:
 
     def ensure_limit(self, sql: str, limit: int) -> str:
         """Ensure the SQL has a *top-level* LIMIT clause (subquery/CTE limits don't count)."""
-        from dbaide.adapters.base import outer_limit_value
-        stripped = sql.strip().rstrip(";")
-        if outer_limit_value(stripped, dialect=self.dialect) is not None:
-            return stripped
-        return f"{stripped} LIMIT {int(limit)}"
+        # Delegate to the canonical, comment-safe appender (appends LIMIT on a new
+        # line so a trailing line comment can't swallow it; no-op if a top-level
+        # limiter already exists).
+        from dbaide.adapters.base import append_limit
+        return append_limit(sql, int(limit), dialect=self.dialect)
 
     def _first_keyword(self, sql: str) -> str:
         match = re.search(r"[A-Za-z]+", _strip_leading_comments(sql))

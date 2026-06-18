@@ -298,4 +298,8 @@ def append_limit(sql: str, limit: int | None, *, dialect: str = "generic") -> st
     stripped = sql.strip().rstrip(";")
     if outer_limit_value(stripped, dialect=dialect) is not None:
         return stripped
-    return f"{stripped} LIMIT {int(limit)}"
+    # Append on a NEW LINE, not after a space: if the SQL ends with a trailing line
+    # comment (``SELECT * FROM t -- note``) a same-line ``LIMIT`` would be swallowed
+    # by the comment and the query would run unbounded. A newline puts LIMIT past the
+    # comment so the row cap stays effective.
+    return f"{stripped}\nLIMIT {int(limit)}"

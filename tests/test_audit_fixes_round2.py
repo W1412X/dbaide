@@ -85,7 +85,14 @@ def test_fetch_first_recognized():
 def test_append_limit_does_not_double_fetch_first():
     sql = "SELECT * FROM t FETCH FIRST 10 ROWS ONLY"
     assert append_limit(sql, 100) == sql            # no spurious LIMIT appended
-    assert append_limit("SELECT * FROM t", 100) == "SELECT * FROM t LIMIT 100"
+    # LIMIT is appended on a new line (comment-safe), not after a space.
+    assert append_limit("SELECT * FROM t", 100) == "SELECT * FROM t\nLIMIT 100"
+
+
+def test_append_limit_survives_trailing_line_comment():
+    # A trailing "-- comment" must not swallow the injected LIMIT.
+    out = append_limit("SELECT * FROM t -- everything", 100)
+    assert outer_limit_value(out) == 100
 
 
 # ── JoinCatalogStore: path traversal ─────────────────────────────────────────

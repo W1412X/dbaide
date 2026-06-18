@@ -1084,7 +1084,7 @@ def test_exploratory_sql_success_keeps_loop_for_followup_reasoning(tmp_path):
     assert resp.answer.startswith("I used the exploratory count")
     assert llm.loop_calls == 2
     assert resp.result is None
-    assert resp.sql == "SELECT COUNT(*) AS n FROM t LIMIT 100"
+    assert resp.sql == "SELECT COUNT(*) AS n FROM t\nLIMIT 100"
     assert len(resp.executed_sqls) == 1
     assert resp.executed_sqls[0]["purpose"] == "explore row count"
     assert orch.run_state.query_result is None
@@ -1135,7 +1135,7 @@ def test_confirmed_exploratory_sql_does_not_become_final_result(tmp_path):
 
     assert resp.answer == "Exploration approved and recorded."
     assert resp.result is None
-    assert resp.sql == "SELECT COUNT(*) AS n FROM t LIMIT 100"
+    assert resp.sql == "SELECT COUNT(*) AS n FROM t\nLIMIT 100"
     assert len(resp.executed_sqls) == 1
     assert orch.run_state.query_result is None
     assert orch.run_state.sql == ""
