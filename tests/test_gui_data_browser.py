@@ -118,11 +118,22 @@ def test_structure_panel(qapp):
     cols = [{"name": "id", "data_type": "INTEGER", "primary_key": True},
             {"name": "city", "data_type": "TEXT", "indexed": True}]
     ddl = _generate_ddl("orders", cols)
-    assert "CREATE TABLE orders" in ddl and "id INTEGER PRIMARY KEY" in ddl
+    assert 'CREATE TABLE "orders"' in ddl and '"id" INTEGER PRIMARY KEY' in ddl
     sp = StructurePanel()
     sp.show_table("orders", cols)
     assert len(sp._cols._rows) == 2
     assert sp.stack.currentIndex() == 1
+
+
+def test_structure_panel_ddl_quotes_reserved_and_cjk_identifiers(qapp):
+    """Generated DDL is copyable, so identifiers must be quoted (reserved words,
+    CJK names) and dialect-correct (backticks for mysql)."""
+    from dbaide.desktop.views.structure_panel import _generate_ddl
+    cols = [{"name": "order", "data_type": "TEXT"}, {"name": "金额", "data_type": "REAL"}]
+    generic = _generate_ddl("订单", cols)
+    assert 'CREATE TABLE "订单"' in generic and '"order" TEXT' in generic and '"金额" REAL' in generic
+    mysql = _generate_ddl("select", cols, "mysql")
+    assert "CREATE TABLE `select`" in mysql and "`order` TEXT" in mysql and "`金额` REAL" in mysql
 
 
 def test_count_table_service(qapp, tmp_path):

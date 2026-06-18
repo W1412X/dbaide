@@ -262,4 +262,4 @@ def test_structure_copy_ddl(qapp):
     sp = StructurePanel()
     sp.show_table("orders", [{"name": "id", "data_type": "INTEGER", "primary_key": True}], {}, [])
     sp._on_copy_ddl()
-    assert "CREATE TABLE orders" in QApplication.clipboard().text()
+    assert 'CREATE TABLE "orders"' in QApplication.clipboard().text()

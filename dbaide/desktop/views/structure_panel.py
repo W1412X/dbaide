@@ -23,6 +23,7 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 
+from dbaide.adapters.base import quote_identifier
 from dbaide.desktop.components.empty_state import EmptyState
 from dbaide.desktop.components.icons import svg_icon
 from dbaide.desktop.components.sql_highlighter import SqlHighlighter
@@ -30,16 +31,20 @@ from dbaide.desktop.components.table import ResultTableWidget
 from dbaide.desktop.theme import Theme
 
 
-def _generate_ddl(table: str, columns: list[dict[str, Any]]) -> str:
+def _generate_ddl(table: str, columns: list[dict[str, Any]], dialect: str = "generic") -> str:
     if not columns:
         return f"-- {table}: no column metadata"
+    # Quote identifiers so the generated, copyable skeleton is valid SQL even when a
+    # table/column is a reserved word, contains special characters, or is CJK-named.
     defs = []
     for c in columns:
-        line = f"  {c.get('name', '')} {c.get('data_type') or ''}".rstrip()
+        name = str(c.get("name") or "")
+        qname = quote_identifier(name, dialect) if name else ""
+        line = f"  {qname} {c.get('data_type') or ''}".rstrip()
         if c.get("primary_key"):
             line += " PRIMARY KEY"
         defs.append(line)
-    return f"CREATE TABLE {table} (\n" + ",\n".join(defs) + "\n);"
+    return f"CREATE TABLE {quote_identifier(table, dialect)} (\n" + ",\n".join(defs) + "\n);"
 
 
 class StructurePanel(QWidget):
@@ -135,7 +140,10 @@ class StructurePanel(QWidget):
         columns: list[dict[str, Any]],
         relations: dict[str, list[dict[str, Any]]] | None = None,
         indexes: list[dict[str, Any]] | None = None,
+        *,
+        dialect: str = "generic",
     ) -> None:
+        self._ddl_hl.set_dialect(dialect)
         self._title.setText(table)
         rows = [{
             "Column": c.get("name", ""),
@@ -147,7 +155,7 @@ class StructurePanel(QWidget):
         self._indexes.setText(self._indexes_text(indexes or []))
         # Show a generated skeleton instantly; the real DDL from the database replaces
         # it via set_ddl() once the (lazy) fetch returns.
-        self._ddl.setPlainText(_generate_ddl(table, columns or []))
+        self._ddl.setPlainText(_generate_ddl(table, columns or [], dialect))
         self._ddl_label.setText(self._t("structure.ddl"))
         self.stack.setCurrentIndex(1)
 

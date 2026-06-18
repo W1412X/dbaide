@@ -161,7 +161,8 @@ class TableDocument(QWidget):
              indexes: list[dict[str, Any]] | None = None) -> None:
         """Render the offline structure and show it. No query runs until the user
         opens the Data tab (see ``_ensure_data``)."""
-        self.structure.show_table(self.table, columns or [], relations or {}, indexes or [])
+        self.structure.show_table(self.table, columns or [], relations or {}, indexes or [],
+                                  dialect=self._dialect)
         fk_map = {
             fk.get("column"): (fk.get("ref_table"), fk.get("ref_column"))
             for fk in ((relations or {}).get("foreign_keys") or [])
