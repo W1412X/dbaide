@@ -657,6 +657,37 @@ class TestThreeLayerCompression:
         assert after <= threshold  # converged
         assert any("truncated to fit" in m.content for m in msgs)
 
+    def test_reported_tokens_trigger_compaction_when_estimate_underreads(self, tmp_path):
+        """If the API-reported prompt_tokens exceed the threshold, compaction must
+        trigger even when the local char-estimate is small (estimate under-read)."""
+        llm = _JsonExtractorLLM()
+        orch = _orch(tmp_path, llm=llm)
+        orch.model_config = _SmallContextConfig()  # context_length floored to 8000
+        orch.session.compress_threshold = 50       # threshold = 4000
+        orch.session.session_uncompressed_turns = 1
+        # Small messages by char-estimate, but the API says the prompt was huge.
+        msgs = [LLMMessage("system", "sys")]
+        for n in (1, 2):
+            msgs.append(LLMMessage("user", f"[turn:{n}:start]\nq{n}"))
+            msgs.append(LLMMessage("assistant", f"a{n}"))
+            msgs.append(LLMMessage("user", f"[turn:{n}:end] done"))
+        msgs.append(LLMMessage("user", "[turn:3:start]\ncurrent"))
+        before = len(msgs)
+        orch.llm.last_usage = {"prompt_tokens": 7000}  # > threshold 4000
+
+        loop = AskAgentLoop(orch)
+        # Estimate alone is tiny (well under threshold) → without the reported-token
+        # floor, compaction would NOT run. With it, the old turns get compressed.
+        loop._maybe_compress_turns(orch, msgs)
+        assert len(msgs) < before  # compaction occurred
+
+    def test_reported_tokens_zero_when_no_usage(self, tmp_path):
+        orch = _orch(tmp_path)
+        loop = AskAgentLoop(orch)
+        assert loop._reported_prompt_tokens(orch) == 0
+        orch.llm.last_usage = {"prompt_tokens": 1234}
+        assert loop._reported_prompt_tokens(orch) == 1234
+
     def test_hard_truncate_noop_under_threshold(self, tmp_path):
         orch = _orch(tmp_path)
         msgs = [LLMMessage("system", "sys"), LLMMessage("user", "small"),

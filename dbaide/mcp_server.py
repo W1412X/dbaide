@@ -302,6 +302,17 @@ def _text_content(text: str, *, is_error: bool = False) -> dict:
     return result
 
 
+def _data_content(data: dict, *, text: str | None = None) -> dict:
+    """Tool result carrying both a human-readable text block and machine-readable
+    ``structuredContent`` (MCP 2025-06). Spec-aware clients get typed data without
+    re-parsing the text; clients on older revisions ignore the extra field. Only
+    use for already-bounded payloads (row-previewed query results)."""
+    return {
+        "content": [{"type": "text", "text": text if text is not None else bounded_json_text(data)}],
+        "structuredContent": data,
+    }
+
+
 def _positive_int_arg(
     arguments: dict[str, Any],
     name: str,
@@ -619,7 +630,7 @@ def handle_execute_sql(arguments: dict) -> dict:
             "elapsed_ms": round(result.elapsed_ms, 2),
             "sql": result.sql,
         }
-        return _text_content(bounded_json_text(data))
+        return _data_content(data)
     except (ValueError, PermissionError) as exc:
         return _text_content(f"Rejected: {exc}", is_error=True)
     except Exception as exc:
@@ -659,7 +670,7 @@ def handle_explain_sql(arguments: dict) -> dict:
             "row_count": result.row_count,
             "sql": result.sql,
         }
-        return _text_content(json.dumps(data, ensure_ascii=False, default=str, indent=2))
+        return _data_content(data, text=json.dumps(data, ensure_ascii=False, default=str, indent=2))
     except Exception as exc:
         return _text_content(f"Error: {exc}", is_error=True)
 
@@ -723,7 +734,7 @@ def handle_sample_rows(arguments: dict) -> dict:
             "row_count": result.row_count,
             "sql": result.sql,
         }
-        return _text_content(bounded_json_text(data))
+        return _data_content(data)
     except Exception as exc:
         return _text_content(f"Error: {exc}", is_error=True)
 

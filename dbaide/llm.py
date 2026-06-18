@@ -76,6 +76,10 @@ class OpenAICompatibleClient(LLMClient):
         self.cfg = cfg
         self.base_url = _validated_http_base_url(cfg.base_url)
         self.api_key = cfg.api_key or (os.environ.get(cfg.api_key_env) if cfg.api_key_env else "")
+        # The token-usage block from the most recent successful completion, as
+        # reported by the API ({"prompt_tokens", "completion_tokens", ...}).
+        # Compaction prefers this exact count over the local char-heuristic.
+        self.last_usage: dict[str, Any] | None = None
         if not self.base_url or not self.api_key or not cfg.model:
             missing = []
             if not self.base_url:
@@ -122,9 +126,18 @@ class OpenAICompatibleClient(LLMClient):
                 start = time.perf_counter()
                 # base_url is validated as an absolute http(s) URL in __init__.
                 with urllib.request.urlopen(req, timeout=timeout, context=_ssl_context()) as resp:  # nosec B310
-                    data = json.loads(resp.read().decode("utf-8"))
+                    raw = resp.read()
                 elapsed = (time.perf_counter() - start) * 1000
                 logger.debug("llm_response model=%s elapsed_ms=%.0f attempt=%d", self.cfg.model, elapsed, attempt + 1)
+                # A 200 with a malformed/non-JSON body is a response error, not a
+                # transport error — retrying won't fix it, so raise immediately
+                # (RuntimeError is not caught by the retry handlers below).
+                try:
+                    data = json.loads(raw.decode("utf-8"))
+                except (ValueError, UnicodeDecodeError) as exc:
+                    raise RuntimeError(f"LLM returned a non-JSON response: {str(exc)[:120]}") from exc
+                if not isinstance(data, dict):
+                    raise RuntimeError(f"LLM returned unexpected JSON type: {type(data).__name__}")
                 if "error" in data:
                     raise RuntimeError(f"LLM API error: {data['error']}")
                 choices = data.get("choices") or []
@@ -133,25 +146,47 @@ class OpenAICompatibleClient(LLMClient):
                 content = choices[0].get("message", {}).get("content")
                 if content is None:
                     raise RuntimeError("LLM returned null content")
+                usage = data.get("usage")
+                self.last_usage = usage if isinstance(usage, dict) else None
                 return str(content)
             except urllib.error.HTTPError as exc:
                 body = exc.read().decode("utf-8", errors="replace")
                 last_exc = RuntimeError(f"LLM HTTP {exc.code}: {body[:200]}")
+                # Carry the real status code so classification doesn't have to
+                # string-grep the message (llm_errors.classify_llm_error).
+                last_exc.status_code = exc.code  # type: ignore[attr-defined]
                 if exc.code in (429, 500, 502, 503, 504) and attempt < self.MAX_RETRIES - 1:
-                    delay = self.RETRY_BACKOFF[min(attempt, len(self.RETRY_BACKOFF) - 1)]
-                    logger.warning("llm_retry attempt=%d delay=%ds status=%d", attempt + 1, delay, exc.code)
+                    delay = self._retry_delay(attempt, exc)
+                    logger.warning("llm_retry attempt=%d delay=%.1fs status=%d", attempt + 1, delay, exc.code)
                     time.sleep(delay)
                     continue
                 raise last_exc from exc
-            except (urllib.error.URLError, TimeoutError, OSError, ValueError) as exc:
+            except (urllib.error.URLError, TimeoutError, OSError) as exc:
                 last_exc = RuntimeError(f"LLM connection failed: {exc}")
                 if attempt < self.MAX_RETRIES - 1:
-                    delay = self.RETRY_BACKOFF[min(attempt, len(self.RETRY_BACKOFF) - 1)]
-                    logger.warning("llm_retry attempt=%d delay=%ds error=%s", attempt + 1, delay, exc)
+                    delay = self._retry_delay(attempt)
+                    logger.warning("llm_retry attempt=%d delay=%.1fs error=%s", attempt + 1, delay, exc)
                     time.sleep(delay)
                     continue
                 raise last_exc from exc
         raise last_exc or RuntimeError("LLM call failed after retries")
+
+    def _retry_delay(self, attempt: int, exc: "urllib.error.HTTPError | None" = None) -> float:
+        """Backoff for retry *attempt*, honoring a server ``Retry-After`` header on
+        429/503 when present (seconds form; HTTP-date form falls back to backoff)."""
+        default = float(self.RETRY_BACKOFF[min(attempt, len(self.RETRY_BACKOFF) - 1)])
+        if exc is not None:
+            try:
+                ra = exc.headers.get("Retry-After") if exc.headers else None
+            except Exception:
+                ra = None
+            if ra:
+                try:
+                    # Cap to avoid an unbounded sleep from a hostile/buggy server.
+                    return min(60.0, max(0.0, float(str(ra).strip())))
+                except (ValueError, TypeError):
+                    pass  # HTTP-date form — not worth parsing; use backoff.
+        return default
 
     def supports_streaming(self) -> bool:
         return True

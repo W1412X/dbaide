@@ -84,10 +84,16 @@ class SQLGuard:
         if first not in {"select", "with", "explain"}:
             issues.append(ValidationIssue("READONLY_ONLY", "Only SELECT/WITH/EXPLAIN statements are allowed"))
 
-        # Check: forbidden keywords
+        # Check: forbidden keywords. A keyword counts as forbidden only in
+        # *statement* position — not as a function call (``REPLACE(...)``,
+        # ``TRUNCATE(n,d)``, MySQL ``INSERT(...)``) nor as a qualified identifier
+        # (``t.call``). The negative lookbehind ``(?<!\.)`` drops qualified names;
+        # the negative lookahead ``(?!\s*\()`` drops function calls. Real DML —
+        # ``DELETE FROM``, ``REPLACE INTO``, a data-modifying CTE ``AS (DELETE …)``
+        # — is followed by whitespace + a target, so it is still flagged.
         stripped = _strip_strings_and_comments(normalized, dialect=self.dialect).lower()
         for keyword in FORBIDDEN_KEYWORDS:
-            if re.search(rf"\b{keyword}\b", stripped):
+            if re.search(rf"(?<!\.)\b{keyword}\b(?!\s*\()", stripped):
                 issues.append(ValidationIssue("FORBIDDEN_KEYWORD", f"Forbidden keyword: {keyword.upper()}"))
 
         # Check: forbidden patterns

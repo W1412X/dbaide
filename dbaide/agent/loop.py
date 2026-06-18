@@ -125,6 +125,16 @@ class AskAgentLoop:
         ctx_len = getattr(model_cfg, "context_length", _DEFAULT_CONTEXT_LENGTH) if model_cfg else _DEFAULT_CONTEXT_LENGTH
         return max(ctx_len, 8000)
 
+    def _reported_prompt_tokens(self, orch: AskOrchestrator) -> int:
+        """Exact prompt-token count the API reported for the most recent LLM
+        call, or 0 if unavailable (no call yet, or the endpoint omits usage)."""
+        usage = getattr(getattr(orch, "llm", None), "last_usage", None)
+        if isinstance(usage, dict):
+            pt = usage.get("prompt_tokens")
+            if isinstance(pt, int) and pt > 0:
+                return pt
+        return 0
+
     def _speculative_prefetch(
         self, orch: AskOrchestrator, question: str, database: str,
     ) -> ToolResult | None:
@@ -903,7 +913,17 @@ class AskAgentLoop:
                   header built from session.turns[] data.
         """
         budget = self._context_budget()
-        total_tokens = sum(estimate_tokens(m.content) for m in messages)
+        # Trigger on the LARGER of the char-heuristic estimate and the exact
+        # prompt-token count the API reported for the last call. The estimate
+        # drifts (CJK/JSON), and an UNDER-estimate is the dangerous case — it
+        # would let the stream grow past the real context window before we
+        # compact. The exact count from orch.llm.last_usage is a hard floor that
+        # prevents that overflow. (Post-compaction recomputes below stay on the
+        # estimate, since last_usage is stale once we rewrite messages.)
+        total_tokens = max(
+            sum(estimate_tokens(m.content) for m in messages),
+            self._reported_prompt_tokens(orch),
+        )
         pct = getattr(orch.session, "compress_threshold", _DEFAULT_COMPRESS_THRESHOLD)
         threshold = int(budget * max(50, min(95, int(pct))) / 100)
         if total_tokens <= threshold:

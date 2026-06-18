@@ -37,6 +37,30 @@ def classify_llm_error(exc: BaseException, *, stage: str = "llm") -> DBAideError
             evidence={"exception_type": exc_type},
         )
 
+    # Prefer the real HTTP status when the client attached one (set by
+    # OpenAICompatibleClient) — it's exact, unlike grepping the message for
+    # "429"/"5xx", which can false-match a row count or id in an error body.
+    status_code = getattr(exc, "status_code", None)
+    if isinstance(status_code, int):
+        if status_code in (401, 403):
+            return DBAideError(
+                code=ErrorCode.MODEL_UNAVAILABLE, stage=stage, message=message,
+                hint=_t("error.llm.auth"), retryable=False, repair_action=RepairAction.STOP,
+                evidence={"exception_type": exc_type, "status_code": status_code},
+            )
+        if status_code == 429:
+            return DBAideError(
+                code=ErrorCode.LLM_ERROR, stage=stage, message=message,
+                hint=_t("error.llm.rate_limit"), retryable=True, repair_action=RepairAction.STOP,
+                evidence={"exception_type": exc_type, "status_code": status_code},
+            )
+        if 500 <= status_code <= 599:
+            return DBAideError(
+                code=ErrorCode.LLM_ERROR, stage=stage, message=message,
+                hint=_t("error.llm.server"), retryable=True, repair_action=RepairAction.STOP,
+                evidence={"exception_type": exc_type, "status_code": status_code},
+            )
+
     if any(marker in lower for marker in _AUTH_MARKERS):
         return DBAideError(
             code=ErrorCode.MODEL_UNAVAILABLE,

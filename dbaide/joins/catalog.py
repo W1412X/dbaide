@@ -100,7 +100,14 @@ class JoinCatalogStore:
             self.base_dir = Path(os.environ.get("DBAIDE_JOINS", DEFAULT_JOIN_DIR)).expanduser()
 
     def instance_path(self, instance: str) -> Path:
-        safe = instance.replace("/", "_").replace("\\", "_").strip() or "default"
+        # Collapse anything that isn't a plain identifier char so the name stays a
+        # single component inside instances/. Critically, a name of "." or ".."
+        # (or all-dots) must NOT pass through: instance_path("..") would resolve to
+        # base_dir/joins.json and purge_instance("..") would rmtree the whole
+        # base_dir. (Mirrors history.session_store._safe_name + a dot-only guard.)
+        safe = "".join(c if c.isalnum() or c in "-_." else "_" for c in (instance or "")).strip()
+        if not safe or set(safe) <= {"."}:
+            safe = "default"
         return self.base_dir / "instances" / safe / "joins.json"
 
     def purge_instance(self, instance: str) -> bool:

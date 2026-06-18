@@ -275,14 +275,21 @@ def _sql_top_level(sql: str, *, dialect: str = "generic") -> str:
 
 
 def outer_limit_value(sql: str, *, dialect: str = "generic") -> int | None:
-    """The effective row-count of a top-level LIMIT, or None if the outer query has
-    none. Handles ``LIMIT n``, ``LIMIT offset, count`` (count is the cap) and
-    ``LIMIT n OFFSET m``. Limits hidden inside subqueries/CTEs/strings are ignored."""
-    match = re.search(r"\blimit\s+(\d+)(?:\s*,\s*(\d+))?", _sql_top_level(sql, dialect=dialect), re.I)
-    if not match:
-        return None
-    # "LIMIT a, b" → b is the row count; "LIMIT n" → n.
-    return int(match.group(2) if match.group(2) is not None else match.group(1))
+    """The effective row-count cap of a top-level row limiter, or None if the
+    outer query has none. Handles ``LIMIT n``, ``LIMIT offset, count`` (count is
+    the cap), ``LIMIT n OFFSET m`` and the SQL-standard ``FETCH FIRST/NEXT n
+    ROWS ONLY`` (Postgres/DB2/Oracle). Limiters inside subqueries/CTEs/strings
+    are ignored."""
+    top = _sql_top_level(sql, dialect=dialect)
+    match = re.search(r"\blimit\s+(\d+)(?:\s*,\s*(\d+))?", top, re.I)
+    if match:
+        # "LIMIT a, b" → b is the row count; "LIMIT n" → n.
+        return int(match.group(2) if match.group(2) is not None else match.group(1))
+    # SQL-standard: FETCH FIRST|NEXT n ROWS|ROW ONLY (n optional, defaults to 1).
+    fetch = re.search(r"\bfetch\s+(?:first|next)\s+(\d+)?\s*rows?\s+only", top, re.I)
+    if fetch:
+        return int(fetch.group(1)) if fetch.group(1) else 1
+    return None
 
 
 def append_limit(sql: str, limit: int | None, *, dialect: str = "generic") -> str:

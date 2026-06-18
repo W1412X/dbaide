@@ -43,3 +43,58 @@ def strip_function_from_keywords(sql: str) -> str:
         # closing paren, so we can surgically remove the interior text.
         cleaned = pat.sub(lambda m: m.group(0)[:m.group(0).index("(")] + "(", cleaned)
     return cleaned
+
+
+_DOLLAR_TAG = re.compile(r"\$[A-Za-z_]*\$")
+
+
+def blank_strings_and_comments(sql: str) -> str:
+    """Replace comments and single-quoted/dollar-quoted string literals with
+    spaces of equal length, preserving token boundaries and offsets.
+
+    Comments are replaced with SPACES (not removed) so a comment between a
+    keyword and an identifier — e.g. ``FROM /*x*/ secret`` — still leaves a
+    visible ``FROM   secret`` for the table-reference scanner. Removing them
+    instead would let a comment hide a table reference from the schema guard
+    while the comment-laden SQL still reaches the database (a disclosure-boundary
+    bypass). Double-quoted/backtick identifiers are KEPT (they may be quoted
+    table names the scanner must see). NOT valid SQL — extraction only.
+    """
+    out: list[str] = []
+    i, n = 0, len(sql)
+    while i < n:
+        ch = sql[i]
+        nxt = sql[i + 1] if i + 1 < n else ""
+        if ch == "-" and nxt == "-":                       # line comment
+            j = sql.find("\n", i + 2)
+            j = n if j < 0 else j
+            out.append(" " * (j - i)); i = j; continue
+        if ch == "/" and nxt == "*":                       # block comment
+            j = sql.find("*/", i + 2)
+            j = n if j < 0 else j + 2
+            out.append(" " * (j - i)); i = j; continue
+        if ch == "$":                                      # dollar-quoted string
+            m = _DOLLAR_TAG.match(sql, i)
+            if m:
+                tag = m.group(0)
+                j = sql.find(tag, i + len(tag))
+                j = n if j < 0 else j + len(tag)
+                out.append(" " * (j - i)); i = j; continue
+        if ch == "'":                                      # single-quoted literal
+            j = i + 1
+            while j < n:
+                if sql[j] == "'":
+                    if j + 1 < n and sql[j + 1] == "'":
+                        j += 2; continue
+                    j += 1; break
+                j += 1
+            out.append(" " * (j - i)); i = j; continue
+        if ch in ('"', "`"):                               # quoted identifier — keep
+            j = i + 1
+            while j < n and sql[j] != ch:
+                j += 1
+            j = min(j + 1, n)
+            out.append(sql[i:j]); i = j; continue
+        out.append(ch)
+        i += 1
+    return "".join(out)

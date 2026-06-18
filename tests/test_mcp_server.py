@@ -130,6 +130,22 @@ class TestInitialize:
         assert result["protocolVersion"] == mcp.PROTOCOL_VERSION
 
 
+class TestStructuredContent:
+    """Data tools carry machine-readable structuredContent (MCP 2025-06)."""
+
+    def test_data_content_has_both_text_and_structured(self):
+        data = {"columns": ["a"], "rows": [{"a": 1}], "row_count": 1}
+        result = mcp._data_content(data)
+        assert result["content"][0]["type"] == "text"
+        assert result["structuredContent"] == data
+
+    def test_data_content_custom_text(self):
+        data = {"x": 1}
+        result = mcp._data_content(data, text="hello")
+        assert result["content"][0]["text"] == "hello"
+        assert result["structuredContent"] == data
+
+
 class TestHandleOne:
     """The per-message dispatch must never crash on malformed input."""
 

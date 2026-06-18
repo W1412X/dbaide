@@ -4,13 +4,17 @@ import re
 
 from dbaide.context.disclosure import DisclosureContext
 from dbaide.models import ValidationIssue, ValidationResult
-from dbaide.validation.sql_cleanup import strip_function_from_keywords
+from dbaide.validation.sql_cleanup import blank_strings_and_comments, strip_function_from_keywords
 
 
 class SchemaGuard:
     """
     Best-effort guard that blocks obvious table/column hallucinations against disclosed schema.
     It is intentionally conservative and never claims full SQL parsing.
+
+    Matching is case-insensitive: most engines fold unquoted identifiers (Postgres
+    → lower, MySQL is case-insensitive on common platforms), so a strict compare
+    would reject legitimate ``FROM Orders`` against a disclosed ``orders``.
     """
 
     def validate(self, sql: str, context: DisclosureContext) -> ValidationResult:
@@ -18,12 +22,13 @@ class SchemaGuard:
         exact_refs, bare_refs = _known_table_refs(context)
         if not exact_refs and not bare_refs:
             return ValidationResult(ok=True, normalized_sql=sql)
-        cte_names = set(_cte_names(sql))
+        cte_names = {c.lower() for c in _cte_names(sql)}
         for ref in _table_refs(sql):
-            bare = _bare_identifier(ref)
-            if bare in cte_names or ref in cte_names:
+            low = ref.lower()
+            bare = _bare_identifier(ref).lower()
+            if bare in cte_names or low in cte_names:
                 continue
-            if ref in exact_refs:
+            if low in exact_refs:
                 continue
             if "." not in ref and bare in bare_refs:
                 continue
@@ -33,9 +38,12 @@ class SchemaGuard:
 
 def _table_refs(sql: str) -> list[str]:
     refs: list[str] = []
-    # Strip the FROM keyword inside SQL functions (EXTRACT, TRIM, SUBSTRING)
-    # so the regex below doesn't mistake column names for table references.
-    cleaned = strip_function_from_keywords(sql)
+    # Blank out comments and string literals FIRST so a comment cannot hide a
+    # table reference from the scanner (e.g. ``FROM /*x*/ secret`` — the table
+    # would otherwise slip past the disclosure guard while still reaching the DB).
+    # Then strip the FROM keyword inside SQL functions (EXTRACT, TRIM, SUBSTRING)
+    # so the regex doesn't mistake column names for table references.
+    cleaned = strip_function_from_keywords(blank_strings_and_comments(sql))
     ident = r"(?:[A-Za-z_][\w$]*|`[^`]+`|\"[^\"]+\"|\[[^\]]+\])"
     pattern = re.compile(rf"\b(?:from|join)\s+({ident}(?:\s*\.\s*{ident})*)", re.I)
     for match in pattern.finditer(cleaned):
@@ -106,15 +114,17 @@ def _bare_identifier(value: str) -> str:
 
 
 def _known_table_refs(context: DisclosureContext) -> tuple[set[str], set[str]]:
+    """Return (exact_refs, bare_refs) of disclosed tables, lowercased for
+    case-insensitive matching against query references."""
     exact_refs: set[str] = set()
     bare_refs: set[str] = set()
     for ref, entry in context.tables.items():
         normalized = _normalize_ref(ref)
         if normalized:
-            exact_refs.add(normalized)
+            exact_refs.add(normalized.lower())
         table = _normalize_ref(entry.table.name)
         if table:
-            bare_refs.add(table)
+            bare_refs.add(table.lower())
     return exact_refs, bare_refs
 
 
