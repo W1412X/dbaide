@@ -535,8 +535,10 @@ class AskAgentLoop:
                 calls, dropped = self._batch_calls(decision)
                 if dropped:
                     messages.append(LLMMessage("user",
-                        "Note: these can't be batched (issue them one at a time so each keeps "
-                        f"its gate / depends on prior results): {', '.join(dropped)}."
+                        "Note: these were NOT run this round (either not batchable — issue "
+                        "them one at a time so each keeps its gate / depends on prior results "
+                        "— or beyond the per-round batch cap). Re-issue them in a later step: "
+                        f"{', '.join(dropped)}."
                     ))
                 if not calls:
                     messages.append(LLMMessage("user",
@@ -642,6 +644,10 @@ class AskAgentLoop:
                 if len(runnable) < getattr(self.orchestrator.session, "max_batch_tools", _DEFAULT_MAX_BATCH):
                     args = item.get("args") if isinstance(item.get("args"), dict) else {}
                     runnable.append({"tool": tool, "args": args})
+                elif tool not in dropped:
+                    # Over the per-round batch cap — surface it so the model re-issues
+                    # it next round instead of silently believing all calls ran.
+                    dropped.append(tool)
             elif tool not in dropped:
                 dropped.append(tool)
         return runnable, dropped

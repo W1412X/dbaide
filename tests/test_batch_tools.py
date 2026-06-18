@@ -95,11 +95,13 @@ def test_batch_calls_filters_and_caps(tmp_path):
     # Gated/mutating/pausing tools are surfaced, not silently dropped.
     assert set(dropped) == {"execute_sql", "ask_user", "annotate_object"}
 
-    # _DEFAULT_MAX_BATCH cap.
-    many = loop._batch_calls({"calls": [
+    # _DEFAULT_MAX_BATCH cap: extra batchable calls run capped, and the overflow is
+    # SURFACED in dropped (not silently lost) so the model re-issues them next round.
+    many_runnable, many_dropped = loop._batch_calls({"calls": [
         {"tool": "describe_table", "args": {"table": f"t{i}"}} for i in range(_DEFAULT_MAX_BATCH + 4)
-    ]})[0]
-    assert len(many) == _DEFAULT_MAX_BATCH
+    ]})
+    assert len(many_runnable) == _DEFAULT_MAX_BATCH
+    assert "describe_table" in many_dropped  # the over-cap calls are not silently dropped
 
 
 def test_batchable_whitelist_excludes_unsafe_tools():
