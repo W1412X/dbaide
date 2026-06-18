@@ -306,3 +306,19 @@ def test_insert_completion_mid_word_preserves_suffix(qapp):
     e.setTextCursor(tc)
     e._insert_completion("users")
     assert e.toPlainText() == "SELECT usersname FROM t"
+
+
+def test_highlighter_finds_comment_after_in_string_marker(qapp):
+    """A '--' inside a string literal must not hide the real line comment that follows
+    it (the scanner skips in-string markers)."""
+    from dbaide.desktop.components.sql_highlighter import SqlHighlighter
+
+    text = "SELECT 'a--b' FROM t -- real comment"
+    spans = [(7, 13)]  # the 'a--b' literal
+    # The real comment marker (after the string) is detected, not the in-string one.
+    assert SqlHighlighter._first_marker_outside_strings(text, "--", spans) == text.index("-- real")
+    # No markers outside strings → -1.
+    assert SqlHighlighter._first_marker_outside_strings("SELECT 'x--y'", "--", [(7, 13)]) == -1
+    # MySQL '#' requires a boundary (so 'a#b' as an identifier fragment isn't a comment).
+    assert SqlHighlighter._first_marker_outside_strings("SELECT a#b", "#", [], require_boundary=True) == -1
+    assert SqlHighlighter._first_marker_outside_strings("SELECT 1 # c", "#", [], require_boundary=True) == 9

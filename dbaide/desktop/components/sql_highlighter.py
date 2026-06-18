@@ -79,19 +79,33 @@ class SqlHighlighter(QSyntaxHighlighter):
                 m = it.next()
                 self.setFormat(m.capturedStart(), m.capturedLength(), self._string_fmt)
                 string_spans.append((m.capturedStart(), m.capturedEnd()))
-        dash = text.find("--")
-        if dash >= 0 and not self._inside_string(dash, string_spans):
+        # Find the first comment marker that is OUTSIDE a string — scanning past any
+        # earlier marker that sits inside a literal (e.g. the '--' in 'a--b' must not
+        # hide the real '-- comment' that follows it).
+        dash = self._first_marker_outside_strings(text, "--", string_spans)
+        if dash >= 0:
             self.setFormat(dash, len(text) - dash, self._comment_fmt)
         if self._dialect == "mysql":
-            hash_at = text.find("#")
-            if hash_at >= 0 and (hash_at == 0 or text[hash_at - 1].isspace()):
-                if not self._inside_string(hash_at, string_spans):
-                    self.setFormat(hash_at, len(text) - hash_at, self._comment_fmt)
+            hash_at = self._first_marker_outside_strings(text, "#", string_spans, require_boundary=True)
+            if hash_at >= 0:
+                self.setFormat(hash_at, len(text) - hash_at, self._comment_fmt)
         self._highlight_block_comments(text)
 
     @staticmethod
     def _inside_string(pos: int, spans: list[tuple[int, int]]) -> bool:
         return any(s <= pos < e for s, e in spans)
+
+    @classmethod
+    def _first_marker_outside_strings(
+        cls, text: str, marker: str, spans: list[tuple[int, int]], *, require_boundary: bool = False
+    ) -> int:
+        pos = text.find(marker)
+        while pos >= 0:
+            boundary_ok = (not require_boundary) or pos == 0 or text[pos - 1].isspace()
+            if boundary_ok and not cls._inside_string(pos, spans):
+                return pos
+            pos = text.find(marker, pos + 1)
+        return -1
 
     def _highlight_block_comments(self, text: str) -> None:
         # Default to "not inside a block comment" so that Qt detects the state
