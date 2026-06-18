@@ -143,10 +143,12 @@ class ResultInterpreter:
             )
 
         if truncated:
+            # row_count is the number of rows RETURNED (the cap), not the true total —
+            # more rows exist. Don't call it the total (the old wording did, misleadingly).
             parts.append(
-                f"注意：结果已截断，界面仅展示部分数据（总计 {row_count:,} 条）。"
+                f"注意：结果已截断，仅展示前 {row_count:,} 条，实际行数更多。"
                 if zh
-                else f"Note: Results were truncated. Only showing a subset of {row_count:,} total rows."
+                else f"Note: results were truncated — showing the first {row_count:,} rows; more rows exist."
             )
 
         if elapsed_ms > 5000:

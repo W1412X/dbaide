@@ -82,6 +82,21 @@ def test_result_interpreter_uses_question_language():
     assert "查询" in out2["summary"]
 
 
+def test_result_interpreter_truncated_message_does_not_call_count_the_total():
+    """When truncated, row_count is the RETURNED (capped) count, not the total — the
+    note must say 'first N rows, more exist', not label N as the total."""
+    from dbaide.agent.controllers import ResultInterpreter
+    en = ResultInterpreter().interpret(question="show data", sql="SELECT 1", row_count=100,
+                                       columns=["a"], elapsed_ms=1, truncated=True, warnings=[],
+                                       language="en")["summary"]
+    assert "first 100 rows" in en and "more rows exist" in en
+    assert "total rows" not in en
+    zh = ResultInterpreter().interpret(question="显示", sql="SELECT 1", row_count=100,
+                                       columns=["a"], elapsed_ms=1, truncated=True, warnings=[],
+                                       language="zh")["summary"]
+    assert "前 100 条" in zh and "总计" not in zh
+
+
 def test_localized_build_title_zh():
     i18n.set_language("zh")
     assert i18n.localized_build_title("Building assets · shop") == "正在构建资产 · shop"
