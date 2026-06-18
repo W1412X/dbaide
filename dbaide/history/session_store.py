@@ -68,6 +68,8 @@ def make_turn(
     created_at: float | None = None,
     charts: list[dict[str, Any]] | None = None,
     executed_sqls: list[dict[str, Any]] | None = None,
+    verified_facts: list[str] | None = None,
+    excluded_paths: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     """Build a turn dict from a workflow result's salient fields.
 
@@ -96,6 +98,8 @@ def make_turn(
         "created_at": created_at if created_at is not None else _now(),
         "charts": list(charts or []),
         "executed_sqls": [dict(item) for item in (executed_sqls or []) if isinstance(item, dict)],
+        "verified_facts": [str(f) for f in (verified_facts or [])],
+        "excluded_paths": [dict(item) for item in (excluded_paths or []) if isinstance(item, dict)],
     }
 
 

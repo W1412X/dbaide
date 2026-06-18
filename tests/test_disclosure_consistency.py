@@ -154,6 +154,36 @@ def test_disclosed_tables_snapshot_spans_all_sub_intents(orch):
     assert disclosed == ["main.customers", "main.orders"]
 
 
+def test_seed_session_memory_carries_facts_and_exclusions(orch):
+    """Verified facts and ruled-out paths from earlier turns must be re-seeded
+    into this run's memory so they survive compression of the originating turn."""
+    orch.session_turns = [{
+        "status": "completed",
+        "verified_facts": ["status=2 means cancelled"],
+        "excluded_paths": [{"target": "orders.legacy_amt", "reason": "deprecated, all NULL"}],
+    }]
+    orch._reset_loop_state("q2", "", True)
+    mem = orch.run_state.memory
+    assert "status=2 means cancelled" in mem.verified_facts
+    assert any(e.target == "orders.legacy_amt" for e in mem.excluded_paths)
+
+
+def test_session_turn_prompt_reinjects_facts_and_exclusions(orch):
+    from dbaide.agent.loop import AskAgentLoop, LoopState
+
+    orch.session_turns = [{
+        "status": "completed",
+        "verified_facts": ["paid = status IN (1,3)"],
+        "excluded_paths": [{"target": "old_orders", "reason": "archive table, do not use"}],
+    }]
+    orch._reset_loop_state("q2", "", True)
+    loop = AskAgentLoop(orch)
+    state = LoopState(question="q2", database="", execute_allowed=True, answer_language="en")
+    prompt = loop.prompts.session_turn_prompt(state, 2)
+    assert "Verified facts" in prompt and "paid = status IN (1,3)" in prompt
+    assert "Ruled-out paths" in prompt and "old_orders" in prompt
+
+
 def test_disclosure_is_independent_of_message_compression(orch):
     """Compression rewrites the LLM message stream only; the disclosure gate is
     runtime state on session.disclosure and must be unaffected, so SQL on an

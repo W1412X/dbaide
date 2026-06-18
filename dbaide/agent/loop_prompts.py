@@ -251,11 +251,11 @@ class DecisionPromptBuilder:
         """Build the user message for a new turn in session continuity mode.
 
         Unlike initial_user_prompt(), this omits prior turns (already in the
-        stream) and verified_facts/excluded_paths (already in the stream).
-        active_criteria ARE injected because they may have been established in
-        turns that were subsequently compressed — repeating them here ensures
-        the LLM honours criteria even after compression removes the original
-        messages where they were confirmed.
+        stream). active_criteria, verified facts and excluded paths ARE re-injected
+        because they may have been established in turns that were subsequently
+        compressed — repeating them here keeps the LLM honouring criteria, reusing
+        proven facts, and avoiding ruled-out paths even after compression removes
+        the original messages where they were established.
         """
         pins = _pinned_scope_labels(getattr(self.orchestrator, "schema_scope", None))
         pin_line = (f"User-attached schema (prefer these; retrieve_schema_context on them directly, "
@@ -269,6 +269,21 @@ class DecisionPromptBuilder:
                 "Confirmed criteria (already settled with the user — honour these, do NOT re-ask):\n"
                 + "\n".join(f"- {c}" for c in confirmed) + "\n\n"
             )
+        mem = self.orchestrator.run_state.memory
+        facts = [f for f in (getattr(mem, "verified_facts", None) or []) if str(f).strip()][-8:]
+        facts_line = ""
+        if facts:
+            facts_line = (
+                "Verified facts (established earlier this session — reuse, do NOT re-derive):\n"
+                + "\n".join(f"- {f}" for f in facts) + "\n\n"
+            )
+        excluded = [e for e in (getattr(mem, "excluded_paths", None) or []) if getattr(e, "target", "")][-8:]
+        excluded_line = ""
+        if excluded:
+            excluded_line = (
+                "Ruled-out paths (already excluded earlier — do NOT retry these):\n"
+                + "\n".join(f"- {e.target}: {e.reason}" for e in excluded) + "\n\n"
+            )
         timezone = str(getattr(self.orchestrator.session.connection, "session_timezone", "UTC") or "UTC")
         today = date.today().isoformat()
 
@@ -280,6 +295,8 @@ class DecisionPromptBuilder:
             f"Answer language for final user-facing prose: {state.answer_language}\n\n"
             f"{notes_line}"
             f"{criteria_line}"
+            f"{facts_line}"
+            f"{excluded_line}"
             f"{pin_line}"
         ).rstrip() + "\n"
 

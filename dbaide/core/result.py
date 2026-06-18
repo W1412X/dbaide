@@ -33,6 +33,7 @@ class WorkflowResult:
         "trace", "created_at", "completed_at",
         "pending_question", "pending_options", "pending_questions", "resume_state",
         "clarifications", "disclosed_tables",
+        "verified_facts", "excluded_paths",
         "charts", "executed_sqls",
         "session_messages",
     )
@@ -92,6 +93,10 @@ class WorkflowResult:
         # turn's session memory to read.
         self.clarifications: list[str] = []
         self.disclosed_tables: list[str] = []
+        # Cross-turn agent memory carried forward so a later turn (even after the
+        # originating turn is compressed) keeps verified facts and ruled-out paths.
+        self.verified_facts: list[str] = []
+        self.excluded_paths: list[dict[str, Any]] = []
         self.charts: list[dict[str, Any]] = []
         self.executed_sqls: list[dict[str, Any]] = []
         self.session_messages: list[dict[str, str]] | None = None
@@ -126,6 +131,8 @@ class WorkflowResult:
             "resume_state": self.resume_state,
             "clarifications": self.clarifications,
             "disclosed_tables": self.disclosed_tables,
+            "verified_facts": list(self.verified_facts or []),
+            "excluded_paths": list(self.excluded_paths or []),
             "charts": list(self.charts or []),
             "executed_sqls": list(self.executed_sqls or []),
         }

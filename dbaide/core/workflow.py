@@ -262,6 +262,17 @@ class WorkflowEngine:
             result.disclosed_tables = sorted(disclosed.keys())
         else:
             result.disclosed_tables = sorted({str(k) for k in (run_state.schemas or {}).keys()})
+        # Carry verified facts + excluded paths forward so a later turn keeps them
+        # even after this turn's messages are compressed (mirrors clarifications).
+        mem = getattr(run_state, "memory", None)
+        if mem is not None:
+            result.verified_facts = [str(f) for f in (getattr(mem, "verified_facts", None) or [])]
+            result.excluded_paths = [
+                {"target": ep.target, "reason": ep.reason,
+                 "evidence_ref": getattr(ep, "evidence_ref", ""),
+                 "source_priority": getattr(ep, "source_priority", "evidence")}
+                for ep in (getattr(mem, "excluded_paths", None) or [])
+            ]
         result.charts = list(getattr(response, "charts", None) or getattr(run_state, "charts", []) or [])
         executed_sqls = list(getattr(response, "executed_sqls", None) or [])
         result.executed_sqls = executed_sqls

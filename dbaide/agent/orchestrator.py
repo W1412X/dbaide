@@ -122,6 +122,10 @@ class AskOrchestrator:
         # time", "paid only") that the user already settled.
         if self.active_criteria:
             self.run_state.clarifications = list(self.active_criteria)
+        # Carry verified facts + ruled-out paths from earlier turns into this run's
+        # memory so they survive even after the originating turn is compressed —
+        # they are re-injected into the turn prompt (same rationale as criteria).
+        self._seed_session_memory()
 
     def run(
         self,
@@ -516,6 +520,25 @@ class AskOrchestrator:
             if not dc.instance:
                 dc.set_instance(self.instance)
             dc.redisclose(items, source="prior turns")
+
+    def _seed_session_memory(self) -> None:
+        """Re-seed verified facts + excluded paths from earlier turns of this chat
+        session into the current run's memory, so they persist across turns and
+        survive message compression (the turn prompt re-injects them)."""
+        if not self.session_turns:
+            return
+        mem = self.run_state.memory
+        for turn in self.session_turns:
+            for fact in (turn.get("verified_facts") or []):
+                if str(fact).strip():
+                    mem.mark_verified(str(fact))
+            for ep in (turn.get("excluded_paths") or []):
+                if isinstance(ep, dict) and str(ep.get("target") or "").strip():
+                    mem.add_exclusion(
+                        str(ep.get("target") or ""), str(ep.get("reason") or ""),
+                        evidence_ref=str(ep.get("evidence_ref") or ""),
+                        source_priority=str(ep.get("source_priority") or "evidence"),
+                    )
 
 
 

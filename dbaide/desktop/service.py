@@ -1013,6 +1013,8 @@ class DesktopService:
                 created_at=result.created_at or None,
                 charts=list(getattr(result, "charts", []) or []),
                 executed_sqls=list(getattr(result, "executed_sqls", []) or []),
+                verified_facts=list(getattr(result, "verified_facts", []) or []),
+                excluded_paths=list(getattr(result, "excluded_paths", []) or []),
             ), messages=session_messages)
         except Exception:  # noqa: BLE001 — session persistence must never break a query
             logger.debug("failed to record session turn", exc_info=True)
