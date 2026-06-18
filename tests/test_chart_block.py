@@ -240,6 +240,27 @@ def test_chart_block_stacked_bar_y_axis_fits_total(qapp):
     assert y_axes and y_axes[0].max() >= 25.0
 
 
+def test_chart_block_scatter_hover_shows_point_value(qapp):
+    """Scatter charts wire a value-based hover tooltip (x is a value, not a category
+    index), so hovering a point reports its actual (x, y) without crashing."""
+    pytest.importorskip("PyQt6.QtCharts")
+    from PyQt6.QtCore import QPointF
+    from dbaide.desktop.components.chart_block import build_chart_widget
+
+    spec = {
+        "chart_id": "chart:sch",
+        "chart_type": "scatter",
+        "title": "spread",
+        "categories": ["100", "2500"],
+        "series": [{"name": "rate", "values": [1.0, 2.0]}],
+        "row_count": 2,
+    }
+    widget = build_chart_widget(spec)
+    # Should not raise and should accept an out-of-category-range x (a real value).
+    widget._on_scatter_hovered(QPointF(2500.0, 2.0), True, "rate")
+    widget._on_scatter_hovered(QPointF(2500.0, 2.0), False, "rate")  # hide path
+
+
 def test_chart_block_scatter_x_axis_fits_numeric_x(qapp):
     """Scatter x-axis must span the actual x values — manually-attached axes don't
     auto-scale, so a large x range would otherwise be clipped to Qt's default [0,10]."""

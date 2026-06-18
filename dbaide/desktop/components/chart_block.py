@@ -191,6 +191,7 @@ class _ChartView(QWidget):
             QChartView,
             QHorizontalBarSeries,
             QLineSeries,
+            QScatterSeries,
             QStackedBarSeries,
         )
 
@@ -209,6 +210,13 @@ class _ChartView(QWidget):
                 series.hovered.connect(self._on_bar_hovered)
             elif isinstance(series, (QBarSeries, QStackedBarSeries)):
                 series.hovered.connect(self._on_bar_hovered)
+            elif isinstance(series, QScatterSeries):
+                # Scatter x is a value, not a category index, so show the point's
+                # actual (x, y) rather than going through the category-indexed path.
+                name = series.name()
+                series.hovered.connect(
+                    lambda point, status, n=name: self._on_scatter_hovered(point, status, n)
+                )
             elif isinstance(series, QLineSeries):
                 name = series.name()
                 series.hovered.connect(
@@ -241,6 +249,16 @@ class _ChartView(QWidget):
             return
         index = int(round(point.x()))
         self._show_tooltip(index, point.y(), series_name=series_name)
+
+    def _on_scatter_hovered(self, point, status: bool, series_name: str = "") -> None:
+        if not status:
+            QToolTip.hideText()
+            return
+        unit = self._series_units.get(series_name, "")
+        x = _format_tooltip_value(point.x())
+        y = f"{_format_tooltip_value(point.y())}{unit}"
+        text = f"{series_name}\n({x}, {y})" if series_name else f"({x}, {y})"
+        QToolTip.showText(QCursor.pos(), text)
 
     def resizeEvent(self, event) -> None:  # noqa: N802
         super().resizeEvent(event)
