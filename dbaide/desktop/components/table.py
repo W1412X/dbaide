@@ -167,11 +167,24 @@ class ResultTableWidget(QWidget):
         self.table.setVerticalHeaderLabels([str(row_offset + i + 1) for i in range(len(self._rows))])
         # Unified alignment: every cell is vertically centred; numbers align right,
         # everything else left. Headers follow their column so they line up.
-        numeric_cols = {
-            c_idx for c_idx, col in enumerate(self._columns)
-            if any(_is_numeric(row.get(col)) for row in self._rows)
-            and all(row.get(col) is None or _is_numeric(row.get(col)) for row in self._rows)
-        }
+        # A column is numeric iff every non-null value is numeric AND at least one is.
+        # Single pass per cell (the old any()+all() evaluated _is_numeric up to twice
+        # per cell on every page load); each cell's _is_numeric is computed once here.
+        numeric_cols: set[int] = set()
+        for c_idx, col in enumerate(self._columns):
+            saw_numeric = False
+            all_ok = True
+            for row in self._rows:
+                value = row.get(col)
+                if value is None:
+                    continue
+                if _is_numeric(value):
+                    saw_numeric = True
+                else:
+                    all_ok = False
+                    break
+            if saw_numeric and all_ok:
+                numeric_cols.add(c_idx)
         for c_idx in range(len(self._columns)):
             header_item = self.table.horizontalHeaderItem(c_idx)
             if header_item is None:

@@ -158,3 +158,23 @@ def test_format_cell_collapses_newlines_for_single_line_grid(qapp):
     # Plain values are untouched.
     assert _format_cell("plain") == "plain"
     assert _format_cell(None) == "NULL"
+
+
+def test_numeric_column_detection_mixed_and_null(qapp):
+    """A column is right-aligned (numeric) only if every non-null value is numeric and
+    at least one is; nulls don't disqualify, a single non-numeric does."""
+    w = ResultTableWidget()
+    rows = [
+        {"n": 1, "mixed": 1, "allnull": None, "txt": "a"},
+        {"n": 2, "mixed": "x", "allnull": None, "txt": "b"},
+        {"n": None, "mixed": 3, "allnull": None, "txt": "c"},
+    ]
+    w.load(columns=["n", "mixed", "allnull", "txt"], rows=rows, row_count=3)
+
+    def aligned_right(col_idx):
+        return bool(int(w.table.item(0, col_idx).textAlignment()) & int(Qt.AlignmentFlag.AlignRight))
+
+    assert aligned_right(0)          # n: numeric with a null → numeric
+    assert not aligned_right(1)      # mixed: has a non-numeric → not numeric
+    assert not aligned_right(2)      # allnull: no numeric value → not numeric
+    assert not aligned_right(3)      # txt: text
