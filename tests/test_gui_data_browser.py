@@ -239,6 +239,20 @@ def test_filter_completes_column_words(qapp):
     db.deleteLater()
 
 
+def test_filter_completes_cjk_column_words(qapp):
+    """The WHERE filter completer must trigger on CJK column names (zh databases)."""
+    from dbaide.desktop.views.data_browser import DataBrowser
+    db = DataBrowser()
+    db.open_table("local", "main", "订单")
+    db.show_result({"columns": ["编号", "金额"], "rows": [], "row_count": 0, "offset": 0})
+    db._filter.setText("金额 > 10 AND 编")
+    db._filter.setCursorPosition(len("金额 > 10 AND 编"))
+    assert db._filter_word() == ("编", len("金额 > 10 AND "))
+    db._insert_filter_completion("编号")
+    assert db._filter.text() == "金额 > 10 AND 编号"
+    db.deleteLater()
+
+
 def test_table_ddl_service_returns_real_sqlite_ddl(qapp, tmp_path):
     """The table_ddl action returns the database's actual CREATE statement (verbatim
     from sqlite_master), not an auto-inferred one."""

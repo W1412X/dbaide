@@ -401,7 +401,8 @@ class DataBrowser(QWidget):
 
     # ── filter (WHERE) completion ────────────────────────────────────────────--
 
-    _WORD = re.compile(r"[A-Za-z_][\w]*$")
+    # [^\W\d] (Unicode letter/underscore, not a digit) so CJK column names complete.
+    _WORD = re.compile(r"[^\W\d][\w]*$")
     _WHERE_KEYWORDS = ["AND", "OR", "NOT", "LIKE", "IN", "IS", "NULL", "BETWEEN"]
 
     def _set_filter_completions(self) -> None:
