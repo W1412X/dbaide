@@ -77,8 +77,12 @@ class SchemaTools:
 
     def describe_table(self, table: str, database: str = "") -> list[ColumnInfo]:
         database, table = normalize_db_table_for_dialect(table, database, self.adapter.dialect)
-        self._require_scope(table, database)
+        # Resolve the containing database BEFORE the scope check: a database-qualified
+        # deny rule (e.g. "db1.secret") would otherwise be bypassed by a bare table name
+        # (allows_table only matches "db1.secret" when the database is known), and a
+        # qualified allow rule would over-block a legitimately allowed bare table.
         database = database or self._asset_database_for_table(table) or self._default_asset_database()
+        self._require_scope(table, database)
         docs = self.assets.column_docs(self.instance, database, table, fingerprint=self.fingerprint) if database else []
         if docs:
             columns = [self.assets.to_column_info(doc) for doc in docs]
@@ -91,6 +95,9 @@ class SchemaTools:
 
     def foreign_keys(self, table: str, database: str = "") -> list[ForeignKeyInfo]:
         database, table = normalize_db_table_for_dialect(table, database, self.adapter.dialect)
+        # Resolve the database before the scope check so a qualified deny/allow rule
+        # isn't bypassed/over-applied for a bare table name (see describe_table).
+        database = database or self._asset_database_for_table(table) or self._default_asset_database()
         self._require_scope(table, database)
         return self.adapter.foreign_keys(table, database=database)
 

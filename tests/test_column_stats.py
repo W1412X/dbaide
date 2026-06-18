@@ -98,3 +98,52 @@ def test_batch_falls_back_per_column_on_query_error(tmp_path):
     by_col = {s["column"]: s for s in pt.column_stats("t")}
     assert abs(by_col["amount"]["stats"]["null_rate"] - 0.3333) < 0.001  # recovered per-column
     assert by_col["note"]["stats"].get("empty_rate", 0) > 0
+
+
+def _scoped_tools(tmp_path, *, deny=None, allow=None):
+    """Build a sqlite DB with assets so the db ('main') resolves, then return scoped
+    SchemaTools + ProfileTools sharing it."""
+    import sqlite3
+    from dbaide.adapters import build_adapter
+    from dbaide.assets import AssetBuilder
+    from dbaide.joins import JoinCatalogStore
+    from dbaide.tools.schema import SchemaTools
+
+    db = tmp_path / "scope.db"
+    c = sqlite3.connect(db)
+    c.executescript("CREATE TABLE t(id INTEGER PRIMARY KEY, a REAL); INSERT INTO t VALUES (1,2.0);")
+    c.commit(); c.close()
+    conn = ConnectionConfig(name="sc", type="sqlite", path=str(db),
+                            table_deny=list(deny or []), table_allow=list(allow or []))
+    store = AssetStore(tmp_path / "a")
+    jc = JoinCatalogStore(base_dir=tmp_path / "j")
+    AssetBuilder(connection=conn, adapter=build_adapter(conn), store=store, join_catalog=jc).build(
+        profile_mode="none", sample=False,
+    )
+    st = SchemaTools(build_adapter(conn), DisclosureContext(), instance="sc", assets=store)
+    pt = ProfileTools(build_adapter(conn), DisclosureContext(), instance="sc", assets=store)
+    return st, pt
+
+
+def test_qualified_deny_not_bypassed_by_bare_table_name(tmp_path):
+    """A database-qualified deny rule ('main.t') must block a BARE describe/profile call:
+    the tool resolves the database before the scope check, so the rule still matches."""
+    import pytest
+    st, pt = _scoped_tools(tmp_path, deny=["main.t"])
+    for call in (
+        lambda: st.describe_table("t"),
+        lambda: st.foreign_keys("t"),
+        lambda: pt.sample_rows("t"),
+        lambda: pt.column_stats("t"),
+        lambda: pt.profile_table("t"),
+    ):
+        with pytest.raises(PermissionError):
+            call()
+
+
+def test_qualified_allow_not_overblocked_for_bare_table_name(tmp_path):
+    """A qualified allow rule ('main.t') must permit a BARE describe call — resolving the
+    database first means the allowed table isn't wrongly treated as out-of-scope."""
+    st, _ = _scoped_tools(tmp_path, allow=["main.t"])
+    cols = st.describe_table("t")
+    assert {c.name for c in cols} == {"id", "a"}

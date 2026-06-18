@@ -62,6 +62,9 @@ class ProfileTools:
 
     def sample_rows(self, table: str, *, database: str = "", limit: int = 20) -> QueryResult:
         database, table = normalize_db_table_for_dialect(table, database, self.adapter.dialect)
+        # Resolve the database before the scope check so a qualified deny/allow rule
+        # isn't bypassed/over-applied for a bare table name (see schema.describe_table).
+        database = database or self._asset_database_for_table(table) or self._default_asset_database()
         self._require_scope(table, database)
         result = self.adapter.sample_rows(table, database=database, limit=limit)
         self.context.record_samples(table, result.rows, database=database)
@@ -69,8 +72,8 @@ class ProfileTools:
 
     def profile_column(self, table: str, column: str, *, database: str = "", top_k: int = 10) -> ColumnProfile:
         database, table = normalize_db_table_for_dialect(table, database, self.adapter.dialect)
-        self._require_scope(table, database)
         database = database or self._asset_database_for_table(table) or self._default_asset_database()
+        self._require_scope(table, database)
         for doc in self.assets.column_docs(self.instance, database, table, fingerprint=self.fingerprint) if database else []:
             if doc.get("name") == column or doc.get("column") == column:
                 cached = self._profile_from_doc(table, column, doc)
@@ -121,8 +124,8 @@ class ProfileTools:
         per-column and only runs when chosen. The caller (LLM) picks metrics, else type
         defaults apply. Values truncated."""
         database, table = normalize_db_table_for_dialect(table, database, self.adapter.dialect)
-        self._require_scope(table, database)
         database = database or self._asset_database_for_table(table) or self._default_asset_database()
+        self._require_scope(table, database)
         all_cols = {c.name: c for c in self.adapter.describe_table(table, database=database)}
         wanted = [all_cols[c] for c in (columns or list(all_cols)) if c in all_cols]
         picked = [str(m).strip().lower() for m in (metrics or []) if str(m).strip()]
@@ -232,6 +235,7 @@ class ProfileTools:
 
     def profile_table(self, table: str, columns: list[str] | None = None, *, database: str = "", top_k: int = 10) -> list[ColumnProfile]:
         database, table = normalize_db_table_for_dialect(table, database, self.adapter.dialect)
+        database = database or self._asset_database_for_table(table) or self._default_asset_database()
         self._require_scope(table, database)
         if columns is None:
             columns = [c.name for c in self.adapter.describe_table(table, database=database)]
