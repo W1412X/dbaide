@@ -153,6 +153,23 @@ class TestTableScopeGuard:
         assert not result.ok
         assert any("nonexistent" in i.message for i in result.issues)
 
+    def test_cjk_table_extracted_and_scoped(self):
+        """Unquoted CJK table names must be extracted (not crash) so allow/deny
+        enforcement works for Chinese-named databases."""
+        from dbaide.validation.sql_cleanup import table_references
+        assert table_references("SELECT * FROM 订单") == ["订单"]
+        assert table_references(
+            "SELECT * FROM 分析.订单 JOIN 客户 c ON c.id=订单.cid"
+        ) == ["客户", "分析.订单"]
+        # deny rule on a CJK table blocks it but leaves others alone
+        deny = TableScopeGuard(deny=["订单"])
+        assert not deny.validate("SELECT * FROM 订单").ok
+        assert deny.validate("SELECT * FROM 客户").ok
+        # allow-list rejects an out-of-scope CJK table
+        allow = TableScopeGuard(allow=["客户"])
+        assert not allow.validate("SELECT * FROM 订单").ok
+        assert allow.validate("SELECT * FROM 客户").ok
+
     def test_cte_name_allowed(self):
         result = _scope(("main", "users")).validate(
             "WITH cte AS (SELECT * FROM users) SELECT * FROM cte")

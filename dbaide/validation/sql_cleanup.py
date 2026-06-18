@@ -108,7 +108,10 @@ _TABLES_END_KEYWORDS = frozenset({
     "join", "inner", "left", "right", "full", "cross", "natural", "on", "using",
 })
 
-_REF_IDENT = r"(?:[A-Za-z_][\w$]*|`[^`]+`|\"[^\"]+\"|\[[^\]]+\])"
+# Unquoted branch uses [^\W\d] (Unicode letter/underscore, not a digit) as the
+# start char so CJK-named tables (e.g. 订单) are extracted — important because
+# TableScopeGuard relies on this for allow/deny enforcement.
+_REF_IDENT = r"(?:[^\W\d][\w$]*|`[^`]+`|\"[^\"]+\"|\[[^\]]+\])"
 _REF_QUALIFIED = rf"{_REF_IDENT}(?:\s*\.\s*{_REF_IDENT})*"
 _REF_LEAD = re.compile(rf"^\s*({_REF_QUALIFIED})")
 _REF_JOIN = re.compile(rf"\bjoin\s+({_REF_QUALIFIED})", re.I)
@@ -150,7 +153,10 @@ def _from_region(text: str, start: int) -> str:
         elif depth == 0 and ch == ";":
             break
         elif depth == 0 and (ch.isalpha() or ch == "_"):
-            word = re.match(r"[A-Za-z_]+", text[i:]).group(0)
+            # ch.isalpha() is True for CJK letters too, so consume a full Unicode
+            # word (\w, not [A-Za-z_]) — an ASCII-only match would be None here and
+            # crash. CJK words are never clause keywords, so they just advance us.
+            word = re.match(r"\w+", text[i:]).group(0)
             if word.lower() in _TABLES_END_KEYWORDS:
                 break
             i += len(word)
