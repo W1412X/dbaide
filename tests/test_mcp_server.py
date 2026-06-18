@@ -296,6 +296,28 @@ class TestHandleOne:
             "error": {"code": -32600, "message": "Invalid Request"},
         }]
 
+    def test_malformed_json_returns_parse_error(self, monkeypatch):
+        # JSON-RPC 2.0: a non-JSON line is a Parse error and must get a single
+        # error response with id null and code -32700 — not silence.
+        import io
+        sent = []
+        monkeypatch.setattr(mcp, "_send", lambda m: sent.append(m))
+        monkeypatch.setattr(mcp.sys, "stdin", io.StringIO("{not valid json\n"))
+        mcp.serve(mode="tools")
+        assert sent == [{
+            "jsonrpc": "2.0", "id": None,
+            "error": {"code": -32700, "message": "Parse error"},
+        }]
+
+    def test_blank_lines_are_silent(self, monkeypatch):
+        # Blank/whitespace-only lines are framing noise, not parse errors.
+        import io
+        sent = []
+        monkeypatch.setattr(mcp, "_send", lambda m: sent.append(m))
+        monkeypatch.setattr(mcp.sys, "stdin", io.StringIO("\n   \n"))
+        mcp.serve(mode="tools")
+        assert sent == []
+
     def test_batch_of_requests_returns_array(self, monkeypatch):
         # A non-empty batch still returns an array of the non-notification results.
         import io

@@ -1002,6 +1002,10 @@ def serve(*, mode: str = "full") -> None:
             try:
                 msg = json.loads(line)
             except json.JSONDecodeError:
+                # JSON-RPC 2.0: invalid JSON is a Parse error and must get an error
+                # response with id null (the id can't be recovered) — not silence.
+                # Mirrors the empty-batch (-32600) handling below.
+                _send(_error(None, -32700, "Parse error"))
                 continue
 
             # JSON-RPC 2.0 batch: an array of request objects. Respond with an
