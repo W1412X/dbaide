@@ -213,7 +213,11 @@ def _parse_explain_rows(dialect: str, result: QueryResult) -> int | None:
 
 
 def quote_identifier(name: str, dialect: str = "generic") -> str:
-    if dialect == "mysql":
+    # MariaDB quotes identifiers with backticks like MySQL by default (double quotes
+    # are string literals unless ANSI_QUOTES is set). The rest of the dialect handling
+    # (_sql_top_level, SQLGuard) already treats mysql/mariadb together — keep this
+    # consistent so a "mariadb" dialect doesn't emit string-literal "identifiers".
+    if dialect in ("mysql", "mariadb"):
         q = "`"
     else:
         q = '"'

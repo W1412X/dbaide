@@ -43,6 +43,11 @@ def test_explain_sql_strips_explain_analyze_prefix():
 def test_quote_identifier_handles_qualified_names():
     assert quote_identifier("public.orders", "postgres") == '"public"."orders"'
     assert quote_identifier("shop.orders", "mysql") == "`shop`.`orders`"
+    # MariaDB uses backticks like MySQL — not double quotes (those are string literals).
+    assert quote_identifier("shop.orders", "mariadb") == "`shop`.`orders`"
+    assert quote_identifier("orders", "mariadb") == "`orders`"
+    # Embedded backtick is doubled to escape it.
+    assert quote_identifier("we`ird", "mariadb") == "`we``ird`"
 
 
 def test_explain_sql_honors_table_scope():
