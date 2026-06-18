@@ -42,7 +42,10 @@ class AssetSearch:
                         col = str(col_doc.get("name") or col_doc.get("column") or "")
                         self._add_hit(hits, tokens, "column", f"{instance}.{db_name}.{table}.{col}", col_doc)
         hits.sort(key=lambda hit: (-hit.score, hit.path))
-        return hits[:limit]
+        # Guard the slice: a non-positive limit (e.g. CLI `find --limit -5`) would
+        # otherwise become hits[:-5] and silently return "all but the last 5" instead
+        # of the top results. Clamp to at least 1.
+        return hits[: max(1, int(limit))]
 
     def _add_hit(self, hits: list[AssetSearchHit], tokens: set[str], kind: str, path: str, doc: dict[str, Any]) -> None:
         text = document_text(doc)
