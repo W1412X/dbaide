@@ -34,6 +34,36 @@ def test_connection_pool_reuses_idle_connections():
     assert len(created) == 1
 
 
+def test_close_all_during_in_use_discards_stale_connection_on_release():
+    """close_all() while a connection is checked out must not corrupt accounting:
+    the in-use conn belongs to the old epoch, so on release it is closed (not pooled)
+    and _total stays consistent — otherwise a later acquire could exceed max_size."""
+    reset_registry()
+    created = []
+
+    def factory():
+        conn = FakeConnection(len(created))
+        created.append(conn)
+        return conn
+
+    from dbaide.db.connection_pool import ConnectionPool, PoolKey as _PK
+    pool = ConnectionPool(key=_PK("shop", "mysql", "main"), max_size=1, factory=factory)
+
+    handle = pool.acquire()           # checks out conn #0 (epoch 0), _total == 1
+    assert pool._total == 1
+    pool.close_all()                  # epoch -> 1, _total reset to 0, idle cleared
+    assert pool._total == 0
+    handle.close()                    # released against dead epoch → discarded, not pooled
+    assert created[0].closed is True
+    assert pool._idle == []           # stale conn was NOT re-pooled
+    assert pool._total == 0           # and _total did not go negative
+
+    # The pool is still usable and still honours max_size afterwards.
+    with pool.acquire() as conn:
+        assert conn.name == 1
+        assert pool._total == 1
+
+
 def test_connection_pool_separates_session_timezones():
     reset_registry()
     created = []

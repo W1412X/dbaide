@@ -24,10 +24,14 @@ class PoolKey:
 
 
 class PooledConnection:
-    def __init__(self, pool: "ConnectionPool", conn: object) -> None:
+    def __init__(self, pool: "ConnectionPool", conn: object, epoch: int = 0) -> None:
         object.__setattr__(self, "_pool", pool)
         object.__setattr__(self, "_conn", conn)
         object.__setattr__(self, "_released", False)
+        # The pool's epoch when this connection was checked out. close_all() bumps the
+        # epoch, so a connection acquired before a pool reset is recognised as stale on
+        # release and discarded instead of being pooled against a reset _total count.
+        object.__setattr__(self, "_epoch", epoch)
 
     def __enter__(self) -> "PooledConnection":
         return self
@@ -58,7 +62,7 @@ class PooledConnection:
         except Exception:
             pass
         object.__setattr__(self, "_released", True)
-        self._pool.release(self._conn)
+        self._pool.release(self._conn, self._epoch)
 
 
 class ConnectionPool:
@@ -77,6 +81,7 @@ class ConnectionPool:
         self._cond = threading.Condition()
         self._idle: list[object] = []
         self._total = 0
+        self._epoch = 0
 
     def acquire(self) -> PooledConnection:
         with self._cond:
@@ -84,24 +89,36 @@ class ConnectionPool:
                 while self._idle:
                     conn = self._idle.pop()
                     if self._valid(conn):
-                        return PooledConnection(self, conn)
+                        return PooledConnection(self, conn, self._epoch)
                     self._total -= 1
                     self._close_physical(conn)
                 if self._total < self.max_size:
                     self._total += 1
                     break
                 self._cond.wait()
+            epoch = self._epoch
         try:
             conn = self._factory()
         except Exception:
             with self._cond:
-                self._total -= 1
+                # Only reclaim the slot if no reset happened while we were building —
+                # close_all() already zeroed _total for the old epoch.
+                if epoch == self._epoch:
+                    self._total -= 1
                 self._cond.notify()
             raise
-        return PooledConnection(self, conn)
+        return PooledConnection(self, conn, epoch)
 
-    def release(self, conn: object) -> None:
+    def release(self, conn: object, epoch: int | None = None) -> None:
         with self._cond:
+            # A connection acquired before a close_all() belongs to a dead epoch: its
+            # slot is no longer counted in _total, so don't pool it (that would leave
+            # _idle out of sync with _total and let acquire() exceed max_size) and
+            # don't decrement _total (it was already reset). Just close it.
+            if epoch is not None and epoch != self._epoch:
+                self._close_physical(conn)
+                self._cond.notify()
+                return
             if self._valid(conn):
                 self._idle.append(conn)
             else:
@@ -111,6 +128,7 @@ class ConnectionPool:
 
     def close_all(self) -> None:
         with self._cond:
+            self._epoch += 1
             idle, self._idle = self._idle, []
             self._total = 0
             self._cond.notify_all()
