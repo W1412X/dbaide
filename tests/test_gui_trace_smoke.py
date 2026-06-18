@@ -589,6 +589,38 @@ def test_complete_turn_renders_answer_only(qapp):
     assert markdowns == ["Done."]
 
 
+def test_md_inline_escape_preserves_error_text():
+    from dbaide.desktop.components.conversation import _md_inline_escape
+    from dbaide.rendering.markdown import render_markdown_safe
+
+    msg = "near `orders`: col _id_ unknown *now*"
+    html = render_markdown_safe("- " + _md_inline_escape(msg))
+    # The DB error must render verbatim — no code span / emphasis from its punctuation.
+    assert "<code>" not in html and "<em>" not in html
+    assert "`orders`" in html and "_id_" in html
+
+
+def test_complete_turn_error_note_is_escaped(qapp):
+    from dbaide.desktop.components.conversation import ConversationView, _MarkdownBlock
+
+    conv = ConversationView()
+    conv.begin_turn("q")
+    conv.complete_turn(
+        answer="Done.",
+        ok=False,
+        errors=[{"stage": "execute_sql", "message": "bad col `a_b` near *x*"}],
+    )
+    block = conv._layout.itemAt(conv._layout.count() - 1).widget()
+    notes = [
+        w._markdown
+        for i in range(block._content.count())
+        if isinstance((w := block._content.itemAt(i).widget()), _MarkdownBlock)
+        and "execute" in getattr(w, "_markdown", "")
+    ]
+    # The error message's markdown punctuation is backslash-escaped in the note.
+    assert notes and "\\`a\\_b\\`" in notes[0] and "\\*x\\*" in notes[0]
+
+
 def test_answer_without_stream_renders_immediately(qapp):
     """No live chunks (model can't stream / streaming off) → the full answer renders at
     once, with no front-end simulation. The full text is stored for copy."""

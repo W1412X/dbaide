@@ -77,6 +77,18 @@ _FENCED_CODE_RE = re.compile(
 )
 
 
+def _md_inline_escape(text: str) -> str:
+    """Backslash-escape CommonMark inline-significant characters so literal text
+    (e.g. a DB error containing `backticks`, *stars* or col_names) renders verbatim
+    inside a Markdown block instead of turning into code spans / emphasis."""
+    out: list[str] = []
+    for ch in str(text):
+        if ch in "\\`*_[]~":
+            out.append("\\")
+        out.append(ch)
+    return "".join(out)
+
+
 def _split_fenced_code_blocks(markdown: str) -> list[tuple[str, str, str]]:
     """Split Markdown into prose/code chunks for UI affordances.
 
@@ -1501,14 +1513,17 @@ class ConversationView(QScrollArea):
             turn.set_actions(actions_widget)
         notes: list[str] = []
         if warnings:
-            notes.append(f"**{self._tr('conversation.warnings')}**\n" + "\n".join(f"- {w}" for w in warnings))
+            notes.append(f"**{self._tr('conversation.warnings')}**\n" + "\n".join(
+                f"- {_md_inline_escape(w)}" for w in warnings))
         if errors:
             lines = []
             for err in errors:
                 if isinstance(err, dict):
-                    lines.append(f"- [{err.get('stage', '')}] {err.get('message', '')}")
+                    stage = _md_inline_escape(err.get("stage", ""))
+                    message = _md_inline_escape(err.get("message", ""))
+                    lines.append(f"- [{stage}] {message}")
                 else:
-                    lines.append(f"- {err}")
+                    lines.append(f"- {_md_inline_escape(err)}")
             notes.append(f"**{self._tr('conversation.notes')}**\n" + "\n".join(lines))
         if notes:
             turn.append_content(_MarkdownBlock("\n\n".join(notes), boxed=True))
