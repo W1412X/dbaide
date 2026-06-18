@@ -75,6 +75,10 @@ def test_classify_join_type():
     assert classify_join_type(max_right_per_left=3, max_left_per_right=1) == "one_to_many"
     assert classify_join_type(max_right_per_left=1, max_left_per_right=4) == "many_to_one"
     assert classify_join_type(max_right_per_left=2, max_left_per_right=3) == "many_to_many"
+    # No observed join pairs → no cardinality evidence → "unknown", NOT a false 1:1.
+    assert classify_join_type(max_right_per_left=0, max_left_per_right=0) == "unknown"
+    assert classify_join_type(max_right_per_left=0, max_left_per_right=5) == "unknown"
+    assert classify_join_type(max_right_per_left=5, max_left_per_right=0) == "unknown"
 
 
 def test_sample_validation_many_to_one(tmp_path):

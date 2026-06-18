@@ -94,6 +94,11 @@ def join_confidence(
 def classify_join_type(*, max_right_per_left: int, max_left_per_right: int) -> str:
     mr = max(0, int(max_right_per_left or 0))
     ml = max(0, int(max_left_per_right or 0))
+    # No observed join pairs (zero sample matches) means we have NO cardinality
+    # evidence. Reporting "one_to_one" here would falsely imply a clean key
+    # relationship for a join that matched nothing — say "unknown" instead.
+    if mr <= 0 or ml <= 0:
+        return "unknown"
     if mr <= 1 and ml <= 1:
         return "one_to_one"
     if mr > 1 and ml > 1:
