@@ -159,3 +159,20 @@ def test_chart_block_scatter_non_numeric_x_falls_back_to_order(qapp):
     }
     block = ChartBlock(spec)
     assert block.layout().count() >= 3
+
+
+def test_chart_block_empty_series_shows_no_data(qapp):
+    # No QtCharts needed: the no-data path returns a QLabel before importing it.
+    from PyQt6.QtWidgets import QLabel
+    from dbaide.desktop.components.chart_block import build_chart_widget
+
+    # 0-row query / malformed spec: no series, or no categories → clean placeholder,
+    # not a raw IndexError on spec.series[0].
+    for spec in (
+        {"chart_type": "bar", "categories": ["A", "B"], "series": [], "row_count": 0},
+        {"chart_type": "pie", "categories": [], "series": [{"name": "n", "values": []}]},
+        {"chart_type": "line", "categories": ["A"], "series": [{"name": "n", "values": []}]},
+    ):
+        widget = build_chart_widget(spec)
+        assert isinstance(widget, QLabel)
+        assert widget.text()  # the localized "no data" message

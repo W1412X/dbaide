@@ -985,6 +985,7 @@ _STRINGS: dict[str, dict[str, str]] = {
     "conversation.notes": {"en": "Notes", "zh": "备注"},
     "conversation.code": {"en": "Code", "zh": "代码"},
     "conversation.chart": {"en": "Chart", "zh": "图表"},
+    "conversation.chart_no_data": {"en": "No data to chart", "zh": "无可绘制的数据"},
     "conversation.chart_points": {"en": "{n} data points", "zh": "{n} 个数据点"},
     "conversation.chart_series": {"en": "{n} series", "zh": "{n} 条序列"},
     "conversation.chart_right_axis": {"en": "Right axis: {label}", "zh": "右轴：{label}"},

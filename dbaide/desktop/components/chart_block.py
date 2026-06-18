@@ -301,6 +301,29 @@ def _wrap_chart(chart, *, categories: list[str], chart_type: str, height: int, s
 
 def build_chart_widget(spec_dict: dict[str, Any]) -> QWidget:
     """Build a styled QChartView from a serialized chart spec."""
+    # A no-data spec (0-row query → series with empty values and/or no categories)
+    # would make chart_spec_from_dict raise a raw validation ValueError ("each series
+    # requires non-empty values") that ChartBlock surfaces verbatim to the user. Detect
+    # it up front and show a clean placeholder instead. Genuine spec errors (bad
+    # chart_type / series type / axis) still propagate. Done before importing QtCharts —
+    # an empty chart needs only a QLabel.
+    _raw_series = [s for s in (spec_dict.get("series") or []) if isinstance(s, dict)]
+    _raw_categories = list(spec_dict.get("categories") or [])
+    _chart_type = str(spec_dict.get("chart_type") or "bar")
+    _has_values = any(
+        isinstance(s.get("values"), list) and s.get("values") for s in _raw_series
+    )
+    _needs_categories = _chart_type not in ("pie", "donut", "scatter")
+    if not _raw_series or not _has_values or (_needs_categories and not _raw_categories):
+        from dbaide.i18n import t
+        placeholder = QLabel(t("conversation.chart_no_data"))
+        placeholder.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        placeholder.setStyleSheet(f"color: {_hex_color('MUTED').name()}; background: transparent; padding: 24px;")
+        return placeholder
+
+    spec = chart_spec_from_dict(spec_dict)
+    raw_categories = [str(c) for c in spec.categories]
+
     from PyQt6.QtCharts import (
         QBarCategoryAxis,
         QBarSeries,
@@ -314,10 +337,8 @@ def build_chart_widget(spec_dict: dict[str, Any]) -> QWidget:
         QValueAxis,
     )
 
-    spec = chart_spec_from_dict(spec_dict)
     chart = QChart()
     colors = _series_colors()
-    raw_categories = [str(c) for c in spec.categories]
     chart_type = spec.chart_type
     _, _angle, bottom_extra = category_axis_layout(raw_categories)
     show_legend = len(spec.series) > 1 or chart_type in {"pie", "donut"}
