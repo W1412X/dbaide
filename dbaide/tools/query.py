@@ -6,7 +6,7 @@ from dbaide.adapters.base import DatabaseAdapter
 from dbaide.context.disclosure import DisclosureContext
 from dbaide.core.result import ValidationReport
 from dbaide.models import QueryResult, ValidationResult
-from dbaide.validation import SchemaGuard, SQLGuard
+from dbaide.validation import SQLGuard, TableScopeGuard
 
 
 class QueryTools:
@@ -29,7 +29,13 @@ class QueryTools:
             max_row_limit=max_row_limit,
             dialect=getattr(adapter, "dialect", "generic"),
         )
-        self.schema_guard = SchemaGuard()
+        # OPT-IN per-connection table scope (default: allow all → no-op). Existence
+        # of a table/column is NOT pre-checked here — the DB returns a precise error
+        # the agent can act on, which is cheaper to maintain than a static gate.
+        self.scope_guard = TableScopeGuard(
+            allow=list(getattr(adapter.config, "table_allow", []) or []),
+            deny=list(getattr(adapter.config, "table_deny", []) or []),
+        )
         self.timeout_seconds = timeout_seconds
         self.explain_max_rows = policy.explain_max_rows if policy else 0
 
@@ -53,21 +59,21 @@ class QueryTools:
         first = self._guard_for_limit(limit).validate(sql, add_limit=add_limit)
         if not first.ok:
             return first
-        second = self.schema_guard.validate(first.normalized_sql, self.context)
-        if not second.ok:
-            return second
+        scope = self.scope_guard.validate(first.normalized_sql)
+        if not scope.ok:
+            return scope
         return first
 
     def validate_sql_report(self, sql: str, *, add_limit: bool = True, limit: int | None = None) -> ValidationReport:
         report = self._guard_for_limit(limit).validate_with_report(sql, add_limit=add_limit)
         if not report.ok:
             return report
-        schema_result = self.schema_guard.validate(report.normalized_sql, self.context)
-        if not schema_result.ok:
+        scope = self.scope_guard.validate(report.normalized_sql)
+        if not scope.ok:
             return ValidationReport(
                 ok=False,
                 normalized_sql=report.normalized_sql,
-                issues=[issue.message for issue in schema_result.issues],
+                issues=[issue.message for issue in scope.issues],
                 warnings=report.warnings,
                 risk_level="rejected",
                 requires_confirmation=False,
@@ -78,12 +84,11 @@ class QueryTools:
         validation = self.sql_guard.validate(sql, add_limit=False)
         if not validation.ok:
             raise ValueError("; ".join(issue.message for issue in validation.issues))
-        # Schema guard: ensure EXPLAIN only touches disclosed tables (same
-        # boundary as execute_sql). Without this, the LLM could probe for
-        # undisclosed tables via EXPLAIN, bypassing progressive disclosure.
-        schema_result = self.schema_guard.validate(validation.normalized_sql, self.context)
-        if not schema_result.ok:
-            raise ValueError("; ".join(issue.message for issue in schema_result.issues))
+        # Honor the optional connection table-scope on EXPLAIN too, so it can't be
+        # used to probe a denied/out-of-scope table.
+        scope = self.scope_guard.validate(validation.normalized_sql)
+        if not scope.ok:
+            raise ValueError("; ".join(issue.message for issue in scope.issues))
         explain_target = _strip_leading_explain(validation.normalized_sql)
         result = self.adapter.explain(explain_target, database=database, timeout_seconds=self.timeout_seconds)
         self.context.record_execution(result.sql, database=database)

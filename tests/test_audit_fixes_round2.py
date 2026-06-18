@@ -15,20 +15,16 @@ from pathlib import Path
 import pytest
 
 from dbaide.adapters.base import append_limit, outer_limit_value
-from dbaide.context.disclosure import DisclosureContext
 from dbaide.joins.catalog import JoinCatalogStore
-from dbaide.models import ColumnInfo, TableInfo
-from dbaide.validation import SchemaGuard, SQLGuard
+from dbaide.validation import SQLGuard, TableScopeGuard
 
 
-# ── SchemaGuard: disclosure bypass via comments (security) ────────────────────
+# ── TableScopeGuard: comment can't smuggle an out-of-scope table (security) ────
 
 @pytest.fixture
-def guard_ctx():
-    ctx = DisclosureContext()
-    ctx.record_tables([TableInfo(name="orders")], database="public")
-    ctx.record_columns("orders", [ColumnInfo(name="id")], database="public")
-    return SchemaGuard(), ctx
+def scope_guard():
+    # Allowed scope = the orders table only; anything else is out of scope.
+    return TableScopeGuard(allow=["public.orders", "orders"])
 
 
 @pytest.mark.parametrize("sql", [
@@ -38,23 +34,21 @@ def guard_ctx():
     "SELECT * FROM secret_table",
     "SELECT * FROM public.secret_table",
 ])
-def test_comment_does_not_hide_undisclosed_table(guard_ctx, sql):
-    guard, ctx = guard_ctx
-    result = guard.validate(sql, ctx)
-    assert not result.ok, f"disclosure bypass: {sql!r}"
-    assert any(i.code == "UNKNOWN_TABLE" for i in result.issues)
+def test_comment_cannot_hide_out_of_scope_table(scope_guard, sql):
+    result = scope_guard.validate(sql)
+    assert not result.ok, f"scope bypass: {sql!r}"
+    assert any(i.code in ("TABLE_OUT_OF_SCOPE", "TABLE_DENIED") for i in result.issues)
 
 
 @pytest.mark.parametrize("sql", [
     "SELECT * FROM orders",
     "SELECT * FROM Orders",            # case-insensitive
     "SELECT * FROM PUBLIC.ORDERS",
-    "SELECT * FROM /*c*/ orders",      # comment around a DISCLOSED table is fine
+    "SELECT * FROM /*c*/ orders",      # comment around an in-scope table is fine
     "SELECT * FROM orders WHERE note = 'from secret_table'",  # string literal, not a ref
 ])
-def test_disclosed_table_passes(guard_ctx, sql):
-    guard, ctx = guard_ctx
-    result = guard.validate(sql, ctx)
+def test_in_scope_table_passes(scope_guard, sql):
+    result = scope_guard.validate(sql)
     assert result.ok, f"false rejection: {sql!r} -> {[i.message for i in result.issues]}"
 
 

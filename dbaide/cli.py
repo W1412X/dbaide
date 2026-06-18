@@ -73,6 +73,8 @@ def build_parser() -> argparse.ArgumentParser:
     add.add_argument("--sslmode", default="", choices=["", "disable", "allow", "prefer", "require", "verify-ca", "verify-full"],
                      help="TLS mode for remote (postgres/mysql) connections. verify-ca/verify-full validate the server certificate. Default: driver default.")
     add.add_argument("--ssl-ca", default="", help="Path to a CA certificate bundle for verify-ca/verify-full (default: system/certifi trust store).")
+    add.add_argument("--table-allow", action="append", default=[], help="Restrict the agent to ONLY these tables (repeatable). Default: all tables allowed.")
+    add.add_argument("--table-deny", action="append", default=[], help="Forbid the agent from referencing these tables (repeatable).")
     add.add_argument("--default", action="store_true")
     add.add_argument("--skip-assets", action="store_true", help="Save connection without building offline schema assets.")
     add.add_argument("--asset-database", action="append", default=[], help="Database/schema to initialize. Repeatable. Default: all visible databases.")
@@ -1169,6 +1171,8 @@ def dispatch_connect(args: argparse.Namespace, cfg: ConfigManager) -> int:
             session_timezone=getattr(args, "session_timezone", "UTC"),
             sslmode=getattr(args, "sslmode", ""),
             ssl_ca=getattr(args, "ssl_ca", ""),
+            table_allow=getattr(args, "table_allow", []),
+            table_deny=getattr(args, "table_deny", []),
         )
         cfg.upsert_connection(conn, make_default=args.default)
         tls = f", sslmode={conn.sslmode}" if conn.sslmode else ""

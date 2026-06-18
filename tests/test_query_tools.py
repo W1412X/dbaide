@@ -45,21 +45,22 @@ def test_quote_identifier_handles_qualified_names():
     assert quote_identifier("shop.orders", "mysql") == "`shop`.`orders`"
 
 
-def test_explain_sql_rejects_undisclosed_table():
-    """explain_sql must enforce the schema guard — same boundary as execute_sql.
-    Without this, the LLM could probe for undisclosed tables via EXPLAIN."""
+def test_explain_sql_honors_table_scope():
+    """There is no disclosure gate, so EXPLAIN runs for any table by default; but a
+    configured connection table-scope (deny) is still enforced on EXPLAIN, so it
+    can't be used to probe a denied table."""
     import pytest
-    ctx = DisclosureContext()
-    ctx.record_tables([TableInfo(name="orders")], database="main")
+    # Default (no scope): EXPLAIN any table.
     adapter = ExplainSpyAdapter(ConnectionConfig(name="local", type="sqlite", path="/tmp/test.db"))
-    query = QueryTools(adapter, ctx)
+    QueryTools(adapter, DisclosureContext()).explain_sql("SELECT * FROM anything")
+    assert "anything" in adapter.explained_sql
 
-    # Known table → succeeds
-    query.explain_sql("SELECT * FROM orders")
-    assert "orders" in adapter.explained_sql
-
-    # Undisclosed table → rejected
-    with pytest.raises(ValueError, match="undisclosed"):
+    # With a deny scope: the denied table is rejected even via EXPLAIN.
+    scoped = ExplainSpyAdapter(ConnectionConfig(
+        name="local", type="sqlite", path="/tmp/test.db", table_deny=["secret_table"]))
+    query = QueryTools(scoped, DisclosureContext())
+    query.explain_sql("SELECT * FROM orders")  # in scope → ok
+    with pytest.raises(ValueError, match="scope"):
         query.explain_sql("SELECT * FROM secret_table")
 
 

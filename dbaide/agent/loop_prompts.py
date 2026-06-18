@@ -251,33 +251,19 @@ class DecisionPromptBuilder:
         """Build the user message for a new turn in session continuity mode.
 
         Task-specific memory (confirmed criteria 口径, verified facts, ruled-out
-        paths) is DELIBERATELY NOT re-injected here. Earlier turns — including
-        these — live in the message stream (compression preserves them into the
+        paths, tables explored earlier) is DELIBERATELY NOT re-injected here. Prior
+        turns live in the message stream (compression preserves them into the
         per-turn summaries), so the model attends to them BY RELEVANCE, the way
-        codex does. Force-injecting them as authoritative every turn would
-        contaminate an unrelated follow-up (e.g. asserting "paid only" on a
-        question about a different table). Only turn-invariant / canonical context
-        is stated here: date, timezone, answer language, pinned scope, and the
-        disclosure gate (tables already available this session).
+        codex does — avoiding contamination of an unrelated follow-up. Only
+        turn-invariant / canonical context is stated: date, timezone, answer
+        language, and any user-pinned scope. There is no schema-disclosure gate;
+        table existence is proven by the DB at execution time.
         """
         pins = _pinned_scope_labels(getattr(self.orchestrator, "schema_scope", None))
         pin_line = (f"User-attached schema (prefer these; retrieve_schema_context on them directly, "
                     f"no broad discovery needed): {', '.join(pins)}\n\n") if pins else ""
         notes = decision_notes_block(self.orchestrator, state.database)
         notes_line = f"{notes}\n\n" if notes else ""
-        # Echo the disclosure gate (canonical, turn-invariant) so the model's
-        # awareness matches what SchemaGuard accepts — these tables were disclosed
-        # earlier this session and can be queried directly. The model still picks
-        # only the ones relevant to the current question.
-        known = list(getattr(self.orchestrator.session.disclosure, "tables", {}).keys())
-        known_line = ""
-        if known:
-            shown = known[:40]
-            more = f" (+{len(known) - 40} more)" if len(known) > 40 else ""
-            known_line = (
-                "Tables already available this session (query directly if relevant — "
-                "no need to re-discover): " + ", ".join(shown) + more + "\n\n"
-            )
         timezone = str(getattr(self.orchestrator.session.connection, "session_timezone", "UTC") or "UTC")
         today = date.today().isoformat()
 
@@ -288,7 +274,6 @@ class DecisionPromptBuilder:
             f"Connection session timezone: {timezone}\n\n"
             f"Answer language for final user-facing prose: {state.answer_language}\n\n"
             f"{notes_line}"
-            f"{known_line}"
             f"{pin_line}"
         ).rstrip() + "\n"
 

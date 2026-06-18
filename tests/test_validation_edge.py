@@ -1,5 +1,15 @@
 from dbaide.validation.sql_guard import SQLGuard, _strip_strings_and_comments
-from dbaide.validation.schema_guard import SchemaGuard
+from dbaide.validation.schema_guard import TableScopeGuard
+
+
+def _scope(*tables):
+    """Build a TableScopeGuard allow-list from (db, name) pairs, accepting both the
+    qualified (db.name) and bare (name) forms — mirrors how a table is 'in scope'."""
+    allow: set[str] = set()
+    for db, name in tables:
+        allow.add(f"{db}.{name}" if db else name)
+        allow.add(name)
+    return TableScopeGuard(allow=list(allow))
 from dbaide.validation.sql_cleanup import strip_function_from_keywords
 from dbaide.agent.loop import LoopState, ToolCallRecord, _inject_stuck_loop_hint
 from dbaide.agent.toolkit.support import _safe_int, _safe_float, _tables_in_sql
@@ -116,49 +126,40 @@ class TestStripStringsAndComments:
         assert "SELECT" in result
 
 
-class TestSchemaGuardEdgeCases:
-    def test_empty_context_passes(self):
-        ctx = DisclosureContext()
-        result = SchemaGuard().validate("SELECT * FROM anything", ctx)
+class TestTableScopeGuard:
+    """TableScopeGuard reuses the table-reference extraction; with no scope it is a
+    no-op, with an allow-list it rejects out-of-scope tables. (Same extraction
+    correctness the old disclosure guard had — CTEs, quoting, function FROM, etc.)"""
+
+    def test_no_scope_passes(self):
+        result = TableScopeGuard().validate("SELECT * FROM anything")
         assert result.ok
 
-    def test_known_table_passes(self):
-        ctx = DisclosureContext()
-        ctx.record_tables([TableInfo(name="users")], database="main")
-        result = SchemaGuard().validate("SELECT * FROM users", ctx)
+    def test_in_scope_passes(self):
+        result = _scope(("main", "users")).validate("SELECT * FROM users")
         assert result.ok
 
-    def test_unknown_table_fails(self):
-        ctx = DisclosureContext()
-        ctx.record_tables([TableInfo(name="users")], database="main")
-        result = SchemaGuard().validate("SELECT * FROM nonexistent", ctx)
+    def test_out_of_scope_fails(self):
+        result = _scope(("main", "users")).validate("SELECT * FROM nonexistent")
         assert not result.ok
         assert any("nonexistent" in i.message for i in result.issues)
 
     def test_cte_name_allowed(self):
-        ctx = DisclosureContext()
-        ctx.record_tables([TableInfo(name="users")], database="main")
-        result = SchemaGuard().validate("WITH cte AS (SELECT * FROM users) SELECT * FROM cte", ctx)
+        result = _scope(("main", "users")).validate(
+            "WITH cte AS (SELECT * FROM users) SELECT * FROM cte")
         assert result.ok
 
     def test_quoted_table_name(self):
-        ctx = DisclosureContext()
-        ctx.record_tables([TableInfo(name="users")], database="main")
-        result = SchemaGuard().validate('SELECT * FROM "users"', ctx)
+        result = _scope(("main", "users")).validate('SELECT * FROM "users"')
         assert result.ok
 
     def test_qualified_table_name(self):
-        ctx = DisclosureContext()
-        ctx.record_tables([TableInfo(name="users")], database="main")
-        result = SchemaGuard().validate('SELECT * FROM "main"."users"', ctx)
+        result = _scope(("main", "users")).validate('SELECT * FROM "main"."users"')
         assert result.ok
 
     def test_extract_from_not_mistaken_for_table(self):
-        """EXTRACT(YEAR FROM col) uses FROM as function syntax, not as a table
-        reference. The schema guard must not reject it as 'undisclosed table: col'.
-        This was the root cause of a production infinite-loop (66 retries)."""
-        ctx = DisclosureContext()
-        ctx.record_tables([TableInfo(name="order")], database="order_data")
+        """EXTRACT(YEAR FROM col) uses FROM as function syntax, not a table ref —
+        the scope check must not flag the column as an out-of-scope table."""
         sql = (
             'SELECT EXTRACT(YEAR FROM order_created_at) AS year, '
             'EXTRACT(MONTH FROM order_created_at) AS month, '
@@ -167,46 +168,39 @@ class TestSchemaGuardEdgeCases:
             'WHERE order_created_at >= \'2025-01-01\' '
             'GROUP BY year, month'
         )
-        result = SchemaGuard().validate(sql, ctx)
+        result = _scope(("order_data", "order")).validate(sql)
         assert result.ok, f"False positive: {[i.message for i in result.issues]}"
 
     def test_trim_from_not_mistaken_for_table(self):
-        """TRIM(chars FROM col) is another SQL function that uses FROM."""
-        ctx = DisclosureContext()
-        ctx.record_tables([TableInfo(name="users")], database="main")
-        sql = "SELECT TRIM(' ' FROM name) FROM users"
-        result = SchemaGuard().validate(sql, ctx)
-        assert result.ok, f"False positive: {[i.message for i in result.issues]}"
+        result = _scope(("main", "users")).validate("SELECT TRIM(' ' FROM name) FROM users")
+        assert result.ok
 
-    def test_real_table_ref_still_validated_alongside_extract(self):
-        """EXTRACT in the same SQL shouldn't suppress real table validation."""
-        ctx = DisclosureContext()
-        ctx.record_tables([TableInfo(name="users")], database="main")
-        sql = (
-            'SELECT EXTRACT(YEAR FROM created_at) FROM nonexistent'
-        )
-        result = SchemaGuard().validate(sql, ctx)
+    def test_real_table_ref_still_checked_alongside_extract(self):
+        sql = 'SELECT EXTRACT(YEAR FROM created_at) FROM nonexistent'
+        result = _scope(("main", "users")).validate(sql)
         assert not result.ok
         assert any("nonexistent" in i.message for i in result.issues)
 
-    def test_duplicate_bare_table_accepted_when_disclosed(self):
-        ctx = DisclosureContext()
-        ctx.record_tables([TableInfo(name="orders")], database="sales")
-        ctx.record_tables([TableInfo(name="orders")], database="archive")
-
-        bare = SchemaGuard().validate("SELECT * FROM orders", ctx)
-        qualified = SchemaGuard().validate("SELECT * FROM sales.orders", ctx)
-
-        assert bare.ok
-        assert qualified.ok
+    def test_duplicate_bare_table_accepted(self):
+        guard = _scope(("sales", "orders"), ("archive", "orders"))
+        assert guard.validate("SELECT * FROM orders").ok
+        assert guard.validate("SELECT * FROM sales.orders").ok
 
     def test_substring_from_not_mistaken_for_table(self):
-        """SUBSTRING(col FROM n FOR m) is SQL-standard syntax using FROM."""
-        ctx = DisclosureContext()
-        ctx.record_tables([TableInfo(name="users")], database="main")
-        sql = "SELECT SUBSTRING(name FROM 1 FOR 3) FROM users"
-        result = SchemaGuard().validate(sql, ctx)
-        assert result.ok, f"False positive: {[i.message for i in result.issues]}"
+        result = _scope(("main", "users")).validate("SELECT SUBSTRING(name FROM 1 FOR 3) FROM users")
+        assert result.ok
+
+    def test_comment_cannot_hide_out_of_scope_table(self):
+        """A comment between FROM and the table must not smuggle an out-of-scope
+        table past the scope check (it still reaches the DB)."""
+        result = _scope(("main", "users")).validate("SELECT * FROM /*x*/ secret_table")
+        assert not result.ok
+        assert any("secret_table" in i.message for i in result.issues)
+
+    def test_deny_list_blocks(self):
+        guard = TableScopeGuard(deny=["secret_table"])
+        assert guard.validate("SELECT * FROM orders").ok
+        assert not guard.validate("SELECT * FROM secret_table").ok
 
 
 class TestWorkflowExtractTables:
@@ -432,8 +426,6 @@ class TestCTEParserStringLiterals:
     """_cte_names must skip parentheses inside string literals."""
 
     def test_closing_paren_in_string_does_not_break_cte(self):
-        ctx = DisclosureContext()
-        ctx.record_tables([TableInfo(name="users")], database="main")
         sql = (
             "WITH cte1 AS (\n"
             "  SELECT * FROM users WHERE name = ')'\n"
@@ -442,24 +434,20 @@ class TestCTEParserStringLiterals:
             ")\n"
             "SELECT * FROM cte1"
         )
-        result = SchemaGuard().validate(sql, ctx)
+        result = _scope(("main", "users")).validate(sql)
         assert result.ok, f"CTE with string paren broke parser: {[i.message for i in result.issues]}"
 
     def test_escaped_quote_in_cte_body(self):
-        ctx = DisclosureContext()
-        ctx.record_tables([TableInfo(name="t")], database="main")
         sql = (
             "WITH c AS (\n"
             "  SELECT * FROM t WHERE v = 'it''s )'\n"
             ")\n"
             "SELECT * FROM c"
         )
-        result = SchemaGuard().validate(sql, ctx)
+        result = _scope(("main", "t")).validate(sql)
         assert result.ok
 
     def test_multiple_ctes_with_string_parens(self):
-        ctx = DisclosureContext()
-        ctx.record_tables([TableInfo(name="a"), TableInfo(name="b")], database="main")
         sql = (
             "WITH x AS (\n"
             "  SELECT ')' AS col FROM a\n"
@@ -468,7 +456,7 @@ class TestCTEParserStringLiterals:
             ")\n"
             "SELECT * FROM x JOIN y ON x.col = y.col"
         )
-        result = SchemaGuard().validate(sql, ctx)
+        result = _scope(("main", "a"), ("main", "b")).validate(sql)
         assert result.ok
 
 

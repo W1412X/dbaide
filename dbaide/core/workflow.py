@@ -29,10 +29,6 @@ from dbaide.tools import QueryTools
 
 logger = logging.getLogger("dbaide.workflow")
 
-# Backstop on the cumulative per-turn disclosed-tables snapshot so a very long
-# session cannot grow each stored turn unbounded (carry-forward gate seeding).
-_MAX_DISCLOSED_TABLES = 300
-
 
 class WorkflowEngine:
     """Unified workflow engine consumed by CLI and GUI.
@@ -254,19 +250,15 @@ class WorkflowEngine:
         # tables this turn touched (so the next follow-up can see the context).
         run_state = assistant._orchestrator.run_state  # noqa: SLF001
         result.clarifications = list(getattr(run_state, "clarifications", []) or [])
-        # Take disclosed tables from the accumulated DisclosureContext, not the
-        # final RunState. A multi-intent turn runs each sub-intent on a fresh
-        # RunState, so run_state.schemas holds only the LAST sub-intent's tables —
-        # but session.disclosure accumulates every sub-intent's (and prior turns')
-        # tables, in the canonical "db.table" ref form the schema guard matches.
+        # A plain per-turn record of the tables this turn touched (for the session
+        # UI / retrieve_turn). Taken from the turn's DisclosureContext, which the
+        # in-turn discovery populates; spans all sub-intents (they share the
+        # session). No longer used as a cross-turn gate — there is none.
         _session = getattr(assistant._orchestrator, "session", None)  # noqa: SLF001
         disclosure = getattr(_session, "disclosure", None)
         disclosed = getattr(disclosure, "tables", None) if disclosure is not None else None
         if disclosed:
-            # Insertion order keeps the most-recently disclosed; cap so a very long
-            # session's cumulative table set can't grow the stored turn unbounded.
-            keys = list(disclosed.keys())[-_MAX_DISCLOSED_TABLES:]
-            result.disclosed_tables = sorted(keys)
+            result.disclosed_tables = sorted(disclosed.keys())
         else:
             result.disclosed_tables = sorted({str(k) for k in (run_state.schemas or {}).keys()})
         # Carry verified facts + excluded paths forward so a later turn keeps them

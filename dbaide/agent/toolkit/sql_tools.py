@@ -197,10 +197,9 @@ def register(registry: ToolRegistry, orchestrator) -> None:
             targets = [(db, table) for db, table, _ in disclosed]
             relations = list(orchestrator.run_state.relations or [])
             # Scope the SQL-writer schema context to THIS call's target tables.
-            # The full disclosure summary now also carries tables carried over from
-            # earlier turns (cross-turn gate seeding); feeding all of them would add
-            # token noise and dilute table selection. Target columns themselves come
-            # from `disclosed`, so filtering the summary is safe.
+            # The disclosure summary may hold every table discovered this turn;
+            # feeding all of them would add token noise and dilute table selection.
+            # Target columns themselves come from `disclosed`, so filtering is safe.
             target_refs = {(str(db or ""), str(table)) for db, table, _ in disclosed}
             summary = orchestrator.session.disclosure.summary()
             summary["tables"] = [

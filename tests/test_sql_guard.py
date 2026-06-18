@@ -1,7 +1,4 @@
-from dbaide.validation import SQLGuard
-from dbaide.context.disclosure import DisclosureContext
-from dbaide.models import ColumnInfo, TableInfo
-from dbaide.validation import SchemaGuard
+from dbaide.validation import SQLGuard, TableScopeGuard
 
 
 def test_sql_guard_rejects_write_statement():
@@ -22,13 +19,9 @@ def test_sql_guard_adds_limit():
     assert result.normalized_sql.endswith("LIMIT 25")
 
 
-def test_schema_guard_allows_cte_refs_and_quoted_qualified_tables():
-    context = DisclosureContext()
-    context.record_tables([TableInfo(name="orders")], database="main")
-    context.record_columns("orders", [ColumnInfo(name="id")], database="main")
-
-    result = SchemaGuard().validate('WITH recent AS (SELECT * FROM "main"."orders") SELECT * FROM recent', context)
-
+def test_table_scope_allows_cte_refs_and_quoted_qualified_tables():
+    guard = TableScopeGuard(allow=["main.orders", "orders"])
+    result = guard.validate('WITH recent AS (SELECT * FROM "main"."orders") SELECT * FROM recent')
     assert result.ok
 
 

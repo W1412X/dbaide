@@ -115,18 +115,12 @@ class AskOrchestrator:
             answer_language=normalize(answer_language or detect_user_language(question)),
         )
         self.run_state.memory.reset_goal(question, database=database, execute_allowed=execute)
-        # Task-specific memory (confirmed criteria 口径, verified facts, ruled-out
-        # paths) is deliberately NOT carried into this fresh run as authoritative
-        # state. It lives in the chat history (compression preserves it into the
-        # per-turn summaries); the model attends to it BY RELEVANCE — the codex
-        # model — so an unrelated follow-up is not contaminated by a prior turn's
-        # "paid only" / "status=2 = cancelled". run_state.clarifications therefore
-        # holds only THIS turn's confirmations. (active_criteria is still loaded by
-        # the workflow but no longer force-applied.)
-        # The disclosure gate IS canonical, turn-invariant state, so it is carried:
-        # rehydrate columns for earlier-turn tables from the OFFLINE asset cache
-        # (no DB round-trip) so generate_sql finds them without re-describing.
-        self._rehydrate_run_state_schemas()
+        # Nothing is carried across turns as authoritative state. Prior turns'
+        # criteria / facts / explored tables live in the chat history (compression
+        # preserves them into the per-turn summaries); the model attends to them by
+        # relevance. There is no schema-disclosure gate to keep in sync — table
+        # existence is proven by the DB at execution time, and any per-connection
+        # table scope (TableScopeGuard) is stateless. So a fresh run starts clean.
 
     def run(
         self,
@@ -220,13 +214,6 @@ class AskOrchestrator:
         skip_turn_markers: bool = False,
     ) -> AssistantResponse:
         self.run_state.fail_reason = ""  # fresh per run (never carry a stale reason)
-        # Carry forward schema disclosed in EARLIER turns of this chat session so
-        # the schema guard recognizes those tables this turn — the conversation
-        # memory (session_messages / [Prior turns]) implies the agent already
-        # knows them, and the disclosure gate must agree (else a follow-up that
-        # reuses a prior table is wrongly rejected as "undisclosed"). Done before
-        # snapshotting disclosures_before so these don't count as "new this turn".
-        self._seed_session_disclosure()
         disclosures = list(self.session.disclosure.events)
 
         from dbaide.agent.loop import AskAgentLoop
@@ -500,52 +487,6 @@ class AskOrchestrator:
 
     def _new_disclosures(self, before: list[str]) -> list[str]:
         return self.session.disclosure.events[len(before):]
-
-    def _prior_disclosed_keys(self) -> list[tuple[str, str]]:
-        """(database, table) pairs disclosed in earlier turns. The most recent
-        completed turn's disclosed_tables is the cumulative session set, so we read
-        only it (O(tables), not O(turns*tables))."""
-        if not self.session_turns:
-            return []
-        last = self.session_turns[-1]
-        out: list[tuple[str, str]] = []
-        for key in (last.get("disclosed_tables") or []):
-            key = str(key).strip()
-            if not key:
-                continue
-            db, _sep, table = key.rpartition(".")
-            out.append((db, table or key))
-        return out
-
-    def _seed_session_disclosure(self) -> None:
-        """Re-disclose tables surfaced in earlier turns of this chat session into
-        the live DisclosureContext (the schema guard's gate). Cheap (in-memory),
-        idempotent across sub-intents."""
-        items = self._prior_disclosed_keys()
-        if items:
-            dc = self.session.disclosure
-            if not dc.instance:
-                dc.set_instance(self.instance)
-            dc.redisclose(items, source="prior turns")
-
-    def _rehydrate_run_state_schemas(self) -> None:
-        """Populate run_state.schemas with columns for earlier-turn tables from the
-        offline AssetStore (no DB round-trip), so generate_sql / the SQL writer
-        find them via find_schema_columns instead of triggering a re-describe."""
-        for db, table in self._prior_disclosed_keys():
-            sk = self.run_state.schema_key(db, table)
-            if sk in self.run_state.schemas:
-                continue
-            try:
-                got = self.schema.columns_from_assets(table, db)
-            except Exception:
-                got = None
-            if got is None:
-                continue
-            resolved_db, columns = got
-            rk = self.run_state.schema_key(resolved_db, table)
-            self.run_state.schemas[rk] = list(columns)
-            self.run_state.schema_db[rk] = resolved_db
 
 
 

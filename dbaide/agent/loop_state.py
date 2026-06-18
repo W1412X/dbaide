@@ -230,21 +230,9 @@ def restore_loop_state(orchestrator: Any, snapshot: dict[str, Any]) -> tuple[lis
             database=orchestrator.run_state.database,
             execute_allowed=execute_allowed,
         )
-    # The DisclosureContext is runtime state and is NOT part of this snapshot;
-    # on resume it starts empty (fresh Session). Re-disclose the tables this run
-    # already discovered before pausing so the schema guard recognizes them when
-    # the resumed run re-validates SQL (e.g. a risk-confirmed re-execution).
-    dc = getattr(getattr(orchestrator, "session", None), "disclosure", None)
-    if dc is not None:
-        if not dc.instance:
-            dc.set_instance(str(getattr(orchestrator, "instance", "") or ""))
-        items: list[tuple] = []
-        for key, cols in orchestrator.run_state.schemas.items():
-            db = str(orchestrator.run_state.schema_db.get(key, "") or "")
-            table = orchestrator.run_state.schema_table_part(key, db)
-            items.append((db, table, cols))
-        if items:
-            dc.redisclose(items, source="resume")
+    # No disclosure gate to re-seed on resume: table existence is proven by the DB
+    # at execution time, so a risk-confirmed re-execution just runs and the DB is
+    # authoritative. run_state.schemas (restored above) still feeds the SQL writer.
     return messages, execute_allowed
 
 

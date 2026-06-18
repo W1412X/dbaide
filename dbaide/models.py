@@ -61,6 +61,8 @@ class ConnectionConfig:
         session_timezone: str = "UTC",
         sslmode: str = "",
         ssl_ca: str = "",
+        table_allow: list[str] | None = None,
+        table_deny: list[str] | None = None,
     ) -> None:
         self.name = str(name or "").strip()
         self.type = str(type or "").strip().lower()
@@ -98,6 +100,11 @@ class ConnectionConfig:
             )
         self.sslmode = mode
         self.ssl_ca = str(ssl_ca or "").strip()
+        # Optional security scope (default empty = allow all). When set, the agent
+        # (and direct SQL paths) may only reference tables in table_allow / may not
+        # reference tables in table_deny. Stateless; enforced by TableScopeGuard.
+        self.table_allow = [str(t).strip() for t in (table_allow or []) if str(t).strip()]
+        self.table_deny = [str(t).strip() for t in (table_deny or []) if str(t).strip()]
 
 
 class ModelConfig:
