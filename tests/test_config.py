@@ -57,6 +57,18 @@ class TestConfigManager:
         result = cfg.get_connection(None)
         assert result.name == "test"
 
+    def test_get_connection_stale_default_falls_back(self, tmp_path):
+        """A stale default_connection (e.g. hand-edited config pointing at a deleted
+        connection) must not make get_connection(None) raise — fall back to an
+        available connection. An explicit bad name still raises."""
+        import pytest as _pytest
+        cfg = ConfigManager(path=tmp_path / "config.toml")
+        cfg.upsert_connection(ConnectionConfig(name="real", type="sqlite", path="/tmp/r.db"))
+        cfg._data["default_connection"] = "ghost"   # stale/nonexistent
+        assert cfg.get_connection(None).name == "real"
+        with _pytest.raises(KeyError):
+            cfg.get_connection("ghost")             # explicit bad name still errors
+
     def test_model_save_and_load(self, tmp_path):
         cfg = ConfigManager(path=tmp_path / "config.toml")
         model = ModelConfig(name="default", provider="openai_compatible", base_url="http://test", model="gpt-4")

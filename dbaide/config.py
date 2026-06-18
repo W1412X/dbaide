@@ -213,7 +213,13 @@ class ConfigManager:
         if not conns:
             raise ValueError("No connections configured. Run `dbaide connect add ...` first.")
         if not name:
-            name = str(self._data.get("default_connection") or "") or next(iter(conns))
+            # No explicit name → use the default, but fall back to the first available
+            # connection if the configured default is missing or stale (e.g. a
+            # hand-edited config pointing at a deleted connection). Only an EXPLICIT
+            # bad name raises below.
+            name = str(self._data.get("default_connection") or "")
+            if name not in conns:
+                name = next(iter(conns))
         if name not in conns:
             available = ", ".join(sorted(conns.keys()))
             raise KeyError(f"Connection not found: {name}. Available: {available}")
