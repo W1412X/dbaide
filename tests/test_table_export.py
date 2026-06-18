@@ -30,6 +30,16 @@ def test_export_insert_decimal_unquoted():
     assert sql == 'INSERT INTO "t" ("id", "price", "bad") VALUES (1, 19.99, NULL);'
 
 
+def test_export_insert_non_finite_decimal_is_null():
+    """A non-finite Decimal (e.g. PostgreSQL NUMERIC 'NaN'/'Infinity') has no valid
+    SQL numeric literal — it must become NULL, not a bare NaN/Infinity token."""
+    from decimal import Decimal
+
+    rows = [{"a": Decimal("NaN"), "b": Decimal("-Infinity"), "c": Decimal("9.99")}]
+    sql = export_insert(rows, ["a", "b", "c"], table="t")
+    assert sql == 'INSERT INTO "t" ("a", "b", "c") VALUES (NULL, NULL, 9.99);'
+
+
 def test_export_insert_backslash_is_dialect_aware():
     """Backslash escaping must match each dialect's string rules: MySQL/MariaDB
     double it (backslash is an escape); PostgreSQL uses an E'' string with a doubled

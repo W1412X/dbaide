@@ -30,7 +30,12 @@ def _sql_literal(value: Any, *, dialect: str = "generic") -> str:
     # and must be emitted UNQUOTED (a quoted '123.45' is a string literal, which can
     # fail to insert under strict typing). NaN/Inf have no SQL literal → NULL.
     if isinstance(value, (int, float, Decimal)):
+        # NaN/Inf have no valid SQL numeric literal — emit NULL rather than a bare
+        # NaN/Infinity token (which fails to insert). Decimal('NaN') is reachable from
+        # a PostgreSQL NUMERIC column, so guard Decimal too (not just float).
         if isinstance(value, float) and not math.isfinite(value):
+            return "NULL"
+        if isinstance(value, Decimal) and not value.is_finite():
             return "NULL"
         return str(value)
     s = str(value).replace("'", "''")
