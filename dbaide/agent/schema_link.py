@@ -12,7 +12,7 @@ from typing import TYPE_CHECKING, Any
 
 from dbaide.agent.memory import SchemaCandidate, SchemaEvidenceReport, next_prefixed_id
 from dbaide.agent.progress_events import child_node, subagent_event
-from dbaide.agent.schema_context import normalize_db_table, sanitize_note
+from dbaide.agent.schema_context import flatten_prompt_text, normalize_db_table, sanitize_note
 from dbaide.models import ColumnInfo
 
 if TYPE_CHECKING:
@@ -180,7 +180,10 @@ class SchemaEvidenceRetriever:
             fingerprint=getattr(self.orch, "connection_fingerprint", ""),
         )
         if tdoc:
-            summary = str(tdoc.get("description") or tdoc.get("summary") or tdoc.get("source_comment") or tdoc.get("comment") or "")[:240]
+            summary = flatten_prompt_text(
+                tdoc.get("description") or tdoc.get("summary") or tdoc.get("source_comment") or tdoc.get("comment") or "",
+                240,
+            )
             row_count = tdoc.get("row_count")
             indexes = list(tdoc.get("indexes") or [])
             foreign_keys = list(tdoc.get("foreign_keys") or [])
@@ -192,7 +195,7 @@ class SchemaEvidenceRetriever:
                     "data_type": str(col.get("data_type") or col.get("type") or ""),
                     "primary_key": bool(col.get("primary_key")),
                     "indexed": bool(col.get("indexed")),
-                    "comment": str(col.get("comment") or "")[:160],
+                    "comment": flatten_prompt_text(col.get("comment") or "", 160),
                     "note": note,
                 })
         if not columns:
@@ -215,7 +218,7 @@ class SchemaEvidenceRetriever:
                     "data_type": col.data_type,
                     "primary_key": col.primary_key,
                     "indexed": col.indexed,
-                    "comment": (col.comment or "")[:160],
+                    "comment": flatten_prompt_text(col.comment or "", 160),
                     "note": note,
                 })
         if not indexes:
