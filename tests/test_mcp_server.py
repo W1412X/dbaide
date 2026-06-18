@@ -197,6 +197,23 @@ class TestAskProgressAndCancel:
         mcp.handle_ask({"question": "q"})
         assert not [m for m in sent if m.get("method") == "notifications/progress"]
 
+    def test_wait_user_surfaces_clarification(self, monkeypatch):
+        """A clarification pause must surface the question + options for the one-shot
+        MCP caller, not return the bare question text as if it were the answer."""
+        def run_impl(progress, cancel_check, _CancelledError, Result):
+            r = Result("wait_user")
+            r.pending_question = "Which currency — USD or local?"
+            r.pending_options = ["USD", "local"]
+            return r
+
+        self._patch_engine(monkeypatch, run_impl=run_impl)
+        monkeypatch.setattr(mcp, "_send", lambda m: None)
+        result = mcp.handle_ask({"question": "total revenue"})
+        text = result["content"][0]["text"]
+        assert "NEEDS CLARIFICATION" in text
+        assert "Which currency" in text
+        assert "USD" in text and "local" in text
+
     def test_cancellation_returns_cancelled(self, monkeypatch):
         import threading
 

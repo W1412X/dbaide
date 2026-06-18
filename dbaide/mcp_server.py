@@ -474,6 +474,20 @@ def handle_ask(arguments: dict, *, progress_token: Any = None,
         if getattr(result, "status", None) and result.status.value == "cancelled":
             return _text_content("Cancelled.", is_error=True)
 
+        # MCP ask is one-shot — there's no resume channel. If the agent paused for
+        # clarification, don't return the bare question text (a dead-end); surface it
+        # explicitly with its options so the calling agent can re-ask with the
+        # missing detail folded in.
+        if getattr(result, "status", None) and result.status.value == "wait_user":
+            q = (getattr(result, "pending_question", "") or result.answer_markdown
+                 or result.answer_plaintext or "Clarification needed").strip()
+            lines = [f"NEEDS CLARIFICATION: {q}",
+                     "(MCP ask is single-shot — re-call `ask` with the answer folded into your question.)"]
+            opts = list(getattr(result, "pending_options", None) or [])
+            if opts:
+                lines.append("Options: " + "; ".join(str(o) for o in opts))
+            return _text_content("\n".join(lines))
+
         parts: list[str] = []
         answer = result.answer_markdown or result.answer_plaintext or ""
         if answer:
