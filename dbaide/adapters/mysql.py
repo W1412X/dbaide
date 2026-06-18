@@ -169,7 +169,11 @@ class MySQLAdapter(DatabaseAdapter):
                     schema=db,
                     comment=row.get("comment") or "",
                     estimated_rows=row.get("estimated_rows"),
-                    table_type=row.get("table_type") or "table",
+                    # Normalize information_schema's TABLE_TYPE ('BASE TABLE'/'VIEW') to
+                    # the lowercase 'table'/'view' the rest of the app expects (SQLite and
+                    # Postgres already do). Without this, backup_database/backup_instance —
+                    # which filter table_type == 'table' — skipped every MySQL table.
+                    table_type="view" if "VIEW" in str(row.get("table_type") or "").upper() else "table",
                 )
                 for row in cur.fetchall()
             ]

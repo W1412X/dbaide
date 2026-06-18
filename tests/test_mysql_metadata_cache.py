@@ -149,3 +149,32 @@ def test_mysql_adapter_reuses_physical_connections_from_pool():
         assert second.name == 0
 
     assert len(adapter.opened) == 1
+
+
+def test_mysql_list_tables_normalizes_table_type():
+    """information_schema TABLE_TYPE ('BASE TABLE'/'VIEW') must be normalized to the
+    lowercase 'table'/'view' the app expects — otherwise backup_database (which filters
+    table_type == 'table') skips every MySQL table."""
+    reset_registry()
+
+    class _TablesCursor(_Cursor):
+        def execute(self, sql, params=()):
+            if "information_schema.TABLES" in sql:
+                self._rows = [
+                    {"name": "orders", "comment": "", "estimated_rows": 5, "table_type": "BASE TABLE"},
+                    {"name": "v_summary", "comment": "", "estimated_rows": None, "table_type": "VIEW"},
+                ]
+            else:
+                super().execute(sql, params)
+
+    class _Conn(_Connection):
+        def cursor(self):
+            return _TablesCursor(self.adapter)
+
+    class _Adapter(_CachingMySQLAdapter):
+        def _connect(self, database: str = ""):
+            return _Conn(self)
+
+    tables = _Adapter().list_tables(database="shop")
+    by_name = {t.name: t.table_type for t in tables}
+    assert by_name == {"orders": "table", "v_summary": "view"}
