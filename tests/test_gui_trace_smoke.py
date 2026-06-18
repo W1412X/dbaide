@@ -834,3 +834,22 @@ def test_pill_select_set_value_validates_against_options(qapp):
     c2 = PillSelect()
     c2.set_value("pending")               # no options yet → keep (can't validate)
     assert c2.value() == "pending"
+
+
+def test_clarification_bar_dismissed_on_error_and_new_turn(qapp):
+    """A pending clarification bar must be retracted when its turn errors and when a
+    new turn starts — it can't linger as a clickable prompt for a dead run."""
+    from dbaide.desktop.components.conversation import ConversationView
+
+    conv = ConversationView()
+    conv.begin_turn("q1")
+    bar = conv.append_clarification(question="Which date range?", options=["7d", "30d"])
+    assert conv._clarification_bar is bar
+    conv.finish_turn_error("connection dropped")
+    assert conv._clarification_bar is None and bar.isHidden()
+
+    # And a brand-new turn supersedes a still-showing bar.
+    conv.begin_turn("q2")
+    bar2 = conv.append_clarification(question="Which table?", options=["a", "b"])
+    conv.begin_turn("q3")
+    assert conv._clarification_bar is None and bar2.isHidden()

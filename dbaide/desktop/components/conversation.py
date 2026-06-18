@@ -1310,6 +1310,8 @@ class ConversationView(QScrollArea):
         self._chunk_dirty = False
         self._live_answer = None
         self._live_answer_text = ""
+        # A new turn supersedes any clarification bar still showing on a prior turn.
+        self._dismiss_clarification_bar()
         turn = TurnBlock()
         if user_text.strip():
             # Only surface the connection · db caption when it changes from the
@@ -1465,14 +1467,18 @@ class ConversationView(QScrollArea):
             if str(chart.get("chart_id")) not in rendered_chart_ids:
                 turn.append_content(ChartBlock(chart))
 
-    def append_clarification_reply(self, text: str) -> None:
-        if self._current_turn is None:
-            return
-        # The choice is made — retract the (now stale) option chips so the prompt
-        # doesn't keep hanging there as if it still wants an answer.
+    def _dismiss_clarification_bar(self) -> None:
+        """Retract a pending clarification bar so its (now stale) option chips don't
+        keep hanging there as if they still want an answer."""
         if self._clarification_bar is not None:
             self._clarification_bar.hide()
             self._clarification_bar = None
+
+    def append_clarification_reply(self, text: str) -> None:
+        if self._current_turn is None:
+            return
+        # The choice is made — retract the (now stale) option chips.
+        self._dismiss_clarification_bar()
         self._current_turn._header.show()
         self._current_turn._header_layout.addWidget(_Bubble(text, align_right=True))
         self._scroll_bottom()
@@ -1589,6 +1595,8 @@ class ConversationView(QScrollArea):
         self._chunk_dirty = False
         self._live_answer = None
         self._live_answer_text = ""
+        # An errored/cancelled turn must not leave a clickable clarification bar behind.
+        self._dismiss_clarification_bar()
         if self._current_turn:
             events = list((self._current_record or {}).get("events") or [])
             self._current_turn.set_trace(events)
