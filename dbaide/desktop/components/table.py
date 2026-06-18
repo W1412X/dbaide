@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import json
+import numbers as _numbers
+import re
 from typing import Any
 
 from PyQt6.QtCore import Qt
@@ -413,11 +415,15 @@ def _format_cell(value: Any) -> str:
     return text[:120] + "…" if len(text) > 120 else text
 
 
+# A real numeric string: optional sign, digits with optional decimal/exponent. Does
+# NOT match "inf"/"nan"/"1_000" — float() accepts those, but a text column holding
+# them should align left, not be mistaken for a numeric column.
+_NUMERIC_STR_RE = re.compile(r"[+-]?(?:\d+\.?\d*|\.\d+)(?:[eE][+-]?\d+)?$")
+
+
 def _is_numeric(value: Any) -> bool:
     if value is None or isinstance(value, bool):
         return False
-    try:
-        float(str(value))
+    if isinstance(value, _numbers.Number):  # int / float / Decimal from the driver
         return True
-    except ValueError:
-        return False
+    return bool(_NUMERIC_STR_RE.match(str(value).strip()))

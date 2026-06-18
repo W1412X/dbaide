@@ -129,3 +129,21 @@ def test_auto_fit_columns_resizes(qapp):
     w.load(columns=["id", "name"], rows=[{"id": 1, "name": "a-very-long-name-value"}], row_count=1)
     w.table.resizeColumnToContents(1)
     w.table.resizeColumnsToContents()  # should not raise
+
+
+def test_is_numeric_rejects_inf_nan_underscore_strings(qapp):
+    from dbaide.desktop.components.table import _is_numeric
+
+    # Real numeric values / strings → numeric (right-aligned).
+    for v in (42, 3.5, -7, "42", "-3.5", "1e3", "  5 "):
+        assert _is_numeric(v), v
+    # float() accepts these, but a text column holding them must align LEFT.
+    for v in ("inf", "-inf", "nan", "NaN", "Infinity", "1_000", "abc", "", None, True):
+        assert not _is_numeric(v), v
+
+
+def test_text_column_with_nan_value_aligns_left(qapp):
+    w = ResultTableWidget()
+    w.load(columns=["code"], rows=[{"code": "nan"}, {"code": "inf"}], row_count=2)
+    item = w.table.item(0, 0)
+    assert int(item.textAlignment()) & int(Qt.AlignmentFlag.AlignLeft)
