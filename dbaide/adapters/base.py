@@ -292,11 +292,29 @@ def outer_limit_value(sql: str, *, dialect: str = "generic") -> int | None:
     return None
 
 
+def has_outer_row_limiter(sql: str, *, dialect: str = "generic") -> bool:
+    """True if the top-level query already has any row-limiting clause.
+
+    Unlike :func:`outer_limit_value` (which returns a numeric count, or None when
+    no *numeric* limit is found), this also recognises the non-numeric limiters
+    ``LIMIT ALL`` and ``LIMIT NULL`` (Postgres no-ops) and the SQL-standard
+    ``FETCH FIRST/NEXT … ROWS ONLY``. Used to decide whether appending a LIMIT is
+    safe: appending after an existing ``LIMIT ALL`` would yield invalid
+    double-LIMIT SQL.
+    """
+    top = _sql_top_level(sql, dialect=dialect)
+    if re.search(r"\blimit\b", top, re.I):
+        return True
+    if re.search(r"\bfetch\s+(?:first|next)\b.*?\brows?\s+only\b", top, re.I | re.S):
+        return True
+    return False
+
+
 def append_limit(sql: str, limit: int | None, *, dialect: str = "generic") -> str:
     if limit is None:
         return sql
     stripped = sql.strip().rstrip(";")
-    if outer_limit_value(stripped, dialect=dialect) is not None:
+    if has_outer_row_limiter(stripped, dialect=dialect):
         return stripped
     # Append on a NEW LINE, not after a space: if the SQL ends with a trailing line
     # comment (``SELECT * FROM t -- note``) a same-line ``LIMIT`` would be swallowed

@@ -95,6 +95,19 @@ def test_append_limit_survives_trailing_line_comment():
     assert outer_limit_value(out) == 100
 
 
+def test_append_limit_does_not_double_limit_all():
+    # Postgres "LIMIT ALL"/"LIMIT NULL" are non-numeric limiters; appending another
+    # LIMIT would produce invalid double-LIMIT SQL. They must be left untouched.
+    from dbaide.adapters.base import has_outer_row_limiter
+
+    assert append_limit("SELECT * FROM t LIMIT ALL", 100, dialect="postgres") == "SELECT * FROM t LIMIT ALL"
+    assert append_limit("SELECT * FROM t LIMIT NULL", 100, dialect="postgres") == "SELECT * FROM t LIMIT NULL"
+    assert has_outer_row_limiter("SELECT * FROM t LIMIT ALL", dialect="postgres") is True
+    # A LIMIT only inside a subquery is not a top-level limiter.
+    assert has_outer_row_limiter("SELECT * FROM (SELECT 1 LIMIT 5) x") is False
+    assert append_limit("SELECT * FROM (SELECT 1 LIMIT 5) x", 100) == "SELECT * FROM (SELECT 1 LIMIT 5) x\nLIMIT 100"
+
+
 # ── JoinCatalogStore: path traversal ─────────────────────────────────────────
 
 @pytest.mark.parametrize("bad", ["..", ".", "../..", "a/../b", "..\\..", "..."])
