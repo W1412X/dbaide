@@ -42,6 +42,32 @@ def test_chart_agent_uses_llm_chart_type():
     assert payload["categories"][0].startswith("快讯")
 
 
+def test_chart_agent_clamps_overlong_labels_deterministically():
+    """The model no longer counts characters — the app clamps long labels in code."""
+    rows = [{"d": "2026-06-01", "v": 10.0}]
+    long_title = "A very long descriptive chart title that exceeds the display budget"
+    llm = _ChartMockLLM({
+        "chart_type": "bar",
+        "title": long_title,
+        "category_field": "d",
+        "value_fields": ["v"],
+        "series_names": ["A rather long series legend name"],
+        "x_label": "An overly long x axis label here",
+        "y_label": "Another overly long y axis label",
+        "axes": {"left": {"label": "An overly long left axis label", "format": "number"}},
+        "sort_by": "category_asc",
+        "limit": 10,
+    })
+    spec = ChartAgent(llm).render(chart_id="chart:1", question="q", intent="i",
+                                  columns=["d", "v"], rows=rows)
+    payload = chart_spec_to_dict(spec)
+    assert len(payload["title"]) <= 40 and payload["title"].endswith("…")
+    assert len(payload["x_label"]) <= 18 and payload["x_label"].endswith("…")
+    assert len(payload["y_label"]) <= 18
+    assert len(payload["series"][0]["name"]) <= 16 and payload["series"][0]["name"].endswith("…")
+    assert len(payload["axes"]["left"]["label"]) <= 18
+
+
 def test_chart_agent_materializes_combo_dual_axis_metadata():
     rows = [
         {"day": "2026-06-01", "orders": 120, "ad_spend": 3500.0},

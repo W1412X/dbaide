@@ -57,16 +57,25 @@ class ChartAgent:
 
     def build_spec(self, plan: ChartPlan, *, chart_id: str, rows: list[dict[str, Any]]) -> ChartSpec:
         categories, series = _materialize(plan, rows)
+        # Clamp model-authored labels deterministically here rather than asking the
+        # model to count characters in the prompt — same display result, no format
+        # burden on the model (it just writes a meaningful label).
+        for s in series:
+            s["name"] = _clamp_label(s.get("name", ""), 16)
+        axes = {k: dict(v) for k, v in (plan.axes or {}).items()}
+        for ax in axes.values():
+            if "label" in ax:
+                ax["label"] = _clamp_label(ax.get("label", ""), 18)
         spec = ChartSpec(
             chart_id=chart_id,
             chart_type=plan.chart_type,
-            title=plan.title,
+            title=_clamp_label(plan.title, 40) or "Chart",
             categories=categories,
             series=series,
-            x_label=plan.x_label,
-            y_label=plan.y_label,
+            x_label=_clamp_label(plan.x_label, 18),
+            y_label=_clamp_label(plan.y_label, 18),
             row_count=len(rows),
-            axes=dict(plan.axes or {}),
+            axes=axes,
         )
         spec.validate()
         return spec
@@ -230,6 +239,13 @@ def _materialize(plan: ChartPlan, rows: list[dict[str, Any]]) -> tuple[list[str]
             item["unit"] = plan.units[idx]
         series.append(item)
     return categories, series
+
+
+def _clamp_label(text: Any, limit: int) -> str:
+    """Collapse whitespace and truncate a display label to *limit* chars with an
+    ellipsis. Deterministic backstop so the model needn't police label length."""
+    s = " ".join(str(text or "").split())
+    return s if len(s) <= limit else s[: max(1, limit - 1)].rstrip() + "…"
 
 
 def _default_series_type(chart_type: str) -> str:

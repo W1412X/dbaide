@@ -42,12 +42,12 @@ def chart_agent_system_prompt() -> str:
         "formats them compactly. For many points, bucket by day/week in SQL rather than plotting "
         "hundreds of raw timestamps.\n"
         "\n"
-        "Label rules (critical for display quality):\n"
-        "- x_label and y_label: keep under 15 characters; strip units/parenthetical info — "
-        "put units in series_names or the axes format field instead\n"
-        "- series_names: keep each name under 12 characters — used in legend and tooltips\n"
-        "- axes.left.label / axes.right.label: same 15-char limit; just the measure name, no units\n"
-        "- title: descriptive but concise, under 30 characters\n"
+        "Label rules (the app truncates over-long labels, so just keep them tight —\n"
+        "do not pad or count characters):\n"
+        "- x_label / y_label / axes labels: the measure name only; strip units/parentheticals "
+        "(put units in the axes format field)\n"
+        "- series_names: short legend/tooltip names\n"
+        "- title: descriptive but concise\n"
         "- Axis labels and titles are displayed in the user's language when obvious from context"
     )
 
