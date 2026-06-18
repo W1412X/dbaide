@@ -138,3 +138,38 @@ class ExplainSpyAdapter(DatabaseAdapter):
     def profile_column(self, table: str, column: str, *, database: str = "", top_k: int = 10,
                        timeout_seconds: int = 30, **kwargs) -> ColumnProfile:
         return ColumnProfile(table=table, column=column, row_count=0, null_count=0)
+
+
+def test_profile_and_schema_tools_enforce_table_scope(tmp_path):
+    """table_deny/table_allow must be enforced on direct table access (sample_rows,
+    column_stats, profile_table, describe_table, foreign_keys), not only execute_sql —
+    otherwise the scope is bypassable via those tools."""
+    import sqlite3
+    import pytest
+    from dbaide.adapters import build_adapter
+    from dbaide.tools.profile import ProfileTools
+    from dbaide.tools.schema import SchemaTools
+
+    db = tmp_path / "scope.db"
+    c = sqlite3.connect(db)
+    c.execute("CREATE TABLE orders(id INTEGER)")
+    c.execute("CREATE TABLE secret(id INTEGER, ssn TEXT)")
+    c.execute("INSERT INTO secret VALUES (1, 'x')")
+    c.commit(); c.close()
+
+    conn = ConnectionConfig(name="local", type="sqlite", path=str(db), table_deny=["secret"])
+    adapter = build_adapter(conn)
+    pt = ProfileTools(adapter, DisclosureContext())
+    st = SchemaTools(adapter, DisclosureContext())
+
+    for fn in (lambda: pt.sample_rows("secret"),
+               lambda: pt.column_stats("secret"),
+               lambda: pt.profile_table("secret"),
+               lambda: st.describe_table("secret"),
+               lambda: st.foreign_keys("secret")):
+        with pytest.raises(PermissionError, match="scope"):
+            fn()
+
+    # In-scope table still works.
+    assert pt.sample_rows("orders").row_count == 0
+    assert len(st.describe_table("orders")) == 1

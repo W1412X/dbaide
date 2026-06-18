@@ -10,6 +10,7 @@ from dbaide.assets.summarizer import truncate_cell
 from dbaide.connection_identity import connection_fingerprint
 from dbaide.context.disclosure import DisclosureContext
 from dbaide.models import ColumnInfo, ColumnProfile, QueryResult
+from dbaide.validation import TableScopeGuard
 
 # Type-aware candidate metrics. The first list is the default set (always fetched
 # when the caller doesn't pick); the second is optional metrics the LLM opts into.
@@ -47,15 +48,28 @@ class ProfileTools:
         self.instance = instance or adapter.config.name
         self.assets = assets or AssetStore()
         self.fingerprint = connection_fingerprint(adapter.config)
+        # Enforce the opt-in per-connection table scope on direct table access too —
+        # otherwise table_deny/table_allow could be bypassed via sample/stats/profile.
+        self._scope = TableScopeGuard(
+            allow=list(getattr(adapter.config, "table_allow", []) or []),
+            deny=list(getattr(adapter.config, "table_deny", []) or []),
+        )
+
+    def _require_scope(self, table: str, database: str = "") -> None:
+        ok, reason = self._scope.allows_table(table, database)
+        if not ok:
+            raise PermissionError(reason)
 
     def sample_rows(self, table: str, *, database: str = "", limit: int = 20) -> QueryResult:
         database, table = normalize_db_table_for_dialect(table, database, self.adapter.dialect)
+        self._require_scope(table, database)
         result = self.adapter.sample_rows(table, database=database, limit=limit)
         self.context.record_samples(table, result.rows, database=database)
         return result
 
     def profile_column(self, table: str, column: str, *, database: str = "", top_k: int = 10) -> ColumnProfile:
         database, table = normalize_db_table_for_dialect(table, database, self.adapter.dialect)
+        self._require_scope(table, database)
         database = database or self._asset_database_for_table(table) or self._default_asset_database()
         for doc in self.assets.column_docs(self.instance, database, table, fingerprint=self.fingerprint) if database else []:
             if doc.get("name") == column or doc.get("column") == column:
@@ -107,6 +121,7 @@ class ProfileTools:
         per-column and only runs when chosen. The caller (LLM) picks metrics, else type
         defaults apply. Values truncated."""
         database, table = normalize_db_table_for_dialect(table, database, self.adapter.dialect)
+        self._require_scope(table, database)
         database = database or self._asset_database_for_table(table) or self._default_asset_database()
         all_cols = {c.name: c for c in self.adapter.describe_table(table, database=database)}
         wanted = [all_cols[c] for c in (columns or list(all_cols)) if c in all_cols]
@@ -217,6 +232,7 @@ class ProfileTools:
 
     def profile_table(self, table: str, columns: list[str] | None = None, *, database: str = "", top_k: int = 10) -> list[ColumnProfile]:
         database, table = normalize_db_table_for_dialect(table, database, self.adapter.dialect)
+        self._require_scope(table, database)
         if columns is None:
             columns = [c.name for c in self.adapter.describe_table(table, database=database)]
         profiles: list[ColumnProfile] = []

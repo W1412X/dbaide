@@ -55,6 +55,23 @@ class TableScopeGuard:
                 issues.append(ValidationIssue("TABLE_OUT_OF_SCOPE", f"Table outside connection's allowed scope: {ref}"))
         return ValidationResult(ok=not issues, issues=issues, normalized_sql=sql)
 
+    def allows_table(self, table: str, database: str = "") -> tuple[bool, str]:
+        """Check a single (database, table) target against the scope. Returns
+        (ok, reason). Used by direct table-access tools (sample_rows / column_stats /
+        profile_table / describe_table) so the scope can't be bypassed by going around
+        execute_sql. No-op (always ok) when no scope is configured."""
+        if not self.active:
+            return True, ""
+        refs = {_norm(table), _norm(_bare_identifier(table))}
+        if database:
+            refs.add(_norm(f"{database}.{table}"))
+        refs.discard("")
+        if self.deny and (self.deny & refs):
+            return False, f"Table not permitted by connection scope: {table}"
+        if self.allow and not (self.allow & refs):
+            return False, f"Table outside connection's allowed scope: {table}"
+        return True, ""
+
 
 def _norm(value: str) -> str:
     return _normalize_ref(str(value)).lower()

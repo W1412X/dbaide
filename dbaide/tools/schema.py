@@ -6,6 +6,7 @@ from dbaide.db.identifiers import normalize_db_table_for_dialect
 from dbaide.connection_identity import connection_fingerprint
 from dbaide.context.disclosure import DisclosureContext
 from dbaide.models import ColumnInfo, ForeignKeyInfo, TableInfo
+from dbaide.validation import TableScopeGuard
 
 
 class SchemaTools:
@@ -16,6 +17,17 @@ class SchemaTools:
         self.assets = assets or AssetStore()
         self.connection = adapter.config
         self.fingerprint = connection_fingerprint(adapter.config)
+        # Honor the opt-in per-connection table scope on schema introspection too, so a
+        # denied table's columns/FKs can't be disclosed by going around execute_sql.
+        self._scope = TableScopeGuard(
+            allow=list(getattr(adapter.config, "table_allow", []) or []),
+            deny=list(getattr(adapter.config, "table_deny", []) or []),
+        )
+
+    def _require_scope(self, table: str, database: str = "") -> None:
+        ok, reason = self._scope.allows_table(table, database)
+        if not ok:
+            raise PermissionError(reason)
 
     def disclose_instance(self) -> None:
         self.context.set_instance(self.instance)
@@ -57,6 +69,7 @@ class SchemaTools:
 
     def describe_table(self, table: str, database: str = "") -> list[ColumnInfo]:
         database, table = normalize_db_table_for_dialect(table, database, self.adapter.dialect)
+        self._require_scope(table, database)
         database = database or self._asset_database_for_table(table) or self._default_asset_database()
         docs = self.assets.column_docs(self.instance, database, table, fingerprint=self.fingerprint) if database else []
         if docs:
@@ -70,6 +83,7 @@ class SchemaTools:
 
     def foreign_keys(self, table: str, database: str = "") -> list[ForeignKeyInfo]:
         database, table = normalize_db_table_for_dialect(table, database, self.adapter.dialect)
+        self._require_scope(table, database)
         return self.adapter.foreign_keys(table, database=database)
 
     def inspect_table(self, table: str, database: str = "") -> dict:
