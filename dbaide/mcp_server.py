@@ -26,6 +26,7 @@ import logging
 import os
 import signal
 import sys
+import threading
 from typing import Any
 
 from dbaide.agent.toolkit.result_preview import bounded_json_text, preview_rows
@@ -410,7 +411,8 @@ _ctx = _ToolContext()
 
 # ── Handlers: Mode A ───────────────────────────────────────────────────────
 
-def handle_ask(arguments: dict) -> dict:
+def handle_ask(arguments: dict, *, progress_token: Any = None,
+               cancel_event: "threading.Event | None" = None) -> dict:
     question = str(arguments.get("question") or "").strip()
     if not question:
         return _text_content("Error: question is required", is_error=True)
@@ -424,19 +426,53 @@ def handle_ask(arguments: dict) -> dict:
         from dbaide.llm import build_llm_client
         from dbaide.core.workflow import WorkflowEngine
         from dbaide.core.result import WorkflowRequest
+        from dbaide.core.cancellation import CancelledError
 
         cfg = ConfigManager()
         connection = cfg.get_connection(conn)
         llm = build_llm_client(cfg.model())
         store = AssetStore()
 
+        # Forward agent progress events to the MCP client as notifications/progress
+        # (only when the client supplied a progressToken). progress must be
+        # monotonically increasing; total is omitted (the run length is unknown).
+        counter = {"n": 0}
+
+        def on_progress(ev: Any) -> None:
+            if progress_token is None:
+                return
+            if isinstance(ev, dict) and ev.get("kind") == "answer_chunk":
+                return  # token-by-token deltas would flood the channel
+            counter["n"] += 1
+            if isinstance(ev, dict):
+                text = str(ev.get("title") or ev.get("detail") or ev.get("stage") or "working")
+            else:
+                text = str(ev)
+            _send({
+                "jsonrpc": JSONRPC,
+                "method": "notifications/progress",
+                "params": {
+                    "progressToken": progress_token,
+                    "progress": counter["n"],
+                    "message": text[:200],
+                },
+            })
+
+        def cancel_check() -> None:
+            if cancel_event is not None and cancel_event.is_set():
+                raise CancelledError("cancelled by client")
+
         result = WorkflowEngine(connection, llm=llm, asset_store=store, model_config=cfg.model()).run(
             WorkflowRequest(
                 question=question,
                 connection_name=connection.name,
                 database_scope=[database] if database else [],
-            )
+            ),
+            progress=on_progress if progress_token is not None else None,
+            cancel_check=cancel_check,
         )
+        if getattr(result, "status", None) and result.status.value == "cancelled":
+            return _text_content("Cancelled.", is_error=True)
 
         parts: list[str] = []
         answer = result.answer_markdown or result.answer_plaintext or ""
@@ -824,11 +860,25 @@ HANDLERS = {
 
 # ── Main loop ───────────────────────────────────────────────────────────────
 
+# stdout is written from both the main stdin loop and background ask threads
+# (progress notifications + the eventual result); serialize writes so two
+# messages never interleave on the wire.
+_send_lock = threading.Lock()
+
+# In-flight async ``ask`` calls: request id → cancel Event, so a
+# notifications/cancelled for that id can signal the running agent.
+_inflight: dict[Any, "threading.Event"] = {}
+_inflight_lock = threading.Lock()
+
+
 def _send(msg: dict | list) -> None:
     try:
-        sys.stdout.write(json.dumps(msg) + "\n")
-        sys.stdout.flush()
+        with _send_lock:
+            sys.stdout.write(json.dumps(msg) + "\n")
+            sys.stdout.flush()
     except (BrokenPipeError, OSError):
+        # In a worker thread SystemExit just ends the thread; the main loop's
+        # next write will hit the same error and shut the server down.
         raise SystemExit(0)
 
 
@@ -862,6 +912,55 @@ def _handle_one(msg: Any) -> dict | None:
         if msg_id is not None:
             return _error(msg_id, -32603, str(exc))
         return None
+
+
+def _spawn_ask(msg: dict) -> None:
+    """Run the long-lived ``ask`` tool on a background thread so the main stdin
+    loop stays responsive — it can still process notifications/cancelled (to abort
+    the run) and other tool calls. Progress and the final result are written by
+    the worker via the shared, locked ``_send``."""
+    msg_id = msg.get("id")
+    params = msg.get("params") or {}
+    arguments = params.get("arguments")
+    if not isinstance(arguments, dict):
+        arguments = {}
+    progress_token = (params.get("_meta") or {}).get("progressToken") if isinstance(params.get("_meta"), dict) else None
+
+    cancel_event = threading.Event()
+    if msg_id is not None:
+        with _inflight_lock:
+            _inflight[msg_id] = cancel_event
+
+    def run() -> None:
+        try:
+            result = handle_ask(arguments, progress_token=progress_token, cancel_event=cancel_event)
+            if msg_id is not None and not cancel_event.is_set():
+                # If the client cancelled, it has stopped waiting for a response
+                # (per the MCP cancellation spec) — don't send a late one.
+                _send(_ok(msg_id, result))
+        except SystemExit:
+            pass
+        except Exception as exc:  # noqa: BLE001
+            logger.exception("ask thread failed")
+            if msg_id is not None and not cancel_event.is_set():
+                _send(_error(msg_id, -32603, str(exc)))
+        finally:
+            if msg_id is not None:
+                with _inflight_lock:
+                    _inflight.pop(msg_id, None)
+
+    threading.Thread(target=run, name="dbaide-mcp-ask", daemon=True).start()
+
+
+def _is_async_ask(msg: Any) -> bool:
+    """True for a tools/call request targeting ``ask`` when ask is enabled in the
+    active mode (so it should run on a background thread)."""
+    if not isinstance(msg, dict) or msg.get("method") != "tools/call":
+        return False
+    params = msg.get("params") or {}
+    if not isinstance(params, dict) or params.get("name") != "ask":
+        return False
+    return _active_mode in ("full", "ask")
 
 
 def serve(*, mode: str = "full") -> None:
@@ -898,6 +997,22 @@ def serve(*, mode: str = "full") -> None:
                 responses = [r for r in (_handle_one(m) for m in msg) if r is not None]
                 if responses:
                     _send(responses)
+                continue
+
+            # Cancellation: signal the matching in-flight ask so its agent loop
+            # aborts at the next cancel_check.
+            if isinstance(msg, dict) and msg.get("method") == "notifications/cancelled":
+                req_id = (msg.get("params") or {}).get("requestId")
+                with _inflight_lock:
+                    ev = _inflight.get(req_id)
+                if ev is not None:
+                    ev.set()
+                continue
+
+            # Long-running ask runs on a worker thread so the loop stays
+            # responsive to cancellation and other calls.
+            if _is_async_ask(msg):
+                _spawn_ask(msg)
                 continue
 
             response = _handle_one(msg)

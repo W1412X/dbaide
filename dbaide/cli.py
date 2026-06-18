@@ -70,6 +70,9 @@ def build_parser() -> argparse.ArgumentParser:
     add.add_argument("--password-env", default="")
     add.add_argument("--password", default="")
     add.add_argument("--session-timezone", default="UTC", help="Session time zone set after connecting. Default: UTC.")
+    add.add_argument("--sslmode", default="", choices=["", "disable", "allow", "prefer", "require", "verify-ca", "verify-full"],
+                     help="TLS mode for remote (postgres/mysql) connections. verify-ca/verify-full validate the server certificate. Default: driver default.")
+    add.add_argument("--ssl-ca", default="", help="Path to a CA certificate bundle for verify-ca/verify-full (default: system/certifi trust store).")
     add.add_argument("--default", action="store_true")
     add.add_argument("--skip-assets", action="store_true", help="Save connection without building offline schema assets.")
     add.add_argument("--asset-database", action="append", default=[], help="Database/schema to initialize. Repeatable. Default: all visible databases.")
@@ -1164,9 +1167,12 @@ def dispatch_connect(args: argparse.Namespace, cfg: ConfigManager) -> int:
             password=args.password,
             load_profile=getattr(args, "load_profile", "production"),
             session_timezone=getattr(args, "session_timezone", "UTC"),
+            sslmode=getattr(args, "sslmode", ""),
+            ssl_ca=getattr(args, "ssl_ca", ""),
         )
         cfg.upsert_connection(conn, make_default=args.default)
-        print(f"saved connection: {args.name} (load_profile={conn.load_profile}, session_timezone={conn.session_timezone})")
+        tls = f", sslmode={conn.sslmode}" if conn.sslmode else ""
+        print(f"saved connection: {args.name} (load_profile={conn.load_profile}, session_timezone={conn.session_timezone}{tls})")
         if not args.skip_assets:
             build_connection_assets(
                 cfg,

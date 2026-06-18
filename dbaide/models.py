@@ -16,6 +16,7 @@ class TaskType(str, Enum):
 _VALID_TYPES = {"sqlite", "mysql", "mariadb", "postgres", "postgresql"}
 _VALID_LOAD_PROFILES = {"production", "staging", "dev"}
 _VALID_MODEL_PROVIDERS = {"none", "openai_compatible"}
+_VALID_SSL_MODES = {"disable", "allow", "prefer", "require", "verify-ca", "verify-full"}
 
 _TOKEN_UNITS = {"k": 1_000, "m": 1_000_000}
 
@@ -58,6 +59,8 @@ class ConnectionConfig:
         path: str = "",
         load_profile: str = "production",
         session_timezone: str = "UTC",
+        sslmode: str = "",
+        ssl_ca: str = "",
     ) -> None:
         self.name = str(name or "").strip()
         self.type = str(type or "").strip().lower()
@@ -83,6 +86,18 @@ class ConnectionConfig:
         # hammer a live database by accident.
         self.load_profile = profile if profile in _VALID_LOAD_PROFILES else "production"
         self.session_timezone = str(session_timezone or "UTC").strip() or "UTC"
+        # TLS for remote connections (postgres/mysql/mariadb). Empty = driver
+        # default. Otherwise a libpq-style mode shared across dialects:
+        #   disable | allow | prefer | require | verify-ca | verify-full
+        # verify-ca/verify-full validate the server cert against ssl_ca (or the
+        # system/certifi trust store when ssl_ca is empty).
+        mode = str(sslmode or "").strip().lower()
+        if mode and mode not in _VALID_SSL_MODES:
+            raise ValueError(
+                f"Invalid sslmode: {mode!r}. Supported: {', '.join(sorted(_VALID_SSL_MODES))} (or empty)"
+            )
+        self.sslmode = mode
+        self.ssl_ca = str(ssl_ca or "").strip()
 
 
 class ModelConfig:

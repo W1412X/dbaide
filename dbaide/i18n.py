@@ -750,6 +750,18 @@ _STRINGS: dict[str, dict[str, str]] = {
     "conn.password": {"en": "Password", "zh": "密码"},
     "conn.session_timezone": {"en": "Session time zone", "zh": "会话时区"},
     "conn.load_profile": {"en": "Load profile", "zh": "负载档位"},
+    "conn.sslmode": {"en": "TLS / SSL mode", "zh": "TLS/SSL 模式"},
+    "conn.ssl_ca": {"en": "CA certificate", "zh": "CA 证书"},
+    "conn.sslmode_tooltip": {
+        "en": "TLS for remote connections. verify-ca/verify-full validate the server "
+              "certificate; require encrypts without verifying. Empty = driver default.",
+        "zh": "远程连接的 TLS。verify-ca/verify-full 会校验服务器证书；require 仅加密不校验。留空=驱动默认。",
+    },
+    "conn.ssl_ca_tooltip": {
+        "en": "Path to a CA certificate bundle for verify-ca/verify-full. "
+              "Leave empty to use the system/certifi trust store.",
+        "zh": "verify-ca/verify-full 使用的 CA 证书路径。留空则使用系统/certifi 信任库。",
+    },
     # Settings page headers
     "settings.connections.subtitle": {"en": "Manage database connections.", "zh": "管理数据库连接。"},
     "settings.export": {"en": "Export", "zh": "导出"},

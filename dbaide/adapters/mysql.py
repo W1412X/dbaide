@@ -12,6 +12,41 @@ from dbaide.models import ColumnInfo, ColumnProfile, ForeignKeyInfo, IndexInfo, 
 logger = logging.getLogger("dbaide.mysql")
 
 
+def _mysql_ssl_context(sslmode: str, ssl_ca: str):
+    """Build an ``ssl.SSLContext`` for pymysql from a libpq-style sslmode, or
+    return None to leave the driver default (no TLS).
+
+    Passing an SSLContext as pymysql's ``ssl=`` is the version-robust way to
+    enable TLS (a bare dict's truthiness/handling has shifted across releases).
+      require        → encrypt, do NOT verify the certificate
+      verify-ca      → verify the cert chain against ssl_ca (or certifi)
+      verify-full    → verify the chain AND the hostname
+      disable        → no TLS
+      "" / allow / prefer → driver default (no explicit TLS)
+    """
+    import ssl as _ssl
+    mode = (sslmode or "").strip().lower()
+    if mode in ("", "allow", "prefer", "disable"):
+        return None
+    if mode == "require":
+        ctx = _ssl.create_default_context()
+        ctx.check_hostname = False
+        ctx.verify_mode = _ssl.CERT_NONE
+        return ctx
+    # verify-ca / verify-full
+    cafile = ssl_ca or None
+    if not cafile:
+        try:
+            import certifi
+            cafile = certifi.where()
+        except Exception:
+            cafile = None
+    ctx = _ssl.create_default_context(cafile=cafile)
+    ctx.check_hostname = (mode == "verify-full")
+    ctx.verify_mode = _ssl.CERT_REQUIRED
+    return ctx
+
+
 class MySQLAdapter(DatabaseAdapter):
     dialect = "mysql"
 
@@ -33,7 +68,7 @@ class MySQLAdapter(DatabaseAdapter):
             raise RuntimeError("Install MySQL support with `pip install dbaide[mysql]`.") from exc
         password = self.config.password or (os.environ.get(self.config.password_env) if self.config.password_env else "")
         db = database or self.config.database or None
-        conn = pymysql.connect(
+        connect_kwargs: dict = dict(
             host=self.config.host or "localhost",
             port=int(self.config.port or 3306),
             user=self.config.user,
@@ -43,6 +78,13 @@ class MySQLAdapter(DatabaseAdapter):
             cursorclass=pymysql.cursors.DictCursor,
             autocommit=False,
         )
+        ssl_ctx = _mysql_ssl_context(
+            getattr(self.config, "sslmode", "") or "",
+            getattr(self.config, "ssl_ca", "") or "",
+        )
+        if ssl_ctx is not None:
+            connect_kwargs["ssl"] = ssl_ctx
+        conn = pymysql.connect(**connect_kwargs)
         self._set_session_timezone(conn)
         return conn
 

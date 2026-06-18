@@ -70,6 +70,14 @@ class ConnectionForm(QWidget):
         self.session_timezone.setFixedHeight(26)
         self.session_timezone.setPlaceholderText("UTC, +00:00, +08:00")
         self.session_timezone.setToolTip(_ct("conn.timezone_tooltip"))
+        self.sslmode = Combo()
+        self.sslmode.setFixedHeight(26)
+        self.sslmode.addItems(["", "disable", "allow", "prefer", "require", "verify-ca", "verify-full"])
+        self.sslmode.setToolTip(_ct("conn.sslmode_tooltip"))
+        self.ssl_ca = QLineEdit()
+        self.ssl_ca.setFixedHeight(26)
+        self.ssl_ca.setPlaceholderText("/path/to/ca.pem")
+        self.ssl_ca.setToolTip(_ct("conn.ssl_ca_tooltip"))
 
         from dbaide.i18n import t
         browse = compact_button(t("conn.browse"), width=88)
@@ -92,7 +100,10 @@ class ConnectionForm(QWidget):
         form.addRow(form_label(t("conn.user")), self.user)
         form.addRow(form_label(t("conn.password")), self.password)
         form.addRow(form_label(t("conn.session_timezone")), self.session_timezone)
-        self._rows_server = (3, 4, 5, 6, 7, 8)  # host, port, database, user, password, timezone
+        form.addRow(form_label(t("conn.sslmode")), self.sslmode)
+        form.addRow(form_label(t("conn.ssl_ca")), self.ssl_ca)
+        # host, port, database, user, password, timezone, sslmode, ssl_ca
+        self._rows_server = (3, 4, 5, 6, 7, 8, 9, 10)
         form.addRow(form_label(t("conn.load_profile")), self.load_profile)
         scroll.setWidget(inner)
         outer.addWidget(scroll)
@@ -126,6 +137,8 @@ class ConnectionForm(QWidget):
         else:
             self.password.setPlaceholderText("")
         self.session_timezone.setText(str(payload.get("session_timezone") or "UTC"))
+        self.sslmode.setCurrentText(str(payload.get("sslmode") or ""))
+        self.ssl_ca.setText(str(payload.get("ssl_ca") or ""))
         self.load_profile.setCurrentText(str(payload.get("load_profile") or "production"))
         self._sync_fields(self.type_select.currentText(), reset_port=port in (None, ""))
 
@@ -139,6 +152,8 @@ class ConnectionForm(QWidget):
         self.password.clear()
         self.password.setPlaceholderText("")
         self.session_timezone.setText("UTC")
+        self.sslmode.setCurrentText("")
+        self.ssl_ca.clear()
         self.load_profile.setCurrentText("production")
         self._sync_fields(conn_type, reset_port=True)
 
@@ -186,6 +201,8 @@ class ConnectionForm(QWidget):
             "user": self.user.text().strip(),
             "password": self.password.text(),
             "session_timezone": self.session_timezone.text().strip() or "UTC",
+            "sslmode": self.sslmode.currentText().strip(),
+            "ssl_ca": self.ssl_ca.text().strip(),
             "load_profile": self.load_profile.currentText().strip(),
             "make_default": make_default,
         }

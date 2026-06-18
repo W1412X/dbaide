@@ -21,7 +21,7 @@ class PostgresAdapter(DatabaseAdapter):
         except ImportError as exc:
             raise RuntimeError("Install PostgreSQL support with `pip install dbaide[postgres]`.") from exc
         password = self.config.password or (os.environ.get(self.config.password_env) if self.config.password_env else "")
-        conn = psycopg.connect(
+        conn_kwargs: dict = dict(
             host=self.config.host or "localhost",
             port=int(self.config.port or 5432),
             user=self.config.user or None,
@@ -29,6 +29,22 @@ class PostgresAdapter(DatabaseAdapter):
             dbname=database or self.config.database or "postgres",
             row_factory=dict_row,
         )
+        # TLS: libpq understands sslmode natively (disable/allow/prefer/require/
+        # verify-ca/verify-full). For the verify-* modes, point it at the CA bundle
+        # (the user's ssl_ca, else certifi's trust store for public CAs).
+        sslmode = getattr(self.config, "sslmode", "") or ""
+        if sslmode:
+            conn_kwargs["sslmode"] = sslmode
+            ca = getattr(self.config, "ssl_ca", "") or ""
+            if not ca and sslmode in ("verify-ca", "verify-full"):
+                try:
+                    import certifi
+                    ca = certifi.where()
+                except Exception:
+                    ca = ""
+            if ca:
+                conn_kwargs["sslrootcert"] = ca
+        conn = psycopg.connect(**conn_kwargs)
         self._set_session_timezone(conn)
         return conn
 

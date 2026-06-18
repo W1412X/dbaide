@@ -130,6 +130,92 @@ class TestInitialize:
         assert result["protocolVersion"] == mcp.PROTOCOL_VERSION
 
 
+class TestAskProgressAndCancel:
+    """The ask tool forwards progress and honors cancellation."""
+
+    def _patch_engine(self, monkeypatch, *, run_impl):
+        from dbaide.core.cancellation import CancelledError
+
+        class _Conn:
+            name = "c"
+
+        class _Cfg:
+            def get_connection(self, conn):
+                return _Conn()
+
+            def model(self):
+                return object()
+
+        class _Result:
+            def __init__(self, status):
+                self.status = type("S", (), {"value": status})()
+                self.answer_markdown = "ANSWER"
+                self.answer_plaintext = "ANSWER"
+                self.selected_sql = ""
+                self.executed_sqls = []
+                self.warnings = []
+
+        class _Engine:
+            def __init__(self, *a, **k):
+                pass
+
+            def run(self, req, *, progress=None, cancel_check=None):
+                return run_impl(progress, cancel_check, CancelledError, _Result)
+
+        monkeypatch.setattr("dbaide.config.ConfigManager", lambda: _Cfg())
+        monkeypatch.setattr("dbaide.llm.build_llm_client", lambda m: object())
+        monkeypatch.setattr("dbaide.assets.AssetStore", lambda: object())
+        monkeypatch.setattr("dbaide.core.workflow.WorkflowEngine", _Engine)
+
+    def test_progress_notifications_emitted(self, monkeypatch):
+        def run_impl(progress, cancel_check, _CancelledError, Result):
+            progress({"title": "step one", "kind": "phase"})
+            progress({"kind": "answer_chunk", "detail": "tok"})  # must be skipped
+            progress({"stage": "execute"})
+            return Result("completed")
+
+        self._patch_engine(monkeypatch, run_impl=run_impl)
+        sent = []
+        monkeypatch.setattr(mcp, "_send", lambda m: sent.append(m))
+        result = mcp.handle_ask({"question": "q"}, progress_token="tok-1")
+
+        progress_msgs = [m for m in sent if m.get("method") == "notifications/progress"]
+        assert len(progress_msgs) == 2  # answer_chunk filtered out
+        assert progress_msgs[0]["params"]["progressToken"] == "tok-1"
+        assert progress_msgs[0]["params"]["progress"] == 1
+        assert progress_msgs[1]["params"]["progress"] == 2  # monotonically increasing
+        assert "ANSWER" in result["content"][0]["text"]
+
+    def test_no_progress_without_token(self, monkeypatch):
+        def run_impl(progress, cancel_check, _CancelledError, Result):
+            assert progress is None  # not wired when no token
+            return Result("completed")
+
+        self._patch_engine(monkeypatch, run_impl=run_impl)
+        sent = []
+        monkeypatch.setattr(mcp, "_send", lambda m: sent.append(m))
+        mcp.handle_ask({"question": "q"})
+        assert not [m for m in sent if m.get("method") == "notifications/progress"]
+
+    def test_cancellation_returns_cancelled(self, monkeypatch):
+        import threading
+
+        def run_impl(progress, cancel_check, CancelledError, Result):
+            try:
+                cancel_check()  # event is set → raises
+            except CancelledError:
+                return Result("cancelled")  # WorkflowEngine catches it in real code
+            return Result("completed")
+
+        self._patch_engine(monkeypatch, run_impl=run_impl)
+        monkeypatch.setattr(mcp, "_send", lambda m: None)
+        ev = threading.Event()
+        ev.set()
+        result = mcp.handle_ask({"question": "q"}, cancel_event=ev)
+        assert result.get("isError") is True
+        assert "cancel" in result["content"][0]["text"].lower()
+
+
 class TestStructuredContent:
     """Data tools carry machine-readable structuredContent (MCP 2025-06)."""
 

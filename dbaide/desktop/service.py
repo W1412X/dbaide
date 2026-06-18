@@ -83,6 +83,8 @@ def _conn_payload(conn: ConnectionConfig, *, has_assets: bool) -> dict[str, Any]
         "target": target,
         "load_profile": getattr(conn, "load_profile", "production"),
         "session_timezone": getattr(conn, "session_timezone", "UTC"),
+        "sslmode": getattr(conn, "sslmode", ""),
+        "ssl_ca": getattr(conn, "ssl_ca", ""),
         "asset_status": "ready" if has_assets else "missing",
     }
 
@@ -1374,6 +1376,8 @@ class DesktopService:
             path=str(payload.get("path") or "").strip(),
             load_profile=str(payload.get("load_profile") or "production").strip(),
             session_timezone=str(payload.get("session_timezone") or "UTC").strip(),
+            sslmode=str(payload.get("sslmode") or "").strip(),
+            ssl_ca=str(payload.get("ssl_ca") or "").strip(),
         )
 
     def list_joins(self, payload: dict[str, Any]) -> dict[str, Any]:
@@ -1553,6 +1557,8 @@ class DesktopService:
             "path": conn.path,
             "load_profile": conn.load_profile,
             "session_timezone": conn.session_timezone,
+            "sslmode": getattr(conn, "sslmode", ""),
+            "ssl_ca": getattr(conn, "ssl_ca", ""),
         }
         # Strip empty values for cleaner output.
         conn_dict = {k: v for k, v in conn_dict.items() if v not in (None, "", 0)}
@@ -1661,6 +1667,7 @@ class DesktopService:
                 "password_env": conn.password_env, "password": conn.password,
                 "path": conn.path,
                 "load_profile": conn.load_profile, "session_timezone": conn.session_timezone,
+                "sslmode": getattr(conn, "sslmode", ""), "ssl_ca": getattr(conn, "ssl_ca", ""),
             }
             conn_dict = {k: v for k, v in conn_dict.items() if v not in (None, "", 0)}
             conn_dict.setdefault("name", conn.name)
