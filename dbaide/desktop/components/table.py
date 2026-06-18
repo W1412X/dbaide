@@ -412,6 +412,11 @@ def _format_cell(value: Any) -> str:
     if isinstance(value, str) and value == "":
         return '""'
     text = str(value)
+    # The grid is single-line: show multi-line / tabbed values as a clean one-line
+    # preview (newlines → ↵, tabs → space) so the row doesn't render only its first
+    # line or with stray control glyphs. The full value is on double-click.
+    if "\n" in text or "\r" in text or "\t" in text:
+        text = text.replace("\r\n", "↵").replace("\n", "↵").replace("\r", "↵").replace("\t", " ")
     return text[:120] + "…" if len(text) > 120 else text
 
 

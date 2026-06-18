@@ -147,3 +147,14 @@ def test_text_column_with_nan_value_aligns_left(qapp):
     w.load(columns=["code"], rows=[{"code": "nan"}, {"code": "inf"}], row_count=2)
     item = w.table.item(0, 0)
     assert int(item.textAlignment()) & int(Qt.AlignmentFlag.AlignLeft)
+
+
+def test_format_cell_collapses_newlines_for_single_line_grid(qapp):
+    from dbaide.desktop.components.table import _format_cell
+
+    # Multi-line / tabbed values preview on one line (full value is on double-click).
+    assert _format_cell("line1\nline2") == "line1↵line2"
+    assert _format_cell("a\r\nb\tc") == "a↵b c"
+    # Plain values are untouched.
+    assert _format_cell("plain") == "plain"
+    assert _format_cell(None) == "NULL"
