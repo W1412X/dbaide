@@ -46,6 +46,19 @@ def test_user_join_confidence_and_priority(tmp_path):
     assert rels[0]["source"] == "user"
 
 
+def test_add_reverse_join_upserts_not_duplicates(tmp_path):
+    """A join is undirected for queries (merge dedups a↔b), so adding the reverse of
+    an existing join must update it in place, not store a confusing duplicate."""
+    store = JoinCatalogStore(tmp_path / "joins")
+    store.add("local", {"table": "a", "column": "x", "ref_table": "b", "ref_column": "y"}, source="user")
+    store.add("local", {"table": "b", "column": "y", "ref_table": "a", "ref_column": "x"}, source="user")
+    recs = store.list_records("local")
+    assert len(recs) == 1  # reverse upserted, not duplicated
+    # a genuinely different endpoint still creates a separate record
+    store.add("local", {"table": "a", "column": "x", "ref_table": "c", "ref_column": "z"}, source="user")
+    assert len(store.list_records("local")) == 2
+
+
 def test_join_catalog_fingerprint_blocks_stale_relations(tmp_path):
     store = JoinCatalogStore(tmp_path / "joins")
     conn1 = ConnectionConfig(name="local", type="sqlite", path=str(tmp_path / "one.db"))

@@ -214,6 +214,10 @@ class JoinCatalogStore:
             fingerprint=fingerprint,
         )
         key = relation_endpoint_key(record["table"], record["column"], record["ref_table"], record["ref_column"])
+        # A join is undirected for query purposes (merge_relation_layers dedups a↔b),
+        # so upsert on EITHER direction — otherwise adding the reverse of an existing
+        # join stores a confusing duplicate the consumers already treat as the same.
+        rev_key = (key[2], key[3], key[0], key[1])
         replaced = False
         for index, existing in enumerate(records):
             existing_key = relation_endpoint_key(
@@ -224,7 +228,7 @@ class JoinCatalogStore:
             )
             if fingerprint and str(existing.get("connection_fingerprint") or "") != fingerprint:
                 continue
-            if existing_key == key and str(existing.get("database") or "") == str(record.get("database") or ""):
+            if existing_key in (key, rev_key) and str(existing.get("database") or "") == str(record.get("database") or ""):
                 record["id"] = existing.get("id") or record["id"]
                 record["created_at"] = existing.get("created_at") or record["created_at"]
                 if source == "user":
