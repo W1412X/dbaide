@@ -648,6 +648,44 @@ def test_complete_turn_embeds_charts_inline(qapp):
     assert "Before" in first._markdown
 
 
+def _bar_chart(cid: str):
+    return {
+        "chart_id": cid, "chart_type": "bar", "title": "Sales",
+        "categories": ["A"], "series": [{"name": "n", "values": [1.0]}], "row_count": 1,
+    }
+
+
+def _block_types(block):
+    return [
+        w.__class__.__name__
+        for i in range(block._content.count())
+        if (w := block._content.itemAt(i).widget()) is not None
+    ]
+
+
+def test_complete_turn_appends_unreferenced_charts(qapp):
+    # Answer prose with NO {{chart:N}} placeholder must still render the chart
+    # (appended), not silently drop it.
+    from dbaide.desktop.components.conversation import ConversationView
+
+    conv = ConversationView()
+    conv.begin_turn("show chart")
+    conv.complete_turn(answer="Here is the breakdown.", charts=[_bar_chart("chart:1")], ok=True)
+    block = conv._layout.itemAt(conv._layout.count() - 1).widget()
+    assert _block_types(block) == ["_MarkdownBlock", "ChartBlock"]
+
+
+def test_complete_turn_chart_only_answer_renders_chart(qapp):
+    # Empty prose + charts: the chart must still render.
+    from dbaide.desktop.components.conversation import ConversationView
+
+    conv = ConversationView()
+    conv.begin_turn("just the chart")
+    conv.complete_turn(answer="", charts=[_bar_chart("chart:1")], ok=True)
+    block = conv._layout.itemAt(conv._layout.count() - 1).widget()
+    assert "ChartBlock" in _block_types(block)
+
+
 def test_follow_at_bottom_tail_logic():
     from dbaide.desktop.components.trace import _follow_at_bottom
 

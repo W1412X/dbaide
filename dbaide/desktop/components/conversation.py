@@ -1414,6 +1414,7 @@ class ConversationView(QScrollArea):
             segments = [("md", body)]
 
         first_md = True
+        rendered_chart_ids: set[str] = set()
         for kind, payload in segments:
             if kind == "md":
                 turn.append_content(_MarkdownBlock(
@@ -1423,7 +1424,15 @@ class ConversationView(QScrollArea):
                 ))
                 first_md = False
             elif kind == "chart" and isinstance(payload, dict):
+                rendered_chart_ids.add(str(payload.get("chart_id")))
                 turn.append_content(ChartBlock(payload))
+
+        # The answer may not reference every chart inline (or may have no prose at
+        # all). split_answer_with_charts omits unreferenced charts, so append them
+        # here — a generated visualization must never be silently dropped.
+        for chart in chart_list:
+            if str(chart.get("chart_id")) not in rendered_chart_ids:
+                turn.append_content(ChartBlock(chart))
 
     def append_clarification_reply(self, text: str) -> None:
         if self._current_turn is None:
