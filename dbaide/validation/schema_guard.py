@@ -15,8 +15,8 @@ class SchemaGuard:
 
     def validate(self, sql: str, context: DisclosureContext) -> ValidationResult:
         issues: list[ValidationIssue] = []
-        exact_refs, unique_bare_refs = _known_table_refs(context)
-        if not exact_refs and not unique_bare_refs:
+        exact_refs, bare_refs = _known_table_refs(context)
+        if not exact_refs and not bare_refs:
             return ValidationResult(ok=True, normalized_sql=sql)
         cte_names = set(_cte_names(sql))
         for ref in _table_refs(sql):
@@ -25,7 +25,7 @@ class SchemaGuard:
                 continue
             if ref in exact_refs:
                 continue
-            if "." not in ref and ref in unique_bare_refs:
+            if "." not in ref and bare in bare_refs:
                 continue
             issues.append(ValidationIssue("UNKNOWN_TABLE", f"SQL references undisclosed or unknown table: {ref}"))
         return ValidationResult(ok=not issues, issues=issues, normalized_sql=sql)
@@ -107,19 +107,15 @@ def _bare_identifier(value: str) -> str:
 
 def _known_table_refs(context: DisclosureContext) -> tuple[set[str], set[str]]:
     exact_refs: set[str] = set()
-    bare_counts: dict[str, int] = {}
+    bare_refs: set[str] = set()
     for ref, entry in context.tables.items():
+        normalized = _normalize_ref(ref)
+        if normalized:
+            exact_refs.add(normalized)
         table = _normalize_ref(entry.table.name)
-        database = _normalize_ref(entry.database or entry.table.schema or "")
-        stored_ref = _normalize_ref(ref)
-        if stored_ref:
-            exact_refs.add(stored_ref)
         if table:
-            bare_counts[table] = bare_counts.get(table, 0) + 1
-        if database and table:
-            exact_refs.add(f"{database}.{table}")
-    unique_bare_refs = {name for name, count in bare_counts.items() if count == 1}
-    return exact_refs, unique_bare_refs
+            bare_refs.add(table)
+    return exact_refs, bare_refs
 
 
 def _strip_identifier_quotes(value: str) -> str:

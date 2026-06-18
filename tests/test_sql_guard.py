@@ -24,8 +24,8 @@ def test_sql_guard_adds_limit():
 
 def test_schema_guard_allows_cte_refs_and_quoted_qualified_tables():
     context = DisclosureContext()
-    context.record_tables([TableInfo(name="orders")], instance="local", database="main")
-    context.record_columns("orders", [ColumnInfo(name="id")], instance="local", database="main")
+    context.record_tables([TableInfo(name="orders")], database="main")
+    context.record_columns("orders", [ColumnInfo(name="id")], database="main")
 
     result = SchemaGuard().validate('WITH recent AS (SELECT * FROM "main"."orders") SELECT * FROM recent', context)
 

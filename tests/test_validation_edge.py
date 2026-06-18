@@ -124,32 +124,32 @@ class TestSchemaGuardEdgeCases:
 
     def test_known_table_passes(self):
         ctx = DisclosureContext()
-        ctx.record_tables([TableInfo(name="users")], instance="local", database="main")
+        ctx.record_tables([TableInfo(name="users")], database="main")
         result = SchemaGuard().validate("SELECT * FROM users", ctx)
         assert result.ok
 
     def test_unknown_table_fails(self):
         ctx = DisclosureContext()
-        ctx.record_tables([TableInfo(name="users")], instance="local", database="main")
+        ctx.record_tables([TableInfo(name="users")], database="main")
         result = SchemaGuard().validate("SELECT * FROM nonexistent", ctx)
         assert not result.ok
         assert any("nonexistent" in i.message for i in result.issues)
 
     def test_cte_name_allowed(self):
         ctx = DisclosureContext()
-        ctx.record_tables([TableInfo(name="users")], instance="local", database="main")
+        ctx.record_tables([TableInfo(name="users")], database="main")
         result = SchemaGuard().validate("WITH cte AS (SELECT * FROM users) SELECT * FROM cte", ctx)
         assert result.ok
 
     def test_quoted_table_name(self):
         ctx = DisclosureContext()
-        ctx.record_tables([TableInfo(name="users")], instance="local", database="main")
+        ctx.record_tables([TableInfo(name="users")], database="main")
         result = SchemaGuard().validate('SELECT * FROM "users"', ctx)
         assert result.ok
 
     def test_qualified_table_name(self):
         ctx = DisclosureContext()
-        ctx.record_tables([TableInfo(name="users")], instance="local", database="main")
+        ctx.record_tables([TableInfo(name="users")], database="main")
         result = SchemaGuard().validate('SELECT * FROM "main"."users"', ctx)
         assert result.ok
 
@@ -158,7 +158,7 @@ class TestSchemaGuardEdgeCases:
         reference. The schema guard must not reject it as 'undisclosed table: col'.
         This was the root cause of a production infinite-loop (66 retries)."""
         ctx = DisclosureContext()
-        ctx.record_tables([TableInfo(name="order")], instance="local", database="order_data")
+        ctx.record_tables([TableInfo(name="order")], database="order_data")
         sql = (
             'SELECT EXTRACT(YEAR FROM order_created_at) AS year, '
             'EXTRACT(MONTH FROM order_created_at) AS month, '
@@ -173,7 +173,7 @@ class TestSchemaGuardEdgeCases:
     def test_trim_from_not_mistaken_for_table(self):
         """TRIM(chars FROM col) is another SQL function that uses FROM."""
         ctx = DisclosureContext()
-        ctx.record_tables([TableInfo(name="users")], instance="local", database="main")
+        ctx.record_tables([TableInfo(name="users")], database="main")
         sql = "SELECT TRIM(' ' FROM name) FROM users"
         result = SchemaGuard().validate(sql, ctx)
         assert result.ok, f"False positive: {[i.message for i in result.issues]}"
@@ -181,7 +181,7 @@ class TestSchemaGuardEdgeCases:
     def test_real_table_ref_still_validated_alongside_extract(self):
         """EXTRACT in the same SQL shouldn't suppress real table validation."""
         ctx = DisclosureContext()
-        ctx.record_tables([TableInfo(name="users")], instance="local", database="main")
+        ctx.record_tables([TableInfo(name="users")], database="main")
         sql = (
             'SELECT EXTRACT(YEAR FROM created_at) FROM nonexistent'
         )
@@ -189,21 +189,21 @@ class TestSchemaGuardEdgeCases:
         assert not result.ok
         assert any("nonexistent" in i.message for i in result.issues)
 
-    def test_duplicate_bare_table_requires_qualification(self):
+    def test_duplicate_bare_table_accepted_when_disclosed(self):
         ctx = DisclosureContext()
-        ctx.record_tables([TableInfo(name="orders")], instance="local", database="sales")
-        ctx.record_tables([TableInfo(name="orders")], instance="local", database="archive")
+        ctx.record_tables([TableInfo(name="orders")], database="sales")
+        ctx.record_tables([TableInfo(name="orders")], database="archive")
 
         bare = SchemaGuard().validate("SELECT * FROM orders", ctx)
         qualified = SchemaGuard().validate("SELECT * FROM sales.orders", ctx)
 
-        assert not bare.ok
+        assert bare.ok
         assert qualified.ok
 
     def test_substring_from_not_mistaken_for_table(self):
         """SUBSTRING(col FROM n FOR m) is SQL-standard syntax using FROM."""
         ctx = DisclosureContext()
-        ctx.record_tables([TableInfo(name="users")], instance="local", database="main")
+        ctx.record_tables([TableInfo(name="users")], database="main")
         sql = "SELECT SUBSTRING(name FROM 1 FOR 3) FROM users"
         result = SchemaGuard().validate(sql, ctx)
         assert result.ok, f"False positive: {[i.message for i in result.issues]}"
@@ -433,7 +433,7 @@ class TestCTEParserStringLiterals:
 
     def test_closing_paren_in_string_does_not_break_cte(self):
         ctx = DisclosureContext()
-        ctx.record_tables([TableInfo(name="users")], instance="local", database="main")
+        ctx.record_tables([TableInfo(name="users")], database="main")
         sql = (
             "WITH cte1 AS (\n"
             "  SELECT * FROM users WHERE name = ')'\n"
@@ -447,7 +447,7 @@ class TestCTEParserStringLiterals:
 
     def test_escaped_quote_in_cte_body(self):
         ctx = DisclosureContext()
-        ctx.record_tables([TableInfo(name="t")], instance="local", database="main")
+        ctx.record_tables([TableInfo(name="t")], database="main")
         sql = (
             "WITH c AS (\n"
             "  SELECT * FROM t WHERE v = 'it''s )'\n"
@@ -459,7 +459,7 @@ class TestCTEParserStringLiterals:
 
     def test_multiple_ctes_with_string_parens(self):
         ctx = DisclosureContext()
-        ctx.record_tables([TableInfo(name="a"), TableInfo(name="b")], instance="local", database="main")
+        ctx.record_tables([TableInfo(name="a"), TableInfo(name="b")], database="main")
         sql = (
             "WITH x AS (\n"
             "  SELECT ')' AS col FROM a\n"

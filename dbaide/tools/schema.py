@@ -18,7 +18,7 @@ class SchemaTools:
         self.fingerprint = connection_fingerprint(adapter.config)
 
     def disclose_instance(self) -> None:
-        self.context.record_instances([self.instance])
+        self.context.set_instance(self.instance)
 
     def list_databases(self) -> list[str]:
         asset_dbs = [
@@ -27,10 +27,10 @@ class SchemaTools:
             if db.get("name")
         ]
         if asset_dbs:
-            self.context.record_databases(self.instance, asset_dbs)
+            self.context.record_databases(asset_dbs)
             return asset_dbs
         databases = self.adapter.list_databases()
-        self.context.record_databases(self.instance, databases)
+        self.context.record_databases(databases)
         return databases
 
     def list_tables(self, database: str = "") -> list[TableInfo]:
@@ -42,17 +42,17 @@ class SchemaTools:
                 docs = self.assets.table_docs(self.instance, db_name, fingerprint=self.fingerprint)
                 if docs:
                     tables = [self.assets.to_table_info(doc) for doc in docs]
-                    self.context.record_tables(tables, instance=self.instance, database=db_name)
+                    self.context.record_tables(tables, database=db_name)
                     all_tables.extend(tables)
             if all_tables:
                 return all_tables
         docs = self.assets.table_docs(self.instance, database, fingerprint=self.fingerprint) if database else []
         if docs:
             tables = [self.assets.to_table_info(doc) for doc in docs]
-            self.context.record_tables(tables, instance=self.instance, database=database)
+            self.context.record_tables(tables, database=database)
             return tables
         tables = self.adapter.list_tables(database=database)
-        self.context.record_tables(tables, instance=self.instance, database=database)
+        self.context.record_tables(tables, database=database)
         return tables
 
     def describe_table(self, table: str, database: str = "") -> list[ColumnInfo]:
@@ -62,10 +62,10 @@ class SchemaTools:
         if docs:
             columns = [self.assets.to_column_info(doc) for doc in docs]
             self._ensure_asset_disclosure_path(database, table)
-            self.context.record_columns(table, columns, instance=self.instance, database=database)
+            self.context.record_columns(table, columns, database=database)
             return columns
         columns = self.adapter.describe_table(table, database=database)
-        self.context.record_columns(table, columns, instance=self.instance, database=database)
+        self.context.record_columns(table, columns, database=database)
         return columns
 
     def foreign_keys(self, table: str, database: str = "") -> list[ForeignKeyInfo]:
@@ -103,15 +103,14 @@ class SchemaTools:
         containing database/table first so disclosure traces stay monotonic."""
         if not database:
             return
-        known_dbs = self.context.databases.get(self.instance, [])
-        if database not in known_dbs:
+        if database not in self.context.databases:
             dbs = [
                 str(db.get("name"))
                 for db in self.assets.database_docs(self.instance, fingerprint=self.fingerprint)
                 if db.get("name")
             ]
-            self.context.record_databases(self.instance, dbs or [database])
-        ref = self.context.table_ref(self.instance, database, table)
+            self.context.record_databases(dbs or [database])
+        ref = self.context.table_ref(database, table)
         if ref not in self.context.tables:
             table_doc = self.assets.table_doc(
                 self.instance,
@@ -121,6 +120,5 @@ class SchemaTools:
             ) or {"name": table, "database": database}
             self.context.record_tables(
                 [self.assets.to_table_info(table_doc)],
-                instance=self.instance,
                 database=database,
             )

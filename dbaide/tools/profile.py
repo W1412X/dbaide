@@ -51,7 +51,7 @@ class ProfileTools:
     def sample_rows(self, table: str, *, database: str = "", limit: int = 20) -> QueryResult:
         database, table = normalize_db_table_for_dialect(table, database, self.adapter.dialect)
         result = self.adapter.sample_rows(table, database=database, limit=limit)
-        self.context.record_samples(table, result.rows, instance=self.instance, database=database)
+        self.context.record_samples(table, result.rows, database=database)
         return result
 
     def profile_column(self, table: str, column: str, *, database: str = "", top_k: int = 10) -> ColumnProfile:
@@ -61,10 +61,10 @@ class ProfileTools:
             if doc.get("name") == column or doc.get("column") == column:
                 cached = self._profile_from_doc(table, column, doc)
                 if cached is not None:
-                    self.context.record_profile(table, cached, instance=self.instance, database=database)
+                    self.context.record_profile(table, cached, database=database)
                     return cached
         profile = self.adapter.profile_column(table, column, database=database, top_k=top_k)
-        self.context.record_profile(table, profile, instance=self.instance, database=database)
+        self.context.record_profile(table, profile, database=database)
         return profile
 
     @staticmethod

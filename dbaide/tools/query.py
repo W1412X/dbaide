@@ -84,7 +84,7 @@ class QueryTools:
             raise ValueError("; ".join(issue.message for issue in schema_result.issues))
         explain_target = _strip_leading_explain(validation.normalized_sql)
         result = self.adapter.explain(explain_target, database=database, timeout_seconds=self.timeout_seconds)
-        self.context.record_execution(result.sql, instance=self.instance, database=database)
+        self.context.record_execution(result.sql, database=database)
         return result
 
     def execute_sql(
@@ -110,13 +110,13 @@ class QueryTools:
                 explain_result = self.adapter.explain(
                     explain_target, database=database, timeout_seconds=timeout_seconds or self.timeout_seconds,
                 )
-                self.context.record_execution(explain_result.sql, instance=self.instance, database=database)
+                self.context.record_execution(explain_result.sql, database=database)
             except (ValueError, RuntimeError, OSError):
                 pass
         result = self.adapter.execute_readonly(
             normalized, database=database, limit=effective_limit, timeout_seconds=timeout_seconds or self.timeout_seconds,
         )
-        self.context.record_execution(result.sql, instance=self.instance, database=database)
+        self.context.record_execution(result.sql, database=database)
         return result
 
 

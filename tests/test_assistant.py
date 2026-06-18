@@ -42,7 +42,7 @@ def test_assistant_progressive_query(tmp_path):
     assert response.sql.strip()
     assert response.result is not None
     assert response.result.row_count >= 1
-    assert any("L0 instances" in event for event in response.disclosures)
+    assert any("L0 instance" in event for event in response.disclosures)
     assert any("L1 databases" in event for event in response.disclosures)
     assert any("L2 tables" in event for event in response.disclosures)
     assert any("L3 columns" in event for event in response.disclosures)

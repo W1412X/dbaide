@@ -1458,17 +1458,17 @@ def safe_llm(cfg: ConfigManager):
 
 def _populate_disclosure(adapter, session: Session, instance: str, database: str) -> None:
     dc = session.disclosure
-    dc.record_instances([instance])
+    dc.set_instance(instance)
     try:
         databases = adapter.list_databases()
-        dc.record_databases(instance, databases)
+        dc.record_databases(databases)
     except Exception as exc:
         logger.debug("list_databases failed for %s: %s", instance, exc)
         databases = []
     active_db = database or (databases[0] if len(databases) == 1 else "")
     try:
         tables = adapter.list_tables(database=active_db)
-        dc.record_tables(tables, instance=instance, database=active_db)
+        dc.record_tables(tables, database=active_db)
     except Exception as exc:
         logger.debug("list_tables failed for %s.%s: %s", instance, active_db, exc)
 

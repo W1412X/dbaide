@@ -28,56 +28,51 @@ class TableDisclosure:
 
 @dataclass(slots=True)
 class DisclosureContext:
-    instances: list[str] = field(default_factory=list)
-    databases: dict[str, list[str]] = field(default_factory=dict)
+    instance: str = ""
+    databases: list[str] = field(default_factory=list)
     tables: dict[str, TableDisclosure] = field(default_factory=dict)
     events: list[str] = field(default_factory=list)
 
-    def record_instances(self, instances: list[str]) -> None:
-        self.instances = list(dict.fromkeys(instances))
-        self.events.append(f"L0 instances disclosed: {', '.join(self.instances) or '(none)'}")
+    def set_instance(self, instance: str) -> None:
+        self.instance = instance
+        self.events.append(f"L0 instance disclosed: {instance or '(none)'}")
 
-    def record_databases(self, instance: str, databases: list[str]) -> None:
-        self._ensure_instance(instance)
-        self.databases[instance] = list(dict.fromkeys(databases))
-        self.events.append(f"L1 databases disclosed: {instance} -> {', '.join(databases) or '(none)'}")
+    def record_databases(self, databases: list[str]) -> None:
+        self.databases = list(dict.fromkeys(databases))
+        self.events.append(f"L1 databases disclosed: {', '.join(self.databases) or '(none)'}")
 
-    def record_tables(self, tables: list[TableInfo], *, instance: str = "", database: str = "") -> None:
-        self._ensure_instance(instance)
+    def record_tables(self, tables: list[TableInfo], *, database: str = "") -> None:
         for table in tables:
             db = database or table.schema or ""
-            ref = self.table_ref(instance, db, table.name)
-            self.tables.setdefault(ref, TableDisclosure(table=table, instance=instance, database=db))
-        prefix = self.path(instance, database)
+            ref = self.table_ref(db, table.name)
+            self.tables.setdefault(ref, TableDisclosure(table=table, instance=self.instance, database=db))
+        prefix = self.path(database)
         self.events.append(f"L2 tables disclosed: {prefix} ({len(tables)} table(s))")
 
-    def record_columns(self, table: str, columns: list[ColumnInfo], *, instance: str = "", database: str = "") -> None:
-        entry = self._entry_for(table, instance=instance, database=database)
+    def record_columns(self, table: str, columns: list[ColumnInfo], *, database: str = "") -> None:
+        entry = self._entry_for(table, database=database)
         if entry is None:
-            # describe_table may be reached without a prior list_tables/discover
-            # (e.g. a direct table question, or a resumed loop). Register the table
-            # here so SchemaGuard stays fail-closed instead of silently dropping it.
-            ref = self.table_ref(instance, database, table)
-            entry = TableDisclosure(table=TableInfo(name=table, schema=database), instance=instance, database=database)
+            ref = self.table_ref(database, table)
+            entry = TableDisclosure(table=TableInfo(name=table, schema=database), instance=self.instance, database=database)
             self.tables[ref] = entry
         entry.columns = list(columns)
-        self.events.append(f"L3 columns disclosed: {self.path(instance, database, table)} ({len(columns)} column(s))")
+        self.events.append(f"L3 columns disclosed: {self.path(database, table)} ({len(columns)} column(s))")
 
-    def record_profile(self, table: str, profile: ColumnProfile, *, instance: str = "", database: str = "") -> None:
-        entry = self._entry_for(table, instance=instance, database=database)
+    def record_profile(self, table: str, profile: ColumnProfile, *, database: str = "") -> None:
+        entry = self._entry_for(table, database=database)
         if entry:
             entry.profiles[profile.column] = profile
-        self.events.append(f"L4 profile disclosed: {self.path(instance, database, table, profile.column)}")
+        self.events.append(f"L4 profile disclosed: {self.path(database, table, profile.column)}")
 
-    def record_samples(self, table: str, rows: list[dict[str, Any]], *, instance: str = "", database: str = "") -> None:
-        entry = self._entry_for(table, instance=instance, database=database)
+    def record_samples(self, table: str, rows: list[dict[str, Any]], *, database: str = "") -> None:
+        entry = self._entry_for(table, database=database)
         if entry:
             entry.samples = list(rows)
-        self.events.append(f"L4 samples disclosed: {self.path(instance, database, table)} ({len(rows)} row(s))")
+        self.events.append(f"L4 samples disclosed: {self.path(database, table)} ({len(rows)} row(s))")
 
-    def record_execution(self, sql: str, *, instance: str = "", database: str = "") -> None:
+    def record_execution(self, sql: str, *, database: str = "") -> None:
         preview = " ".join(sql.split())[:160]
-        prefix = self.path(instance, database)
+        prefix = self.path(database)
         self.events.append(f"L5 execution evidence disclosed: {prefix}: {preview}")
 
     def known_columns(self) -> dict[str, set[str]]:
@@ -86,8 +81,6 @@ class DisclosureContext:
             if entry.columns:
                 col_names = {c.name for c in entry.columns}
                 out[ref] = col_names
-                # Bare table name → union of columns from all databases so
-                # validation accepts any column that exists in any variant.
                 bare = entry.table.name
                 if bare in out:
                     out[bare] = out[bare] | col_names
@@ -100,13 +93,13 @@ class DisclosureContext:
 
     def summary(self) -> dict[str, Any]:
         return {
-            "instances": self.instances,
+            "instances": [self.instance] if self.instance else [],
             "databases": self.databases,
             "tables": [
                 {
                     "instance": entry.instance,
                     "database": entry.database,
-                    "path": self.table_ref(entry.instance, entry.database, entry.table.name),
+                    "path": self.table_ref(entry.database, entry.table.name),
                     "name": entry.table.name,
                     "schema": entry.table.schema,
                     "comment": entry.table.comment,
@@ -136,25 +129,20 @@ class DisclosureContext:
             ],
         }
 
-    def _entry_for(self, table: str, *, instance: str = "", database: str = "") -> TableDisclosure | None:
-        ref = self.table_ref(instance, database, table)
+    def _entry_for(self, table: str, *, database: str = "") -> TableDisclosure | None:
+        ref = self.table_ref(database, table)
         if ref in self.tables:
             return self.tables[ref]
         if table in self.tables:
             return self.tables[table]
         for entry in self.tables.values():
-            instance_ok = not instance or entry.instance == instance
             database_ok = not database or entry.database == database or entry.table.schema == database
-            if instance_ok and database_ok and (entry.table.name == table or entry.table.ref == table):
+            if database_ok and (entry.table.name == table or entry.table.ref == table):
                 return entry
         return None
 
-    def _ensure_instance(self, instance: str) -> None:
-        if instance and instance not in self.instances:
-            self.instances.append(instance)
-
-    def table_ref(self, instance: str, database: str, table: str) -> str:
-        parts = [p for p in [instance, database, table] if p]
+    def table_ref(self, database: str, table: str) -> str:
+        parts = [p for p in [database, table] if p]
         return ".".join(parts)
 
     def path(self, *parts: str) -> str:

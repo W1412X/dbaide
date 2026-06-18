@@ -105,6 +105,12 @@ class DecisionPromptBuilder:
             "do NOT retry the same SQL or merely raise timeout. Write a faster SQL: reduce scanned "
             "rows, push filters earlier, use available indexes, aggregate before joining large "
             "tables, or use EXISTS/key-set checks, bounded probes, and sampled validation.\n"
+            "Keep predicates sargable: never wrap an indexed/filtered column in a function "
+            "(DATE, YEAR, MONTH, arithmetic, CAST, etc.) — the optimizer cannot use the index. "
+            "Instead, transform the constant boundaries. "
+            "E.g. instead of DATE(col + INTERVAL 8 HOUR) BETWEEN '2026-06-01' AND '2026-06-10', "
+            "write col >= '2026-05-31 16:00:00' AND col < '2026-06-10 16:00:00'. "
+            "Instead of YEAR(col) = 2026, write col >= '2026-01-01' AND col < '2027-01-01'.\n"
             "No SQL tool ends the run — call action=finish only when the intent is fully answered.\n"
             "</sql-execution>\n\n"
 

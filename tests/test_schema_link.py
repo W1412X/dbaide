@@ -222,7 +222,7 @@ def test_retrieve_registers_candidates_in_disclosure_context(tmp_path):
 
     disclosure = orch.session.disclosure
     for table in ("orders", "users", "items"):
-        key = f"shop.main.{table}"
+        key = f"main.{table}"
         assert key in disclosure.tables, (
             f"{table} registered in run_state but missing from disclosure"
         )

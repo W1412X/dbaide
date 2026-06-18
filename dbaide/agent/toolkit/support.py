@@ -95,7 +95,7 @@ def _normalize_tool_table(orchestrator: AskOrchestrator, table: str, database: s
 def _remember_table_schema(orchestrator: AskOrchestrator, table: str, database: str, columns: list[ColumnInfo]) -> None:
     orchestrator.run_state.remember_table_schema(table, database, columns)
     orchestrator.schema.context.record_columns(
-        table, columns, instance=orchestrator.instance, database=database,
+        table, columns, database=database,
     )
 
 

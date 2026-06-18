@@ -385,7 +385,7 @@ def test_decision_prompt_treats_sql_timeout_as_rewrite_signal(tmp_path):
     assert "do NOT retry the same SQL" in prompt
     assert "Write a faster SQL" in prompt
     assert "available indexes" in prompt
-    assert "sargable" not in prompt
+    assert "sargable" in prompt
 
 
 def test_decision_user_prompt_includes_today_for_relative_periods(tmp_path):

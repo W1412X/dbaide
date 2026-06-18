@@ -32,7 +32,7 @@ def test_explain_sql_rejects_undisclosed_table():
     Without this, the LLM could probe for undisclosed tables via EXPLAIN."""
     import pytest
     ctx = DisclosureContext()
-    ctx.record_tables([TableInfo(name="orders")], instance="local", database="main")
+    ctx.record_tables([TableInfo(name="orders")], database="main")
     adapter = ExplainSpyAdapter(ConnectionConfig(name="local", type="sqlite", path="/tmp/test.db"))
     query = QueryTools(adapter, ctx)
 
@@ -58,7 +58,7 @@ def test_mysql_validation_rejects_full_outer_join():
 
 def test_execute_sql_uses_configured_default_limit_when_omitted():
     ctx = DisclosureContext()
-    ctx.record_tables([TableInfo(name="users")], instance="local", database="main")
+    ctx.record_tables([TableInfo(name="users")], database="main")
     adapter = ExplainSpyAdapter(ConnectionConfig(name="local", type="sqlite", path="/tmp/test.db"))
     query = QueryTools(adapter, ctx, default_limit=17)
 
