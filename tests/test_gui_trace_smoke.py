@@ -677,6 +677,25 @@ def test_answer_chunks_stream_live_then_finalize(qapp):
     assert v._turns[-1]["answer"] == "42 paid orders"  # full text stored for copy
 
 
+def test_conversation_tail_follow_pauses_on_scroll_up(qapp):
+    """Streaming auto-scroll must pause when the user scrolls up to read, and resume
+    when they return to the bottom — no scroll-jacking on every chunk."""
+    from dbaide.desktop.components.conversation import ConversationView
+    v = ConversationView()
+    bar = v.verticalScrollBar()
+    bar.setRange(0, 100)
+    v._on_scroll_value(0)        # user scrolled to the top
+    assert v._follow_bottom is False
+    v._on_scroll_value(96)       # within slack of the bottom
+    assert v._follow_bottom is True
+    # A chunk flush while paused must still update the block (no crash) and not raise.
+    v.begin_turn("q")
+    v.append_answer_chunk("partial")
+    v._follow_bottom = False
+    v._flush_answer_chunk()
+    assert v._live_answer_text == "partial"
+
+
 def test_finish_turn_error_clears_live_stream_state(qapp):
     """A mid-stream error must tear down the live-answer block + chunk timer, so the
     next turn's streamed answer doesn't render into the errored turn's block."""

@@ -1243,6 +1243,14 @@ class ConversationView(QScrollArea):
         self._chunk_timer.setSingleShot(True)
         self._chunk_timer.setInterval(80)
         self._chunk_timer.timeout.connect(self._flush_answer_chunk)
+        # Tail-follow: auto-scroll during streaming only while the user is at the
+        # bottom. If they scroll up to read, stop yanking them back on every chunk.
+        self._follow_bottom = True
+        self.verticalScrollBar().valueChanged.connect(self._on_scroll_value)
+
+    def _on_scroll_value(self, value: int) -> None:
+        bar = self.verticalScrollBar()
+        self._follow_bottom = value >= bar.maximum() - 8
 
     def append_answer_chunk(self, text: str) -> None:
         """Append a streamed slice of the final answer to the open turn, creating the
@@ -1267,7 +1275,9 @@ class ConversationView(QScrollArea):
         except RuntimeError:
             self._live_answer = None
             return
-        self._scroll_bottom()
+        # Only follow the stream to the bottom if the user hasn't scrolled up to read.
+        if self._follow_bottom:
+            self._scroll_bottom()
 
     def showEvent(self, event) -> None:  # noqa: N802
         super().showEvent(event)
