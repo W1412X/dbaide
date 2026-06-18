@@ -163,3 +163,21 @@ def test_join_relations_require_explicit_tool_call_after_multi_describe(tmp_path
     assert result.ok
     assert result.data["relations"]
     assert orch.run_state.relations == result.data["relations"]
+
+
+def test_max_tail_keep_index_keeps_largest_fitting_tail():
+    from dbaide.agent.loop import _max_tail_keep_index
+
+    # head=[10,10], overhead=5 → base=25. threshold=100 → tail budget 75.
+    # Tail messages are 20 each; 3 fit (60), 4 don't (80). Must keep 3, i.e.
+    # first_keep=3 (drop messages[2:3]) — NOT 5 (keeping only the last message).
+    sizes = [10, 10, 20, 20, 20, 20]
+    assert _max_tail_keep_index(sizes, 100, head=2, overhead=5) == 3
+
+    # When even one tail message can't fit, keep none of the tail (only head+note).
+    big = [10, 10, 200, 200]
+    assert _max_tail_keep_index(big, 100, head=2, overhead=5) == len(big)
+
+    # When the whole tail fits, keep all of it (first_keep == head).
+    small = [10, 10, 5, 5, 5]
+    assert _max_tail_keep_index(small, 100, head=2, overhead=5) == 2

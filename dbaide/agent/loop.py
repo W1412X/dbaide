@@ -60,6 +60,28 @@ _STUCK_LOOP_THRESHOLD = 3
 _STUCK_LOOP_ESCALATION = 5
 
 
+def _max_tail_keep_index(token_sizes: list[int], threshold: int, *, head: int = 2, overhead: int = 0) -> int:
+    """Largest tail to preserve under a hard token budget.
+
+    Returns the SMALLEST ``first_keep`` (>= ``head``) such that the ``head`` leading
+    messages + ``overhead`` + the tail ``token_sizes[first_keep:]`` fit within
+    ``threshold``. Callers drop ``messages[head:first_keep]`` (replacing them with a
+    truncation note). The point is to keep as MANY recent messages as fit — walking
+    from the end and stopping when the next-older message would overflow, not stopping
+    at the first message that fits (which would keep only the single last message).
+    """
+    n = len(token_sizes)
+    base = sum(token_sizes[:head]) + overhead
+    cumulative = 0
+    first_keep = n  # default: keep no tail messages (only head + note)
+    for i in range(n - 1, head - 1, -1):
+        if base + cumulative + token_sizes[i] > threshold:
+            break
+        cumulative += token_sizes[i]
+        first_keep = i
+    return first_keep
+
+
 def _executed_sql(tool_name: str, orch, result) -> str:
     if tool_name not in _SQL_TOOLS:
         return ""
@@ -917,14 +939,8 @@ class AskAgentLoop:
             logger.warning("context_compress_stall: compression reduced only %d → %d tokens, "
                            "falling back to hard truncation", total_tokens, new_tokens)
             token_sizes = [estimate_tokens(m.content) for m in messages]
-            cumulative = 0
-            first_keep = 2
-            for i in range(len(messages) - 1, 1, -1):
-                cumulative += token_sizes[i]
-                overhead = estimate_tokens("[Context note: earlier messages truncated to fit context budget.]")
-                if token_sizes[0] + token_sizes[1] + overhead + cumulative <= threshold:
-                    first_keep = i
-                    break
+            overhead = estimate_tokens("[Context note: earlier messages truncated to fit context budget.]")
+            first_keep = _max_tail_keep_index(token_sizes, threshold, head=2, overhead=overhead)
             if first_keep > 2:
                 messages[2:first_keep] = [LLMMessage("user",
                     "[Context note: earlier messages truncated to fit context budget.]")]
