@@ -215,16 +215,9 @@ def _safe_float(value: Any, default: float) -> float:
 
 
 def _tables_in_sql(sql: str) -> list[str]:
-    from dbaide.validation.sql_cleanup import strip_function_from_keywords
+    # Shared robust extractor: handles comma joins (FROM a, b), subqueries, quoted
+    # names. Critically the comma-join case feeds the risk gate's table_count/
+    # has_joins, so undercounting here would skip the join-confidence confirmation.
+    from dbaide.validation.sql_cleanup import table_references
 
-    # Strip FROM inside SQL functions (EXTRACT, TRIM, SUBSTRING) so that
-    # column names are not mistaken for table references.
-    cleaned = strip_function_from_keywords(sql)
-    tokens = cleaned.replace("\n", " ").replace(",", " ").split()
-    tables: list[str] = []
-    for index, token in enumerate(tokens[:-1]):
-        if token.lower() in {"from", "join"}:
-            table = tokens[index + 1].strip('"`[]()').strip()
-            if table and table.lower() not in {"select", "where", ""} and not table.startswith("(") and table not in tables:
-                tables.append(table)
-    return tables
+    return table_references(sql)

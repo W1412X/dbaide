@@ -98,3 +98,118 @@ def blank_strings_and_comments(sql: str) -> str:
         out.append(ch)
         i += 1
     return "".join(out)
+
+
+# ── Table-reference extraction (shared by the scope guard, risk gate, plan, trace) ──
+
+_TABLES_END_KEYWORDS = frozenset({
+    "where", "group", "order", "having", "union", "intersect", "except",
+    "limit", "offset", "window", "qualify", "fetch", "for",
+    "join", "inner", "left", "right", "full", "cross", "natural", "on", "using",
+})
+
+_REF_IDENT = r"(?:[A-Za-z_][\w$]*|`[^`]+`|\"[^\"]+\"|\[[^\]]+\])"
+_REF_QUALIFIED = rf"{_REF_IDENT}(?:\s*\.\s*{_REF_IDENT})*"
+_REF_LEAD = re.compile(rf"^\s*({_REF_QUALIFIED})")
+_REF_JOIN = re.compile(rf"\bjoin\s+({_REF_QUALIFIED})", re.I)
+_REF_FROM = re.compile(r"\bfrom\b", re.I)
+
+
+def strip_identifier_quotes(value: str) -> str:
+    text = value.strip()
+    if len(text) >= 2 and ((text[0], text[-1]) in {("`", "`"), ('"', '"'), ("[", "]")}):
+        return text[1:-1]
+    return text
+
+
+def normalize_table_ref(value: str) -> str:
+    """Strip identifier quotes from each dotted part: `db`.`t` → db.t."""
+    parts = [part.strip() for part in re.split(r"\s*\.\s*", value)]
+    return ".".join(strip_identifier_quotes(part) for part in parts if part)
+
+
+def _from_region(text: str, start: int) -> str:
+    """Text after a top-level FROM up to the next clause keyword / enclosing ')'.
+    Paren- and quote-aware so a subquery's own commas/keywords don't end the list."""
+    depth = 0
+    i, n = start, len(text)
+    while i < n:
+        ch = text[i]
+        if ch in ('"', "`", "["):
+            close = "]" if ch == "[" else ch
+            j = text.find(close, i + 1)
+            i = (j + 1) if j != -1 else n
+        elif ch == "(":
+            depth += 1
+            i += 1
+        elif ch == ")":
+            if depth == 0:
+                break
+            depth -= 1
+            i += 1
+        elif depth == 0 and ch == ";":
+            break
+        elif depth == 0 and (ch.isalpha() or ch == "_"):
+            word = re.match(r"[A-Za-z_]+", text[i:]).group(0)
+            if word.lower() in _TABLES_END_KEYWORDS:
+                break
+            i += len(word)
+        else:
+            i += 1
+    return text[start:i]
+
+
+def _split_top_level_commas(text: str) -> list[str]:
+    items: list[str] = []
+    depth = 0
+    start = 0
+    i, n = 0, len(text)
+    while i < n:
+        ch = text[i]
+        if ch in ('"', "`", "["):
+            close = "]" if ch == "[" else ch
+            j = text.find(close, i + 1)
+            i = (j + 1) if j != -1 else n
+            continue
+        if ch == "(":
+            depth += 1
+        elif ch == ")":
+            depth = max(0, depth - 1)
+        elif ch == "," and depth == 0:
+            items.append(text[start:i])
+            start = i + 1
+        i += 1
+    items.append(text[start:])
+    return items
+
+
+def table_references(sql: str) -> list[str]:
+    """Extract referenced table names from a query (normalized, quote-stripped).
+
+    Handles ``JOIN t`` and the old-style comma list ``FROM a, b, c`` (every table,
+    not just the first), is paren/quote-aware (subquery derived tables are skipped —
+    their inner FROM is matched separately), and blanks strings/comments so a literal
+    or comment can't smuggle or hide a reference. Order-preserving, de-duplicated.
+    """
+    cleaned = strip_function_from_keywords(blank_strings_and_comments(sql))
+    refs: list[str] = []
+    seen: set[str] = set()
+
+    def _add(raw: str) -> None:
+        ref = normalize_table_ref(raw.strip())
+        if ref and ref not in seen:
+            seen.add(ref)
+            refs.append(ref)
+
+    for match in _REF_JOIN.finditer(cleaned):
+        _add(match.group(1))
+    for match in _REF_FROM.finditer(cleaned):
+        region = _from_region(cleaned, match.end())
+        for item in _split_top_level_commas(region):
+            stripped = item.strip()
+            if not stripped or stripped.startswith("("):
+                continue
+            lead = _REF_LEAD.match(stripped)
+            if lead:
+                _add(lead.group(1))
+    return refs

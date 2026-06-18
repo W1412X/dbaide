@@ -460,16 +460,8 @@ def _trace_kind(actor: str) -> TraceKind:
 
 
 def _extract_tables(sql: str) -> list[str]:
-    from dbaide.validation.sql_cleanup import strip_function_from_keywords
+    # Shared robust extractor (handles comma joins, subqueries, quoted names) so the
+    # query plan's target_entities lists every referenced table, not just the first.
+    from dbaide.validation.sql_cleanup import table_references
 
-    # Strip FROM inside SQL functions (EXTRACT, TRIM, SUBSTRING) so that
-    # column names are not mistaken for table references.
-    cleaned = strip_function_from_keywords(sql)
-    tokens = cleaned.replace("\n", " ").replace(",", " ").split()
-    tables: list[str] = []
-    for index, token in enumerate(tokens[:-1]):
-        if token.lower() in {"from", "join"}:
-            table = tokens[index + 1].strip('"`[]')
-            if table and table.lower() not in {"select", "where"} and table not in tables:
-                tables.append(table)
-    return tables
+    return table_references(sql)

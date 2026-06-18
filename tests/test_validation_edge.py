@@ -255,6 +255,17 @@ class TestWorkflowExtractTables:
         assert "users" in tables
         assert "name" not in tables
 
+    def test_comma_join_lists_every_table(self):
+        # Both extractors share the robust helper now — comma joins must list all
+        # tables (the risk gate derives has_joins/table_count from this).
+        from dbaide.agent.toolkit.support import _tables_in_sql
+        from dbaide.validation.sql_cleanup import table_references
+
+        for fn in (workflow_extract_tables, _tables_in_sql, table_references):
+            tables = fn("SELECT * FROM orders o, line_items l WHERE o.id = l.oid")
+            assert set(tables) == {"orders", "line_items"}, fn
+            assert len(tables) == 2  # has_joins would be True
+
 
 class TestSQLGuardExtractTables:
     """SQLGuard._extract_tables must not be tricked by SQL function FROM."""
