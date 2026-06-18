@@ -386,3 +386,27 @@ def test_sidebar_failed_build_progress_clears_active():
     assert sidebar._build_progress_active is True
     sidebar._hide_build_progress_if_current(sidebar._build_progress_token)
     assert sidebar._build_progress_active is False
+
+
+def test_sidebar_filter_matches_database_name():
+    """Filtering by a DATABASE name shows that whole database (all its tables), not an
+    empty tree just because no table/column also contained the needle."""
+    app = _app()
+    sidebar = Sidebar()
+    rows = [
+        {"kind": "database", "name": "analytics", "path": "c.analytics", "children": [
+            {"kind": "table", "name": "events", "path": "c.analytics.events", "column_count": 0, "children": []},
+        ]},
+        {"kind": "database", "name": "billing", "path": "c.billing", "children": [
+            {"kind": "table", "name": "invoices", "path": "c.billing.invoices", "column_count": 0, "children": []},
+        ]},
+    ]
+    sidebar._render(rows)
+    sidebar._rows = rows
+    sidebar._filter_tree("analytics")          # db-name match → whole db kept
+    tree = sidebar.tree
+    top = [tree.topLevelItem(i).data(0, Qt.ItemDataRole.UserRole) for i in range(tree.topLevelItemCount())]
+    names = [d.get("name") for d in top if isinstance(d, dict)]
+    assert "analytics" in names and "billing" not in names
+    # The matched database still shows its tables.
+    assert tree.topLevelItem(0).childCount() == 1

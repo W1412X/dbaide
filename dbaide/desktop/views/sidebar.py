@@ -918,6 +918,12 @@ class Sidebar(QWidget):
             return
         filtered: list[dict[str, Any]] = []
         for db in self._rows:
+            # A match on the DATABASE name shows the whole database (all its tables) —
+            # otherwise filtering by a db name returned nothing unless a table/column
+            # also happened to contain the needle.
+            if needle in str(db.get("name") or "").lower():
+                filtered.append(dict(db))
+                continue
             db_copy = dict(db)
             db_copy["children"] = []
             for table in db.get("children", []):
