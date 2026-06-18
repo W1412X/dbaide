@@ -28,9 +28,14 @@ _KEYWORDS = {
 }
 
 
-def _spans_to_mask(sql: str) -> list[bool]:
+def _spans_to_mask(sql: str, dialect: str = "") -> list[bool]:
     """Mark each char as 'inside a string/comment' (True) so callers can skip it."""
     mask = [False] * len(sql)
+    # MySQL/MariaDB treat backslash as an escape inside '' and "" string literals, so
+    # a "\'" does NOT close the string (and a ";" after it is still inside). Postgres
+    # (standard_conforming_strings) and SQLite treat backslash literally, so this MUST
+    # stay off for them or a real closing quote would be missed.
+    backslash_escapes = str(dialect or "").lower() in ("mysql", "mariadb")
     i, n = 0, len(sql)
     while i < n:
         ch = sql[i]
@@ -48,10 +53,17 @@ def _spans_to_mask(sql: str) -> list[bool]:
                 mask[k] = True
             i = j
         elif ch in ("'", '"', "`"):
+            # Backtick always quotes an identifier (no backslash escaping); '/" are
+            # string literals where MySQL honors backslash escapes.
+            esc = backslash_escapes and ch in ("'", '"')
             mask[i] = True
             j = i + 1
             while j < n:
                 mask[j] = True
+                if esc and sql[j] == "\\" and j + 1 < n:
+                    mask[j + 1] = True  # escaped char stays inside the literal
+                    j += 2
+                    continue
                 if sql[j] == ch:
                     # doubled quote = escaped, stay inside
                     if j + 1 < n and sql[j + 1] == ch:
@@ -67,13 +79,13 @@ def _spans_to_mask(sql: str) -> list[bool]:
     return mask
 
 
-def split_statements(sql: str) -> list[tuple[int, int, str]]:
+def split_statements(sql: str, dialect: str = "") -> list[tuple[int, int, str]]:
     """Split into top-level statements, ignoring ``;`` inside strings/comments.
 
     Returns ``(start, end, text)`` spans (over the original string) for each
     non-empty statement, so a caller can locate the statement under a cursor.
     """
-    mask = _spans_to_mask(sql)
+    mask = _spans_to_mask(sql, dialect)
     out: list[tuple[int, int, str]] = []
     start = 0
     for i, ch in enumerate(sql):
@@ -88,9 +100,9 @@ def split_statements(sql: str) -> list[tuple[int, int, str]]:
     return out
 
 
-def statement_at(sql: str, cursor: int) -> str:
+def statement_at(sql: str, cursor: int, dialect: str = "") -> str:
     """Return the statement containing ``cursor`` (or the whole text if single)."""
-    spans = split_statements(sql)
+    spans = split_statements(sql, dialect)
     if not spans:
         return sql.strip()
     if len(spans) == 1:

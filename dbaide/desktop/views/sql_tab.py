@@ -141,7 +141,7 @@ class SqlTab(QWidget):
                 return selected
         from dbaide.rendering.sql_format import statement_at
         text = self.editor.toPlainText()
-        return statement_at(text, cursor.position())
+        return statement_at(text, cursor.position(), getattr(self, "_dialect", ""))
 
     def _run(self) -> None:
         if self.run_btn.isEnabled():
@@ -181,6 +181,7 @@ class SqlTab(QWidget):
             self.set_dialect(dialect)
 
     def set_dialect(self, dialect: str) -> None:
+        self._dialect = str(dialect or "")
         self.editor.set_dialect(dialect)
         self._highlighter.set_dialect(dialect)
 

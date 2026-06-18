@@ -36,3 +36,18 @@ def test_statement_at_cursor():
 def test_statement_at_single_returns_all():
     sql = "select a, b from t"
     assert statement_at(sql, 3) == sql
+
+
+def test_split_respects_mysql_backslash_escaped_quote():
+    r"""MySQL/MariaDB honor backslash escapes in '' / "" literals, so a ';' inside
+    'a\';b' is part of the string and must not split the statement. Generic/Postgres/
+    SQLite treat backslash literally and keep the standard (different) split."""
+    sql = r"SELECT 'a\'; b' AS x; SELECT 2"
+    mysql = [t for _, _, t in split_statements(sql, "mysql")]
+    assert mysql == [r"SELECT 'a\'; b' AS x", "SELECT 2"]
+    # default/non-MySQL: backslash is literal, so the \' closes the string and the
+    # inner ';' splits (standard_conforming_strings behavior) — unchanged.
+    generic = [t for _, _, t in split_statements(sql, "")]
+    assert len(generic) == 2 and generic[0] == r"SELECT 'a\'"
+    # backtick identifiers never get backslash escaping, even on MySQL
+    assert len(split_statements("SELECT `a\\`; SELECT 2", "mysql")) == 2
