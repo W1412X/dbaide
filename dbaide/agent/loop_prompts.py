@@ -34,7 +34,10 @@ def estimate_tokens(text: str) -> int:
         cp = ord(ch)
         if (0x4E00 <= cp <= 0x9FFF or 0x3400 <= cp <= 0x4DBF
                 or 0xF900 <= cp <= 0xFAFF or 0x2E80 <= cp <= 0x2EFF
-                or 0x3000 <= cp <= 0x303F or 0xFF00 <= cp <= 0xFFEF):
+                or 0x3000 <= cp <= 0x30FF        # CJK symbols + Hiragana + Katakana (JP)
+                or 0xAC00 <= cp <= 0xD7AF        # Hangul syllables (KR)
+                or 0x1100 <= cp <= 0x11FF        # Hangul Jamo
+                or 0xFF00 <= cp <= 0xFFEF):
             cjk += 1
     ascii_chars = len(text) - cjk
     return max(1, int(cjk * 1.5 + ascii_chars / 4))
