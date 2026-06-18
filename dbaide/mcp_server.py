@@ -1008,6 +1008,11 @@ def serve(*, mode: str = "full") -> None:
             # array of the non-notification results (or nothing if all were
             # notifications). A non-dict scalar is dropped without crashing.
             if isinstance(msg, list):
+                # Per JSON-RPC 2.0, an empty batch array is itself an Invalid
+                # Request and MUST get a single error response (not silence).
+                if not msg:
+                    _send(_error(None, -32600, "Invalid Request"))
+                    continue
                 responses = [r for r in (_handle_one(m) for m in msg) if r is not None]
                 if responses:
                     _send(responses)

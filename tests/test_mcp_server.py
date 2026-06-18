@@ -283,6 +283,30 @@ class TestHandleOne:
         assert "tools" in resp["result"]
         assert len(resp["result"]["tools"]) >= 1
 
+    def test_empty_batch_returns_single_invalid_request(self, monkeypatch):
+        # JSON-RPC 2.0: an empty batch array is an Invalid Request and must get a
+        # single error response with id null — not silence.
+        import io
+        sent = []
+        monkeypatch.setattr(mcp, "_send", lambda m: sent.append(m))
+        monkeypatch.setattr(mcp.sys, "stdin", io.StringIO("[]\n"))
+        mcp.serve(mode="tools")
+        assert sent == [{
+            "jsonrpc": "2.0", "id": None,
+            "error": {"code": -32600, "message": "Invalid Request"},
+        }]
+
+    def test_batch_of_requests_returns_array(self, monkeypatch):
+        # A non-empty batch still returns an array of the non-notification results.
+        import io
+        sent = []
+        monkeypatch.setattr(mcp, "_send", lambda m: sent.append(m))
+        batch = '[{"jsonrpc":"2.0","id":1,"method":"ping"},{"jsonrpc":"2.0","method":"ping"}]\n'
+        monkeypatch.setattr(mcp.sys, "stdin", io.StringIO(batch))
+        mcp.serve(mode="tools")
+        assert len(sent) == 1
+        assert sent[0] == [{"jsonrpc": "2.0", "id": 1, "result": {}}]
+
 
 class TestSerialize:
     def test_primitives(self):
