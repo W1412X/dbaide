@@ -155,10 +155,6 @@ class DecisionPromptBuilder:
             "Return a single JSON object each round. Examples:\n"
             '  {"action":"call_tool","tool":"...","args":{...},"thought":"..."}\n'
             '  {"action":"finish","answer":"markdown answer for the user"}\n'
-            "Optional fields:\n"
-            '  "memory_updates":{"verified":["fact"],"excluded_paths":[{"target":"t","reason":"r"}]}\n'
-            "memory_updates.verified: facts confirmed with tool evidence (carried across runs).\n"
-            "memory_updates.excluded_paths: ruled-out tables/columns/interpretations.\n"
             "</response-format>\n\n"
 
             "<batching>\n"
@@ -217,20 +213,6 @@ class DecisionPromptBuilder:
         prior_turns_block = _prior_turns_block(self.orchestrator, window_size=prior_window)
         prior_turns_line = f"{prior_turns_block}\n\n" if prior_turns_block else ""
 
-        mem = self.orchestrator.run_state.memory
-        verified_line = ""
-        if mem.verified_facts:
-            verified_line = (
-                "Verified facts (confirmed with tool evidence in prior turns — trust these):\n"
-                + "\n".join(f"- {f}" for f in mem.verified_facts) + "\n\n"
-            )
-        excluded_line = ""
-        if mem.excluded_paths:
-            excluded_line = (
-                "Excluded paths (ruled out — do NOT retry these):\n"
-                + "\n".join(f"- {e.target}: {e.reason}" for e in mem.excluded_paths) + "\n\n"
-            )
-
         return (
             f"User question:\n{state.question}\n\n"
             f"Database scope: {state.database or '(any)'}\n\n"
@@ -240,8 +222,6 @@ class DecisionPromptBuilder:
             f"Answer language for final user-facing prose: {state.answer_language}\n\n"
             f"{notes_line}"
             f"{criteria_line}"
-            f"{verified_line}"
-            f"{excluded_line}"
             f"{pin_line}"
             f"{prior_turns_line}"
         ).rstrip() + "\n"

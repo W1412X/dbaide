@@ -368,8 +368,9 @@ def test_decision_prompt_has_context_section(tmp_path):
     assert "<context>" in prompt
     # The old <memory> section no longer exists.
     assert "<memory>" not in prompt
-    # Verified and excluded_paths are carried via memory_updates in response format.
-    assert "verified" in prompt and "excluded_paths" in prompt
+    # The model no longer self-maintains a verified/excluded ledger (memory_updates
+    # removed) — that knowledge is recovered from the transcript by compression.
+    assert "memory_updates" not in prompt
 
 
 def test_decision_prompt_treats_sql_timeout_as_rewrite_signal(tmp_path):
@@ -401,24 +402,6 @@ def test_decision_user_prompt_includes_today_for_relative_periods(tmp_path):
     )
     assert "Today's date:" in user
     assert "under-specified after using it" in user
-
-
-def test_decision_memory_updates_ignore_non_list_shapes(tmp_path):
-    from dbaide.agent.loop import AskAgentLoop
-
-    orch = _orch(tmp_path)
-    loop = AskAgentLoop(orch)
-
-    # _apply_decision_memory now only processes verified and excluded_paths
-    loop._apply_decision_memory({
-        "memory_updates": {
-            "verified": "single string not list",
-            "excluded_paths": "bad",
-        }
-    })
-
-    assert orch.run_state.memory.verified_facts == []
-    assert orch.run_state.memory.excluded_paths == []
 
 
 def test_tool_string_list_normalization():
@@ -773,20 +756,6 @@ def test_decide_coerces_tool_named_action_into_call_tool(tmp_path):
     assert decision["tool"] == "ask_user"
     assert decision["args"]["question"] == "按用户名还是昵称匹配？"
     assert decision["args"]["options"] == ["用户名", "昵称"]
-
-
-def test_apply_decision_memory_records_verified(tmp_path):
-    from dbaide.agent.loop import AskAgentLoop
-
-    orch = _orch(tmp_path)
-    loop = AskAgentLoop(orch)
-    loop._apply_decision_memory({
-        "memory_updates": {
-            "verified": ["spu_refunds_daily.delivered_date is a Beijing-day bucket"],
-        }
-    })
-    # In the new architecture, verified facts go to memory.verified_facts
-    assert "spu_refunds_daily.delivered_date is a Beijing-day bucket" in orch.run_state.memory.verified_facts
 
 
 def test_loop_allows_repeated_tool_call(tmp_path):

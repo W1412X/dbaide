@@ -70,6 +70,10 @@ def _executed_sql(tool_name: str, orch, result) -> str:
 
 
 def _risk_reply_confirms(reply: str) -> bool:
+    """Approve a risk-gated execution ONLY on the exact UI-button phrases. This is
+    deliberately strict: a risk gate guards a potentially heavy/expensive query, so
+    anything ambiguous (or merely containing "执行") must default to cancel, not run.
+    The UI surfaces these as clickable buttons, so the common path is unambiguous."""
     text = " ".join(str(reply or "").split()).casefold()
     approved = {"execute anyway", "仍然执行"}
     return text in {item.casefold() for item in approved}
@@ -436,7 +440,6 @@ class AskAgentLoop:
                 runtime.consume_step()
                 continue
 
-            self._apply_decision_memory(decision)
             thought = str(decision.get("thought") or "")[:500]
             if thought:
                 orch.run_state.thought_trace.append(thought)
@@ -682,23 +685,6 @@ class AskAgentLoop:
         if result.ok and isinstance(result.data, dict) and result.data.get("pending"):
             return "pending"
         return "ok"
-
-    def _apply_decision_memory(self, decision: dict[str, Any]) -> None:
-        """Extract cross-run knowledge from model decisions: verified facts and excluded paths."""
-        mem = self.orchestrator.run_state.memory
-        updates = decision.get("memory_updates") if isinstance(decision.get("memory_updates"), dict) else {}
-        for item in _list_update_items(updates.get("verified")) + _list_update_items(updates.get("confirmed")):
-            if isinstance(item, dict):
-                mem.mark_verified(str(item.get("text") or ""))
-            else:
-                mem.mark_verified(str(item))
-        for item in _list_update_items(updates.get("excluded_paths")) + _list_update_items(updates.get("exclusions")):
-            if isinstance(item, dict):
-                mem.add_exclusion(
-                    str(item.get("target") or ""),
-                    str(item.get("reason") or ""),
-                    evidence_ref=str(item.get("evidence_ref") or "decision"),
-                )
 
     def _decide(self, messages: list[LLMMessage]) -> dict[str, Any]:
         """Send the full conversation to the LLM and parse a JSON decision."""
@@ -1725,10 +1711,6 @@ def _fmt_subagent(data: Any) -> str:
     if data.get("warnings"):
         parts.append(f"Warnings: {data['warnings']}")
     return "\n\n".join(parts) if parts else _fmt_generic(data)
-
-
-def _list_update_items(value: Any) -> list[Any]:
-    return value if isinstance(value, list) else []
 
 
 def _inject_stuck_loop_hint(state: LoopState, messages: list[LLMMessage]) -> str:
