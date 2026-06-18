@@ -18,13 +18,16 @@ from dbaide.rendering.sql_dialect import dialect_functions, dialect_keywords, no
 from dbaide.desktop.theme import Theme
 
 # Word(s) immediately before a trailing dot, e.g. "orders" or "analysis.orders".
-_QUALIFIED_DOT = re.compile(r"((?:[A-Za-z_][\w]*)(?:\.[A-Za-z_][\w]*)*)\.(\w*)$")
+# `[^\W\d]` is "a Unicode word char that isn't a digit" — i.e. a letter (incl. CJK)
+# or underscore — so unquoted CJK-named tables/columns (e.g. "订单") still match
+# without admitting digit-leading identifiers.
+_QUALIFIED_DOT = re.compile(r"((?:[^\W\d][\w]*)(?:\.[^\W\d][\w]*)*)\.(\w*)$")
 
 # Extract table aliases: FROM table [AS] alias, JOIN table [AS] alias, FROM a, b [AS] alias
 _ALIAS_RE = re.compile(
     r"(?:FROM|JOIN|,)\s+"
-    r"((?:[`\"]?[A-Za-z_]\w*[`\"]?)(?:\.[`\"]?[A-Za-z_]\w*[`\"]?)*)"
-    r"\s+(?:AS\s+)?([A-Za-z_]\w*)",
+    r"((?:[`\"]?[^\W\d]\w*[`\"]?)(?:\.[`\"]?[^\W\d]\w*[`\"]?)*)"
+    r"\s+(?:AS\s+)?([^\W\d]\w*)",
     re.IGNORECASE,
 )
 

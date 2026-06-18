@@ -132,6 +132,11 @@ def test_dot_prefix_regex(qapp):
     assert _QUALIFIED_DOT.search("FROM analysis.orders.").group(1) == "analysis.orders"
     assert _QUALIFIED_DOT.search("o.").group(1) == "o"
     assert _QUALIFIED_DOT.search("plain") is None
+    # Unquoted CJK-named tables/columns must still match (zh databases are common).
+    assert _QUALIFIED_DOT.search("SELECT * FROM 订单 WHERE 订单.金").group(1) == "订单"
+    assert _QUALIFIED_DOT.search("分析.订单.").group(1) == "分析.订单"
+    # ...but a digit-leading token is not an identifier and must not match.
+    assert _QUALIFIED_DOT.search("123.") is None
 
 
 def test_insert_completion_strips_column_type(qapp):
@@ -235,6 +240,23 @@ def test_alias_completion_join(qapp):
     words, _ = e._scoped_words("SELECT p.")
     assert words is not None
     assert "name" in words
+
+
+def test_alias_completion_cjk_table(qapp):
+    """Unquoted CJK table + alias  →  alias. completes (zh databases)."""
+    from dbaide.desktop.components.sql_editor import SqlEditor
+    e = SqlEditor()
+    e.set_schema({
+        "tables": ["订单"],
+        "columns_by_table": {"订单": ["编号", "金额"]},
+        "column_types": {"订单.金额": "DECIMAL"},
+    })
+    e.setPlainText("SELECT d.金额 FROM 订单 d")
+    words, mode = e._scoped_words("SELECT d.")
+    assert mode.startswith("alias:")
+    assert "金额 · DECIMAL" in words
+    # Direct CJK table-qualified completion also works.
+    assert e._scoped_words("SELECT 订单.")[0] == ["编号", "金额 · DECIMAL"]
 
 
 def test_alias_keyword_not_treated_as_alias(qapp):
