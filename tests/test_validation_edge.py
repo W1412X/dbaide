@@ -206,6 +206,25 @@ class TestTableScopeGuard:
         assert not result.ok
         assert any("secret_table" in i.message for i in result.issues)
 
+    def test_comma_join_table_is_in_scope(self):
+        """Old-style comma joins (FROM a, b) must check EVERY table — a denied/out-
+        of-scope table after a comma was previously not extracted (scope bypass)."""
+        allow = _scope(("main", "orders"))
+        r = allow.validate("SELECT * FROM orders, secret")
+        assert not r.ok and any("secret" in i.message for i in r.issues)
+        # aliased comma list
+        r2 = allow.validate("SELECT * FROM orders o, secret s WHERE o.id = s.id")
+        assert not r2.ok and any("secret" in i.message for i in r2.issues)
+        # all-in-scope comma list still passes
+        assert _scope(("main", "orders"), ("main", "lines")).validate(
+            "SELECT * FROM orders, lines"
+        ).ok
+
+    def test_comma_join_respects_deny_list(self):
+        guard = TableScopeGuard(deny=["secret"])
+        assert not guard.validate("SELECT * FROM orders, secret").ok
+        assert guard.validate("SELECT * FROM orders, lines").ok
+
     def test_deny_list_blocks(self):
         guard = TableScopeGuard(deny=["secret_table"])
         assert guard.validate("SELECT * FROM orders").ok

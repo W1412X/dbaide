@@ -57,16 +57,98 @@ def _norm(value: str) -> str:
     return _normalize_ref(str(value)).lower()
 
 
+# Keywords that end a FROM table-list (so the comma-separated list is bounded).
+_FROM_END_KEYWORDS = frozenset({
+    "where", "group", "order", "having", "union", "intersect", "except",
+    "limit", "offset", "window", "qualify", "fetch", "for",
+    "join", "inner", "left", "right", "full", "cross", "natural", "on", "using",
+})
+
+_IDENT = r"(?:[A-Za-z_][\w$]*|`[^`]+`|\"[^\"]+\"|\[[^\]]+\])"
+_QUALIFIED = rf"{_IDENT}(?:\s*\.\s*{_IDENT})*"
+_LEAD_IDENT_RE = re.compile(rf"^\s*({_QUALIFIED})")
+
+
 def _table_refs(sql: str) -> list[str]:
     refs: list[str] = []
     # Blank comments/strings first so a comment can't hide a table reference,
     # then strip the FROM inside SQL functions (EXTRACT/TRIM/SUBSTRING).
     cleaned = strip_function_from_keywords(blank_strings_and_comments(sql))
-    ident = r"(?:[A-Za-z_][\w$]*|`[^`]+`|\"[^\"]+\"|\[[^\]]+\])"
-    pattern = re.compile(rf"\b(?:from|join)\s+({ident}(?:\s*\.\s*{ident})*)", re.I)
-    for match in pattern.finditer(cleaned):
+    # JOIN introduces exactly one table.
+    for match in re.finditer(rf"\bjoin\s+({_QUALIFIED})", cleaned, re.I):
         refs.append(_normalize_ref(match.group(1).strip()))
+    # FROM introduces a COMMA-SEPARATED list of tables (old-style joins:
+    # ``FROM a, b, c``). Capturing only the first table let a denied/out-of-scope
+    # table ride along after a comma — a scope bypass. Bound the list at the next
+    # clause keyword and split top-level commas. Derived tables ``(SELECT ...)`` are
+    # skipped here; their inner FROM is matched by this same loop.
+    for match in re.finditer(r"\bfrom\b", cleaned, re.I):
+        region = _from_region(cleaned, match.end())
+        for item in _split_top_level_commas(region):
+            stripped = item.strip()
+            if not stripped or stripped.startswith("("):
+                continue
+            lead = _LEAD_IDENT_RE.match(stripped)
+            if lead:
+                refs.append(_normalize_ref(lead.group(1).strip()))
     return refs
+
+
+def _from_region(text: str, start: int) -> str:
+    """Text after a top-level FROM up to the next clause keyword / enclosing ')'.
+    Paren-aware so a subquery's own WHERE/commas don't end the outer list."""
+    depth = 0
+    i, n = start, len(text)
+    while i < n:
+        ch = text[i]
+        if ch in ('"', "`", "["):
+            # Skip a quoted identifier whole — its contents (e.g. a column named
+            # "order") must not be read as a clause keyword that ends the list.
+            close = "]" if ch == "[" else ch
+            j = text.find(close, i + 1)
+            i = (j + 1) if j != -1 else n
+        elif ch == "(":
+            depth += 1
+            i += 1
+        elif ch == ")":
+            if depth == 0:
+                break  # FROM lives inside a subquery; list ends at the enclosing )
+            depth -= 1
+            i += 1
+        elif depth == 0 and ch == ";":
+            break
+        elif depth == 0 and (ch.isalpha() or ch == "_"):
+            word = re.match(r"[A-Za-z_]+", text[i:]).group(0)
+            if word.lower() in _FROM_END_KEYWORDS:
+                break
+            i += len(word)  # skip whole word so 'orders' isn't read as 'order'
+        else:
+            i += 1
+    return text[start:i]
+
+
+def _split_top_level_commas(text: str) -> list[str]:
+    items: list[str] = []
+    depth = 0
+    start = 0
+    i, n = 0, len(text)
+    while i < n:
+        ch = text[i]
+        if ch in ('"', "`", "["):
+            close = "]" if ch == "[" else ch
+            j = text.find(close, i + 1)
+            i = (j + 1) if j != -1 else n
+            continue
+        if ch == "(":
+            depth += 1
+        elif ch == ")":
+            depth = max(0, depth - 1)
+        elif ch == "," and depth == 0:
+            items.append(text[start:i])
+            start = i + 1
+        i += 1
+    items.append(text[start:])
+    return items
 
 
 def _cte_names(sql: str) -> list[str]:
