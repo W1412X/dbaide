@@ -689,13 +689,23 @@ def _detail_title(data: dict) -> str:
     return localized_node_head(node)
 
 
+_MAX_DETAIL_JSON = 20_000  # chars; the full event is always available via "Copy raw"
+
+
 def _json_text(value: object) -> str:
     if isinstance(value, str):
-        return value
-    try:
-        return json.dumps(value, ensure_ascii=False, indent=2, default=str)
-    except (TypeError, ValueError):
-        return str(value)
+        text = value
+    else:
+        try:
+            text = json.dumps(value, ensure_ascii=False, indent=2, default=str)
+        except (TypeError, ValueError):
+            text = str(value)
+    # Bound the rendered size so a step carrying a large output/result_data payload
+    # can't freeze the detail panel's QTextBrowser. Copy raw still exports it in full.
+    if len(text) > _MAX_DETAIL_JSON:
+        from dbaide.i18n import t
+        return text[:_MAX_DETAIL_JSON] + "\n… " + t("trace.detail.truncated", n=f"{len(text):,}")
+    return text
 
 
 def _section(title: str, body: str, *, code: bool = False) -> str:

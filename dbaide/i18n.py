@@ -123,6 +123,10 @@ _STRINGS: dict[str, dict[str, str]] = {
     "trace.view_failed": {"en": "View agent trace · failed", "zh": "查看执行轨迹 · 失败"},
     "trace.copy": {"en": "Copy trace", "zh": "复制轨迹"},
     "trace.copy_raw": {"en": "Copy raw JSON", "zh": "复制原始数据"},
+    "trace.detail.truncated": {
+        "en": "(truncated for display — {n} chars total; use Copy raw for the full event)",
+        "zh": "（已为显示截断——共 {n} 字符；完整事件请用“复制原始数据”）",
+    },
     "message.copy_selection": {"en": "Copy selection", "zh": "复制选中内容"},
     "message.copy_message": {"en": "Copy message", "zh": "复制整条消息"},
     "message.copy_code": {"en": "Copy code", "zh": "复制代码"},

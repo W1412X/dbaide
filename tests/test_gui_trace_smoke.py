@@ -92,6 +92,21 @@ def test_trace_step_raw_export_includes_thought(qapp):
     assert "SELECT 1" in exported
 
 
+def test_detail_json_is_bounded_but_copy_raw_is_full(qapp):
+    """A step with a huge output payload must not render unbounded into the detail
+    panel (would freeze QTextBrowser), but Copy raw still exports the full event."""
+    from dbaide.desktop.components.trace import _json_text, _detail_html, trace_step_raw_export
+
+    rendered = _json_text("x" * 50_000)
+    assert len(rendered) < 25_000 and "truncated for display" in rendered
+
+    big = {"raw": {"output": "y" * 50_000}, "title": "big step", "node_type": "info"}
+    html = _detail_html(big)
+    assert "truncated for display" in html
+    # Copy raw keeps the full payload (not truncated to the display cap).
+    assert trace_step_raw_export(big).count("y") >= 50_000
+
+
 def test_trace_panel_load_persisted_events(qapp):
     from dbaide.desktop.components.trace import InlineTrace
 
