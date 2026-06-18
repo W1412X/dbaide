@@ -102,6 +102,15 @@ def export_markdown_table(rows: list[dict[str, Any]], columns: list[str] | None 
     return "\n".join(lines)
 
 
+def _cell_one_line(value: Any) -> str:
+    """Cell text for a fixed-width text table: collapse newlines/tabs to spaces so a
+    multi-line value can't inject a line break mid-row and misalign the columns."""
+    text = _format_cell(value)
+    if "\n" in text or "\r" in text or "\t" in text:
+        text = text.replace("\r\n", " ").replace("\n", " ").replace("\r", " ").replace("\t", " ")
+    return text
+
+
 def format_result_text(rows: list[dict[str, Any]], columns: list[str] | None = None, max_rows: int = 100) -> str:
     """Format query result as readable text table."""
     if not rows:
@@ -112,7 +121,7 @@ def format_result_text(rows: list[dict[str, Any]], columns: list[str] | None = N
     # Calculate column widths
     widths = {}
     for c in cols:
-        widths[c] = max(len(str(c)), max((len(_format_cell(row.get(c))) for row in display_rows), default=0))
+        widths[c] = max(len(str(c)), max((len(_cell_one_line(row.get(c))) for row in display_rows), default=0))
         widths[c] = min(widths[c], 50)  # Cap width
 
     lines = []
@@ -121,7 +130,7 @@ def format_result_text(rows: list[dict[str, Any]], columns: list[str] | None = N
     lines.append("-+-".join("-" * widths[c] for c in cols))
     # Rows
     for row in display_rows:
-        lines.append(" | ".join(_format_cell(row.get(c))[:widths[c]].ljust(widths[c]) for c in cols))
+        lines.append(" | ".join(_cell_one_line(row.get(c))[:widths[c]].ljust(widths[c]) for c in cols))
 
     if len(rows) > max_rows:
         lines.append(f"\n... showing {max_rows} of {len(rows)} rows")

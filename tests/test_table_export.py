@@ -133,3 +133,15 @@ def test_developer_tools_markdown_escapes_multiline_comment():
     structural = re.findall(r"(?<!\\)\|", data_rows[0])  # unescaped pipes = cell borders
     assert len(structural) == 7                 # 6 cells, the comment's '|' is escaped
     assert "<br>" in data_rows[0]               # newline collapsed, row intact
+
+
+def test_format_result_text_keeps_rows_single_line():
+    """A multi-line cell value must not break the fixed-width text table — every data
+    row stays on one physical line so columns remain aligned."""
+    from dbaide.rendering.table import format_result_text
+
+    rows = [{"id": 1, "note": "line1\nline2\twith tab"}, {"id": 2, "note": "plain"}]
+    out = format_result_text(rows, ["id", "note"])
+    # header + separator + 2 data rows = 4 lines (the newline cell adds no extra line).
+    assert len(out.splitlines()) == 4
+    assert "line1 line2 with tab" in out          # newline/tab collapsed to spaces
