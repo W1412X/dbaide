@@ -118,6 +118,18 @@ class SQLGuard:
             if pattern.search(normalized):
                 issues.append(ValidationIssue("FORBIDDEN_FUNCTION", f"Forbidden SQL pattern: {pattern.pattern}"))
 
+        # Check: SELECT ... INTO <target> creates a table (PostgreSQL / SQL Server) —
+        # a side-effecting/DDL form even though the statement begins with SELECT, so it
+        # slips past the read-only first-keyword check. The engine read-only layer is the
+        # hard stop, but reject it here too for a clear early signal. (INTO OUTFILE/
+        # DUMPFILE is separately caught above.) Matched on the string/comment/quoted-
+        # identifier-stripped SQL so a literal or column named "into" can't false-trigger.
+        if first in {"select", "with"} and re.search(r"\binto\b", stripped):
+            issues.append(ValidationIssue(
+                "READONLY_ONLY",
+                "SELECT ... INTO creates or writes a target; only pure SELECT/WITH/EXPLAIN is allowed",
+            ))
+
         issues.extend(self._dialect_issues(stripped))
 
         explicit_limit = _explicit_limit(stripped, dialect=self.dialect)

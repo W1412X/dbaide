@@ -52,6 +52,25 @@ def test_sql_guard_dangerous_function_patterns_no_false_positive(sql):
     assert SQLGuard().validate(sql).ok
 
 
+@pytest.mark.parametrize("sql", [
+    "SELECT * INTO backup FROM users",                       # postgres/mssql: creates a table
+    "WITH x AS (SELECT 1 AS n) SELECT * INTO t FROM x",      # CTE then SELECT INTO
+])
+def test_sql_guard_blocks_select_into(sql):
+    result = SQLGuard().validate(sql)
+    assert not result.ok
+    assert any(i.code == "READONLY_ONLY" for i in result.issues)
+
+
+@pytest.mark.parametrize("sql", [
+    "SELECT * FROM users",
+    "SELECT name FROM t WHERE note = 'put into box'",        # 'into' inside a string literal
+    'SELECT "into" FROM t',                                   # 'into' as a quoted identifier
+])
+def test_sql_guard_select_into_no_false_positive(sql):
+    assert SQLGuard().validate(sql).ok
+
+
 def test_table_scope_allows_cte_refs_and_quoted_qualified_tables():
     guard = TableScopeGuard(allow=["main.orders", "orders"])
     result = guard.validate('WITH recent AS (SELECT * FROM "main"."orders") SELECT * FROM recent')
