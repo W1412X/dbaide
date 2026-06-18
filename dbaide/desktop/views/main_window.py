@@ -42,6 +42,16 @@ def _tab_label(tab_id: str) -> str:
         "Assistant": _i18n_t("mode.assistant"),
         "Workbench": _i18n_t("mode.workbench"),
     }.get(tab_id, tab_id)
+
+
+def _fk_filter_where(ref_column: str, value: object, dialect: str) -> str:
+    """WHERE clause to open a referenced row by its FK value. The column is quoted
+    and the value rendered as a dialect-correct SQL literal — passing the dialect so
+    backslash/quote escaping matches the target DB (generic escaping would mis-handle
+    a backslash in a string FK value on MySQL)."""
+    from dbaide.adapters.base import quote_identifier
+    from dbaide.rendering.table import _sql_literal
+    return f"{quote_identifier(ref_column, dialect)} = {_sql_literal(value, dialect=dialect)}"
 from dbaide.desktop.views.ask_tab import AskTab
 from dbaide.desktop.dialogs.joins import JoinsDialog
 from dbaide.desktop.dialogs.note_editor import NoteEditorDialog
@@ -2140,8 +2150,6 @@ class MainWindow(QMainWindow):
     def _navigate_fk(self, ref_table: str, ref_column: str, value: object) -> None:
         """Open the referenced table filtered to the clicked FK value (data-cell
         'Open referenced row')."""
-        from dbaide.adapters.base import quote_identifier
-        from dbaide.rendering.table import _sql_literal
         current = self.workbench.tabs.currentWidget()
         current_db = str(getattr(current, "database", "") or "")
         node = self._find_table_node(ref_table, database=current_db)
@@ -2153,7 +2161,7 @@ class MainWindow(QMainWindow):
         doc = self.workbench.tabs.currentWidget()
         if doc is None or not hasattr(doc, "browse_with_filter"):
             return
-        where = f"{quote_identifier(ref_column, self._dialect())} = {_sql_literal(value)}"
+        where = _fk_filter_where(ref_column, value, self._dialect())
         doc.browse_with_filter(where)
 
     def load_asset(self, path: str) -> None:

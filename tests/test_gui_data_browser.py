@@ -177,6 +177,16 @@ def test_fk_cell_navigation(qapp):
     assert w._fk_cell_actions(0, w._columns.index("id")) == []
 
 
+def test_fk_filter_where_is_dialect_correct():
+    """The FK-navigation WHERE quotes the column and renders the value with the target
+    dialect's escaping — a generic literal would mis-handle a backslash on MySQL."""
+    from dbaide.desktop.views.main_window import _fk_filter_where
+    assert _fk_filter_where("code", "a\\b", "mysql") == "`code` = 'a\\\\b'"   # backslash doubled
+    assert _fk_filter_where("code", "a\\b", "sqlite") == '"code" = \'a\\b\''   # backslash literal
+    assert _fk_filter_where("id", 7, "postgres") == '"id" = 7'                  # numbers unquoted
+    assert _fk_filter_where("code", "O'B", "sqlite") == '"code" = \'O\'\'B\''    # quote escaped
+
+
 def test_fk_cell_navigation_skips_null_value(qapp):
     """A NULL foreign-key cell offers no navigation — there is no referenced row to
     open (and `ref_column = NULL` would never match)."""
