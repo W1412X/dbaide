@@ -70,3 +70,16 @@ def test_raw_html_is_escaped():
     html = render_markdown_safe("Hello <script>alert(1)</script> world")
     assert "<script>" not in html
     assert "&lt;script&gt;" in html
+
+
+def test_dangerous_link_schemes_neutralized():
+    from dbaide.rendering.sanitize import sanitize_markdown_html
+
+    # file:/vbscript:/javascript: schemes must be stripped from rendered links so a
+    # click can't open a local resource or run script (links render with
+    # setOpenExternalLinks=True).
+    for scheme in ("file", "javascript", "vbscript"):
+        out = sanitize_markdown_html(f'<a href="{scheme}:///etc/passwd">x</a>')
+        assert f"{scheme}:" not in out.lower()
+    # data: images are still allowed (only non-image data: is stripped).
+    assert "data:image" in sanitize_markdown_html('<img src="data:image/png;base64,AAA">')

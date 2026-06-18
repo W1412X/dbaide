@@ -31,8 +31,13 @@ def sanitize_markdown_html(html_text: str) -> str:
     html_text = re.sub(r'<script[^>]*>.*?</script>', '', html_text, flags=re.S | re.I)
     # Remove event handlers (quoted and unquoted attribute values)
     html_text = re.sub(r'\bon\w+\s*=\s*(?:["\'][^"\']*["\']|\S+)', '', html_text, flags=re.I)
-    # Remove javascript: URLs
+    # Remove dangerous URL schemes. The chat renders with setOpenExternalLinks(True),
+    # so a model- or DB-sourced link like [x](file:///etc/passwd) would otherwise open
+    # a local resource via QDesktopServices on click. Neutralize the scheme (the link
+    # text stays; the href becomes harmless) — consistent with javascript:/data: below.
     html_text = re.sub(r'javascript\s*:', '', html_text, flags=re.I)
+    html_text = re.sub(r'vbscript\s*:', '', html_text, flags=re.I)
+    html_text = re.sub(r'file\s*:', '', html_text, flags=re.I)
     # Remove data: URLs (except images)
     html_text = re.sub(r'data\s*:(?!image)', '', html_text, flags=re.I)
     return html_text
