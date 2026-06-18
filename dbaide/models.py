@@ -120,8 +120,15 @@ class ModelConfig:
         model: str = "",
         timeout_seconds: int = 60,
         context_length: int = 32000,
+        tool_calling: str = "auto",
     ) -> None:
         self.name = name
+        # Native function/tool-calling preference: "auto" (use it, fall back to the
+        # JSON decision protocol if the endpoint rejects tools), "on" (force), "off"
+        # (always use the JSON protocol). Lets the provider format tool calls instead
+        # of the model hand-writing decision JSON.
+        tc = str(tool_calling or "auto").strip().lower()
+        self.tool_calling = tc if tc in ("auto", "on", "off") else "auto"
         self.provider = str(provider or "none").strip().lower()
         if self.provider not in _VALID_MODEL_PROVIDERS:
             raise ValueError(

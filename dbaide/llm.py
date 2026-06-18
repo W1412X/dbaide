@@ -32,12 +32,52 @@ class LLMMessage:
     content: str
 
 
+def _parse_tool_calls(raw: Any) -> list[dict[str, Any]]:
+    """Normalize the OpenAI ``tool_calls`` array into [{"name", "arguments": dict}].
+    Tolerates string or already-parsed argument objects and malformed entries."""
+    out: list[dict[str, Any]] = []
+    if not isinstance(raw, list):
+        return out
+    for call in raw:
+        if not isinstance(call, dict):
+            continue
+        fn = call.get("function") or {}
+        name = str(fn.get("name") or "").strip()
+        if not name:
+            continue
+        args = fn.get("arguments")
+        if isinstance(args, str):
+            try:
+                args = json.loads(args) if args.strip() else {}
+            except (ValueError, TypeError):
+                args = {}
+        if not isinstance(args, dict):
+            args = {}
+        out.append({"name": name, "arguments": args})
+    return out
+
+
+class ToolsUnsupported(RuntimeError):
+    """Raised when the endpoint rejects native function/tool calling, so the caller
+    can fall back to the JSON decision protocol (and remember the downgrade)."""
+
+
 class LLMClient:
     def complete_json(self, messages: list[LLMMessage], *, schema_hint: str = "") -> dict[str, Any]:
         raise NotImplementedError
 
     def complete_text(self, messages: list[LLMMessage], *, json_mode: bool = False) -> str:
         raise NotImplementedError
+
+    def supports_tool_calling(self) -> bool:
+        """Whether this client can do native function/tool calling. Base: no, so
+        the agent uses the hand-written JSON decision protocol (mocks inherit this)."""
+        return False
+
+    def complete_with_tools(self, messages: list[LLMMessage], tools: list[dict[str, Any]]) -> dict[str, Any]:
+        """Run a tool-enabled completion. Returns {"content": str|None,
+        "tool_calls": [{"name": str, "arguments": dict}]}. Default: unsupported."""
+        raise ToolsUnsupported("native tool calling not supported by this client")
 
     def supports_streaming(self) -> bool:
         return False
@@ -80,6 +120,9 @@ class OpenAICompatibleClient(LLMClient):
         # reported by the API ({"prompt_tokens", "completion_tokens", ...}).
         # Compaction prefers this exact count over the local char-heuristic.
         self.last_usage: dict[str, Any] | None = None
+        # Set once if the endpoint rejects native tools, so later runs in this
+        # process skip the wasted native attempt and go straight to the JSON protocol.
+        self._tools_unsupported = False
         if not self.base_url or not self.api_key or not cfg.model:
             missing = []
             if not self.base_url:
@@ -187,6 +230,77 @@ class OpenAICompatibleClient(LLMClient):
                 except (ValueError, TypeError):
                     pass  # HTTP-date form — not worth parsing; use backoff.
         return default
+
+    def supports_tool_calling(self) -> bool:
+        # Honor an explicit off; "auto"/"on" both attempt native calls (auto falls
+        # back at call time if the endpoint rejects tools). A cached downgrade from
+        # an earlier rejection short-circuits to the JSON protocol.
+        if self._tools_unsupported:
+            return False
+        return getattr(self.cfg, "tool_calling", "auto") != "off"
+
+    def complete_with_tools(self, messages: list[LLMMessage], tools: list[dict[str, Any]]) -> dict[str, Any]:
+        """Native function/tool calling. Returns
+        {"content": str|None, "tool_calls": [{"name": str, "arguments": dict}], "usage": dict|None}.
+        Raises ToolsUnsupported if the endpoint rejects the ``tools`` parameter (HTTP
+        400/404/422) so the caller can fall back to the JSON protocol."""
+        payload: dict[str, Any] = {
+            "model": self.cfg.model,
+            "messages": [{"role": m.role, "content": m.content} for m in messages],
+            "temperature": 0,
+            "tools": tools,
+            "tool_choice": "auto",
+        }
+        body = json.dumps(payload).encode("utf-8")
+        req = urllib.request.Request(
+            f"{self.base_url}/chat/completions", data=body,
+            headers={"Content-Type": "application/json", "Authorization": f"Bearer {self.api_key}"},
+            method="POST",
+        )
+        timeout = max(1, int(self.cfg.timeout_seconds))
+        last_exc: Exception | None = None
+        for attempt in range(self.MAX_RETRIES):
+            try:
+                with urllib.request.urlopen(req, timeout=timeout, context=_ssl_context()) as resp:  # nosec B310
+                    raw = resp.read()
+                try:
+                    data = json.loads(raw.decode("utf-8"))
+                except (ValueError, UnicodeDecodeError) as exc:
+                    raise RuntimeError(f"LLM returned a non-JSON response: {str(exc)[:120]}") from exc
+                if not isinstance(data, dict):
+                    raise RuntimeError(f"LLM returned unexpected JSON type: {type(data).__name__}")
+                if "error" in data:
+                    raise RuntimeError(f"LLM API error: {data['error']}")
+                choices = data.get("choices") or []
+                if not choices:
+                    raise RuntimeError("LLM returned empty choices")
+                message = choices[0].get("message") or {}
+                usage = data.get("usage")
+                self.last_usage = usage if isinstance(usage, dict) else None
+                return {
+                    "content": message.get("content"),
+                    "tool_calls": _parse_tool_calls(message.get("tool_calls")),
+                    "usage": self.last_usage,
+                }
+            except urllib.error.HTTPError as exc:
+                # A 4xx on a tools request typically means the endpoint doesn't
+                # support function calling — signal the caller to fall back.
+                if exc.code in (400, 404, 422, 501):
+                    body_txt = exc.read().decode("utf-8", errors="replace")[:200]
+                    raise ToolsUnsupported(f"endpoint rejected tools (HTTP {exc.code}): {body_txt}") from exc
+                last_exc = RuntimeError(f"LLM HTTP {exc.code}")
+                last_exc.status_code = exc.code  # type: ignore[attr-defined]
+                if exc.code in (429, 500, 502, 503, 504) and attempt < self.MAX_RETRIES - 1:
+                    time.sleep(self._retry_delay(attempt, exc))
+                    continue
+                raise last_exc from exc
+            except (urllib.error.URLError, TimeoutError, OSError) as exc:
+                last_exc = RuntimeError(f"LLM connection failed: {exc}")
+                if attempt < self.MAX_RETRIES - 1:
+                    time.sleep(self._retry_delay(attempt))
+                    continue
+                raise last_exc from exc
+        raise last_exc or RuntimeError("LLM tool call failed after retries")
 
     def supports_streaming(self) -> bool:
         return True

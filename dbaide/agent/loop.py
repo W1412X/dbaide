@@ -26,7 +26,7 @@ from dbaide.agent.toolkit import build_tool_registry, loop_tool_specs
 from dbaide.agent.toolkit.result_preview import preview_rows
 from dbaide.core.cancellation import CancelledError
 from dbaide.core.events import TraceEvent
-from dbaide.llm import LLMMessage
+from dbaide.llm import LLMMessage, ToolsUnsupported as _ToolsUnsupported
 from dbaide.models import AssistantResponse
 from dbaide.tools.registry import ToolContext, ToolResult
 
@@ -115,6 +115,10 @@ class AskAgentLoop:
         self.allowed_tool_names = frozenset(s.name for s in self.allowed_tool_specs)
         self._trace_parent = ""
         self._agent_loop_node_id = ""
+        # Native tool-calling: built lazily; flips to True if the endpoint rejects
+        # tools so we stop retrying native and use the JSON protocol for the run.
+        self._tool_schemas_cache: list[dict[str, Any]] | None = None
+        self._tools_downgraded = False
 
     def _ns_step(self, event: dict) -> dict:
         if self._trace_parent and event.get("step"):
@@ -686,12 +690,72 @@ class AskAgentLoop:
             return "pending"
         return "ok"
 
+    def _tool_call_schemas(self) -> list[dict[str, Any]]:
+        if self._tool_schemas_cache is None:
+            self._tool_schemas_cache = [_tool_spec_to_function(s) for s in self.allowed_tool_specs]
+        return self._tool_schemas_cache
+
+    def _native_decide(self, messages: list[LLMMessage]) -> dict[str, Any] | None:
+        """One native tool-calling round → the internal decision dict (same shape
+        the JSON protocol returns), or None to fall back to the JSON protocol."""
+        orch = self.orchestrator
+        if orch.cancel_check:
+            orch.cancel_check()
+        result = orch.llm.complete_with_tools(messages, self._tool_call_schemas())
+        if orch.cancel_check:
+            orch.cancel_check()
+        tool_calls = result.get("tool_calls") or []
+        content = result.get("content")
+        if tool_calls:
+            calls = [
+                {"tool": tc["name"], "args": tc.get("arguments") or {}}
+                for tc in tool_calls if tc.get("name") in self.allowed_tool_names
+            ]
+            if not calls:
+                return None  # model named only unknown tools → let JSON protocol retry
+            if len(calls) == 1:
+                return {"action": "call_tool", "tool": calls[0]["tool"], "args": calls[0]["args"], "thought": ""}
+            return {"action": "call_tools", "calls": calls, "thought": ""}
+        if content and content.strip():
+            # No tool call + content = the model is done → finish. Emit as one chunk
+            # so the UI still receives the answer when streaming is on.
+            if getattr(orch, "stream_answers", False):
+                self._emit_answer_chunk(content)
+            return {"action": "finish", "answer": content}
+        return None  # neither a tool call nor content → fall back
+
     def _decide(self, messages: list[LLMMessage]) -> dict[str, Any]:
         """Send the full conversation to the LLM and parse a JSON decision."""
         self._last_prompt_tokens = sum(estimate_tokens(m.content) for m in messages)
+        orch = self.orchestrator
+
+        # Native function/tool-calling path (capability-gated). The provider emits
+        # well-formed tool calls, which we translate into the SAME internal decision
+        # dict the JSON protocol produces — so the rest of the loop, compression and
+        # resume are unchanged. On an endpoint that rejects tools we downgrade once
+        # and use the JSON protocol for the rest of the run.
+        if (not self._tools_downgraded
+                and getattr(orch, "llm", None) is not None
+                and orch.llm.supports_tool_calling()):
+            try:
+                native = self._native_decide(messages)
+                if native is not None:
+                    return native
+            except _ToolsUnsupported as exc:
+                self._tools_downgraded = True
+                try:
+                    orch.llm._tools_unsupported = True  # cache across runs in-process
+                except Exception:
+                    pass
+                logger.info("native_tool_calling_downgrade: %s", exc)
+            except Exception as exc:
+                if _looks_cancelled(exc):
+                    raise
+                self._tools_downgraded = True
+                logger.warning("native_tool_calling_failed, using JSON protocol: %s", exc)
+
         schema_hint = ('Return {"action":"call_tool|call_tools|finish","tool":"...","args":{},'
                        '"calls":[{"tool":"...","args":{}}],"thought":"...","answer":"..."}')
-        orch = self.orchestrator
 
         last_error = ""
         last_raw = ""
@@ -1711,6 +1775,50 @@ def _fmt_subagent(data: Any) -> str:
     if data.get("warnings"):
         parts.append(f"Warnings: {data['warnings']}")
     return "\n\n".join(parts) if parts else _fmt_generic(data)
+
+
+_SCALAR_JSON_TYPES = {"int": "integer", "integer": "integer", "number": "number",
+                      "float": "number", "bool": "boolean", "boolean": "boolean",
+                      "object": "object", "dict": "object", "string": "string", "str": "string"}
+
+
+def _json_prop(value: Any) -> dict[str, Any]:
+    """Map a dbaide spec type string to a JSON-Schema property. Handles the spec's
+    own forms (``list[string]``, ``list[dict]``, ``dict``) so array/object args are
+    advertised correctly to a native tool-calling provider, not flattened to string."""
+    t = str(value or "").lower().strip()
+    if t.startswith("list[") and t.endswith("]"):
+        inner = _SCALAR_JSON_TYPES.get(t[5:-1].strip(), "string")
+        return {"type": "array", "items": {"type": inner}}
+    if t in ("list", "array"):
+        return {"type": "array", "items": {"type": "string"}}
+    return {"type": _SCALAR_JSON_TYPES.get(t, "string")}
+
+
+def _tool_spec_to_function(spec: Any) -> dict[str, Any]:
+    """Map a dbaide ToolSpec to an OpenAI function-tool schema for native calling."""
+    schema = getattr(spec, "input_schema", None) or {}
+    properties: dict[str, Any] = {}
+    required: list[str] = []
+    for key, meta in schema.items():
+        if not isinstance(meta, dict):
+            properties[key] = {"type": "string"}
+            continue
+        prop = _json_prop(meta.get("type"))
+        desc = meta.get("description")
+        if desc:
+            prop["description"] = str(desc)
+        properties[key] = prop
+        if meta.get("required"):
+            required.append(key)
+    return {
+        "type": "function",
+        "function": {
+            "name": spec.name,
+            "description": str(getattr(spec, "description", "") or ""),
+            "parameters": {"type": "object", "properties": properties, "required": required},
+        },
+    }
 
 
 def _inject_stuck_loop_hint(state: LoopState, messages: list[LLMMessage]) -> str:
