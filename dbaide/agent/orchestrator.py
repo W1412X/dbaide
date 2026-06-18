@@ -215,6 +215,13 @@ class AskOrchestrator:
         skip_turn_markers: bool = False,
     ) -> AssistantResponse:
         self.run_state.fail_reason = ""  # fresh per run (never carry a stale reason)
+        # Carry forward schema disclosed in EARLIER turns of this chat session so
+        # the schema guard recognizes those tables this turn — the conversation
+        # memory (session_messages / [Prior turns]) implies the agent already
+        # knows them, and the disclosure gate must agree (else a follow-up that
+        # reuses a prior table is wrongly rejected as "undisclosed"). Done before
+        # snapshotting disclosures_before so these don't count as "new this turn".
+        self._seed_session_disclosure()
         disclosures = list(self.session.disclosure.events)
 
         from dbaide.agent.loop import AskAgentLoop
@@ -488,6 +495,27 @@ class AskOrchestrator:
 
     def _new_disclosures(self, before: list[str]) -> list[str]:
         return self.session.disclosure.events[len(before):]
+
+    def _seed_session_disclosure(self) -> None:
+        """Re-disclose tables surfaced in earlier turns of this chat session into
+        the live DisclosureContext. Cheap (in-memory records, no DB round-trips):
+        the schema guard only needs the table to be known, and the agent already
+        carries column detail in the conversation. Idempotent across sub-intents."""
+        if not self.session_turns:
+            return
+        dc = self.session.disclosure
+        items: list[tuple] = []
+        for turn in self.session_turns:
+            for key in (turn.get("disclosed_tables") or []):
+                key = str(key).strip()
+                if not key:
+                    continue
+                db, _sep, table = key.rpartition(".")
+                items.append((db, table or key))
+        if items:
+            if not dc.instance:
+                dc.set_instance(self.instance)
+            dc.redisclose(items, source="prior turns")
 
 
 

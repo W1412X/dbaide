@@ -49,6 +49,46 @@ class DisclosureContext:
         prefix = self.path(database)
         self.events.append(f"L2 tables disclosed: {prefix} ({len(tables)} table(s))")
 
+    def ensure_table(self, database: str, table: str,
+                     columns: list[ColumnInfo] | None = None) -> bool:
+        """Idempotently (re-)disclose a table — and optionally its columns —
+        WITHOUT a per-call event. Used to carry disclosure across turns and
+        across a pause/resume so the schema guard stays consistent with what the
+        agent already knows. Returns True if anything new was recorded."""
+        table = str(table or "").strip()
+        if not table:
+            return False
+        database = str(database or "").strip()
+        ref = self.table_ref(database, table)
+        entry = self.tables.get(ref) or self._entry_for(table, database=database)
+        changed = False
+        if entry is None:
+            entry = TableDisclosure(
+                table=TableInfo(name=table, schema=database),
+                instance=self.instance, database=database,
+            )
+            self.tables[ref] = entry
+            changed = True
+        if columns and not entry.columns:
+            entry.columns = list(columns)
+            changed = True
+        return changed
+
+    def redisclose(self, items: list[tuple], *, source: str = "session") -> int:
+        """Carry forward previously-disclosed tables (across turns / resume).
+        ``items`` is an iterable of ``(database, table)`` or ``(database, table,
+        columns)``. Emits one summary event. Returns the count newly recorded."""
+        n = 0
+        for item in items:
+            db = item[0] if len(item) > 0 else ""
+            table = item[1] if len(item) > 1 else ""
+            cols = item[2] if len(item) > 2 else None
+            if self.ensure_table(db, table, cols):
+                n += 1
+        if n:
+            self.events.append(f"L2 tables re-disclosed ({source}): {n} table(s)")
+        return n
+
     def record_columns(self, table: str, columns: list[ColumnInfo], *, database: str = "") -> None:
         entry = self._entry_for(table, database=database)
         if entry is None:
