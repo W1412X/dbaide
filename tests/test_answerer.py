@@ -181,3 +181,16 @@ def test_answer_language_directive_targets_question_language():
     assert "English" in en
     assert "question language" in zh.lower()
     assert "question language" in en.lower()
+
+
+    def test_query_result_single_col_11_rows_shows_more_indicator(self):
+        """A single-column result with 11 rows must show the 'and N total' indicator
+        (was hidden when row_count fell between the 10-shown and 12-preview caps)."""
+        set_language("en")
+        rows = [{"name": f"u{i}"} for i in range(11)]
+        result = QueryResult(columns=["name"], rows=rows, sql="SELECT name FROM users",
+                             row_count=11, elapsed_ms=1.0)
+        out = self.formatter.query_result(result)
+        assert "and 11 total" in out      # the 'more' indicator is present, not hidden
+        assert "u9" in out                # 10 values (u0..u9) shown inline
+        assert "u10" not in out           # the 11th isn't inline — covered by 'and 11 total'

@@ -107,12 +107,15 @@ def _summarize_rows(result: QueryResult, zh: bool) -> str:
         return _describe_row(preview[0], cols, zh)
 
     if len(cols) == 1:
-        values = [str(row.get(cols[0], "")) for row in preview]
+        # Build EXACTLY the values we display (≤10) so the "and N total" suffix is
+        # driven by what's shown — not by the wider 12-row preview, which would hide
+        # the 11th/12th value with no "more" indicator.
+        values = [str(row.get(cols[0], "")) for row in preview[:10]]
         if zh:
-            joined = "、".join(values[:10])
+            joined = "、".join(values)
             suffix = f" 等 {result.row_count} 项" if result.row_count > len(values) else ""
             return f"{cols[0]}：{joined}{suffix}。"
-        joined = ", ".join(values[:10])
+        joined = ", ".join(values)
         suffix = f", and {result.row_count} total" if result.row_count > len(values) else ""
         return f"{cols[0]}: {joined}{suffix}."
 
