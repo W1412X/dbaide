@@ -19,6 +19,39 @@ def test_sql_guard_adds_limit():
     assert result.normalized_sql.endswith("LIMIT 25")
 
 
+import pytest
+
+
+@pytest.mark.parametrize("sql", [
+    "SELECT pg_read_file('/etc/passwd')",
+    "SELECT pg_read_binary_file('/etc/shadow')",
+    "SELECT pg_ls_dir('/')",
+    "SELECT lo_export(1, '/tmp/x')",
+    "SELECT dblink('host=evil', 'select 1')",
+    "SELECT xp_cmdshell('whoami')",
+    "SELECT xp_dirtree('c:/')",
+    "SELECT sp_oacreate('x')",
+    "SELECT * FROM openrowset(BULK 'c:/x', SINGLE_CLOB) z",
+    "SELECT sys_exec('rm -rf /')",
+    "SELECT load_extension('evil.so')",
+    "SELECT readfile('/etc/passwd')",
+    "SELECT utl_http.request('http://attacker') FROM dual",
+])
+def test_sql_guard_blocks_read_side_dangerous_functions(sql):
+    result = SQLGuard().validate(sql)
+    assert not result.ok
+    assert any(i.code == "FORBIDDEN_FUNCTION" for i in result.issues)
+
+
+@pytest.mark.parametrize("sql", [
+    "SELECT readfile FROM docs",          # same-named plain column, no call
+    "SELECT email FROM users WHERE id=1",
+    "SELECT pg_size_pretty(total) FROM t",  # unrelated pg_ function
+])
+def test_sql_guard_dangerous_function_patterns_no_false_positive(sql):
+    assert SQLGuard().validate(sql).ok
+
+
 def test_table_scope_allows_cte_refs_and_quoted_qualified_tables():
     guard = TableScopeGuard(allow=["main.orders", "orders"])
     result = guard.validate('WITH recent AS (SELECT * FROM "main"."orders") SELECT * FROM recent')

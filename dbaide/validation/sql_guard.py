@@ -29,6 +29,23 @@ FORBIDDEN_PATTERNS = [
     re.compile(r"\bload\s+(data|xml)\s+\w*\s*infile\b", re.I),
     re.compile(r"/\*!", re.I),  # MySQL executable conditional comment
     re.compile(r"\bexecute\s+immediate\b", re.I),  # PostgreSQL dynamic SQL
+    # Read-side file / command / network functions. These need no write to do
+    # damage (read server files, exfiltrate, SSRF, run OS commands), so they're
+    # blocked even though the connection is already read-only. Matched only in the
+    # FUNC( call form so a same-named plain column is unaffected.
+    re.compile(r"\bpg_read_(?:binary_)?file\s*\(", re.I),     # postgres: read server files
+    re.compile(r"\bpg_ls_dir\s*\(", re.I),                     # postgres: list server dirs
+    re.compile(r"\bpg_stat_file\s*\(", re.I),                  # postgres: stat server files
+    re.compile(r"\blo_(?:import|export)\s*\(", re.I),          # postgres: large-object file I/O
+    re.compile(r"\bdblink(?:_connect)?\s*\(", re.I),           # postgres: outbound DB conn (SSRF)
+    re.compile(r"\bxp_cmdshell\b", re.I),                      # mssql: OS command exec
+    re.compile(r"\bxp_(?:dirtree|fileexist|regread|regwrite)\b", re.I),  # mssql: fs/registry
+    re.compile(r"\bsp_oa(?:create|method|getproperty)\b", re.I),  # mssql: OLE automation
+    re.compile(r"\bopen(?:rowset|datasource)\s*\(", re.I),     # mssql: ad-hoc remote/file access
+    re.compile(r"\bsys_e(?:xec|val)\s*\(", re.I),              # mysql UDF: OS command exec
+    re.compile(r"\bload_extension\s*\(", re.I),                # sqlite: load native extension
+    re.compile(r"\b(?:readfile|writefile|fts3_tokenizer)\s*\(", re.I),  # sqlite: file I/O
+    re.compile(r"\butl_(?:file|http|smtp|tcp|inaddr)\b", re.I),  # oracle: file/network access
 ]
 
 # Patterns that indicate high-risk queries
