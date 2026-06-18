@@ -40,6 +40,16 @@ def test_explain_sql_strips_explain_analyze_prefix():
     assert adapter.explained_sql == "SELECT * FROM users"
 
 
+def test_explain_sql_strips_parenthesized_analyze_prefix():
+    """EXPLAIN (ANALYZE, ...) executes the query; the prefix must be stripped so the
+    re-prepended plain EXPLAIN does not run ANALYZE and bypass the cost gate."""
+    for prefix in ("EXPLAIN (ANALYZE) ", "EXPLAIN (ANALYZE, BUFFERS) ", "EXPLAIN (FORMAT JSON) "):
+        adapter = ExplainSpyAdapter(ConnectionConfig(name="local", type="sqlite", path="/tmp/test.db"))
+        query = QueryTools(adapter, DisclosureContext())
+        query.explain_sql(prefix + "SELECT * FROM users")
+        assert adapter.explained_sql == "SELECT * FROM users"
+
+
 def test_quote_identifier_handles_qualified_names():
     assert quote_identifier("public.orders", "postgres") == '"public"."orders"'
     assert quote_identifier("shop.orders", "mysql") == "`shop`.`orders`"

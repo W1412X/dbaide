@@ -128,8 +128,17 @@ class QueryTools:
 
 
 def _strip_leading_explain(sql: str) -> str:
+    """Strip a leading EXPLAIN prefix in any form so the explain path can re-add a
+    plain, non-executing EXPLAIN. Critically this includes the parenthesized
+    PostgreSQL form ``EXPLAIN (ANALYZE, BUFFERS) ...`` — left in place it would make
+    the re-prepended EXPLAIN run ``EXPLAIN (ANALYZE) ...``, which EXECUTES the query
+    and bypasses the cost gate."""
     text = sql.strip().rstrip(";")
-    m = re.match(r"explain\s+(?:analyze\s+)?(?:query\s+plan\s+)?", text, re.IGNORECASE)
-    if m:
+    m = re.match(
+        r"explain\s*(?:\([^)]*\)\s*)?(?:analyze\s+)?(?:verbose\s+)?(?:query\s+plan\s+)?",
+        text,
+        re.IGNORECASE,
+    )
+    if m and m.group(0).strip():
         return text[m.end():].strip()
     return text
