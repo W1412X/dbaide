@@ -53,6 +53,18 @@ def test_browse_table_exact_multiple_has_no_phantom_next_page(qapp, tmp_path):
     assert p2["row_count"] == 4
 
 
+def test_export_table_all_returns_all_rows_unfiltered(qapp, tmp_path):
+    # "Export all rows" on an UNFILTERED table must not be capped to the small
+    # unfiltered-star bound (≤100) nor blocked by the large-LIMIT cost gate on the
+    # default (production) profile. 250 rows must all come back.
+    svc = _service(tmp_path, rows=250)
+    r = svc.dispatch("export_table_all", {"connection_name": "local", "table": "t"})
+    assert len(r["rows"]) == 250 and r["capped"] is False
+    # WHERE-filtered export also returns every matching row.
+    rf = svc.dispatch("export_table_all", {"connection_name": "local", "table": "t", "where": "city = 'SF'"})
+    assert rf["rows"] and all(row["city"] == "SF" for row in rf["rows"])
+
+
 def test_browse_table_sort_and_filter(qapp, tmp_path):
     svc = _service(tmp_path, rows=9)
     desc = svc.dispatch("browse_table", {"connection_name": "local", "table": "t",

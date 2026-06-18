@@ -1180,17 +1180,25 @@ class DesktopService:
         where = str(payload.get("where") or "").strip()
         dialect = self._table_dialect(conn)
 
+        export_cap = 50_000
         sql = self._select_from(table, where, dialect)
         if order_by:
             from dbaide.adapters.base import quote_identifier
             sql += f" ORDER BY {quote_identifier(order_by, dialect)} {order_dir}"
+        # Add the cap as an EXPLICIT LIMIT: without it, an unfiltered ``SELECT *`` is
+        # forced down to the small unfiltered-star bound (≤100 rows), so "export all"
+        # would silently return a handful of rows. confirmed=True because the user's
+        # explicit export is the confirmation for this deliberately-large read (which
+        # otherwise trips the large-LIMIT cost gate on production/staging profiles).
+        sql += f" LIMIT {export_cap}"
 
         tools = self._query_tools(conn)
-        result = tools.execute_sql(sql, database=database, limit=50_000)
+        result = tools.execute_sql(sql, database=database, limit=export_cap, confirmed=True)
         return {
             "columns": result.columns,
             "rows": result.rows or [],
             "row_count": result.row_count,
+            "capped": result.row_count >= export_cap,
         }
 
     def table_ddl(self, payload: dict[str, Any]) -> dict[str, Any]:
