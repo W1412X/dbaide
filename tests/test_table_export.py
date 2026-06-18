@@ -20,6 +20,16 @@ def test_export_insert_escapes_and_types():
     assert sql == 'INSERT INTO "users" ("id", "name", "amt", "flag") VALUES (1, \'O\'\'Brien\', 3.5, NULL);'
 
 
+def test_export_insert_decimal_unquoted():
+    """Decimal (NUMERIC/DECIMAL driver type) must be emitted as an unquoted number,
+    not a quoted string literal; non-finite floats fall back to NULL."""
+    from decimal import Decimal
+
+    rows = [{"id": 1, "price": Decimal("19.99"), "bad": float("inf")}]
+    sql = export_insert(rows, ["id", "price", "bad"], table="t")
+    assert sql == 'INSERT INTO "t" ("id", "price", "bad") VALUES (1, 19.99, NULL);'
+
+
 def test_export_insert_backslash_all_dialects():
     """Trailing backslash must be doubled on every dialect, not just MySQL."""
     rows = [{"path": "C:\\"}]

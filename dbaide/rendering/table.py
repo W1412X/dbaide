@@ -4,6 +4,8 @@ from __future__ import annotations
 import csv
 import io
 import json
+import math
+from decimal import Decimal
 from typing import Any
 
 from dbaide.adapters.base import quote_identifier
@@ -23,7 +25,12 @@ def _sql_literal(value: Any, *, dialect: str = "generic") -> str:
         return "NULL"
     if isinstance(value, bool):
         return "TRUE" if value else "FALSE"
-    if isinstance(value, (int, float)):
+    # Decimal is what most drivers return for NUMERIC/DECIMAL columns; it is a number
+    # and must be emitted UNQUOTED (a quoted '123.45' is a string literal, which can
+    # fail to insert under strict typing). NaN/Inf have no SQL literal → NULL.
+    if isinstance(value, (int, float, Decimal)):
+        if isinstance(value, float) and not math.isfinite(value):
+            return "NULL"
         return str(value)
     s = str(value).replace("'", "''")
     # A trailing backslash would escape the closing quote on any dialect.
