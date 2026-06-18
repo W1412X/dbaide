@@ -247,6 +247,43 @@ class DecisionPromptBuilder:
         ).rstrip() + "\n"
 
 
+    def session_turn_prompt(self, state: Any, turn_number: int) -> str:
+        """Build the user message for a new turn in session continuity mode.
+
+        Unlike initial_user_prompt(), this omits prior turns (already in the
+        stream) and verified_facts/excluded_paths (already in the stream).
+        active_criteria ARE injected because they may have been established in
+        turns that were subsequently compressed — repeating them here ensures
+        the LLM honours criteria even after compression removes the original
+        messages where they were confirmed.
+        """
+        pins = _pinned_scope_labels(getattr(self.orchestrator, "schema_scope", None))
+        pin_line = (f"User-attached schema (prefer these; retrieve_schema_context on them directly, "
+                    f"no broad discovery needed): {', '.join(pins)}\n\n") if pins else ""
+        notes = decision_notes_block(self.orchestrator, state.database)
+        notes_line = f"{notes}\n\n" if notes else ""
+        confirmed = [c for c in self.orchestrator.run_state.clarifications if str(c).strip()]
+        criteria_line = ""
+        if confirmed:
+            criteria_line = (
+                "Confirmed criteria (already settled with the user — honour these, do NOT re-ask):\n"
+                + "\n".join(f"- {c}" for c in confirmed) + "\n\n"
+            )
+        timezone = str(getattr(self.orchestrator.session.connection, "session_timezone", "UTC") or "UTC")
+        today = date.today().isoformat()
+
+        return (
+            f"User question:\n{state.question}\n\n"
+            f"Database scope: {state.database or '(any)'}\n\n"
+            f"Today's date: {today} (resolve relative periods from this)\n\n"
+            f"Connection session timezone: {timezone}\n\n"
+            f"Answer language for final user-facing prose: {state.answer_language}\n\n"
+            f"{notes_line}"
+            f"{criteria_line}"
+            f"{pin_line}"
+        ).rstrip() + "\n"
+
+
 def tool_prompt_line(spec: Any) -> str:
     """Render a tool spec as a compact prompt line with required/optional markers."""
     schema = getattr(spec, "input_schema", None) or {}

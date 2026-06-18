@@ -72,6 +72,9 @@ class AskOrchestrator:
         # the retrieve_turn / list_earlier_turns tools.
         self.session_turns: list[dict[str, Any]] = []
         self.active_criteria: list[str] = []
+        # Session-level message continuity: when set, the loop appends to this
+        # stream instead of creating fresh [system, user] messages each turn.
+        self.session_messages: list[Any] | None = None
         self.subagent_depth: int = 0
         self.max_subagent_depth: int = 1
 
@@ -149,7 +152,8 @@ class AskOrchestrator:
                     trace_parent = f"intent:{paused_id}"
             resp = self._run_single(question, database=database, execute=execute,
                                     resume_state=resume_state, user_reply=user_reply,
-                                    trace_parent=trace_parent)
+                                    trace_parent=trace_parent,
+                                    skip_turn_markers=bool(multi))
             # If the pause happened inside a multi-intent plan, resume the WHOLE plan
             # (the paused intent + any not-yet-run ones) rather than dropping the rest.
             if multi is not None:
@@ -208,6 +212,7 @@ class AskOrchestrator:
         user_reply: str = "",
         trace_parent: str = "",
         answer_language: str | None = None,
+        skip_turn_markers: bool = False,
     ) -> AssistantResponse:
         self.run_state.fail_reason = ""  # fresh per run (never carry a stale reason)
         disclosures = list(self.session.disclosure.events)
@@ -229,6 +234,7 @@ class AskOrchestrator:
                 user_reply=user_reply,
                 trace_parent=trace_parent,
                 answer_language=answer_language,
+                session_messages=self.session_messages if not skip_turn_markers else None,
             )
         except Exception as exc:
             logger.warning("agent_loop_failed: %s", exc, exc_info=True)
@@ -256,6 +262,11 @@ class AskOrchestrator:
             stage="decompose", title=f"Decomposed into {len(intents)} sub-intents",
             status="completed", kind="phase", node_id="intent:plan",
         ))
+        # Session continuity: multi-intent is one turn. Sub-intents run in
+        # isolation; the aggregated answer is appended to the session stream.
+        session_mode = self.session_messages is not None
+        if session_mode:
+            self._multi_begin_turn(question)
         results: list[tuple[Any, AssistantResponse]] = []
         for idx, intent in enumerate(intents, start=1):
             node_id = f"intent:{intent.id}"
@@ -264,7 +275,8 @@ class AskOrchestrator:
                 status="running", kind="phase", node_id=node_id,
             ))
             resp = self._run_single(intent.text, database=database, execute=execute,
-                                    trace_parent=node_id, answer_language=intent.language)
+                                    trace_parent=node_id, answer_language=intent.language,
+                                    skip_turn_markers=session_mode)
             self.progress(progress_event(
                 stage="intent", title=f"{idx}. {intent.label}: {intent.text}",
                 status="failed" if (resp.warnings and not resp.answer) else "completed",
@@ -280,7 +292,10 @@ class AskOrchestrator:
                 )
                 return resp
             results.append((intent, resp))
-        return self._aggregate(question, results, disclosures_before=disclosures_before)
+        aggregated = self._aggregate(question, results, disclosures_before=disclosures_before)
+        if session_mode:
+            self._multi_end_turn(aggregated)
+        return aggregated
 
     @staticmethod
     def _ser_intent(intent) -> dict[str, Any]:
@@ -313,6 +328,9 @@ class AskOrchestrator:
                         *, database: str, execute: bool) -> AssistantResponse:
         """After a paused sub-intent resumes, finish it + run the remaining sub-intents."""
         question = str(multi.get("question") or "")
+        if self.session_messages is not None:
+            from dbaide.agent.loop import AskAgentLoop
+            self._multi_turn_number = AskAgentLoop._count_completed_turns(self.session_messages) + 1
         done: list[tuple[Any, AssistantResponse]] = [
             (
                 _sub_intent_from_dict(d.get("intent") if isinstance(d, dict) else {}),
@@ -340,10 +358,12 @@ class AskOrchestrator:
 
         results = done + [(paused_intent, paused_resp)]
         remaining = [_sub_intent_from_dict(r) for r in (multi.get("remaining") or []) if isinstance(r, dict)]
+        session_mode = self.session_messages is not None
         for i, intent in enumerate(remaining):
             resp = self._run_single(intent.text, database=database, execute=execute,
                                     trace_parent=f"intent:{intent.id}",
-                                    answer_language=intent.language)
+                                    answer_language=intent.language,
+                                    skip_turn_markers=session_mode)
             if getattr(resp, "status", "completed") == "wait_user":
                 resp.resume_state = self._attach_multi(
                     resp.resume_state, question, results, intent, remaining[i + 1:],
@@ -351,11 +371,37 @@ class AskOrchestrator:
                 )
                 return resp
             results.append((intent, resp))
-        return self._aggregate(
+        aggregated = self._aggregate(
             question,
             results,
             disclosures_before=list(multi.get("disclosures_before") or []),
         )
+        if session_mode:
+            self._multi_end_turn(aggregated)
+        return aggregated
+
+    def _multi_begin_turn(self, question: str) -> None:
+        """Append a turn-start marker for the multi-intent as one logical turn."""
+        from dbaide.agent.loop import AskAgentLoop
+        from dbaide.llm import LLMMessage
+        msgs = self.session_messages
+        if msgs is None:
+            return
+        turn_number = AskAgentLoop._count_completed_turns(msgs) + 1
+        self._multi_turn_number = turn_number
+        msgs.append(LLMMessage("user", f"[turn:{turn_number}:start]\n{question}"))
+
+    def _multi_end_turn(self, aggregated: "AssistantResponse") -> None:
+        """Append aggregated answer + turn-end marker to the session stream."""
+        from dbaide.llm import LLMMessage
+        msgs = self.session_messages
+        if msgs is None:
+            return
+        turn_number = getattr(self, "_multi_turn_number", 0) or 0
+        answer = getattr(aggregated, "answer", "") or ""
+        if answer:
+            msgs.append(LLMMessage("assistant", answer))
+        msgs.append(LLMMessage("user", f"[turn:{turn_number}:end] Answer delivered."))
 
     def _aggregate(
         self,

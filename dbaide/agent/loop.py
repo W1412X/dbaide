@@ -179,10 +179,13 @@ class AskAgentLoop:
         user_reply: str = "",
         trace_parent: str = "",
         answer_language: str | None = None,
+        session_messages: list[LLMMessage] | None = None,
     ) -> AssistantResponse:
         orch = self.orchestrator
         self._trace_parent = trace_parent
         self._agent_loop_node_id = f"{trace_parent}:loop" if trace_parent else "loop"
+        self._session_messages = session_messages
+        self._turn_number = 0
         messages: list[LLMMessage] = []
         approved_risk_sql = ""
         approved_risk_args: dict[str, Any] = {}
@@ -190,6 +193,8 @@ class AskAgentLoop:
 
         if resume_state:
             messages, execute = restore_loop_state(orch, resume_state)
+            if session_messages is not None:
+                self._turn_number = self._count_completed_turns(messages) + 1
             reply = str(user_reply or question or "").strip()
             if reply:
                 messages.append(LLMMessage("user", f"User reply: {reply}"))
@@ -277,17 +282,43 @@ class AskAgentLoop:
                 execute_allowed=execute,
                 answer_language=orch.run_state.answer_language,
             )
-            # Build initial conversation: system + user question
             tools = self.allowed_tool_specs
             tool_lines = "\n".join(tool_prompt_line(s) for s in tools)
             execute_note = "allowed" if state.execute_allowed else "disabled"
-            system = self.prompts.system_prompt(state, tool_lines, execute_note)
-            user = self.prompts.initial_user_prompt(state)
-            messages = [LLMMessage("system", system), LLMMessage("user", user)]
 
-            prefetch_result = self._speculative_prefetch(orch, question, database)
-            if prefetch_result and prefetch_result.ok:
-                self._inject_prefetch(orch, messages, prefetch_result)
+            if session_messages is not None and len(session_messages) >= 2:
+                # Session continuity: reuse existing message stream
+                messages = list(session_messages)
+                messages[0] = LLMMessage("system",
+                    self.prompts.system_prompt(state, tool_lines, execute_note))
+                self._turn_number = self._count_completed_turns(messages) + 1
+                user_msg = self.prompts.session_turn_prompt(state, self._turn_number)
+                messages.append(LLMMessage("user",
+                    f"[turn:{self._turn_number}:start]\n{user_msg}"))
+                prefetch_result = self._speculative_prefetch(orch, question, database)
+                if prefetch_result and prefetch_result.ok:
+                    self._inject_prefetch(orch, messages, prefetch_result)
+                self._maybe_compress_turns(orch, messages)
+            elif session_messages is not None:
+                # Bootstrap: first turn in a session — add turn markers so the
+                # next turn enters session continuity mode.
+                system = self.prompts.system_prompt(state, tool_lines, execute_note)
+                self._turn_number = 1
+                user = self.prompts.initial_user_prompt(state)
+                messages = [LLMMessage("system", system),
+                            LLMMessage("user", f"[turn:1:start]\n{user}")]
+                prefetch_result = self._speculative_prefetch(orch, question, database)
+                if prefetch_result and prefetch_result.ok:
+                    self._inject_prefetch(orch, messages, prefetch_result)
+            else:
+                # Per-turn isolation (no session)
+                system = self.prompts.system_prompt(state, tool_lines, execute_note)
+                user = self.prompts.initial_user_prompt(state)
+                messages = [LLMMessage("system", system), LLMMessage("user", user)]
+                prefetch_result = self._speculative_prefetch(orch, question, database)
+                if prefetch_result and prefetch_result.ok:
+                    self._inject_prefetch(orch, messages, prefetch_result)
+
             self.progress(
                 progress_event(
                     stage="loop",
@@ -317,6 +348,7 @@ class AskAgentLoop:
             cancel_check=orch.cancel_check,
         )
 
+        risk_step = (int(resume_state.get("step_base") or 0) if resume_state else 0) + 1
         if approved_risk_sql:
             self.progress(
                 self._ns_step(progress_event(
@@ -325,7 +357,7 @@ class AskAgentLoop:
                     status="running",
                     kind="tool",
                     detail=approved_risk_sql[:240],
-                    step=1,
+                    step=risk_step,
                 )),
             )
             result = runtime.call_tool(approved_risk_tool, approved_risk_args or {"sql": approved_risk_sql}, tool_ctx)
@@ -336,7 +368,7 @@ class AskAgentLoop:
                 status="completed" if result.ok else "failed",
                 kind="tool",
                 detail=brief,
-                step=1,
+                step=risk_step,
             ))
             if result.ok:
                 done_event["sql"] = approved_risk_sql
@@ -360,7 +392,10 @@ class AskAgentLoop:
 
         while runtime.steps_remaining > 0:
             # ── Auto-compress if approaching context limit ──
-            self._maybe_compress(orch, messages)
+            if self._session_messages is not None:
+                self._maybe_compress_turns(orch, messages)
+            else:
+                self._maybe_compress(orch, messages)
 
             decide_start = recorder.snapshot_len() if recorder else 0
             try:
@@ -439,6 +474,11 @@ class AskAgentLoop:
                         ev["llm_calls"] = finish_calls
                         ev["output"] = answer
                         self.progress(self._ns_step(ev))
+                # Session continuity: mark turn end and propagate messages
+                if self._session_messages is not None:
+                    messages.append(LLMMessage("user",
+                        f"[turn:{self._turn_number}:end] Answer delivered."))
+                    orch.session_messages = messages
                 self.progress(
                     progress_event(
                         stage="loop",
@@ -484,6 +524,8 @@ class AskAgentLoop:
                         paused = True
                         break
                 if paused:
+                    if self._session_messages is not None:
+                        orch.session_messages = messages
                     return self._build_wait_response(
                         orch, state, messages, disclosures_before or [], step_base=step_no,
                     )
@@ -515,9 +557,17 @@ class AskAgentLoop:
             sig = self._run_tool_call(orch, state, messages, runtime, tool_ctx, decision,
                                       tool_name, args, step_no, llm_start, recorder)
             if sig == "pending":
+                if self._session_messages is not None:
+                    orch.session_messages = messages
                 return self._build_wait_response(
                     orch, state, messages, disclosures_before or [], step_base=step_no,
                 )
+
+        # Propagate session messages on non-finish exits too
+        if self._session_messages is not None:
+            messages.append(LLMMessage("user",
+                f"[turn:{self._turn_number}:end] Answer delivered."))
+            orch.session_messages = messages
 
         budget_exhausted = getattr(runtime, "steps_remaining", 1) <= 0
         if orch.run_state.query_result or orch.run_state.answer:
@@ -572,7 +622,10 @@ class AskAgentLoop:
         with llm_stage(tool_name):
             result = runtime.call_tool(tool_name, args, tool_ctx)
 
-        formatted = _format_tool_result(tool_name, result)
+        try:
+            formatted = _format_tool_result(tool_name, result)
+        except Exception:
+            formatted = f"ERROR: {result.error.message}" if result.error else "(format error)"
         brief = brief_tool_summary(tool_name, result)
         state.calls.append(ToolCallRecord(tool=tool_name, args=args, ok=result.ok, summary=brief))
 
@@ -798,11 +851,257 @@ class AskAgentLoop:
         if new_tokens > total_tokens * 0.9 and new_tokens > threshold:
             logger.warning("context_compress_stall: compression reduced only %d → %d tokens, "
                            "falling back to hard truncation", total_tokens, new_tokens)
-            keep = max(2, len(messages) - 2)
-            while sum(estimate_tokens(m.content) for m in messages) > threshold and keep > 2:
-                keep -= 1
-                messages[2:len(messages) - keep] = [LLMMessage("user",
-                    f"[Context note: earlier messages truncated to fit context budget.]")]
+            token_sizes = [estimate_tokens(m.content) for m in messages]
+            cumulative = 0
+            first_keep = 2
+            for i in range(len(messages) - 1, 1, -1):
+                cumulative += token_sizes[i]
+                overhead = estimate_tokens("[Context note: earlier messages truncated to fit context budget.]")
+                if token_sizes[0] + token_sizes[1] + overhead + cumulative <= threshold:
+                    first_keep = i
+                    break
+            if first_keep > 2:
+                messages[2:first_keep] = [LLMMessage("user",
+                    "[Context note: earlier messages truncated to fit context budget.]")]
+
+    @staticmethod
+    def _count_completed_turns(messages: list[LLMMessage]) -> int:
+        return sum(1 for m in messages if m.role == "user"
+                   and m.content.startswith("[turn:") and ":end]" in m.content[:30])
+
+    @staticmethod
+    def _find_turn_ranges(messages: list[LLMMessage]) -> list[tuple[int, int]]:
+        """Return [(start_idx, end_idx), ...] for each completed turn."""
+        ranges: list[tuple[int, int]] = []
+        current_start: int | None = None
+        for i, m in enumerate(messages):
+            if m.role != "user":
+                continue
+            c = m.content
+            if c.startswith("[turn:") and ":start]" in c[:30]:
+                current_start = i
+            elif c.startswith("[turn:") and ":end]" in c[:30]:
+                if current_start is not None:
+                    ranges.append((current_start, i))
+                    current_start = None
+        return ranges
+
+    def _maybe_compress_turns(self, orch: AskOrchestrator, messages: list[LLMMessage]) -> None:
+        """Session-aware compression: three-layer message lifecycle.
+
+        Triggered by TOKEN COUNT, not turn count.  When the estimated total
+        tokens in ``messages`` exceeds ``compress_threshold`` percent of the
+        context budget, the oldest completed turns are compressed while the
+        most recent ``session_uncompressed_turns`` completed turns (and the
+        in-progress current turn) are always kept raw.
+
+        Layer 1 — Current turn + recent N turns: always raw.
+        Layer 2 — Older completed turns: LLM extracts key info into structured
+                  JSON, replacing raw messages with a single compact record.
+        Layer 3 — Very old turns: if Layer 2 JSON still exceeds budget, oldest
+                  compressed turns are further trimmed to a deterministic
+                  header built from session.turns[] data.
+        """
+        budget = self._context_budget()
+        total_tokens = sum(estimate_tokens(m.content) for m in messages)
+        pct = getattr(orch.session, "compress_threshold", _DEFAULT_COMPRESS_THRESHOLD)
+        threshold = int(budget * max(50, min(95, int(pct))) / 100)
+        if total_tokens <= threshold:
+            return
+
+        turn_ranges = self._find_turn_ranges(messages)
+        keep_recent = getattr(orch.session, "session_uncompressed_turns", 2)
+        compressible = turn_ranges[:-keep_recent] if len(turn_ranges) > keep_recent else []
+        if not compressible:
+            return
+
+        # Phase 1: compress raw turns → structured JSON (Layer 2)
+        raw_turns = [r for r in compressible if not self._is_already_compressed(messages, r)]
+        if raw_turns:
+            self._compress_raw_turns(orch, messages, raw_turns)
+            total_tokens = sum(estimate_tokens(m.content) for m in messages)
+            logger.info("session_compress_phase1_done: %d tokens, threshold %d",
+                        total_tokens, threshold)
+            if total_tokens <= threshold:
+                return
+
+        # Phase 2: demote oldest compressed turns → deterministic header (Layer 3)
+        # Scan messages directly for [Compressed turn tN] records — don't use
+        # _find_turn_ranges which only finds raw [turn:N:start/end] markers.
+        compressed_indices = self._find_compressed_turn_indices(messages)
+        if compressed_indices:
+            self._demote_compressed_turns(orch, messages, compressed_indices, threshold)
+
+    @staticmethod
+    def _is_already_compressed(messages: list[LLMMessage], turn_range: tuple[int, int]) -> bool:
+        start, end = turn_range
+        return start == end and messages[start].content.startswith("[Compressed turn t")
+
+    @staticmethod
+    def _find_compressed_turn_indices(messages: list[LLMMessage]) -> list[int]:
+        """Return indices of already-compressed turn messages (oldest first)."""
+        return [
+            i for i, m in enumerate(messages)
+            if m.role == "user" and m.content.startswith("[Compressed turn t")
+        ]
+
+    def _compress_raw_turns(
+        self, orch: AskOrchestrator, messages: list[LLMMessage],
+        turn_ranges: list[tuple[int, int]],
+    ) -> None:
+        """Layer 1→2: LLM-based structured JSON extraction for raw turns."""
+        compress_failures = 0
+        for start_idx, end_idx in reversed(turn_ranges):
+            to_compress = messages[start_idx:end_idx + 1]
+            turn_num = self._extract_turn_number(to_compress)
+
+            try:
+                json_summary = self._llm_extract_turn_json(orch, to_compress, turn_num)
+                messages[start_idx:end_idx + 1] = [LLMMessage("user",
+                    f"[Compressed turn t{turn_num} — retrieve_turn(t{turn_num}) for full details]\n"
+                    f"{json_summary}")]
+                logger.info("session_compress_turn: t%d, %d msgs → JSON", turn_num, len(to_compress))
+            except Exception as exc:
+                compress_failures += 1
+                logger.warning("session_compress_turn_failed: t%d: %s", turn_num, exc)
+                fallback = self._fallback_turn_summary(orch, to_compress, turn_num)
+                messages[start_idx:end_idx + 1] = [LLMMessage("user", fallback)]
+                if compress_failures >= 3:
+                    logger.warning("session_compress_circuit_break: %d consecutive failures", compress_failures)
+                    break
+
+    def _llm_extract_turn_json(
+        self, orch: AskOrchestrator, turn_msgs: list[LLMMessage], turn_num: int,
+    ) -> str:
+        """Ask the LLM to extract a structured JSON record from raw turn messages."""
+        compress_text = "\n\n---\n\n".join(
+            f"[{m.role}]\n{m.content}" for m in turn_msgs
+        )
+        prompt = (
+            "Extract a structured JSON summary from this database exploration turn.\n"
+            "The JSON will REPLACE the raw messages in the conversation stream — the agent\n"
+            "must be able to continue effectively using only this record.\n\n"
+            "Output ONLY a single JSON object with these fields:\n"
+            '{\n'
+            '  "question": "the user\'s question for this turn",\n'
+            '  "tables": [{"name": "db.table", "key_columns": "col1 type, col2 type", "notes": "FK/index/enum discoveries"}],\n'
+            '  "executed_sqls": [{"sql": "full SQL text", "purpose": "what this query checked", "result": "key rows/numbers"}],\n'
+            '  "criteria": ["user-confirmed conditions/filters/business rules"],\n'
+            '  "discoveries": ["schema insights: column types, enum values, FK relationships, indexes, value distributions"],\n'
+            '  "excluded": ["approaches tried and rejected, with the reason"],\n'
+            '  "answer": "concise final answer delivered to the user"\n'
+            '}\n\n'
+            "Rules:\n"
+            "- executed_sqls: list EVERY SQL that was executed. Pair each with its result data.\n"
+            "  Preserve actual numbers, dates, row counts — follow-up turns need these to avoid re-execution.\n"
+            "- tables: include column types, FK relationships, indexes, enum values discovered.\n"
+            "- criteria: user-confirmed business conditions (e.g. 'exclude cancelled orders').\n"
+            "- discoveries: schema/data insights not obvious from table names.\n"
+            "- DISCARD: assistant decision JSON wrappers (action/tool/args/thought),\n"
+            "  validate_sql confirmations, tool call metadata, intermediate reasoning.\n"
+            "- If no value for a field, use empty string or empty array.\n\n"
+            f"--- TURN {turn_num} TO COMPRESS ---\n\n{compress_text}"
+        )
+        result = orch.llm.complete_text(
+            [LLMMessage("system",
+                "You are a structured data extractor for a database assistant. "
+                "Output ONLY valid JSON, no markdown fences, no explanation."),
+             LLMMessage("user", prompt)],
+        )
+        text = result.strip()
+        if text.startswith("```"):
+            text = text.split("\n", 1)[-1].rsplit("```", 1)[0].strip()
+        json.loads(text)
+        return text
+
+    def _fallback_turn_summary(
+        self, orch: AskOrchestrator, turn_msgs: list[LLMMessage], turn_num: int,
+    ) -> str:
+        """Deterministic fallback: build a compressed record from session.turns[] data."""
+        turn_data = self._find_session_turn(orch, turn_num)
+        if turn_data:
+            record: dict[str, Any] = {"question": turn_data.get("question", "")}
+            tables = turn_data.get("disclosed_tables") or []
+            if tables:
+                record["tables"] = tables
+            exec_sqls = turn_data.get("executed_sqls") or []
+            if exec_sqls:
+                record["executed_sqls"] = [
+                    {"sql": e.get("sql", ""), "purpose": e.get("purpose", ""),
+                     "row_count": e.get("row_count", 0)}
+                    for e in exec_sqls if isinstance(e, dict) and e.get("sql")
+                ]
+            elif turn_data.get("selected_sql"):
+                record["executed_sqls"] = [{"sql": turn_data["selected_sql"]}]
+            criteria = turn_data.get("clarifications") or []
+            if criteria:
+                record["criteria"] = criteria
+            answer = (turn_data.get("answer_markdown") or "")[:300]
+            if answer:
+                record["answer"] = answer
+            body = json.dumps(record, ensure_ascii=False, separators=(",", ":"))
+            return (
+                f"[Compressed turn t{turn_num} — retrieve_turn(t{turn_num}) for full details]\n"
+                f"{body}"
+            )
+        q_line = ""
+        for m in turn_msgs:
+            if m.content.startswith("[turn:") and ":start]" in m.content[:30]:
+                lines = m.content.split("\n", 3)
+                q_line = lines[1] if len(lines) > 1 else ""
+                break
+        record = {"question": q_line, "answer": "(compression failed — use retrieve_turn)"}
+        return (
+            f"[Compressed turn t{turn_num} — retrieve_turn(t{turn_num}) for full details]\n"
+            + json.dumps(record, ensure_ascii=False, separators=(",", ":"))
+        )
+
+    def _demote_compressed_turns(
+        self, orch: AskOrchestrator, messages: list[LLMMessage],
+        compressed_indices: list[int], threshold: int,
+    ) -> None:
+        """Layer 2→3: trim oldest compressed turns to minimal deterministic headers."""
+        for idx in compressed_indices:
+            msg = messages[idx]
+            turn_num = self._extract_turn_number_from_compressed(msg.content)
+            if turn_num == 0:
+                continue
+            turn_data = self._find_session_turn(orch, turn_num)
+            q = (turn_data.get("question", "") if turn_data else "")[:100]
+            tables = (turn_data.get("disclosed_tables") or [])[:5] if turn_data else []
+            record: dict[str, Any] = {"question": q}
+            if tables:
+                record["tables"] = tables
+            body = json.dumps(record, ensure_ascii=False, separators=(",", ":"))
+            messages[idx] = LLMMessage("user",
+                f"[Compressed turn t{turn_num} — retrieve_turn(t{turn_num}) for full details]\n"
+                f"{body}")
+            total = sum(estimate_tokens(m.content) for m in messages)
+            if total <= threshold:
+                break
+
+    @staticmethod
+    def _extract_turn_number(turn_msgs: list[LLMMessage]) -> int:
+        import re
+        for m in turn_msgs:
+            if m.content.startswith("[turn:") and ":start]" in m.content[:30]:
+                match = re.match(r"\[turn:(\d+):start\]", m.content)
+                if match:
+                    return int(match.group(1))
+        return 0
+
+    @staticmethod
+    def _extract_turn_number_from_compressed(content: str) -> int:
+        import re
+        match = re.match(r"\[Compressed turn t(\d+)", content)
+        return int(match.group(1)) if match else 0
+
+    @staticmethod
+    def _find_session_turn(orch: AskOrchestrator, turn_num: int) -> dict[str, Any] | None:
+        turns = getattr(orch, "session_turns", []) or []
+        if 0 < turn_num <= len(turns):
+            return turns[turn_num - 1]
+        return None
 
     def _build_failed_response(
         self, orch: AskOrchestrator, reason: str, disclosures_before: list[str],

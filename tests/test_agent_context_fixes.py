@@ -218,7 +218,8 @@ def test_continue_multi_runs_all_remaining_intents(tmp_path):
     calls: list[str] = []
 
     def fake_run_single(text, *, database="", execute=True, resume_state=None,
-                        user_reply="", trace_parent="", answer_language=None):
+                        user_reply="", trace_parent="", answer_language=None,
+                        skip_turn_markers=False):
         calls.append(text)
         return AssistantResponse(answer=f"answer for {text}", status="completed")
 
@@ -246,7 +247,8 @@ def test_multi_resume_uses_snapshot_database_for_remaining_intents(tmp_path):
     calls: list[tuple[str, str]] = []
 
     def fake_run_single(text, *, database="", execute=True, resume_state=None,
-                        user_reply="", trace_parent="", answer_language=None):
+                        user_reply="", trace_parent="", answer_language=None,
+                        skip_turn_markers=False):
         calls.append((text, database))
         return AssistantResponse(answer=f"answer for {text}", status="completed")
 

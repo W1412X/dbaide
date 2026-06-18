@@ -64,3 +64,17 @@ def test_multi_statement_detection_postgres_backslash():
     result = guard.validate(sql)
     # Should detect multi-statement (the semicolon after the closing quote)
     assert any(issue.code in ("MULTI_STATEMENT", "READONLY_ONLY", "FORBIDDEN_KEYWORD") for issue in result.issues)
+
+
+def test_extract_tables_handles_qualified_and_quoted_names():
+    guard = SQLGuard()
+    tables = guard._extract_tables("select * from main.orders join `analytics`.`events` on 1=1")
+    assert "main.orders" in tables
+    assert "analytics.events" in tables
+
+
+def test_extract_tables_handles_bare_names():
+    guard = SQLGuard()
+    tables = guard._extract_tables("select * from users join orders on users.id = orders.user_id")
+    assert "users" in tables
+    assert "orders" in tables

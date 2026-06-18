@@ -34,6 +34,7 @@ class WorkflowResult:
         "pending_question", "pending_options", "pending_questions", "resume_state",
         "clarifications", "disclosed_tables",
         "charts", "executed_sqls",
+        "session_messages",
     )
 
     def __init__(
@@ -93,6 +94,7 @@ class WorkflowResult:
         self.disclosed_tables: list[str] = []
         self.charts: list[dict[str, Any]] = []
         self.executed_sqls: list[dict[str, Any]] = []
+        self.session_messages: list[dict[str, str]] | None = None
 
     def to_dict(self) -> dict[str, Any]:
         """Serialize to JSON-compatible dict."""
@@ -137,7 +139,7 @@ class WorkflowRequest:
         "limit", "timeout_seconds", "model_name",
         "resume_state", "user_reply", "schema_scope", "stream_answers",
         "session_turns", "active_criteria",
-        "ui_attachments",
+        "ui_attachments", "session_messages",
     )
 
     def __init__(
@@ -156,6 +158,7 @@ class WorkflowRequest:
         stream_answers: bool = False,
         session_turns: list[dict[str, Any]] | None = None,
         active_criteria: list[str] | None = None,
+        session_messages: list[dict[str, str]] | None = None,
     ) -> None:
         self.question = question
         self.connection_name = connection_name
@@ -182,6 +185,7 @@ class WorkflowRequest:
         # agent (it reads schema_scope); kept so the service layer can persist
         # attachment tags on the session turn for display when reloading.
         self.ui_attachments: list[dict[str, Any]] = []
+        self.session_messages = session_messages
 
 
 class QueryPlan:

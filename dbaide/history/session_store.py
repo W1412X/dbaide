@@ -221,6 +221,25 @@ class ChatSessionStore:
             self._write(session)
             return True
 
+    def load_messages(self, connection_name: str, session_id: str) -> list[dict[str, str]] | None:
+        """Load the persisted message stream for a session. Returns None if absent."""
+        session = self.load(connection_name, session_id)
+        if not isinstance(session, dict):
+            return None
+        messages = session.get("messages")
+        return messages if isinstance(messages, list) else None
+
+    def save_messages(self, connection_name: str, session_id: str,
+                      messages: list[dict[str, str]]) -> None:
+        """Persist the message stream (called after each turn completes)."""
+        with self._lock:
+            session = self.load(connection_name, session_id)
+            if session is None:
+                return
+            session["messages"] = messages
+            session["updated_at"] = _now()
+            self._write(session)
+
     def delete(self, connection_name: str, session_id: str) -> bool:
         path = self._path(connection_name, session_id)
         if path.exists():

@@ -19,6 +19,7 @@ class Session:
     max_batch_tools: int = 6
     latest_result_limit: int = 4000
     compress_threshold: int = 80
+    session_uncompressed_turns: int = 2
 
     @classmethod
     def from_policy(cls, connection: ConnectionConfig, policy, **kwargs) -> "Session":
@@ -30,4 +31,5 @@ class Session:
         kwargs.setdefault("max_batch_tools", policy.max_batch_tools)
         kwargs.setdefault("latest_result_limit", policy.latest_result_limit)
         kwargs.setdefault("compress_threshold", policy.compress_threshold)
+        kwargs.setdefault("session_uncompressed_turns", getattr(policy, "session_uncompressed_turns", 2))
         return cls(connection=connection, **kwargs)

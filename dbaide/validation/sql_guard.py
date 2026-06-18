@@ -232,21 +232,14 @@ class SQLGuard:
     def _extract_tables(self, sql: str) -> set[str]:
         """Extract table names from SQL (heuristic)."""
         tables = set()
-        # Strip FROM inside SQL functions (EXTRACT, TRIM, SUBSTRING) so that
-        # column names are not mistaken for table references.
         cleaned = strip_function_from_keywords(sql)
-        # FROM clause
-        for match in re.finditer(r"\bfrom\s+(\w+)", cleaned):
-            tables.add(match.group(1).lower())
-        # JOIN clause
-        for match in re.finditer(r"\bjoin\s+(\w+)", cleaned):
-            tables.add(match.group(1).lower())
-        # UPDATE clause
-        for match in re.finditer(r"\bupdate\s+(\w+)", cleaned):
-            tables.add(match.group(1).lower())
-        # INSERT INTO
-        for match in re.finditer(r"\binto\s+(\w+)", cleaned):
-            tables.add(match.group(1).lower())
+        ident = r"(?:\w+|`[^`]+`|\"[^\"]+\"|\[[^\]]+\])"
+        qualified = rf"({ident}(?:\s*\.\s*{ident})*)"
+        for keyword in ("from", "join", "update", "into"):
+            for match in re.finditer(rf"\b{keyword}\s+{qualified}", cleaned):
+                raw = match.group(1)
+                parts = [p.strip().strip('`"[]') for p in re.split(r"\s*\.\s*", raw)]
+                tables.add(".".join(p.lower() for p in parts if p))
         return tables
 
 

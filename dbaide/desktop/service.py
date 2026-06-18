@@ -836,10 +836,12 @@ class DesktopService:
         # those were already seeded into clarifications before the pause and
         # are captured in the loop-state snapshot (re-seeding would double-count).
         is_resume = bool(payload.get("resume_state") or payload.get("user_reply"))
-        session_turns, active_criteria = self._load_session_memory(
+        session_turns, active_criteria, session_messages = self._load_session_memory(
             conn.name, in_session_id,
             skip_criteria=is_resume,
         )
+        if session_messages is None:
+            session_messages = []
         # Carry forward: if the user didn't attach new schema scope on this turn,
         # inherit the most recent prior turn's scope so the pinned context sticks
         # across follow-up questions in the same session.
@@ -852,6 +854,7 @@ class DesktopService:
         request = self._build_request(
             payload, connection_name=conn.name, database=database,
             session_turns=session_turns, active_criteria=active_criteria,
+            session_messages=session_messages,
         )
         engine = WorkflowEngine(conn, self._safe_llm(), self.store, self.join_catalog,
                                 model_config=self.cfg.model())
@@ -876,12 +879,20 @@ class DesktopService:
         # the first completed turn; clarification pauses (wait_user) don't persist a
         # turn — the turn is appended once the question actually resolves.
         payload["session_id"] = self._record_session_turn(conn.name, in_session_id, request, result, database)
+        if result.session_messages is not None:
+            try:
+                self.sessions.save_messages(
+                    conn.name, payload["session_id"], result.session_messages,
+                )
+            except Exception:
+                logger.debug("failed to save session messages", exc_info=True)
         return payload
 
     def _build_request(self, payload: dict[str, Any], *, connection_name: str,
                        database: str,
                        session_turns: list[dict[str, Any]] | None = None,
-                       active_criteria: list[str] | None = None) -> WorkflowRequest:
+                       active_criteria: list[str] | None = None,
+                       session_messages: list[dict[str, str]] | None = None) -> WorkflowRequest:
         """Assemble the WorkflowRequest from a GUI ask payload (defaults applied here so
         ask() reads as request → run → record)."""
         conn = self.cfg.get_connection(connection_name)
@@ -908,6 +919,7 @@ class DesktopService:
             stream_answers=bool(payload.get("stream_answers", self.cfg.stream_answers())),
             session_turns=session_turns or [],
             active_criteria=active_criteria or [],
+            session_messages=session_messages,
         )
         # Stash the raw UI attachment chips so _record_session_turn can persist
         # them alongside schema_scope — the UI restores them as visual tags when
@@ -917,8 +929,8 @@ class DesktopService:
 
     def _load_session_memory(
         self, conn_name: str, session_id: str, *, skip_criteria: bool = False,
-    ) -> tuple[list[dict[str, Any]], list[str]]:
-        """Return (session_turns, active_criteria) for the agent's session memory.
+    ) -> tuple[list[dict[str, Any]], list[str], list[dict[str, str]] | None]:
+        """Return (session_turns, active_criteria, session_messages).
 
         - session_turns: every COMPLETED turn in this chat session (oldest→newest),
           so the orchestrator can summarise the most-recent few into the prompt and
@@ -926,6 +938,8 @@ class DesktopService:
         - active_criteria: dedup'd union of every confirmed criterion across the
           session. The most-recent occurrence wins (later turns can refine an
           earlier statement). These are seeded into the new run's clarifications.
+        - session_messages: the persisted LLM message stream for session continuity
+          (None if not yet available — first turn or legacy session).
         - skip_criteria=True for resume runs: an ask_user pause is one in-flight
           turn; criteria were already seeded before the pause and live in the
           loop-state snapshot. Re-seeding would double-count. But turns are always
@@ -933,14 +947,22 @@ class DesktopService:
           and the [Prior turns] prompt section is consistent across pause/resume.
         """
         if not session_id:
-            return [], []
+            return [], [], None
         session = self.sessions.load(conn_name, session_id)
         if not isinstance(session, dict):
-            return [], []
+            return [], [], None
         all_turns = [t for t in (session.get("turns") or []) if isinstance(t, dict)]
         completed = [t for t in all_turns if str(t.get("status") or "") == "completed"]
+        # Load persisted message stream for session continuity.
+        session_messages = None
+        raw_msgs = session.get("messages")
+        if isinstance(raw_msgs, list) and raw_msgs:
+            session_messages = [
+                m for m in raw_msgs
+                if isinstance(m, dict) and "role" in m and "content" in m
+            ]
         if skip_criteria:
-            return completed, []
+            return completed, [], session_messages
         # Dedupe criteria preserving order, but later occurrences override earlier
         # (so a follow-up turn that refined "all 2024" → "Q4 2024" sticks).
         seen: dict[str, int] = {}
@@ -950,7 +972,7 @@ class DesktopService:
                 if key:
                     seen[key] = i  # last writer wins
         criteria = [c for c, _ in sorted(seen.items(), key=lambda kv: kv[1])]
-        return completed, criteria
+        return completed, criteria, session_messages
 
     def _record_session_turn(self, conn_name, session_id, request, result, database) -> str:
         session_id = str(session_id or "")

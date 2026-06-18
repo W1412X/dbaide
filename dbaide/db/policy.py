@@ -61,6 +61,9 @@ class ResourcePolicy:
     # percentage of the model's context_length. Range 50–95; default 80.
     compress_threshold: int = 80
 
+    # Session continuity: how many recent completed turns to keep uncompressed.
+    session_uncompressed_turns: int = 2
+
     def merged_with(self, overrides: dict[str, Any]) -> "ResourcePolicy":
         """Return a copy with any recognised numeric/string overrides applied."""
         if not overrides:
@@ -99,6 +102,7 @@ LOAD_PROFILES: dict[str, ResourcePolicy] = {
         big_table_rows=1_000_000,
         explain_max_rows=5_000_000,
         join_sample_size=150,
+        session_uncompressed_turns=2,
     ),
     "staging": ResourcePolicy(
         max_inflight_queries=16,
@@ -115,6 +119,7 @@ LOAD_PROFILES: dict[str, ResourcePolicy] = {
         big_table_rows=5_000_000,
         explain_max_rows=20_000_000,
         join_sample_size=150,
+        session_uncompressed_turns=2,
     ),
     "dev": ResourcePolicy(
         max_inflight_queries=16,
@@ -131,6 +136,7 @@ LOAD_PROFILES: dict[str, ResourcePolicy] = {
         big_table_rows=50_000_000,
         explain_max_rows=200_000_000,
         join_sample_size=200,
+        session_uncompressed_turns=3,
     ),
 }
 

@@ -81,7 +81,8 @@ def _try_fast_execute(orchestrator, draft, disclosed, database) -> ToolResult | 
         if "confirmed" in inspect.signature(orchestrator.query.execute_sql).parameters:
             execute_kwargs["confirmed"] = True
         result = orchestrator.query.execute_sql(report.normalized_sql, **execute_kwargs)
-    except Exception:
+    except Exception as exc:
+        logger.debug("fast_execute_fallback: %s", exc)
         return None
 
     orchestrator.run_state.query_result = result

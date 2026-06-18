@@ -145,7 +145,10 @@ class WorkflowEngine:
             # Streamed answer slices are UI-only — never persisted to the trace.
             if isinstance(msg, dict) and msg.get("kind") == "answer_chunk":
                 if progress:
-                    progress(msg)
+                    try:
+                        progress(msg)
+                    except Exception:
+                        pass
                 return
             label = progress_label(msg)
             if isinstance(msg, dict):
@@ -165,7 +168,10 @@ class WorkflowEngine:
             else:
                 self._trace(result, "agent_progress", msg, "agent", summary=label[:120])
             if progress:
-                progress(msg)
+                try:
+                    progress(msg)
+                except Exception:
+                    pass
 
         assistant._orchestrator.progress = on_progress  # noqa: SLF001
         assistant._orchestrator.cancel_check = cancel_check  # noqa: SLF001
@@ -177,6 +183,15 @@ class WorkflowEngine:
         # consolidated user-confirmed criteria from those turns).
         assistant._orchestrator.session_turns = list(request.session_turns or [])  # noqa: SLF001
         assistant._orchestrator.active_criteria = list(request.active_criteria or [])  # noqa: SLF001
+        # Session-level message continuity: pass the persisted message stream
+        # so the agent appends to the existing conversation instead of starting fresh.
+        if request.session_messages is not None:
+            from dbaide.llm import LLMMessage
+            assistant._orchestrator.session_messages = [  # noqa: SLF001
+                LLMMessage(m["role"], m["content"])
+                for m in request.session_messages
+                if isinstance(m, dict) and "role" in m and "content" in m
+            ]
         try:
             response = assistant.ask(
                 request.question,
@@ -192,6 +207,11 @@ class WorkflowEngine:
             return result
 
         if getattr(response, "status", "completed") == "wait_user":
+            updated_msgs = getattr(assistant._orchestrator, "session_messages", None)  # noqa: SLF001
+            if updated_msgs is not None:
+                result.session_messages = [
+                    {"role": m.role, "content": m.content} for m in updated_msgs
+                ]
             result.status = WorkflowStatus.WAIT_USER
             result.answer_markdown = response.answer
             result.answer_plaintext = response.answer
@@ -214,6 +234,12 @@ class WorkflowEngine:
             result.completed_at = time.time()
             return result
 
+        # Capture the updated session messages for persistence.
+        updated_msgs = getattr(assistant._orchestrator, "session_messages", None)  # noqa: SLF001
+        if updated_msgs is not None:
+            result.session_messages = [
+                {"role": m.role, "content": m.content} for m in updated_msgs
+            ]
         fail_reason = str(getattr(assistant._orchestrator.run_state, "fail_reason", "") or "")  # noqa: SLF001
         result.status = WorkflowStatus.FAILED if fail_reason else WorkflowStatus.COMPLETED
         result.answer_markdown = response.answer

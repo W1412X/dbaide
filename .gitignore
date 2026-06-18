@@ -75,3 +75,6 @@ apps/desktop/dist/
 .vscode/
 .DS_Store
 Thumbs.db
+
+# Embedded / unrelated repos
+codex/

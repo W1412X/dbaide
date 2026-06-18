@@ -334,17 +334,34 @@ def _serialize(obj: Any) -> Any:
 # ── Lazy tool context ──────────────────────────────────────────────────────
 
 class _ToolContext:
-    """Lazily initializes DB adapter + tool instances for a given connection."""
+    """Lazily initializes DB adapter + tool instances for a given connection.
+
+    Rebuilds when the on-disk config changes (detected via ConfigManager hash).
+    """
 
     def __init__(self) -> None:
         self._cache: dict[str, tuple[Any, Any, Any, Any]] = {}
+        self._config_hash: dict[str, str] = {}
 
     def get(self, conn_name: str | None) -> tuple[Any, Any, Any, Any]:
         """Return (adapter, schema_tools, query_tools, profile_tools) for a connection."""
         key = conn_name or ""
-        if key not in self._cache:
+        current_hash = self._connection_hash(conn_name)
+        if key not in self._cache or self._config_hash.get(key) != current_hash:
             self._cache[key] = self._build(conn_name)
+            self._config_hash[key] = current_hash
         return self._cache[key]
+
+    @staticmethod
+    def _connection_hash(conn_name: str | None) -> str:
+        try:
+            from dbaide.config import ConfigManager
+            conn = ConfigManager().get_connection(conn_name)
+            import hashlib
+            raw = f"{conn.name}|{conn.type}|{getattr(conn, 'host', '')}|{getattr(conn, 'port', '')}|{getattr(conn, 'path', '')}|{getattr(conn, 'database', '')}"
+            return hashlib.md5(raw.encode()).hexdigest()
+        except Exception:
+            return ""
 
     @staticmethod
     def _build(conn_name: str | None) -> tuple[Any, Any, Any, Any]:
@@ -409,8 +426,21 @@ def handle_ask(arguments: dict) -> dict:
             parts.append(answer)
         if result.selected_sql:
             parts.append(f"\n```sql\n{result.selected_sql}\n```")
+        if result.executed_sqls:
+            for entry in result.executed_sqls:
+                if isinstance(entry, dict):
+                    sql = entry.get("sql", "")
+                    purpose = entry.get("purpose", "")
+                    r = entry.get("result", "")
+                    if sql:
+                        label = f" ({purpose})" if purpose else ""
+                        parts.append(f"\n**Executed SQL{label}:**\n```sql\n{sql}\n```")
+                        if r:
+                            parts.append(f"Result: {str(r)[:500]}")
         if result.warnings:
             parts.append("\n**Warnings:** " + "; ".join(result.warnings))
+        if getattr(result, "status", None) and result.status.value == "failed":
+            parts.append("\n**Status:** failed")
 
         text = "\n".join(parts) if parts else "(no answer)"
         return _text_content(text)

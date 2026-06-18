@@ -22,6 +22,24 @@ def test_explain_sql_does_not_double_prefix_explicit_explain():
     assert adapter.explained_sql == "SELECT * FROM users"
 
 
+def test_explain_sql_strips_explain_query_plan_prefix():
+    adapter = ExplainSpyAdapter(ConnectionConfig(name="local", type="sqlite", path="/tmp/test.db"))
+    query = QueryTools(adapter, DisclosureContext())
+
+    query.explain_sql("EXPLAIN QUERY PLAN SELECT * FROM users")
+
+    assert adapter.explained_sql == "SELECT * FROM users"
+
+
+def test_explain_sql_strips_explain_analyze_prefix():
+    adapter = ExplainSpyAdapter(ConnectionConfig(name="local", type="sqlite", path="/tmp/test.db"))
+    query = QueryTools(adapter, DisclosureContext())
+
+    query.explain_sql("EXPLAIN ANALYZE SELECT * FROM users")
+
+    assert adapter.explained_sql == "SELECT * FROM users"
+
+
 def test_quote_identifier_handles_qualified_names():
     assert quote_identifier("public.orders", "postgres") == '"public"."orders"'
     assert quote_identifier("shop.orders", "mysql") == "`shop`.`orders`"

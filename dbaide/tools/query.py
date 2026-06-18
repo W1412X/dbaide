@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import re
+
 from dbaide.adapters.base import DatabaseAdapter
 from dbaide.context.disclosure import DisclosureContext
 from dbaide.core.result import ValidationReport
@@ -122,7 +124,7 @@ class QueryTools:
 
 def _strip_leading_explain(sql: str) -> str:
     text = sql.strip().rstrip(";")
-    parts = text.split(None, 1)
-    if parts and parts[0].casefold() == "explain":
-        return parts[1].strip() if len(parts) > 1 else ""
+    m = re.match(r"explain\s+(?:analyze\s+)?(?:query\s+plan\s+)?", text, re.IGNORECASE)
+    if m:
+        return text[m.end():].strip()
     return text
