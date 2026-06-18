@@ -865,3 +865,14 @@ def test_code_block_update_code_syncs_language_label(qapp):
     assert block._lang_label.text() == "PYTHON"
     block.update_code("x = 1", language="")          # no language → generic label
     assert block._lang_label.text() and block._lang_label.text() != "PYTHON"
+
+
+def test_normalize_selected_text_converts_both_separators():
+    """Qt selections use U+2029 (paragraph) and U+2028 (line, from <br>) — both must
+    become real newlines so copied text doesn't carry stray separator glyphs."""
+    from dbaide.desktop.components.conversation import _normalize_selected_text
+
+    s = "a" + chr(0x2029) + "b" + chr(0x2028) + "c"
+    assert _normalize_selected_text(s) == "a\nb\nc"
+    assert " " not in _normalize_selected_text(s)
+    assert " " not in _normalize_selected_text(s)

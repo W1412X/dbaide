@@ -50,12 +50,19 @@ def _copy_to_clipboard(text: str) -> None:
         QApplication.clipboard().setText(text)
 
 
+def _normalize_selected_text(text: str) -> str:
+    """Qt selections encode block breaks as U+2029 (paragraph sep) and soft line
+    breaks (from <br> / markdown line breaks) as U+2028 (line sep). Convert BOTH to
+    '\\n' so copied text pastes as real newlines, not stray separator glyphs."""
+    return str(text or "").replace("\u2029", "\n").replace("\u2028", "\n")
+
+
 def _selected_label_text(label: QLabel) -> str:
-    return str(label.selectedText() or "").replace("\u2029", "\n")
+    return _normalize_selected_text(label.selectedText())
 
 
 def _selected_browser_text(browser: QTextBrowser) -> str:
-    return str(browser.textCursor().selectedText() or "").replace("\u2029", "\n")
+    return _normalize_selected_text(browser.textCursor().selectedText())
 
 
 def _show_copy_menu(widget: QWidget, pos, *, selected_text: str, full_text: str) -> None:
@@ -545,7 +552,7 @@ class _CodeBlock(QFrame):
         _show_copy_menu(
             self._editor.viewport(),
             pos,
-            selected_text=str(self._editor.textCursor().selectedText() or "").replace("\u2029", "\n"),
+            selected_text=_normalize_selected_text(self._editor.textCursor().selectedText()),
             full_text=self._code,
         )
 
