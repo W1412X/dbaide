@@ -853,3 +853,15 @@ def test_clarification_bar_dismissed_on_error_and_new_turn(qapp):
     bar2 = conv.append_clarification(question="Which table?", options=["a", "b"])
     conv.begin_turn("q3")
     assert conv._clarification_bar is None and bar2.isHidden()
+
+
+def test_code_block_update_code_syncs_language_label(qapp):
+    """update_code must refresh the language label, not just the body."""
+    from dbaide.desktop.components.conversation import _CodeBlock
+
+    block = _CodeBlock("SELECT 1", language="sql")
+    assert block._lang_label.text() == "SQL"
+    block.update_code("print(1)", language="python")
+    assert block._lang_label.text() == "PYTHON"
+    block.update_code("x = 1", language="")          # no language → generic label
+    assert block._lang_label.text() and block._lang_label.text() != "PYTHON"

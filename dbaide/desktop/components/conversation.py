@@ -489,8 +489,8 @@ class _CodeBlock(QFrame):
         header = QHBoxLayout()
         header.setContentsMargins(0, 0, 0, 0)
         header.setSpacing(6)
-        label = QLabel(self._language.upper() if self._language else t("conversation.code"))
-        header.addWidget(label)
+        self._lang_label = QLabel(self._language.upper() if self._language else t("conversation.code"))
+        header.addWidget(self._lang_label)
         header.addStretch(1)
         self._copy_btn = IconToolButton(
             svg_icon("copy", color=Theme.MUTED, size=12),
@@ -515,6 +515,13 @@ class _CodeBlock(QFrame):
     def update_code(self, code: str, *, language: str = "") -> None:
         self._code = str(code or "")
         self._editor.setPlainText(self._code)
+        # Keep the language label in sync — an in-place re-render may change the fence
+        # language, and leaving the old label is misleading.
+        new_lang = str(language or "").strip()
+        if new_lang != self._language:
+            self._language = new_lang
+            from dbaide.i18n import t
+            self._lang_label.setText(new_lang.upper() if new_lang else t("conversation.code"))
         line_count = max(1, self._code.count("\n") + 1)
         self._editor.setFixedHeight(min(320, max(50, line_count * 18 + 10)))
 
