@@ -95,8 +95,12 @@ class QueryLog:
         with self._lock:
             self._ring.append(entry)
             subscribers = list(self._subscribers)
-        if self._persist:
-            self._append_jsonl(entry)
+            # Append under the lock: the per-instance logger is shared across the
+            # concurrent multi-run slots, so writing the JSONL line outside the lock
+            # could interleave two entries on the same file. Subscribers run OUTSIDE
+            # the lock (they may be slow / re-enter).
+            if self._persist:
+                self._append_jsonl(entry)
         for cb in subscribers:
             try:
                 cb(entry)
