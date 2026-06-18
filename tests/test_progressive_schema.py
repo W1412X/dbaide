@@ -70,3 +70,30 @@ def test_single_database_skips_db_filter(tmp_path):
     assert "database" not in levels          # db filter skipped (only one db)
     assert "table" in levels                 # table filter still runs
     assert "production_lines" in {h.name for h in discovery.hits if h.kind == "table"}
+
+
+def test_filter_indices_maps_second_batch_global_positions(tmp_path):
+    """The LLM is shown each object's global position and returns those positions;
+    _filter_indices must map them correctly across batch boundaries (BATCH_SIZE=18).
+    A regression guard: the old code treated returned indices as batch-relative and
+    dropped every selection in the 2nd+ batch."""
+    import re
+    from dbaide.agent.progressive_schema import ProgressiveSchemaAgent, BATCH_SIZE
+    from dbaide.llm import LLMClient
+
+    class _EchoTargetLLM(LLMClient):
+        """Echoes back the bracketed labels of objects named 'target'."""
+        def complete_json(self, messages, *, schema_hint=""):
+            user = messages[-1].content
+            objects = user.split("Objects:\n")[-1]
+            picked = [int(m.group(1)) for m in re.finditer(r"\[(\d+)\]\s+([^\n(—]+)", objects)
+                      if m.group(2).strip() == "target"]
+            return {"relevant_indices": picked, "reason": "echo"}
+
+    agent = ProgressiveSchemaAgent(_EchoTargetLLM(), AssetStore(tmp_path / "a"), "t")
+    # 25 objects; the only 'target' sits at global position 20 → inside batch 2.
+    items = [{"index": i, "name": ("target" if i == 20 else f"obj{i}"), "summary": ""}
+             for i in range(25)]
+    assert len(items) > BATCH_SIZE  # forces multiple batches
+    kept = agent._filter_indices("find target", level="table", items=items, context="x")
+    assert kept == [20]

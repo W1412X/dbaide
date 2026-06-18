@@ -538,6 +538,12 @@ class ProgressiveSchemaAgent:
         for start in range(0, len(items), BATCH_SIZE):
             batch = items[start : start + BATCH_SIZE]
             batch_no = start // BATCH_SIZE + 1
+            # Label each item by its GLOBAL position in ``items`` so the indices the
+            # LLM returns map directly to the positions the caller uses (``items[pos]``).
+            # Labeling by the per-item "index" field was wrong: in the 2nd+ batch those
+            # values exceed len(batch) and were dropped as out-of-range, and gapped
+            # "index" values (unnamed objects filtered out) mismapped to the caller.
+            labeled = [{**item, "index": start + offset} for offset, item in enumerate(batch)]
             if multi_batch:
                 self._emit_progress(
                     progress, parent, "",
@@ -552,7 +558,7 @@ class ProgressiveSchemaAgent:
                             LLMMessage("system", _filter_system(level)),
                             LLMMessage(
                                 "user",
-                                f"Question: {question}\nContext: {context}\n\nObjects:\n{_format_batch(batch)}",
+                                f"Question: {question}\nContext: {context}\n\nObjects:\n{_format_batch(labeled)}",
                             ),
                         ],
                         schema_hint='Return {"relevant_indices":[0,1],"reason":"..."}',
@@ -566,14 +572,14 @@ class ProgressiveSchemaAgent:
                     raise last_error
                 continue
             indices = payload.get("relevant_indices") or payload.get("indices") or []
+            valid = range(start, start + len(batch))
             for raw in indices:
                 try:
                     idx = int(raw)
                 except (TypeError, ValueError):
                     continue
-                if 0 <= idx < len(batch):
-                    global_idx = int(batch[idx]["index"])
-                    kept.append(global_idx)
+                if idx in valid:  # global position into items
+                    kept.append(idx)
             if multi_batch:
                 reason = str(payload.get("reason") or "").strip()
                 self._emit_progress(
