@@ -665,6 +665,9 @@ def handle_execute_sql(arguments: dict) -> dict:
         result = query.execute_sql(
             sql, database=database, limit=limit,
             timeout_seconds=timeout,
+            # MCP has no risk-confirmation channel, so honor the configured EXPLAIN
+            # cost gate as a hard reject here (mirrors the agent loop's gate).
+            enforce_cost_gate=True,
         )
         rows, preview_meta = preview_rows(
             list(result.rows or []),

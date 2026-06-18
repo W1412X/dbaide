@@ -103,6 +103,7 @@ class QueryTools:
         timeout_seconds: int | None = None,
         preflight_explain: bool = False,
         confirmed: bool = False,
+        enforce_cost_gate: bool = False,
     ) -> QueryResult:
         effective_limit = self.sql_guard.default_limit if limit is None else max(1, int(limit))
         report = self.validate_sql_report(sql, add_limit=True, limit=effective_limit)
@@ -111,6 +112,17 @@ class QueryTools:
         if report.requires_confirmation and not confirmed:
             raise PermissionError("; ".join(report.warnings) or "SQL requires confirmation")
         normalized = report.normalized_sql
+        # Hard EXPLAIN cost gate for callers without a risk-confirmation channel (the
+        # MCP atomic execute_sql tool). The agent loop runs its own richer gate via the
+        # risk controller; the GUI browse path leaves this off so paginated browsing of
+        # large tables isn't blocked. No-op unless explain_max_rows is configured.
+        if enforce_cost_gate and self.explain_max_rows:
+            estimated = self.estimate_rows(normalized, database=database)
+            if estimated is not None and estimated > self.explain_max_rows:
+                raise ValueError(
+                    f"Query estimated ~{estimated:,} rows, exceeding the cost gate limit of "
+                    f"{self.explain_max_rows:,}. Add filters or narrow the range, then retry."
+                )
         if preflight_explain:
             explain_target = _strip_leading_explain(normalized)
             try:

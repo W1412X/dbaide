@@ -407,10 +407,12 @@ class TestHandlerValidation:
         seen = {}
 
         class FakeQuery:
-            def execute_sql(self, sql, *, database="", limit=100, timeout_seconds=None):
+            def execute_sql(self, sql, *, database="", limit=100, timeout_seconds=None,
+                            enforce_cost_gate=False):
                 from dbaide.models import QueryResult
 
                 seen["limit"] = limit
+                seen["enforce_cost_gate"] = enforce_cost_gate
                 return QueryResult(columns=["n"], rows=[{"n": 1}], row_count=1, sql=sql)
 
         class FakeCtx:
@@ -423,6 +425,8 @@ class TestHandlerValidation:
 
         assert result.get("isError") is not True
         assert seen["limit"] == 1000
+        # MCP has no confirm channel → it opts into the hard EXPLAIN cost gate.
+        assert seen["enforce_cost_gate"] is True
 
 
 def test_inspect_metadata_reports_more_tables_when_limited(monkeypatch):

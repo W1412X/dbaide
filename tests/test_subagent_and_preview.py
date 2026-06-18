@@ -35,7 +35,8 @@ def test_sql_result_formatter_truncates_cells_not_whole_rows():
 
 def test_mcp_execute_sql_returns_bounded_row_preview(monkeypatch):
     class FakeQuery:
-        def execute_sql(self, sql, *, database="", limit=100, timeout_seconds=None):
+        def execute_sql(self, sql, *, database="", limit=100, timeout_seconds=None,
+                        enforce_cost_gate=False):
             return QueryResult(
                 columns=["id", "payload", "status"],
                 rows=[{"id": 1, "payload": "p" * 3000, "status": "ok"}],

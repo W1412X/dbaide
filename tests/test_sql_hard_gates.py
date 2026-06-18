@@ -127,6 +127,41 @@ def test_execute_sql_pauses_for_large_limit_then_runs_after_confirmation(tmp_pat
     assert second.data["row_count"] == 1
 
 
+def test_execute_sql_cost_gate_rejects_over_limit_only_when_enforced(tmp_path):
+    """The MCP atomic execute path opts into a HARD EXPLAIN cost gate (no confirm
+    channel). With it enabled an over-limit estimate is rejected; the default
+    (GUI/browse) path is unaffected so paginated browsing isn't blocked."""
+    import sqlite3
+
+    db = tmp_path / "cost.db"
+    conn = sqlite3.connect(db)
+    conn.executescript("CREATE TABLE t(id INTEGER PRIMARY KEY); INSERT INTO t VALUES (1),(2),(3);")
+    conn.commit(); conn.close()
+
+    cfg = ConnectionConfig(name="local", type="sqlite", path=str(db))
+    orch = AskOrchestrator(build_adapter(cfg), Session(connection=cfg), NullLLMClient())
+    query = orch.query
+    query.explain_max_rows = 100
+    query.estimate_rows = lambda sql, *, database="": 10_000  # simulate a huge scan
+
+    # Default path (browse / agent's own gate handles it): not blocked here.
+    assert query.execute_sql("SELECT * FROM t", database="main").row_count == 3
+
+    # MCP atomic path: hard reject when the estimate exceeds the configured limit.
+    import pytest
+    with pytest.raises(ValueError, match="cost gate limit"):
+        query.execute_sql("SELECT * FROM t", database="main", enforce_cost_gate=True)
+
+    # Under the limit → allowed even when enforced.
+    query.estimate_rows = lambda sql, *, database="": 5
+    assert query.execute_sql("SELECT * FROM t", database="main", enforce_cost_gate=True).row_count == 3
+
+    # Gate disabled (explain_max_rows falsy) → never blocks regardless of estimate.
+    query.explain_max_rows = 0
+    query.estimate_rows = lambda sql, *, database="": 10_000
+    assert query.execute_sql("SELECT * FROM t", database="main", enforce_cost_gate=True).row_count == 3
+
+
 def test_risk_confirmation_reply_denial_wins_over_execute_word():
     assert _risk_reply_confirms("Execute anyway") is True
     assert _risk_reply_confirms("仍然执行") is True
