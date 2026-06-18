@@ -306,15 +306,18 @@ def object_notes_for_tables(
         logger.warning("annotation_lookup_failed: %s", exc)
         return []
     out: list[dict[str, Any]] = []
+    # Flatten labels too (not just notes): a table/column name with an embedded newline
+    # (e.g. from an imported annotations file) could otherwise forge an extra line in
+    # the AUTHORITATIVE notes block the SQL writer renders.
     for db, note in (view.get("databases") or {}).items():
-        out.append({"scope": "database", "label": db or "(all databases)", "note": sanitize_note(note)})
+        out.append({"scope": "database", "label": sanitize_note(db or "(all databases)"), "note": sanitize_note(note)})
     for (db, table), note in (view.get("tables") or {}).items():
         label = f"{db}.{table}" if db else table
-        out.append({"scope": "table", "label": label, "note": sanitize_note(note)})
+        out.append({"scope": "table", "label": sanitize_note(label), "note": sanitize_note(note)})
     for (db, table), columns in (view.get("columns") or {}).items():
         table_label = f"{db}.{table}" if db else table
         for column, note in (columns or {}).items():
-            out.append({"scope": "column", "label": f"{table_label}.{column}", "note": sanitize_note(note)})
+            out.append({"scope": "column", "label": sanitize_note(f"{table_label}.{column}"), "note": sanitize_note(note)})
     return out
 
 
@@ -423,7 +426,9 @@ def decision_notes_block(orchestrator: AskOrchestrator, database: str = "") -> s
         else:
             tbl = str(r.get("table") or "").strip()
             label = f"{db}.{tbl}" if db else tbl
-        lines.append(f"- {scope} {label}: {sanitize_note(r.get('note'))}")
+        # Flatten the label too — a newline in an (e.g. imported) table name must not
+        # forge an extra AUTHORITATIVE instruction line.
+        lines.append(f"- {scope} {sanitize_note(label)}: {sanitize_note(r.get('note'))}")
     return "\n".join(lines)
 
 
