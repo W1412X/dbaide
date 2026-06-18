@@ -1757,7 +1757,11 @@ class MainWindow(QMainWindow):
                 try:
                     with open(path, "w", encoding="utf-8", newline="") as fh:
                         fh.write(content)
-                    self.toast(_i18n_t("result.export_title") + f" → {path}")
+                    msg = _i18n_t("result.export_title") + f" → {path}"
+                    # Don't let a row-cap pass silently — the user asked for "all rows".
+                    if result.get("capped"):
+                        msg += " · " + _i18n_t("result.export_capped", n=f"{len(rows):,}")
+                    self.toast(msg)
                 except OSError as exc:
                     self.toast(str(exc))
 
