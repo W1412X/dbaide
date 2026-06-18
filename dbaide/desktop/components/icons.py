@@ -7,6 +7,7 @@ device-pixel-ratio so it stays sharp on HiDPI, tinted to the requested colour.
 
 from __future__ import annotations
 
+import logging
 from functools import lru_cache
 from pathlib import Path
 
@@ -108,13 +109,22 @@ def _dpr() -> float:
     return 2.0  # render at ≥2× so it's crisp even off a real screen
 
 
+_logger = logging.getLogger("dbaide.icons")
+
+
 @lru_cache(maxsize=512)
 def _glyph_svg_bytes(name: str, color: str, width: float) -> bytes:
     # Cache the formatted SVG BYTES (immutable, lifecycle-safe), not a QSvgRenderer:
     # caching the QObject would dangle when the QApplication is torn down/recreated.
     # This still skips the repeated string .format() while a fresh, valid renderer is
     # built per call.
-    return _TEMPLATE.format(color=color, w=width, inner=_GLYPHS[name]).encode("utf-8")
+    inner = _GLYPHS.get(name)
+    if inner is None:
+        # An unknown/dynamic icon name (typo, a new state without a glyph) must not
+        # crash the whole render — fall back to a blank glyph and log it for devs.
+        _logger.warning("unknown_icon_glyph: %r", name)
+        inner = ""
+    return _TEMPLATE.format(color=color, w=width, inner=inner).encode("utf-8")
 
 
 def _renderer(name: str, color: str, width: float) -> QSvgRenderer:

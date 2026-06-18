@@ -49,3 +49,14 @@ def test_load_tool_icon_returns_non_empty_pixmap(qapp):
         px = SettingsDialog._load_tool_icon(tool)
         assert not px.isNull(), tool
         assert px.width() > 0 and px.height() > 0, tool
+
+
+def test_unknown_icon_name_falls_back_blank_not_crash(qapp):
+    """A dynamic/typo icon name must not KeyError-crash the render — it falls back to
+    a blank glyph and still returns a valid (non-null) pixmap/icon."""
+    from dbaide.desktop.components.icons import svg_pixmap, svg_icon, _glyph_svg_bytes
+    px = svg_pixmap("definitely-not-a-real-glyph-xyz", size=16)
+    assert not px.isNull() and px.width() > 0
+    assert not svg_icon("another-missing-glyph").isNull()
+    # a known glyph still renders normally
+    assert b"<svg" in _glyph_svg_bytes("copy", "#fff", 2.0)
