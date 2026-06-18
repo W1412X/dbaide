@@ -713,29 +713,19 @@ class TestThreeLayerCompression:
 # ---------------------------------------------------------------------------
 
 class TestSessionTurnPromptCriteria:
-    def test_criteria_injected(self, tmp_path):
-        """session_turn_prompt includes active_criteria when present."""
+    def test_prior_criteria_not_force_injected(self, tmp_path):
+        """方案②: prior-turn criteria are NOT force-injected as authoritative into a
+        new turn's prompt (that contaminates unrelated follow-ups). They live in
+        history; the model applies them by relevance."""
         orch = _orch(tmp_path)
         orch.active_criteria = ["排除 cancelled 订单", "只看北京时间"]
-        orch._reset_loop_state("test", "", True)
+        orch._reset_loop_state("follow up?", "", True)
         from dbaide.agent.loop_prompts import DecisionPromptBuilder
         builder = DecisionPromptBuilder(orch)
         from dbaide.agent.loop import LoopState
         state = LoopState(question="follow up?", database="", execute_allowed=True, answer_language="zh")
         prompt = builder.session_turn_prompt(state, 3)
-        assert "排除 cancelled 订单" in prompt
-        assert "只看北京时间" in prompt
-        assert "Confirmed criteria" in prompt
-
-    def test_no_criteria_when_empty(self, tmp_path):
-        """session_turn_prompt omits criteria section when empty."""
-        orch = _orch(tmp_path)
-        orch._reset_loop_state("test", "", True)
-        from dbaide.agent.loop_prompts import DecisionPromptBuilder
-        builder = DecisionPromptBuilder(orch)
-        from dbaide.agent.loop import LoopState
-        state = LoopState(question="q?", database="", execute_allowed=True, answer_language="en")
-        prompt = builder.session_turn_prompt(state, 1)
+        assert "排除 cancelled 订单" not in prompt
         assert "Confirmed criteria" not in prompt
 
 

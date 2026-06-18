@@ -115,20 +115,17 @@ class AskOrchestrator:
             answer_language=normalize(answer_language or detect_user_language(question)),
         )
         self.run_state.memory.reset_goal(question, database=database, execute_allowed=execute)
-        # L2 carry-over: criteria the user confirmed earlier in THIS chat session
-        # become the new turn's binding clarifications. The SQL writer applies them
-        # verbatim via its [Business criteria] block, and the decision prompt sees
-        # them in [Confirmed criteria] — so a follow-up doesn't lose 口径 ("Beijing
-        # time", "paid only") that the user already settled.
-        if self.active_criteria:
-            self.run_state.clarifications = list(self.active_criteria)
-        # Carry verified facts + ruled-out paths from earlier turns into this run's
-        # memory so they survive even after the originating turn is compressed —
-        # they are re-injected into the turn prompt (same rationale as criteria).
-        self._seed_session_memory()
-        # Rehydrate columns for earlier-turn tables from the OFFLINE asset cache
-        # (no DB round-trip) so generate_sql finds them without re-describing —
-        # keeps run_state.schemas (SQL writer) in sync with the disclosure gate.
+        # Task-specific memory (confirmed criteria 口径, verified facts, ruled-out
+        # paths) is deliberately NOT carried into this fresh run as authoritative
+        # state. It lives in the chat history (compression preserves it into the
+        # per-turn summaries); the model attends to it BY RELEVANCE — the codex
+        # model — so an unrelated follow-up is not contaminated by a prior turn's
+        # "paid only" / "status=2 = cancelled". run_state.clarifications therefore
+        # holds only THIS turn's confirmations. (active_criteria is still loaded by
+        # the workflow but no longer force-applied.)
+        # The disclosure gate IS canonical, turn-invariant state, so it is carried:
+        # rehydrate columns for earlier-turn tables from the OFFLINE asset cache
+        # (no DB round-trip) so generate_sql finds them without re-describing.
         self._rehydrate_run_state_schemas()
 
     def run(
@@ -549,25 +546,6 @@ class AskOrchestrator:
             rk = self.run_state.schema_key(resolved_db, table)
             self.run_state.schemas[rk] = list(columns)
             self.run_state.schema_db[rk] = resolved_db
-
-    def _seed_session_memory(self) -> None:
-        """Re-seed verified facts + excluded paths from earlier turns of this chat
-        session into the current run's memory, so they persist across turns and
-        survive message compression (the turn prompt re-injects them)."""
-        if not self.session_turns:
-            return
-        mem = self.run_state.memory
-        for turn in self.session_turns:
-            for fact in (turn.get("verified_facts") or []):
-                if str(fact).strip():
-                    mem.mark_verified(str(fact))
-            for ep in (turn.get("excluded_paths") or []):
-                if isinstance(ep, dict) and str(ep.get("target") or "").strip():
-                    mem.add_exclusion(
-                        str(ep.get("target") or ""), str(ep.get("reason") or ""),
-                        evidence_ref=str(ep.get("evidence_ref") or ""),
-                        source_priority=str(ep.get("source_priority") or "evidence"),
-                    )
 
 
 

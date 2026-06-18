@@ -250,51 +250,33 @@ class DecisionPromptBuilder:
     def session_turn_prompt(self, state: Any, turn_number: int) -> str:
         """Build the user message for a new turn in session continuity mode.
 
-        Unlike initial_user_prompt(), this omits prior turns (already in the
-        stream). active_criteria, verified facts and excluded paths ARE re-injected
-        because they may have been established in turns that were subsequently
-        compressed — repeating them here keeps the LLM honouring criteria, reusing
-        proven facts, and avoiding ruled-out paths even after compression removes
-        the original messages where they were established.
+        Task-specific memory (confirmed criteria 口径, verified facts, ruled-out
+        paths) is DELIBERATELY NOT re-injected here. Earlier turns — including
+        these — live in the message stream (compression preserves them into the
+        per-turn summaries), so the model attends to them BY RELEVANCE, the way
+        codex does. Force-injecting them as authoritative every turn would
+        contaminate an unrelated follow-up (e.g. asserting "paid only" on a
+        question about a different table). Only turn-invariant / canonical context
+        is stated here: date, timezone, answer language, pinned scope, and the
+        disclosure gate (tables already available this session).
         """
         pins = _pinned_scope_labels(getattr(self.orchestrator, "schema_scope", None))
         pin_line = (f"User-attached schema (prefer these; retrieve_schema_context on them directly, "
                     f"no broad discovery needed): {', '.join(pins)}\n\n") if pins else ""
         notes = decision_notes_block(self.orchestrator, state.database)
         notes_line = f"{notes}\n\n" if notes else ""
-        confirmed = [c for c in self.orchestrator.run_state.clarifications if str(c).strip()]
-        criteria_line = ""
-        if confirmed:
-            criteria_line = (
-                "Confirmed criteria (already settled with the user — honour these, do NOT re-ask):\n"
-                + "\n".join(f"- {c}" for c in confirmed) + "\n\n"
-            )
-        mem = self.orchestrator.run_state.memory
-        facts = [f for f in (getattr(mem, "verified_facts", None) or []) if str(f).strip()][-8:]
-        facts_line = ""
-        if facts:
-            facts_line = (
-                "Verified facts (established earlier this session — reuse, do NOT re-derive):\n"
-                + "\n".join(f"- {f}" for f in facts) + "\n\n"
-            )
-        excluded = [e for e in (getattr(mem, "excluded_paths", None) or []) if getattr(e, "target", "")][-8:]
-        excluded_line = ""
-        if excluded:
-            excluded_line = (
-                "Ruled-out paths (already excluded earlier — do NOT retry these):\n"
-                + "\n".join(f"- {e.target}: {e.reason}" for e in excluded) + "\n\n"
-            )
-        # Echo the disclosure gate into the prompt so the model's awareness matches
-        # what SchemaGuard will actually accept — these tables were disclosed in
-        # earlier turns and can be queried directly without re-discovering them.
+        # Echo the disclosure gate (canonical, turn-invariant) so the model's
+        # awareness matches what SchemaGuard accepts — these tables were disclosed
+        # earlier this session and can be queried directly. The model still picks
+        # only the ones relevant to the current question.
         known = list(getattr(self.orchestrator.session.disclosure, "tables", {}).keys())
         known_line = ""
         if known:
             shown = known[:40]
             more = f" (+{len(known) - 40} more)" if len(known) > 40 else ""
             known_line = (
-                "Already-available tables (disclosed earlier this session — query "
-                "directly, no need to re-discover): " + ", ".join(shown) + more + "\n\n"
+                "Tables already available this session (query directly if relevant — "
+                "no need to re-discover): " + ", ".join(shown) + more + "\n\n"
             )
         timezone = str(getattr(self.orchestrator.session.connection, "session_timezone", "UTC") or "UTC")
         today = date.today().isoformat()
@@ -306,9 +288,6 @@ class DecisionPromptBuilder:
             f"Connection session timezone: {timezone}\n\n"
             f"Answer language for final user-facing prose: {state.answer_language}\n\n"
             f"{notes_line}"
-            f"{criteria_line}"
-            f"{facts_line}"
-            f"{excluded_line}"
             f"{known_line}"
             f"{pin_line}"
         ).rstrip() + "\n"

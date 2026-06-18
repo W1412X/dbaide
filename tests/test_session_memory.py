@@ -86,14 +86,15 @@ def test_prior_turns_signal_earlier_when_window_overflows(tmp_path):
     assert "t1:" not in prompt and "t2:" not in prompt
 
 
-def test_active_criteria_carry_forward_as_binding_clarifications(tmp_path):
-    """L2 binding: when the next turn starts, every confirmed criterion from
-    earlier turns in the session is seeded into run_state.clarifications, which
-    the SQL writer renders verbatim in its [Business criteria] block."""
+def test_prior_criteria_not_force_seeded_into_new_turn(tmp_path):
+    """方案②: prior-turn criteria are NOT force-seeded into a new turn's
+    run_state.clarifications as authoritative state — that would contaminate an
+    unrelated follow-up. They live in history (compression preserves them) and the
+    model applies them by relevance. A fresh turn starts with no carried口径."""
     orch = _orch(tmp_path)
     orch.active_criteria = ["按北京时间", "仅 paid 状态"]
     orch._reset_loop_state("新问题", "", True)
-    assert orch.run_state.clarifications == ["按北京时间", "仅 paid 状态"]
+    assert orch.run_state.clarifications == []
 
 
 def test_retrieve_turn_returns_full_fields_by_default(tmp_path):

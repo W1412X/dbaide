@@ -154,9 +154,11 @@ def test_disclosed_tables_snapshot_spans_all_sub_intents(orch):
     assert disclosed == ["main.customers", "main.orders"]
 
 
-def test_seed_session_memory_carries_facts_and_exclusions(orch):
-    """Verified facts and ruled-out paths from earlier turns must be re-seeded
-    into this run's memory so they survive compression of the originating turn."""
+def test_prior_facts_not_force_seeded_into_memory(orch):
+    """方案②: prior-turn verified facts / excluded paths are NOT force-loaded into
+    a fresh run's memory (that, plus prompt re-injection, contaminated unrelated
+    follow-ups). They live in history via compression; the model uses them by
+    relevance. A fresh turn's memory starts clean."""
     orch.session_turns = [{
         "status": "completed",
         "verified_facts": ["status=2 means cancelled"],
@@ -164,24 +166,52 @@ def test_seed_session_memory_carries_facts_and_exclusions(orch):
     }]
     orch._reset_loop_state("q2", "", True)
     mem = orch.run_state.memory
-    assert "status=2 means cancelled" in mem.verified_facts
-    assert any(e.target == "orders.legacy_amt" for e in mem.excluded_paths)
+    assert mem.verified_facts == []
+    assert mem.excluded_paths == []
 
 
-def test_session_turn_prompt_reinjects_facts_and_exclusions(orch):
+def test_session_turn_prompt_does_not_inject_task_memory(orch):
+    """方案②: an unrelated follow-up's prompt must NOT carry prior criteria/facts/
+    excluded as authoritative — no contamination."""
     from dbaide.agent.loop import AskAgentLoop, LoopState
 
     orch.session_turns = [{
         "status": "completed",
+        "clarifications": ["only paid orders"],
         "verified_facts": ["paid = status IN (1,3)"],
-        "excluded_paths": [{"target": "old_orders", "reason": "archive table, do not use"}],
+        "excluded_paths": [{"target": "old_orders", "reason": "archive table"}],
     }]
-    orch._reset_loop_state("q2", "", True)
+    orch.active_criteria = ["only paid orders"]
+    orch._reset_loop_state("how many users?", "", True)
     loop = AskAgentLoop(orch)
-    state = LoopState(question="q2", database="", execute_allowed=True, answer_language="en")
+    state = LoopState(question="how many users?", database="", execute_allowed=True, answer_language="en")
     prompt = loop.prompts.session_turn_prompt(state, 2)
-    assert "Verified facts" in prompt and "paid = status IN (1,3)" in prompt
-    assert "Ruled-out paths" in prompt and "old_orders" in prompt
+    assert "only paid orders" not in prompt
+    assert "paid = status IN (1,3)" not in prompt
+    assert "old_orders" not in prompt
+    assert "Confirmed criteria" not in prompt
+
+
+def test_compression_preserves_criteria_facts_excluded(orch):
+    """方案② enabler: the per-turn compression summary preserves criteria, verified
+    facts and excluded paths into history (so the model can attend to them by
+    relevance on later turns without force-injection)."""
+    from dbaide.agent.loop import AskAgentLoop
+    from dbaide.llm import LLMMessage
+
+    orch.session_turns = [{
+        "status": "completed", "question": "orders analysis",
+        "disclosed_tables": ["main.orders"],
+        "clarifications": ["only paid orders"],
+        "verified_facts": ["status=2 = cancelled"],
+        "excluded_paths": [{"target": "orders.legacy_amt", "reason": "all NULL"}],
+        "answer_markdown": "100 orders",
+    }]
+    summary = AskAgentLoop(orch)._fallback_turn_summary(
+        orch, [LLMMessage("user", "[turn:1:start]\norders analysis")], 1)
+    assert "only paid orders" in summary
+    assert "status=2 = cancelled" in summary
+    assert "orders.legacy_amt" in summary
 
 
 def test_prior_disclosed_keys_reads_last_completed_turn_only(orch):
@@ -230,7 +260,7 @@ def test_known_tables_line_in_prompt(orch):
     loop = AskAgentLoop(orch)
     state = LoopState(question="q2", database="", execute_allowed=True, answer_language="en")
     prompt = loop.prompts.session_turn_prompt(state, 2)
-    assert "Already-available tables" in prompt and "main.orders" in prompt
+    assert "Tables already available this session" in prompt and "main.orders" in prompt
 
 
 def test_sql_writer_context_filtered_to_targets(orch):

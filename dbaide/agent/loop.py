@@ -1042,6 +1042,26 @@ class AskAgentLoop:
         compress_text = "\n\n---\n\n".join(
             f"[{m.role}]\n{m.content}" for m in turn_msgs
         )
+        # Surface the turn's structured criteria / verified facts / ruled-out paths
+        # to the extractor — they live in run_state, not always verbatim in the
+        # messages, but MUST survive into the summary so later turns can rely on
+        # history (rather than every-turn force-injection) for them.
+        td = self._find_session_turn(orch, turn_num) or {}
+        extra: list[str] = []
+        if td.get("clarifications"):
+            extra.append("Confirmed criteria: " + "; ".join(str(c) for c in td["clarifications"]))
+        if td.get("verified_facts"):
+            extra.append("Verified facts: " + "; ".join(str(f) for f in td["verified_facts"]))
+        if td.get("excluded_paths"):
+            extra.append("Ruled-out: " + "; ".join(
+                f"{e.get('target', '')}: {e.get('reason', '')}"
+                for e in td["excluded_paths"] if isinstance(e, dict) and e.get("target")
+            ))
+        if extra:
+            compress_text += (
+                "\n\n---\n\n[STRUCTURED CONTEXT — preserve verbatim into the "
+                "criteria / discoveries / excluded fields]\n" + "\n".join(extra)
+            )
         prompt = (
             "Extract a structured JSON summary from this database exploration turn.\n"
             "The JSON will REPLACE the raw messages in the conversation stream — the agent\n"
@@ -1101,6 +1121,18 @@ class AskAgentLoop:
             criteria = turn_data.get("clarifications") or []
             if criteria:
                 record["criteria"] = criteria
+            # Preserve verified facts + ruled-out paths in the summary so they
+            # survive in history (the model attends to them by relevance on later
+            # turns) instead of being force-injected into every turn's prompt.
+            facts = turn_data.get("verified_facts") or []
+            if facts:
+                record["discoveries"] = list(facts)
+            excluded = turn_data.get("excluded_paths") or []
+            if excluded:
+                record["excluded"] = [
+                    f"{e.get('target', '')}: {e.get('reason', '')}".strip(": ")
+                    for e in excluded if isinstance(e, dict) and e.get("target")
+                ]
             answer = (turn_data.get("answer_markdown") or "")[:300]
             if answer:
                 record["answer"] = answer
