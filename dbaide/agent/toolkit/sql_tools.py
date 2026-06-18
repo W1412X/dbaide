@@ -4,7 +4,6 @@ from __future__ import annotations
 import hashlib
 import inspect
 import logging
-import re
 from typing import Any
 
 from dbaide.agent.memory import SQLArtifact, next_prefixed_id
@@ -17,7 +16,7 @@ from dbaide.tools.specs import (
 )
 from dbaide.agent.progress_events import subagent_event
 from dbaide.agent.schema_context import (
-    apply_column_notes, join_confidence_for_sql,
+    apply_column_notes, index_context_for_schemas, join_confidence_for_sql,
     merge_sql_context, object_notes_for_tables, validation_feedback,
 )
 from dbaide.agent.toolkit.support import (
@@ -200,6 +199,9 @@ def register(registry: ToolRegistry, orchestrator) -> None:
             ctx["answer_language"] = orchestrator.run_state.answer_language
             if orchestrator.run_state.clarifications:
                 ctx["criteria"] = list(orchestrator.run_state.clarifications)  # confirmed 口径
+            index_context = index_context_for_schemas(orchestrator, disclosed)
+            if index_context:
+                ctx["indexes"] = index_context
             object_notes = object_notes_for_tables(orchestrator, _sql_note_targets(orchestrator, targets))
             if object_notes:
                 ctx["object_notes"] = object_notes  # authoritative db/table user notes
@@ -607,44 +609,20 @@ def _sql_timeout_feedback(
     timeout_text = f"{timeout_seconds}s" if timeout_seconds else "the configured timeout"
     lines = [
         f"SQL execution timed out after {timeout_text}: {exc}",
-        "Treat this as a query-plan problem, not as final failure. Rewrite the SQL before retrying.",
+        "Treat this as a slow-query/query-plan problem, not as final failure. Rewrite the SQL before retrying.",
+        f"Timed-out SQL: {sql.strip()[:1200]}",
         "General repair rules:",
-        "- Keep indexed columns bare in JOIN/WHERE predicates; move functions to constants or bounds.",
-        "- Push selective date/status filters into each large table before joins.",
-        "- For consistency checks, aggregate each side in small CTEs first, then join the aggregates.",
-        "- Avoid joining full fact tables just to validate existence; use EXISTS, sampled keys, or prefiltered key sets.",
+        "- Do not simply raise timeout or retry the identical SQL.",
+        "- Avoid slow queries: reduce scanned rows, push selective filters earlier, and choose cheaper join order/keys.",
+        "- Use available schema and index context to write fast SQL; aggregate before joining large tables when possible.",
+        "- Prefer EXISTS/key-set checks, bounded validation queries, or sampled checks for consistency questions.",
+        "- Use EXPLAIN or narrower probes if the next safe rewrite is unclear.",
+        "- Retry only with materially optimized SQL.",
     ]
-    function_hints = _function_predicate_hints(sql)
-    if function_hints:
-        lines += ["Detected likely non-sargable predicate(s):", *function_hints]
     if database:
         lines.append(f"Database scope: {database}")
     lines.append("Do not simply raise timeout unless the user explicitly asks for a long-running export.")
     return "\n".join(lines)
-
-
-def _function_predicate_hints(sql: str) -> list[str]:
-    text = " ".join(str(sql or "").split())
-    hints: list[str] = []
-    if _has_function_call_near_predicate(text):
-        hints.append(
-            "- A function appears around a predicate expression. If it wraps a table column, "
-            "rewrite it so the column remains bare on one side of the comparison and move "
-            "the transformation to constants, derived bounds, or a precomputed column."
-        )
-    return hints
-
-
-def _has_function_call_near_predicate(sql: str) -> bool:
-    text = str(sql or "")
-    if "(" not in text:
-        return False
-    lowered = text.casefold()
-    predicate_markers = (" join ", " on ", " where ", " and ", " or ", " having ")
-    if not any(marker in lowered for marker in predicate_markers):
-        return False
-    # Generic function-call shape, deliberately not tied to one SQL function.
-    return bool(re.search(r"\b[a-z_][a-z0-9_]*\s*\(", lowered))
 
 
 def _risk_confirmation_question(

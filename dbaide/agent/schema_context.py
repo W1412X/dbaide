@@ -318,6 +318,80 @@ def object_notes_for_tables(
     return out
 
 
+def index_context_for_schemas(
+    orchestrator: AskOrchestrator,
+    schemas: list[tuple[str, str, list[ColumnInfo]]],
+) -> list[dict[str, Any]]:
+    """Return complete index definitions for exactly disclosed SQL target tables.
+
+    This is deterministic catalog lookup, not model inference. Composite indexes are
+    preserved as one ordered definition so the SQL writer can reason about the
+    index as a whole instead of seeing only per-column ``indexed`` booleans.
+    """
+    if not schemas:
+        return []
+    out: list[dict[str, Any]] = []
+    seen: set[tuple[str, str]] = set()
+    for database, table, _columns in schemas:
+        table_name = str(table or "").strip()
+        if not table_name:
+            continue
+        db_name = str(database or "").strip()
+        key = (db_name.lower(), table_name.lower())
+        if key in seen:
+            continue
+        seen.add(key)
+        indexes = _indexes_for_table(orchestrator, db_name, table_name)
+        if indexes:
+            out.append({"database": db_name, "table": table_name, "indexes": indexes})
+    return out
+
+
+def _indexes_for_table(orchestrator: AskOrchestrator, database: str, table: str) -> list[dict[str, Any]]:
+    tdoc = None
+    try:
+        tdoc = orchestrator.asset_store.table_doc(
+            orchestrator.instance,
+            database,
+            table,
+            fingerprint=getattr(orchestrator, "connection_fingerprint", ""),
+        )
+    except Exception as exc:
+        logger.warning("asset_index_lookup_failed: %s", exc)
+    if tdoc and tdoc.get("indexes"):
+        return [_serialize_index(idx) for idx in (tdoc.get("indexes") or [])]
+    try:
+        return [
+            _serialize_index(idx)
+            for idx in orchestrator.adapter.indexes(table, database=database)
+        ]
+    except Exception as exc:
+        logger.warning("live_index_lookup_failed: %s", exc)
+        return []
+
+
+def _serialize_index(index: Any) -> dict[str, Any]:
+    raw = index.to_dict() if hasattr(index, "to_dict") else index
+    if isinstance(raw, dict):
+        columns = raw.get("columns") or []
+        if not isinstance(columns, list):
+            columns = [columns]
+        return {
+            "name": str(raw.get("name") or ""),
+            "columns": [str(c) for c in columns],
+            "unique": bool(raw.get("unique")),
+            "type": str(raw.get("type") or ""),
+            "primary": bool(raw.get("primary")),
+        }
+    return {
+        "name": str(getattr(index, "name", "")),
+        "columns": [str(c) for c in (getattr(index, "columns", []) or [])],
+        "unique": bool(getattr(index, "unique", False)),
+        "type": str(getattr(index, "type", "") or ""),
+        "primary": bool(getattr(index, "primary", False)),
+    }
+
+
 def decision_notes_block(orchestrator: AskOrchestrator, database: str = "") -> str:
     """Database/table notes for the whole instance, for the decision prompt.
 

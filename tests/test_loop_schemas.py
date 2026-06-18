@@ -250,6 +250,10 @@ def test_generate_sql_splits_direct_qualified_table_arg(tmp_path):
 def test_generate_sql_uses_all_disclosed_schemas(tmp_path):
     db = tmp_path / "app.db"
     make_multi_db(db)
+    db_conn = sqlite3.connect(db)
+    db_conn.execute("CREATE INDEX idx_orders_user_created ON orders(user_id, created_at)")
+    db_conn.commit()
+    db_conn.close()
     conn = ConnectionConfig(name="local", type="sqlite", path=str(db))
     adapter = build_adapter(conn)
     llm = PromptCaptureLLM()
@@ -273,6 +277,9 @@ def test_generate_sql_uses_all_disclosed_schemas(tmp_path):
     assert "Table: orders" in llm.last_user
     assert "Table: users" in llm.last_user
     assert "user_id" in llm.last_user
+    assert "Indexes (complete definitions; composite indexes keep column order):" in llm.last_user
+    assert "idx_orders_user_created: (user_id, created_at)" in llm.last_user
+    assert "indexed=True" not in llm.last_user
 
 
 def test_generate_sql_fails_when_explicit_table_selection_is_incomplete(tmp_path):

@@ -383,7 +383,9 @@ def test_decision_prompt_treats_sql_timeout_as_rewrite_signal(tmp_path):
 
     assert "If execute_sql times out" in prompt
     assert "do NOT retry the same SQL" in prompt
-    assert "sargable range predicates" in prompt
+    assert "Write a faster SQL" in prompt
+    assert "available indexes" in prompt
+    assert "sargable" not in prompt
 
 
 def test_decision_user_prompt_includes_today_for_relative_periods(tmp_path):
@@ -994,9 +996,8 @@ def test_execute_sql_timeout_sets_optimization_feedback(tmp_path):
     orch._reset_loop_state("validate delivered refunds", "main", True)
     slow_sql = (
         "SELECT a.id, COUNT(*) "
-        "FROM large_a a "
-        "JOIN large_b b ON LOWER(a.join_key) = b.join_key "
-        "WHERE CAST(a.created_at AS DATE) = '2026-06-01' "
+        "FROM large_a a JOIN large_b b ON a.join_key = b.join_key "
+        "WHERE a.created_at >= '2026-06-01' "
         "GROUP BY a.id LIMIT 20"
     )
 
@@ -1024,9 +1025,11 @@ def test_execute_sql_timeout_sets_optimization_feedback(tmp_path):
 
     assert not result.ok
     assert result.error.retryable is True
-    assert "query-plan problem" in orch.run_state.sql_feedback
-    assert "column remains bare" in orch.run_state.sql_feedback
-    assert "precomputed column" in orch.run_state.sql_feedback
+    assert "slow-query/query-plan problem" in orch.run_state.sql_feedback
+    assert "Avoid slow queries" in orch.run_state.sql_feedback
+    assert "available schema and index context" in orch.run_state.sql_feedback
+    assert "column remains bare" not in orch.run_state.sql_feedback
+    assert "precomputed column" not in orch.run_state.sql_feedback
     assert "Do not simply raise timeout" in result.error.message
 
 

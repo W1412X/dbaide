@@ -102,8 +102,9 @@ class DecisionPromptBuilder:
             "(the run's final query_result is not updated); omit for the answer query.\n"
             "Use save_as when you will reuse the result (charts, later SQL). "
             "If execute_sql times out, treat the tool feedback as a plan-rewrite instruction: "
-            "do NOT retry the same SQL or merely raise timeout. Prefer sargable range predicates, "
-            "earlier filters, smaller aggregate CTEs, EXISTS/key-set checks, or sampled validation.\n"
+            "do NOT retry the same SQL or merely raise timeout. Write a faster SQL: reduce scanned "
+            "rows, push filters earlier, use available indexes, aggregate before joining large "
+            "tables, or use EXISTS/key-set checks, bounded probes, and sampled validation.\n"
             "No SQL tool ends the run — call action=finish only when the intent is fully answered.\n"
             "</sql-execution>\n\n"
 

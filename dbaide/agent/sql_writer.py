@@ -184,6 +184,9 @@ class SQLWriter:
             f"Table: {self._format_table_label(table)}",
             f"Columns:\n{col_lines}",
         ]
+        indexes = self._format_indexes(context)
+        if indexes:
+            blocks.append(indexes)
         rel = self._format_relations(context)
         if rel:
             blocks.append(rel)
@@ -220,6 +223,9 @@ class SQLWriter:
             blocks.append(f"Table: {label}")
             blocks.append("Columns:")
             blocks.append(self._format_columns(columns))
+        indexes = self._format_indexes(context)
+        if indexes:
+            blocks.append(indexes)
         rel = self._format_relations(context)
         if rel:
             blocks.append(rel)
@@ -234,7 +240,7 @@ class SQLWriter:
         # `tables` is the full disclosure dump. The prompt already lists the exact
         # schemas passed to SQL generation, so re-dumping the full set here can
         # re-introduce irrelevant evidence the main loop did not select for SQL.
-        skip = ("foreign_keys", "criteria", "object_notes", "tables")
+        skip = ("foreign_keys", "criteria", "indexes", "object_notes", "tables")
         return {k: v for k, v in context.items() if k not in skip}
 
     def _format_table_label(self, name: str) -> str:
@@ -327,9 +333,40 @@ class SQLWriter:
         return "\n\n".join(blocks)
 
     @staticmethod
+    def _format_indexes(context: dict) -> str:
+        entries = context.get("indexes") or []
+        if not isinstance(entries, list):
+            return ""
+        lines = ["Indexes (complete definitions; composite indexes keep column order):"]
+        for entry in entries:
+            if not isinstance(entry, dict):
+                continue
+            table = str(entry.get("table") or "").strip()
+            database = str(entry.get("database") or "").strip()
+            label = f"{database}.{table}" if database else table
+            for raw in entry.get("indexes") or []:
+                if not isinstance(raw, dict):
+                    continue
+                columns = raw.get("columns") or []
+                if not isinstance(columns, list):
+                    columns = [columns]
+                col_text = ", ".join(str(c) for c in columns)
+                attrs: list[str] = []
+                if raw.get("unique"):
+                    attrs.append("unique")
+                if raw.get("primary"):
+                    attrs.append("primary")
+                if raw.get("type"):
+                    attrs.append(f"type={raw.get('type')}")
+                suffix = f" [{', '.join(attrs)}]" if attrs else ""
+                name = str(raw.get("name") or "(unnamed)").strip()
+                lines.append(f"- {label}.{name}: ({col_text}){suffix}")
+        return "\n".join(lines) if len(lines) > 1 else ""
+
+    @staticmethod
     def _format_columns(columns: list[ColumnInfo]) -> str:
         def _line(c: ColumnInfo) -> str:
-            base = f"- {c.name}: {c.data_type}, pk={c.primary_key}, indexed={c.indexed}, comment={c.comment}"
+            base = f"- {c.name}: {c.data_type}, pk={c.primary_key}, comment={c.comment}"
             note = str(getattr(c, "note", "") or "").strip()
             if note:
                 base += f", note(AUTHORITATIVE)={note}"
