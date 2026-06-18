@@ -44,7 +44,11 @@ def _relative_time(ts: float) -> str:
         return t("session.hours_ago", n=int(delta // 3600))
     if delta < 7 * 86400:
         return t("session.days_ago", n=int(delta // 86400))
-    return time.strftime("%b %d", time.localtime(ts))
+    # Older than a week: show an absolute date. Include the year when it differs from
+    # the current year so e.g. "Jan 05" from a previous year isn't ambiguous.
+    when = time.localtime(ts)
+    fmt = "%b %d" if when.tm_year == time.localtime().tm_year else "%b %d, %Y"
+    return time.strftime(fmt, when)
 
 
 # NOTE: sizes are in PIXELS and are ALSO set in each label's stylesheet below.

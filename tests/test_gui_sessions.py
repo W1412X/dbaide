@@ -107,3 +107,17 @@ def test_load_session_replaces_previous(qapp):
     assert "only one" in tab.copy_text("s1") and "count paid orders" not in tab.copy_text("s1")
     tab.deleteLater()
     qapp.processEvents()
+
+
+def test_relative_time_includes_year_for_old_dates(qapp):
+    import time
+    from dbaide.desktop.components.session_list import _relative_time
+
+    # A date from a clearly-prior year must include the year (disambiguation).
+    old = _relative_time(time.mktime((2020, 1, 5, 12, 0, 0, 0, 0, 0)))
+    assert "2020" in old
+    # A recent same-year date (10 days ago) omits the year.
+    recent = _relative_time(time.time() - 10 * 86400)
+    assert recent and str(time.localtime().tm_year) not in recent
+    # Falsy timestamp → empty string (no crash).
+    assert _relative_time(0) == ""
