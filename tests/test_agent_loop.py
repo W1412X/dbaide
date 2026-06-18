@@ -181,3 +181,24 @@ def test_max_tail_keep_index_keeps_largest_fitting_tail():
     # When the whole tail fits, keep all of it (first_keep == head).
     small = [10, 10, 5, 5, 5]
     assert _max_tail_keep_index(small, 100, head=2, overhead=5) == 2
+
+
+def test_run_single_propagates_cancellation(tmp_path):
+    """User cancellation must NOT be swallowed by the loop's generic exception handler:
+    CancelledError (which subclasses Exception) must propagate so the workflow maps it
+    to a CANCELLED status instead of an 'agent loop failed' answer."""
+    from dbaide.core.cancellation import CancelledError
+
+    db = tmp_path / "c.db"
+    make_db(db)
+    cfg = ConnectionConfig(name="local", type="sqlite", path=str(db))
+    adapter = build_adapter(cfg)
+    orch = AskOrchestrator(adapter, Session(connection=cfg), AgentMockLLM())
+
+    def _boom() -> None:
+        raise CancelledError("user cancelled")
+
+    orch.cancel_check = _boom
+    import pytest
+    with pytest.raises(CancelledError):
+        orch.run("how many orders", database="", execute=True)

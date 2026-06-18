@@ -17,6 +17,7 @@ from dbaide.joins import JoinCatalogStore
 from dbaide.annotations import AnnotationStore
 from dbaide.assets import AssetStore
 from dbaide.connection_identity import connection_fingerprint
+from dbaide.core.cancellation import CancelledError
 from dbaide.i18n import detect_user_language, normalize, t as _i18n_t
 from dbaide.llm import LLMClient, NullLLMClient
 from dbaide.models import AssistantResponse
@@ -235,6 +236,12 @@ class AskOrchestrator:
                 answer_language=answer_language,
                 session_messages=self.session_messages if not skip_turn_markers else None,
             )
+        except CancelledError:
+            # User cancellation is NOT a failure: let it propagate so the workflow maps
+            # it to a CANCELLED status (and the UI shows "cancelled", not a loop error).
+            # CancelledError subclasses Exception, so it must be re-raised before the
+            # generic handler below swallows it.
+            raise
         except Exception as exc:
             logger.warning("agent_loop_failed: %s", exc, exc_info=True)
             self.run_state.fail_reason = f"exception: {exc}"
