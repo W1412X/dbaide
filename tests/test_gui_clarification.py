@@ -132,6 +132,25 @@ def test_clarification_stepper_back_preserves_answer(qapp):
     assert stepper._idx == 0 and stepper._input.text() == "UTC"  # answer restored
 
 
+def test_clarification_stepper_back_preserves_unsaved_typed_input(qapp):
+    """Typing an answer then clicking Back (without Next) must not lose the input —
+    coming forward again restores it."""
+    from dbaide.desktop.components.conversation import _ClarificationStepper
+    stepper = _ClarificationStepper([
+        {"ask": "Which timezone?", "options": ["UTC"]},
+        {"ask": "Which status?", "options": ["delivered"]},
+    ])
+    stepper._input.setText("UTC")
+    stepper._on_next()                      # advance to Q2 (UTC recorded)
+    assert stepper._idx == 1
+    stepper._input.setText("shipped")       # type into Q2 but DON'T press Next
+    stepper._on_back()                      # go back to Q1
+    assert stepper._idx == 0
+    stepper._on_next()                      # forward to Q2 again
+    assert stepper._idx == 1
+    assert stepper._input.text() == "shipped"   # in-progress input preserved
+
+
 def test_bar_double_submit_emits_once(qapp):
     """A fast double-click/Enter must not emit two replies (the 2nd would be lost)."""
     from dbaide.desktop.components.conversation import _ClarificationBar

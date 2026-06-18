@@ -958,6 +958,13 @@ class _ClarificationStepper(QFrame):
 
     def _on_back(self) -> None:
         if self._idx > 0:
+            # Preserve any answer typed for the current step before navigating away,
+            # so coming forward again restores it instead of silently dropping the
+            # user's input. Only record non-empty text (don't clobber a prior answer
+            # with a blank when the field was never filled).
+            value = self._input.text().strip()
+            if value:
+                self._record_current(value)
             self._idx -= 1
             self._render()
 
