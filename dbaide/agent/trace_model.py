@@ -302,26 +302,6 @@ class TraceModel:
         end = self._last_ts if self.overall in {"done", "failed"} else (now if now is not None else time.time())
         return max(0.0, (end - self._first_ts) * 1000.0)
 
-    def summary_line(self, now: float | None = None) -> str:
-        if not self.steps and self.overall == "idle":
-            return "Idle"
-        if not self.steps and self.overall == "running":
-            elapsed = self.elapsed_ms(now) / 1000.0
-            phase = self.boot_phase or _t("trace.starting")
-            return f"{phase} · {elapsed:.1f}s"
-        elapsed = self.elapsed_ms(now) / 1000.0
-        if self.overall == "done":
-            return f"Done · {len(self.steps)} steps · {elapsed:.1f}s"
-        if self.overall == "failed":
-            return f"Failed · {len(self.steps)} steps · {elapsed:.1f}s"
-        phase = self.current_phase or "Working"
-        agents = self.active_agents
-        parts = [f"Step {self.current_step}" if self.current_step else "Working", phase]
-        if agents:
-            parts.append(f"{len(agents)} agent{'s' if len(agents) != 1 else ''}: " + ", ".join(agents))
-        return " · ".join(parts) + f" · {elapsed:.1f}s"
-
-
 # ── Plain-text export (shared by the trace panel and conversation copy) ───────
 
 _CHIP_TYPES = {"sql", "phase", "llm", "decision", "io"}

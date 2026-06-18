@@ -81,7 +81,8 @@ def test_overall_done_on_loop_finish():
         progress_event(stage="loop", title="finished", status="completed", kind="agent"),
     ])
     assert m.overall == "done"
-    assert "Done" in m.summary_line(now=2000.0)
+    from dbaide.agent.trace_model import localized_summary_line
+    assert "Done" in localized_summary_line(m)
 
 
 def test_elapsed_uses_event_span_when_done():
@@ -104,15 +105,17 @@ def test_build_assets_collapses_to_single_step():
 
 
 def test_summary_line_lists_active_agents():
+    from dbaide.agent.trace_model import localized_agent_label, localized_summary_line
     m = TraceModel()
     _feed(m, [
         progress_event(stage="retrieve_join_context", title="rel", status="running", kind="tool", step=1),
         subagent_event(agent="join_infer", title="inferring", parent="retrieve_join_context"),
         subagent_event(agent="join_validate", title="validating", parent="retrieve_join_context"),
     ])
-    line = m.summary_line(now=1010.0)
+    line = localized_summary_line(m)
     assert "Mapping relations" in line
-    assert "2 agents" in line
+    assert localized_agent_label("join_infer") in line
+    assert localized_agent_label("join_validate") in line
 
 
 def test_running_summary_without_tool_steps_is_not_idle():
