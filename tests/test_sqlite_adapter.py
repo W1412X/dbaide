@@ -99,3 +99,29 @@ def test_budget_caps_concurrency(tmp_path):
     for t in threads:
         t.join()
     assert adapter.budget.stats.peak_inflight <= 2
+
+
+def test_execute_preserves_duplicate_column_names(tmp_path):
+    """A join selecting same-named columns from both sides (users.id, orders.id) must
+    keep ALL columns — duplicates are disambiguated, not collapsed by dict keying."""
+    db = tmp_path / "dup.db"
+    make_db(db)
+    adapter = build_adapter(ConnectionConfig(name="dup", type="sqlite", path=str(db)))
+    r = adapter.execute_readonly(
+        "SELECT users.id, orders.id, users.name FROM users JOIN orders ON orders.user_id = users.id "
+        "WHERE orders.id = 1",
+        limit=10,
+    )
+    assert r.columns == ["id", "id (2)", "name"]
+    assert r.rows == [{"id": 1, "id (2)": 1, "name": "Alice"}]
+
+
+def test_execute_empty_result_keeps_column_names(tmp_path):
+    """A zero-row result still reports its columns (driven by the cursor description,
+    not the first row), so the UI/agent can see the shape."""
+    db = tmp_path / "empty.db"
+    make_db(db)
+    adapter = build_adapter(ConnectionConfig(name="empty", type="sqlite", path=str(db)))
+    r = adapter.execute_readonly("SELECT id, name FROM users WHERE id < 0", limit=10)
+    assert r.rows == []
+    assert r.columns == ["id", "name"]

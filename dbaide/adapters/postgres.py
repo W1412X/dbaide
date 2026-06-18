@@ -4,7 +4,7 @@ import logging
 import os
 import time
 
-from dbaide.adapters.base import DatabaseAdapter, append_limit, quote_identifier, rows_to_result
+from dbaide.adapters.base import DatabaseAdapter, append_limit, dedupe_columns, quote_identifier, rows_to_result
 from dbaide.db.connection_pool import PoolKey, for_key as connection_pool_for_key
 from dbaide.models import ColumnInfo, ColumnProfile, ForeignKeyInfo, IndexInfo, QueryResult, TableInfo
 
@@ -218,7 +218,13 @@ class PostgresAdapter(DatabaseAdapter):
             # is then genuinely read-only.
             conn.read_only = True
             conn.execute("SET statement_timeout = %s", (max(1, int(timeout_seconds * 1000)),))
-            rows = conn.execute(bounded).fetchall()
+            # Tuple rows + deduped column names so duplicate result columns (e.g. a.id
+            # and b.id from a join) aren't collapsed by the connection's dict_row factory.
+            from psycopg.rows import tuple_row
+            cur = conn.cursor(row_factory=tuple_row)
+            cur.execute(bounded)
+            cols = dedupe_columns([d.name for d in cur.description]) if cur.description else []
+            data = [dict(zip(cols, row)) for row in cur.fetchall()]
             conn.rollback()
         except Exception:
             try:
@@ -229,8 +235,8 @@ class PostgresAdapter(DatabaseAdapter):
         finally:
             conn.close()
         elapsed = (time.perf_counter() - start) * 1000
-        logger.debug("execute rows=%d elapsed_ms=%.1f sql=%s", len(rows), elapsed, bounded[:200])
-        return rows_to_result([dict(row) for row in rows], sql=bounded, elapsed_ms=elapsed)
+        logger.debug("execute rows=%d elapsed_ms=%.1f sql=%s", len(data), elapsed, bounded[:200])
+        return rows_to_result(data, sql=bounded, elapsed_ms=elapsed, columns=cols)
 
     def explain(self, sql: str, *, database: str = "", timeout_seconds: int = 10) -> QueryResult:
         return self.execute_readonly(

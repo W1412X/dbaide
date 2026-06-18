@@ -227,10 +227,27 @@ def quote_identifier(name: str, dialect: str = "generic") -> str:
     return q + str(name).replace(q, q + q) + q
 
 
-def rows_to_result(rows: list[dict[str, Any]], *, sql: str = "", elapsed_ms: float = 0.0, truncated: bool = False) -> QueryResult:
-    columns: list[str] = []
-    if rows:
-        columns = list(rows[0].keys())
+def dedupe_columns(names: list[str]) -> list[str]:
+    """Disambiguate duplicate result-column names so a dict row can hold them all.
+
+    A query like ``SELECT a.id, b.id FROM a JOIN b`` yields two columns named ``id``;
+    keyed into a dict the second would silently overwrite the first, losing data.
+    Rename repeats to ``id (2)``, ``id (3)``, … (display labels — schema-level names
+    used for follow-up SQL are unaffected). Order-preserving."""
+    seen: dict[str, int] = {}
+    out: list[str] = []
+    for raw in names:
+        name = str(raw)
+        count = seen.get(name, 0) + 1
+        seen[name] = count
+        out.append(name if count == 1 else f"{name} ({count})")
+    return out
+
+
+def rows_to_result(rows: list[dict[str, Any]], *, sql: str = "", elapsed_ms: float = 0.0,
+                   truncated: bool = False, columns: list[str] | None = None) -> QueryResult:
+    if columns is None:
+        columns = list(rows[0].keys()) if rows else []
     return QueryResult(columns=columns, rows=rows, row_count=len(rows), truncated=truncated, sql=sql, elapsed_ms=elapsed_ms)
 
 

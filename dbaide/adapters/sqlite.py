@@ -7,7 +7,7 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import Iterator
 
-from dbaide.adapters.base import DatabaseAdapter, append_limit, quote_identifier, rows_to_result
+from dbaide.adapters.base import DatabaseAdapter, append_limit, dedupe_columns, quote_identifier, rows_to_result
 from dbaide.models import ColumnInfo, ColumnProfile, ForeignKeyInfo, IndexInfo, QueryResult, TableInfo
 
 logger = logging.getLogger("dbaide.sqlite")
@@ -138,10 +138,14 @@ class SQLiteAdapter(DatabaseAdapter):
         bounded_sql = append_limit(sql, limit, dialect=self.dialect)
         start = time.perf_counter()
         with self._guarded_conn(timeout_seconds) as conn:
-            rows = [dict(row) for row in conn.execute(bounded_sql).fetchall()]
+            cur = conn.execute(bounded_sql)
+            # Build rows positionally against deduped column names so duplicate result
+            # columns (e.g. a.id and b.id from a join) aren't collapsed by dict keying.
+            cols = dedupe_columns([d[0] for d in cur.description]) if cur.description else []
+            rows = [dict(zip(cols, tuple(row))) for row in cur.fetchall()]
         elapsed = (time.perf_counter() - start) * 1000
         logger.debug("execute rows=%d elapsed_ms=%.1f sql=%s", len(rows), elapsed, bounded_sql[:200])
-        return rows_to_result(rows, sql=bounded_sql, elapsed_ms=elapsed)
+        return rows_to_result(rows, sql=bounded_sql, elapsed_ms=elapsed, columns=cols)
 
     def explain(self, sql: str, *, database: str = "", timeout_seconds: int = 10) -> QueryResult:
         explain_sql = "EXPLAIN QUERY PLAN " + sql.strip().rstrip(";")

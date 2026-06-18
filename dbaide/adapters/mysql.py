@@ -5,7 +5,7 @@ import os
 import threading
 import time
 
-from dbaide.adapters.base import DatabaseAdapter, append_limit, quote_identifier, rows_to_result
+from dbaide.adapters.base import DatabaseAdapter, append_limit, dedupe_columns, quote_identifier, rows_to_result
 from dbaide.db.connection_pool import PoolKey, for_key as connection_pool_for_key
 from dbaide.models import ColumnInfo, ColumnProfile, ForeignKeyInfo, IndexInfo, QueryResult, TableInfo
 
@@ -303,11 +303,15 @@ class MySQLAdapter(DatabaseAdapter):
         start = time.perf_counter()
         conn = self._connect(database)
         try:
-            with conn.cursor() as cur:
+            # A tuple cursor (not the default DictCursor) + deduped column names so
+            # duplicate result columns (e.g. a.id and b.id from a join) aren't collapsed.
+            import pymysql
+            with conn.cursor(pymysql.cursors.Cursor) as cur:
                 cur.execute("START TRANSACTION READ ONLY")
                 self._set_timeout(cur, timeout_seconds)
                 cur.execute(bounded)
-                rows = list(cur.fetchall())
+                cols = dedupe_columns([d[0] for d in cur.description]) if cur.description else []
+                rows = [dict(zip(cols, row)) for row in cur.fetchall()]
             conn.rollback()
         except Exception:
             try:
@@ -319,7 +323,7 @@ class MySQLAdapter(DatabaseAdapter):
             conn.close()
         elapsed = (time.perf_counter() - start) * 1000
         logger.debug("execute rows=%d elapsed_ms=%.1f sql=%s", len(rows), elapsed, bounded[:200])
-        return rows_to_result(rows, sql=bounded, elapsed_ms=elapsed)
+        return rows_to_result(rows, sql=bounded, elapsed_ms=elapsed, columns=cols)
 
     def explain(self, sql: str, *, database: str = "", timeout_seconds: int = 10) -> QueryResult:
         return self.execute_readonly(
