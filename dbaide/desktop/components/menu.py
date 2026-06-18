@@ -273,6 +273,12 @@ class PillSelect(QToolButton):
         self._sync_label()
 
     def set_value(self, value: str) -> None:
+        # Validate against the options (like set_options does): a value not among them
+        # (e.g. a stale/renamed model id) would otherwise be returned by value() while
+        # the label shows the placeholder, and submitting would use a non-existent
+        # option. Fall back to the first option when the value isn't selectable.
+        if self._options and not any(v == value for _, v in self._options):
+            value = self._options[0][1]
         self._value = value
         self._rebuild_menu()
         self._sync_label()

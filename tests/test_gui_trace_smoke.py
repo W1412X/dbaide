@@ -818,3 +818,19 @@ def test_config_stream_answers_default_on(tmp_path):
     assert cfg.stream_answers() is True          # default on
     cfg.set_stream_answers(False)
     assert ConfigManager(path=tmp_path / "config.toml").stream_answers() is False  # persisted
+
+
+def test_pill_select_set_value_validates_against_options(qapp):
+    """A value not among the options (e.g. a stale model id) must fall back to a real
+    option so value() is always selectable; with no options yet, the value is kept."""
+    from dbaide.desktop.components.menu import PillSelect
+
+    c = PillSelect()
+    c.set_options([("GPT", "gpt"), ("Claude", "claude")])
+    c.set_value("claude")
+    assert c.value() == "claude"
+    c.set_value("removed-model")          # not in options → fall back to first
+    assert c.value() == "gpt"
+    c2 = PillSelect()
+    c2.set_value("pending")               # no options yet → keep (can't validate)
+    assert c2.value() == "pending"
