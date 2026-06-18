@@ -876,3 +876,18 @@ def test_normalize_selected_text_converts_both_separators():
     assert _normalize_selected_text(s) == "a\nb\nc"
     assert " " not in _normalize_selected_text(s)
     assert " " not in _normalize_selected_text(s)
+
+
+def test_conversation_clear_resets_transient_state(qapp):
+    """clear() (new/switched session) must reset streaming + follow state so stale
+    flags from a prior session don't suppress auto-scroll or leak a live block."""
+    from dbaide.desktop.components.conversation import ConversationView
+    v = ConversationView()
+    v.begin_turn("q")
+    v.append_answer_chunk("partial")
+    v._follow_bottom = False          # user had scrolled up
+    v.clear()
+    assert v._live_answer is None and v._live_answer_text == ""
+    assert v._clarification_bar is None
+    assert v._follow_bottom is True   # re-engaged for the fresh session
+    assert not v._chunk_timer.isActive()

@@ -1684,4 +1684,6 @@ class ConversationView(QScrollArea):
         self._live_answer = None
         self._live_answer_text = ""
         self._clarification_bar = None
+        # Fresh session → re-engage tail-follow (a prior scroll-up must not carry over).
+        self._follow_bottom = True
         self._sync_viewport_width()
