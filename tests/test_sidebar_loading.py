@@ -410,3 +410,20 @@ def test_sidebar_filter_matches_database_name():
     assert "analytics" in names and "billing" not in names
     # The matched database still shows its tables.
     assert tree.topLevelItem(0).childCount() == 1
+
+
+def test_sidebar_render_tolerates_node_without_name():
+    """A malformed schema node (missing 'name') must not crash the whole tree render —
+    the table/column label builders use a safe get, not data['name']."""
+    app = _app()
+    sidebar = Sidebar()
+    rows = [
+        {"kind": "database", "name": "main", "path": "c.main", "children": [
+            {"kind": "table", "path": "c.main.t1", "column_count": 2, "children": [
+                {"kind": "column", "path": "c.main.t1.c1"},   # no 'name'
+            ]},
+        ]},
+    ]
+    sidebar._render(rows)  # must not raise KeyError
+    assert sidebar.tree.topLevelItemCount() == 1
+    assert sidebar.tree.topLevelItem(0).childCount() == 1   # the unnamed table still renders

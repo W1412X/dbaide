@@ -608,13 +608,14 @@ class Sidebar(QWidget):
         parent_kind: str = "database",
     ) -> QTreeWidgetItem:
         kind = str(data.get("kind") or parent_kind)
+        name = str(data.get("name") or "")  # never KeyError on a malformed node
         if kind == "table":
-            label = f"{data['name']} ({data.get('column_count', 0)})"
+            label = f"{name} ({data.get('column_count', 0)})"
         elif kind == "column":
             suffix = f" · {data.get('data_type')}" if data.get("data_type") else ""
-            label = f"{data['name']}{suffix}"
+            label = f"{name}{suffix}"
         else:
-            label = str(data.get("name") or "")
+            label = name
         item = QTreeWidgetItem([label])
         item.setData(0, Qt.ItemDataRole.UserRole, data)
         self._style_tree_item(item, data, default_icon, _t)
@@ -622,13 +623,14 @@ class Sidebar(QWidget):
 
     def _update_tree_item(self, item: QTreeWidgetItem, data: dict[str, Any], _t) -> None:
         kind = str(data.get("kind") or "")
+        name = str(data.get("name") or "")  # never KeyError on a malformed node
         if kind == "table":
-            label = f"{data['name']} ({data.get('column_count', 0)})"
+            label = f"{name} ({data.get('column_count', 0)})"
         elif kind == "column":
             suffix = f" · {data.get('data_type')}" if data.get("data_type") else ""
-            label = f"{data['name']}{suffix}"
+            label = f"{name}{suffix}"
         else:
-            label = str(data.get("name") or "")
+            label = name
         if item.text(0) != label:
             item.setText(0, label)
         item.setData(0, Qt.ItemDataRole.UserRole, data)
