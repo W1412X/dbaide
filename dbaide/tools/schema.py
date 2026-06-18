@@ -68,6 +68,20 @@ class SchemaTools:
         self.context.record_columns(table, columns, database=database)
         return columns
 
+    def columns_from_assets(self, table: str, database: str = "") -> tuple[str, list[ColumnInfo]] | None:
+        """Assets-only column lookup (NO database round-trip). Returns
+        (resolved_database, columns) when the offline schema cache has them, else
+        None. Used to cheaply rehydrate tables disclosed in earlier turns without
+        re-describing against the live DB."""
+        database, table = normalize_db_table_for_dialect(table, database, self.adapter.dialect)
+        database = database or self._asset_database_for_table(table) or self._default_asset_database()
+        if not database:
+            return None
+        docs = self.assets.column_docs(self.instance, database, table, fingerprint=self.fingerprint)
+        if not docs:
+            return None
+        return database, [self.assets.to_column_info(doc) for doc in docs]
+
     def foreign_keys(self, table: str, database: str = "") -> list[ForeignKeyInfo]:
         database, table = normalize_db_table_for_dialect(table, database, self.adapter.dialect)
         return self.adapter.foreign_keys(table, database=database)

@@ -196,7 +196,18 @@ def register(registry: ToolRegistry, orchestrator) -> None:
         try:
             targets = [(db, table) for db, table, _ in disclosed]
             relations = list(orchestrator.run_state.relations or [])
-            ctx = merge_sql_context(orchestrator.session.disclosure.summary(), relations)
+            # Scope the SQL-writer schema context to THIS call's target tables.
+            # The full disclosure summary now also carries tables carried over from
+            # earlier turns (cross-turn gate seeding); feeding all of them would add
+            # token noise and dilute table selection. Target columns themselves come
+            # from `disclosed`, so filtering the summary is safe.
+            target_refs = {(str(db or ""), str(table)) for db, table, _ in disclosed}
+            summary = orchestrator.session.disclosure.summary()
+            summary["tables"] = [
+                t for t in (summary.get("tables") or [])
+                if (str(t.get("database") or ""), str(t.get("name") or "")) in target_refs
+            ]
+            ctx = merge_sql_context(summary, relations)
             ctx["answer_language"] = orchestrator.run_state.answer_language
             if orchestrator.run_state.clarifications:
                 ctx["criteria"] = list(orchestrator.run_state.clarifications)  # confirmed 口径

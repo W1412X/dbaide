@@ -29,6 +29,10 @@ from dbaide.tools import QueryTools
 
 logger = logging.getLogger("dbaide.workflow")
 
+# Backstop on the cumulative per-turn disclosed-tables snapshot so a very long
+# session cannot grow each stored turn unbounded (carry-forward gate seeding).
+_MAX_DISCLOSED_TABLES = 300
+
 
 class WorkflowEngine:
     """Unified workflow engine consumed by CLI and GUI.
@@ -259,7 +263,10 @@ class WorkflowEngine:
         disclosure = getattr(_session, "disclosure", None)
         disclosed = getattr(disclosure, "tables", None) if disclosure is not None else None
         if disclosed:
-            result.disclosed_tables = sorted(disclosed.keys())
+            # Insertion order keeps the most-recently disclosed; cap so a very long
+            # session's cumulative table set can't grow the stored turn unbounded.
+            keys = list(disclosed.keys())[-_MAX_DISCLOSED_TABLES:]
+            result.disclosed_tables = sorted(keys)
         else:
             result.disclosed_tables = sorted({str(k) for k in (run_state.schemas or {}).keys()})
         # Carry verified facts + excluded paths forward so a later turn keeps them

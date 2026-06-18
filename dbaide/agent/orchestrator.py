@@ -126,6 +126,10 @@ class AskOrchestrator:
         # memory so they survive even after the originating turn is compressed —
         # they are re-injected into the turn prompt (same rationale as criteria).
         self._seed_session_memory()
+        # Rehydrate columns for earlier-turn tables from the OFFLINE asset cache
+        # (no DB round-trip) so generate_sql finds them without re-describing —
+        # keeps run_state.schemas (SQL writer) in sync with the disclosure gate.
+        self._rehydrate_run_state_schemas()
 
     def run(
         self,
@@ -500,26 +504,51 @@ class AskOrchestrator:
     def _new_disclosures(self, before: list[str]) -> list[str]:
         return self.session.disclosure.events[len(before):]
 
+    def _prior_disclosed_keys(self) -> list[tuple[str, str]]:
+        """(database, table) pairs disclosed in earlier turns. The most recent
+        completed turn's disclosed_tables is the cumulative session set, so we read
+        only it (O(tables), not O(turns*tables))."""
+        if not self.session_turns:
+            return []
+        last = self.session_turns[-1]
+        out: list[tuple[str, str]] = []
+        for key in (last.get("disclosed_tables") or []):
+            key = str(key).strip()
+            if not key:
+                continue
+            db, _sep, table = key.rpartition(".")
+            out.append((db, table or key))
+        return out
+
     def _seed_session_disclosure(self) -> None:
         """Re-disclose tables surfaced in earlier turns of this chat session into
-        the live DisclosureContext. Cheap (in-memory records, no DB round-trips):
-        the schema guard only needs the table to be known, and the agent already
-        carries column detail in the conversation. Idempotent across sub-intents."""
-        if not self.session_turns:
-            return
-        dc = self.session.disclosure
-        items: list[tuple] = []
-        for turn in self.session_turns:
-            for key in (turn.get("disclosed_tables") or []):
-                key = str(key).strip()
-                if not key:
-                    continue
-                db, _sep, table = key.rpartition(".")
-                items.append((db, table or key))
+        the live DisclosureContext (the schema guard's gate). Cheap (in-memory),
+        idempotent across sub-intents."""
+        items = self._prior_disclosed_keys()
         if items:
+            dc = self.session.disclosure
             if not dc.instance:
                 dc.set_instance(self.instance)
             dc.redisclose(items, source="prior turns")
+
+    def _rehydrate_run_state_schemas(self) -> None:
+        """Populate run_state.schemas with columns for earlier-turn tables from the
+        offline AssetStore (no DB round-trip), so generate_sql / the SQL writer
+        find them via find_schema_columns instead of triggering a re-describe."""
+        for db, table in self._prior_disclosed_keys():
+            sk = self.run_state.schema_key(db, table)
+            if sk in self.run_state.schemas:
+                continue
+            try:
+                got = self.schema.columns_from_assets(table, db)
+            except Exception:
+                got = None
+            if got is None:
+                continue
+            resolved_db, columns = got
+            rk = self.run_state.schema_key(resolved_db, table)
+            self.run_state.schemas[rk] = list(columns)
+            self.run_state.schema_db[rk] = resolved_db
 
     def _seed_session_memory(self) -> None:
         """Re-seed verified facts + excluded paths from earlier turns of this chat

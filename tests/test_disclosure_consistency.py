@@ -184,6 +184,76 @@ def test_session_turn_prompt_reinjects_facts_and_exclusions(orch):
     assert "Ruled-out paths" in prompt and "old_orders" in prompt
 
 
+def test_prior_disclosed_keys_reads_last_completed_turn_only(orch):
+    """P3: the most recent completed turn's disclosed_tables is the cumulative
+    session set, so seeding reads only it (O(tables), not O(turns*tables))."""
+    orch.session_turns = [
+        {"status": "completed", "disclosed_tables": ["main.orders"]},
+        {"status": "completed", "disclosed_tables": ["main.orders", "main.customers"]},
+    ]
+    keys = orch._prior_disclosed_keys()
+    assert sorted(keys) == [("main", "customers"), ("main", "orders")]
+
+
+def test_rehydrate_run_state_schemas_from_assets(tmp_path):
+    """P1: columns for earlier-turn tables are rehydrated into run_state.schemas
+    from the OFFLINE asset cache (no DB round-trip), so generate_sql finds them
+    via find_schema_columns instead of re-describing."""
+    from dbaide.assets import AssetBuilder, AssetStore
+
+    db = tmp_path / "app.db"
+    conn = sqlite3.connect(db)
+    conn.executescript("CREATE TABLE orders(id INTEGER PRIMARY KEY, total REAL, status TEXT);")
+    conn.commit()
+    conn.close()
+    cfg = ConnectionConfig(name="local", type="sqlite", path=str(db))
+    adapter = build_adapter(cfg)
+    store = AssetStore(tmp_path / "assets")
+    AssetBuilder(connection=cfg, adapter=adapter, store=store).build(profile_mode="none")
+
+    orch = AskOrchestrator(adapter, Session(connection=cfg), asset_store=store)
+    orch.session_turns = [{"status": "completed", "disclosed_tables": ["main.orders"]}]
+    orch._reset_loop_state("q2", "", True)  # triggers rehydrate
+
+    cols = orch.run_state.find_schema_columns("orders", "main")
+    assert cols is not None and {c.name for c in cols} == {"id", "total", "status"}
+
+
+def test_known_tables_line_in_prompt(orch):
+    """P2: the disclosure gate is echoed into the turn prompt so the model knows
+    which prior tables it may query directly."""
+    from dbaide.agent.loop import AskAgentLoop, LoopState
+
+    orch.session_turns = [{"status": "completed", "disclosed_tables": ["main.orders"]}]
+    orch._seed_session_disclosure()
+    orch._reset_loop_state("q2", "", True)
+    loop = AskAgentLoop(orch)
+    state = LoopState(question="q2", database="", execute_allowed=True, answer_language="en")
+    prompt = loop.prompts.session_turn_prompt(state, 2)
+    assert "Already-available tables" in prompt and "main.orders" in prompt
+
+
+def test_sql_writer_context_filtered_to_targets(orch):
+    """P5: the SQL-writer schema context is scoped to the generate_sql targets,
+    not every table carried across the session."""
+    from dbaide.models import ColumnInfo as _Col
+    dc = orch.session.disclosure
+    # Many carried tables in the gate, only one is the target.
+    for n in range(10):
+        dc.record_tables([TableInfo(name=f"carried{n}")], database="main")
+    dc.record_tables([TableInfo(name="orders")], database="main")
+    dc.record_columns("orders", [_Col(name="id")], database="main")
+
+    disclosed = [("main", "orders", [_Col(name="id")])]
+    target_refs = {(str(db or ""), str(t)) for db, t, _ in disclosed}
+    summary = dc.summary()
+    summary["tables"] = [
+        t for t in summary.get("tables", [])
+        if (str(t.get("database") or ""), str(t.get("name") or "")) in target_refs
+    ]
+    assert [t["name"] for t in summary["tables"]] == ["orders"]  # carried* filtered out
+
+
 def test_disclosure_is_independent_of_message_compression(orch):
     """Compression rewrites the LLM message stream only; the disclosure gate is
     runtime state on session.disclosure and must be unaffected, so SQL on an

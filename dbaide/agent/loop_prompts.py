@@ -284,6 +284,18 @@ class DecisionPromptBuilder:
                 "Ruled-out paths (already excluded earlier — do NOT retry these):\n"
                 + "\n".join(f"- {e.target}: {e.reason}" for e in excluded) + "\n\n"
             )
+        # Echo the disclosure gate into the prompt so the model's awareness matches
+        # what SchemaGuard will actually accept — these tables were disclosed in
+        # earlier turns and can be queried directly without re-discovering them.
+        known = list(getattr(self.orchestrator.session.disclosure, "tables", {}).keys())
+        known_line = ""
+        if known:
+            shown = known[:40]
+            more = f" (+{len(known) - 40} more)" if len(known) > 40 else ""
+            known_line = (
+                "Already-available tables (disclosed earlier this session — query "
+                "directly, no need to re-discover): " + ", ".join(shown) + more + "\n\n"
+            )
         timezone = str(getattr(self.orchestrator.session.connection, "session_timezone", "UTC") or "UTC")
         today = date.today().isoformat()
 
@@ -297,6 +309,7 @@ class DecisionPromptBuilder:
             f"{criteria_line}"
             f"{facts_line}"
             f"{excluded_line}"
+            f"{known_line}"
             f"{pin_line}"
         ).rstrip() + "\n"
 
