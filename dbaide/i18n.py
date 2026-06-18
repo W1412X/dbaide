@@ -956,6 +956,7 @@ _STRINGS: dict[str, dict[str, str]] = {
     "result.export_current_page": {"en": "Current page", "zh": "当前页"},
     "result.export_all_rows": {"en": "All rows (no LIMIT)", "zh": "全部数据（不限行数）"},
     "result.export_capped": {"en": "Export capped at {n} rows (table has more).", "zh": "导出上限 {n} 行（表中还有更多数据）。"},
+    "result.export_failed": {"en": "Could not write the file:\n{path}", "zh": "无法写入文件：\n{path}"},
     "result.autofit_column": {"en": "Auto-fit column", "zh": "自适应列宽"},
     "result.autofit_all": {"en": "Auto-fit all columns", "zh": "自适应所有列宽"},
     "result.showing": {

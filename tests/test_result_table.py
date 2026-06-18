@@ -95,6 +95,29 @@ def test_write_file(qapp, tmp_path):
     assert w._write_file("/nonexistent-dir-xyz/out.csv", "x") is False
 
 
+def test_save_to_file_warns_on_write_failure(qapp, monkeypatch):
+    """A failed export (write returns False) must alert the user, not fail silently."""
+    from PyQt6.QtWidgets import QFileDialog, QMessageBox
+    w = ResultTableWidget()
+    w.load(columns=["id"], rows=[{"id": 1}], row_count=1)
+    monkeypatch.setattr(QFileDialog, "getSaveFileName",
+                        staticmethod(lambda *a, **k: ("/nonexistent-dir-xyz/out.csv", "")))
+    warned = []
+    monkeypatch.setattr(QMessageBox, "warning",
+                        staticmethod(lambda *a, **k: warned.append(a)))
+    w.save_csv()
+    assert warned, "expected a warning dialog when the file write fails"
+
+    # A successful write shows no warning.
+    warned.clear()
+    import tempfile, os
+    good = os.path.join(tempfile.mkdtemp(), "ok.csv")
+    monkeypatch.setattr(QFileDialog, "getSaveFileName",
+                        staticmethod(lambda *a, **k: (good, "")))
+    w.save_csv()
+    assert not warned and os.path.exists(good)
+
+
 def test_row_number_gutter_is_offset_aware(qapp):
     w = ResultTableWidget()
     w.load(columns=["id"], rows=[{"id": 1}, {"id": 2}], row_count=200, row_offset=100)

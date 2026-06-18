@@ -265,11 +265,16 @@ class ResultTableWidget(QWidget):
         self._save_to_file(export_json(self._rows, self._columns), "json", "JSON (*.json)")
 
     def _save_to_file(self, content: str, ext: str, file_filter: str) -> None:
-        from PyQt6.QtWidgets import QFileDialog
+        from PyQt6.QtWidgets import QFileDialog, QMessageBox
         suggested = f"{self._table_name}.{ext}"
         path, _ = QFileDialog.getSaveFileName(self, self._t("result.export_title"), suggested, file_filter)
-        if path:
-            self._write_file(path, content)
+        if not path:
+            return
+        # Surface write failures (permission denied, disk full, bad path) — otherwise
+        # the user believes the export succeeded when no file was written.
+        if not self._write_file(path, content):
+            QMessageBox.warning(self, self._t("result.export_title"),
+                                self._t("result.export_failed", path=path))
 
     @staticmethod
     def _write_file(path: str, content: str) -> bool:
