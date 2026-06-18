@@ -82,7 +82,10 @@ def kind_from_type(column: ColumnInfo) -> str:
         return "temporal"
     if typ in {"int", "integer", "bigint", "smallint", "tinyint", "serial", "real", "numeric", "decimal", "float", "double", "number"}:
         return "numeric"
-    if typ in {"char", "varchar", "nchar", "nvarchar", "text", "json", "jsonb", "uuid", "blob", "clob"}:
+    # "character" / "character varying" are PostgreSQL's canonical names (via format_type)
+    # for CHAR / VARCHAR — _base_type reduces both to "character", so it must be in the
+    # text set or every Postgres CHAR/VARCHAR column is misclassified as "unknown".
+    if typ in {"char", "character", "varchar", "nchar", "nvarchar", "text", "json", "jsonb", "uuid", "blob", "clob"}:
         return "text"
     return "unknown"
 
@@ -109,7 +112,7 @@ def infer_data_kind(column: ColumnInfo, profile: ColumnProfile | None = None) ->
         and profile.distinct_count <= min(50, max(3, profile.row_count // 20))
     ):
         return "categorical"
-    if typ in {"char", "varchar", "nchar", "nvarchar", "text", "json", "jsonb", "uuid", "blob", "clob"}:
+    if typ in {"char", "character", "varchar", "nchar", "nvarchar", "text", "json", "jsonb", "uuid", "blob", "clob"}:
         return "text"
     return "unknown"
 
