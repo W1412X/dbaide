@@ -170,6 +170,12 @@ class TestTableScopeGuard:
         assert not allow.validate("SELECT * FROM 订单").ok
         assert allow.validate("SELECT * FROM 客户").ok
 
+    def test_cjk_cte_name_allowed(self):
+        """A CJK-named CTE must be recognized as a CTE, not flagged as a table."""
+        result = _scope(("main", "客户")).validate(
+            "WITH 临时 AS (SELECT * FROM 客户) SELECT * FROM 临时")
+        assert result.ok
+
     def test_cte_name_allowed(self):
         result = _scope(("main", "users")).validate(
             "WITH cte AS (SELECT * FROM users) SELECT * FROM cte")

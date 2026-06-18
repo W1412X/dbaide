@@ -88,7 +88,9 @@ def _cte_names(sql: str) -> list[str]:
         while pos < len(text) and text[pos].isspace():
             pos += 1
         if depth == 0:
-            match = re.match(r"(?:recursive\s+)?([A-Za-z_][\w$]*|`[^`]+`|\"[^\"]+\"|\[[^\]]+\])\s*(?:\([^)]*\))?\s+as\s*\(", text[pos:], re.I)
+            # [^\W\d] (Unicode letter/underscore, not a digit) so CJK-named CTEs
+            # (e.g. WITH 临时 AS (...)) are recognized and not flagged as tables.
+            match = re.match(r"(?:recursive\s+)?([^\W\d][\w$]*|`[^`]+`|\"[^\"]+\"|\[[^\]]+\])\s*(?:\([^)]*\))?\s+as\s*\(", text[pos:], re.I)
             if not match:
                 break
             names.append(_bare_identifier(match.group(1)))
