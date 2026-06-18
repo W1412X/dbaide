@@ -233,3 +233,22 @@ def test_annotate_object_tool(tmp_path):
     # note is required
     bad = registry.invoke("annotate_object", {"scope": "table", "table": "orders"}, ctx)
     assert not bad.ok
+
+
+import pytest as _pytest
+from pathlib import Path as _Path
+
+
+@_pytest.mark.parametrize("bad", ["..", ".", "../..", "a/../b", "..\\..", "..."])
+def test_annotation_instance_path_contains_traversal(tmp_path, bad):
+    # A connection instance of "." / ".." (or all-dots) must stay inside instances/
+    # so purge_instance can't rmtree the whole annotations base dir.
+    store = AnnotationStore(base_dir=tmp_path)
+    resolved = store.instance_path(bad).resolve()
+    instances = (tmp_path / "instances").resolve()
+    assert str(resolved).startswith(str(instances)), f"escaped instances/: {bad!r} -> {resolved}"
+
+
+def test_annotation_instance_path_normal_name(tmp_path):
+    store = AnnotationStore(base_dir=tmp_path)
+    assert store.instance_path("shop").relative_to(tmp_path) == _Path("instances/shop/annotations.json")

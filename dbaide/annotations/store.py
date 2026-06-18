@@ -132,7 +132,13 @@ class AnnotationStore:
             self.base_dir = Path(os.environ.get("DBAIDE_ANNOTATIONS", DEFAULT_ANNOTATION_DIR)).expanduser()
 
     def instance_path(self, instance: str) -> Path:
-        safe = str(instance or "").replace("/", "_").replace("\\", "_").strip() or "default"
+        # Keep the name a single component inside instances/. A name of "." or ".."
+        # (or all-dots) must NOT pass through: instance_path("..") would resolve to
+        # base_dir/annotations.json and purge_instance("..") would rmtree the whole
+        # base_dir (every connection's notes). Mirrors JoinCatalogStore.instance_path.
+        safe = "".join(c if c.isalnum() or c in "-_." else "_" for c in (instance or "")).strip()
+        if not safe or set(safe) <= {"."}:
+            safe = "default"
         return self.base_dir / "instances" / safe / "annotations.json"
 
     def delete_under(self, instance: str, *, database: str = "", table: str = "", column: str = "") -> int:
