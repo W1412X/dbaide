@@ -30,9 +30,11 @@ class TableScopeGuard:
     """Enforce an optional per-connection table allow/deny list. Stateless: it
     depends only on the configured scope, never on prior-turn disclosure."""
 
-    def __init__(self, *, allow: list[str] | None = None, deny: list[str] | None = None) -> None:
+    def __init__(self, *, allow: list[str] | None = None, deny: list[str] | None = None,
+                 dialect: str = "") -> None:
         self.allow = {_norm(t) for t in (allow or []) if str(t).strip()}
         self.deny = {_norm(t) for t in (deny or []) if str(t).strip()}
+        self.dialect = str(dialect or "")
 
     @property
     def active(self) -> bool:
@@ -43,7 +45,7 @@ class TableScopeGuard:
             return ValidationResult(ok=True, normalized_sql=sql)
         cte_names = {c.lower() for c in _cte_names(sql)}
         issues: list[ValidationIssue] = []
-        for ref in _table_refs(sql):
+        for ref in _table_refs(sql, self.dialect):
             low = ref.lower()
             bare = _bare_identifier(ref).lower()
             if bare in cte_names or low in cte_names:

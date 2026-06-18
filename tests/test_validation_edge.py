@@ -153,6 +153,20 @@ class TestTableScopeGuard:
         assert not result.ok
         assert any("nonexistent" in i.message for i in result.issues)
 
+    def test_mysql_backslash_escaped_string_not_phantom_extracted(self):
+        r"""On MySQL/MariaDB a "\'"-escaped quote keeps the literal open, so a
+        table-name-like word inside it must not be phantom-extracted and must not
+        trigger a false scope rejection. Generic/Postgres keep standard behavior."""
+        from dbaide.validation.sql_cleanup import table_references
+        sql = r"SELECT 1 FROM t WHERE x = 'a\' FROM secret'"
+        assert table_references(sql, "mysql") == ["t"]
+        assert table_references(sql, "") == ["t", "secret"]  # standard backslash-literal
+        # MySQL deny on 'secret' must NOT reject this query (secret is inside a string)
+        assert TableScopeGuard(deny=["secret"], dialect="mysql").validate(sql).ok
+        # ...but a genuine reference is still blocked
+        assert not TableScopeGuard(deny=["secret"], dialect="mysql").validate(
+            "SELECT * FROM secret").ok
+
     def test_cjk_table_extracted_and_scoped(self):
         """Unquoted CJK table names must be extracted (not crash) so allow/deny
         enforcement works for Chinese-named databases."""

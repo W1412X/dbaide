@@ -53,6 +53,7 @@ class ProfileTools:
         self._scope = TableScopeGuard(
             allow=list(getattr(adapter.config, "table_allow", []) or []),
             deny=list(getattr(adapter.config, "table_deny", []) or []),
+            dialect=getattr(adapter, "dialect", ""),
         )
 
     def _require_scope(self, table: str, database: str = "") -> None:

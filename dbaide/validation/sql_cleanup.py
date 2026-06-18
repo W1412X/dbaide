@@ -48,7 +48,7 @@ def strip_function_from_keywords(sql: str) -> str:
 _DOLLAR_TAG = re.compile(r"\$[A-Za-z_]*\$")
 
 
-def blank_strings_and_comments(sql: str) -> str:
+def blank_strings_and_comments(sql: str, dialect: str = "") -> str:
     """Replace comments and single-quoted/dollar-quoted string literals with
     spaces of equal length, preserving token boundaries and offsets.
 
@@ -60,6 +60,10 @@ def blank_strings_and_comments(sql: str) -> str:
     bypass). Double-quoted/backtick identifiers are KEPT (they may be quoted
     table names the scanner must see). NOT valid SQL — extraction only.
     """
+    # MySQL/MariaDB treat backslash as an escape inside '' literals, so "\'" does NOT
+    # close the string. Postgres (standard_conforming_strings) and SQLite treat it
+    # literally — keep this off for them or a real closing quote would be missed.
+    backslash_escapes = str(dialect or "").lower() in ("mysql", "mariadb")
     out: list[str] = []
     i, n = 0, len(sql)
     while i < n:
@@ -83,6 +87,8 @@ def blank_strings_and_comments(sql: str) -> str:
         if ch == "'":                                      # single-quoted literal
             j = i + 1
             while j < n:
+                if backslash_escapes and sql[j] == "\\" and j + 1 < n:
+                    j += 2; continue                       # escaped char stays inside
                 if sql[j] == "'":
                     if j + 1 < n and sql[j + 1] == "'":
                         j += 2; continue
@@ -189,15 +195,17 @@ def _split_top_level_commas(text: str) -> list[str]:
     return items
 
 
-def table_references(sql: str) -> list[str]:
+def table_references(sql: str, dialect: str = "") -> list[str]:
     """Extract referenced table names from a query (normalized, quote-stripped).
 
     Handles ``JOIN t`` and the old-style comma list ``FROM a, b, c`` (every table,
     not just the first), is paren/quote-aware (subquery derived tables are skipped —
     their inner FROM is matched separately), and blanks strings/comments so a literal
-    or comment can't smuggle or hide a reference. Order-preserving, de-duplicated.
+    or comment can't smuggle or hide a reference. ``dialect`` makes string scanning
+    backslash-aware for MySQL/MariaDB so a "\\'"-escaped quote inside a literal doesn't
+    spill string content into the scan. Order-preserving, de-duplicated.
     """
-    cleaned = strip_function_from_keywords(blank_strings_and_comments(sql))
+    cleaned = strip_function_from_keywords(blank_strings_and_comments(sql, dialect))
     refs: list[str] = []
     seen: set[str] = set()
 

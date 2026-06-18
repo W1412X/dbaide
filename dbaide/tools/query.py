@@ -35,6 +35,7 @@ class QueryTools:
         self.scope_guard = TableScopeGuard(
             allow=list(getattr(adapter.config, "table_allow", []) or []),
             deny=list(getattr(adapter.config, "table_deny", []) or []),
+            dialect=getattr(adapter, "dialect", ""),
         )
         self.timeout_seconds = timeout_seconds
         self.explain_max_rows = policy.explain_max_rows if policy else 0
