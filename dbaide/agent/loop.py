@@ -1071,11 +1071,11 @@ class AskAgentLoop:
             turn_num = self._extract_turn_number(to_compress)
 
             try:
-                json_summary = self._llm_extract_turn_json(orch, to_compress, turn_num)
+                summary = self._llm_extract_turn_summary(orch, to_compress, turn_num)
                 messages[start_idx:end_idx + 1] = [LLMMessage("user",
                     f"[Compressed turn t{turn_num} — retrieve_turn(t{turn_num}) for full details]\n"
-                    f"{json_summary}")]
-                logger.info("session_compress_turn: t%d, %d msgs → JSON", turn_num, len(to_compress))
+                    f"{summary}")]
+                logger.info("session_compress_turn: t%d, %d msgs → summary", turn_num, len(to_compress))
             except Exception as exc:
                 compress_failures += 1
                 logger.warning("session_compress_turn_failed: t%d: %s", turn_num, exc)
@@ -1085,10 +1085,17 @@ class AskAgentLoop:
                     logger.warning("session_compress_circuit_break: %d consecutive failures", compress_failures)
                     break
 
-    def _llm_extract_turn_json(
+    def _llm_extract_turn_summary(
         self, orch: AskOrchestrator, turn_msgs: list[LLMMessage], turn_num: int,
     ) -> str:
-        """Ask the LLM to extract a structured JSON record from raw turn messages."""
+        """Ask the LLM for a DENSE FREE-TEXT briefing of this turn (not strict JSON).
+
+        The summary is re-inserted into the conversation stream and read by the next
+        model call, so a free-text sectioned briefing is exactly as useful as JSON
+        for that consumer — and it removes the rigid-format burden plus the
+        json.loads parse-failure path (a free-text reply can never "fail to parse",
+        only the genuine LLM/transport error path remains, handled by the caller's
+        deterministic fallback)."""
         compress_text = "\n\n---\n\n".join(
             f"[{m.role}]\n{m.content}" for m in turn_msgs
         )
@@ -1109,44 +1116,34 @@ class AskAgentLoop:
             ))
         if extra:
             compress_text += (
-                "\n\n---\n\n[STRUCTURED CONTEXT — preserve verbatim into the "
-                "criteria / discoveries / excluded fields]\n" + "\n".join(extra)
+                "\n\n---\n\n[STRUCTURED CONTEXT — preserve these verbatim under the "
+                "matching sections]\n" + "\n".join(extra)
             )
         prompt = (
-            "Extract a structured JSON summary from this database exploration turn.\n"
-            "The JSON will REPLACE the raw messages in the conversation stream — the agent\n"
-            "must be able to continue effectively using only this record.\n\n"
-            "Output ONLY a single JSON object with these fields:\n"
-            '{\n'
-            '  "question": "the user\'s question for this turn",\n'
-            '  "tables": [{"name": "db.table", "key_columns": "col1 type, col2 type", "notes": "FK/index/enum discoveries"}],\n'
-            '  "executed_sqls": [{"sql": "full SQL text", "purpose": "what this query checked", "result": "key rows/numbers"}],\n'
-            '  "criteria": ["user-confirmed conditions/filters/business rules"],\n'
-            '  "discoveries": ["schema insights: column types, enum values, FK relationships, indexes, value distributions"],\n'
-            '  "excluded": ["approaches tried and rejected, with the reason"],\n'
-            '  "answer": "concise final answer delivered to the user"\n'
-            '}\n\n'
-            "Rules:\n"
-            "- executed_sqls: list EVERY SQL that was executed. Pair each with its result data.\n"
-            "  Preserve actual numbers, dates, row counts — follow-up turns need these to avoid re-execution.\n"
-            "- tables: include column types, FK relationships, indexes, enum values discovered.\n"
-            "- criteria: user-confirmed business conditions (e.g. 'exclude cancelled orders').\n"
-            "- discoveries: schema/data insights not obvious from table names.\n"
-            "- DISCARD: assistant decision JSON wrappers (action/tool/args/thought),\n"
-            "  validate_sql confirmations, tool call metadata, intermediate reasoning.\n"
-            "- If no value for a field, use empty string or empty array.\n\n"
+            "Compress this database-exploration turn into a DENSE briefing that REPLACES\n"
+            "the raw messages — the agent must be able to continue using only this.\n"
+            "Use these sections (omit a section if it has nothing):\n"
+            "[Question] the user's question this turn\n"
+            "[Tables] each table: name, key columns + types, FK/index/enum notes\n"
+            "[SQL] every executed SQL with its purpose and the key result rows/numbers "
+            "(preserve actual values — follow-ups need them to avoid re-running)\n"
+            "[Criteria] user-confirmed conditions/filters/business rules\n"
+            "[Discoveries] schema/data insights not obvious from table names\n"
+            "[Excluded] approaches tried and rejected, with the reason\n"
+            "[Answer] the concise final answer delivered\n\n"
+            "DISCARD: tool-call/JSON wrappers, validate_sql confirmations, metadata,\n"
+            "intermediate reasoning. Keep facts, SQL, results, schema, criteria.\n\n"
             f"--- TURN {turn_num} TO COMPRESS ---\n\n{compress_text}"
         )
         result = orch.llm.complete_text(
             [LLMMessage("system",
-                "You are a structured data extractor for a database assistant. "
-                "Output ONLY valid JSON, no markdown fences, no explanation."),
+                "You are a precise conversation compressor for a database assistant. "
+                "Output ONLY the dense briefing, no preamble."),
              LLMMessage("user", prompt)],
         )
         text = result.strip()
-        if text.startswith("```"):
-            text = text.split("\n", 1)[-1].rsplit("```", 1)[0].strip()
-        json.loads(text)
+        if not text:
+            raise ValueError("empty compression summary")
         return text
 
     def _fallback_turn_summary(
