@@ -12,7 +12,7 @@ from dbaide.agent.schema_context import disclosed_schemas_for_tables
 from dbaide.agent.join_validation import validate_join_relations
 from dbaide.joins import USER_JOIN_CONFIDENCE, catalog_record_to_relation
 from dbaide.agent.toolkit.support import (
-    _err, _normalize_tool_table, _relations_payload, _safe_float, _safe_int,
+    _err, _normalize_confidence, _normalize_tool_table, _relations_payload, _safe_float, _safe_int,
     _string_list, _targets_from_relations,
 )
 
@@ -118,7 +118,7 @@ def register(registry: ToolRegistry, orchestrator) -> None:
             "ref_column": endpoint["ref_column"],
             "join_type": str(args.get("join_type") or ""),
             "reason": str(args.get("reason") or ""),
-            "confidence": USER_JOIN_CONFIDENCE if source == "user" else _safe_float(args.get("confidence") or 0.7, 0.7),
+            "confidence": USER_JOIN_CONFIDENCE if source == "user" else _normalize_confidence(args.get("confidence")),
         }
         record = orchestrator.join_catalog.add(
             orchestrator.instance,
@@ -144,6 +144,8 @@ def register(registry: ToolRegistry, orchestrator) -> None:
             if ep_db:
                 fields["database"] = ep_db
             fields.update({key: value for key, value in endpoint.items() if value})
+        if "confidence" in fields:
+            fields["confidence"] = _normalize_confidence(fields["confidence"])
         updated = orchestrator.join_catalog.update(
             orchestrator.instance,
             join_id,

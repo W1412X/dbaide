@@ -138,3 +138,27 @@ def test_join_tools(tmp_path):
     deleted = registry.invoke("delete_join", {"id": join_id}, ctx)
     assert deleted.ok
     assert registry.invoke("list_joins", {}, ctx).data["count"] == 0
+
+
+def test_add_join_normalizes_percentage_confidence(tmp_path):
+    """An agent-supplied confidence on a 0–100 scale (e.g. 85) must be rescaled to
+    0.85, not stored raw where it would distort ranking/filtering and display."""
+    db = tmp_path / "app.db"
+    sqlite3.connect(db).close()
+    cfg = ConnectionConfig(name="local", type="sqlite", path=str(db))
+    orch = AskOrchestrator(build_adapter(cfg), Session(connection=cfg), JoinInferMockLLM(),
+                           join_catalog=JoinCatalogStore(tmp_path / "joins"))
+    registry = build_tool_registry(orch)
+    ctx = ToolContext()
+    add = registry.invoke(
+        "add_join",
+        {"table": "a", "column": "x", "ref_table": "b", "ref_column": "y",
+         "source": "agent", "confidence": 85},
+        ctx,
+    )
+    assert add.ok
+    assert add.data["join"]["confidence"] == 0.85
+    join_id = add.data["join"]["id"]
+    upd = registry.invoke("update_join", {"id": join_id, "confidence": 60}, ctx)
+    assert upd.ok
+    assert upd.data["join"]["confidence"] == 0.6

@@ -214,6 +214,16 @@ def _safe_float(value: Any, default: float) -> float:
         return default
 
 
+def _normalize_confidence(value: Any, default: float = 0.7) -> float:
+    """Coerce a confidence into a 0–1 fraction. Models often emit a 0–100 percentage
+    (e.g. 85 for 85%); left as-is it would distort confidence-based ranking/filtering
+    and display as 8500%. Treat values > 1 as percentages and clamp to [0, 1]."""
+    c = _safe_float(value, default)
+    if c > 1.0:
+        c = c / 100.0
+    return max(0.0, min(1.0, c))
+
+
 def _tables_in_sql(sql: str) -> list[str]:
     # Shared robust extractor: handles comma joins (FROM a, b), subqueries, quoted
     # names. Critically the comma-join case feeds the risk gate's table_count/
