@@ -4,6 +4,7 @@ from __future__ import annotations
 import hashlib
 import inspect
 import logging
+import re
 from typing import Any
 
 from dbaide.agent.memory import SQLArtifact, next_prefixed_id
@@ -625,19 +626,25 @@ def _sql_timeout_feedback(
 def _function_predicate_hints(sql: str) -> list[str]:
     text = " ".join(str(sql or "").split())
     hints: list[str] = []
-    if "date(convert_tz(" in text.casefold():
-        hints.append(
-            "- DATE(CONVERT_TZ(column,...)) prevents normal index range access. "
-            "Rewrite equality on a local date as a half-open UTC range on the raw timestamp, "
-            "for example delivered_at >= '<local-date 00:00 converted to UTC>' "
-            "AND delivered_at < '<next-local-date 00:00 converted to UTC>'."
-        )
-    if any(token in text.casefold() for token in ("date(", "convert_tz(", "cast(", "substr(", "substring(")):
+    if _has_function_call_near_predicate(text):
         hints.append(
             "- A function appears around a predicate expression. If it wraps a table column, "
-            "rewrite it so the column remains bare on one side of the comparison."
+            "rewrite it so the column remains bare on one side of the comparison and move "
+            "the transformation to constants, derived bounds, or a precomputed column."
         )
     return hints
+
+
+def _has_function_call_near_predicate(sql: str) -> bool:
+    text = str(sql or "")
+    if "(" not in text:
+        return False
+    lowered = text.casefold()
+    predicate_markers = (" join ", " on ", " where ", " and ", " or ", " having ")
+    if not any(marker in lowered for marker in predicate_markers):
+        return False
+    # Generic function-call shape, deliberately not tied to one SQL function.
+    return bool(re.search(r"\b[a-z_][a-z0-9_]*\s*\(", lowered))
 
 
 def _risk_confirmation_question(

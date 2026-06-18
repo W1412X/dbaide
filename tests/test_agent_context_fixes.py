@@ -993,13 +993,11 @@ def test_execute_sql_timeout_sets_optimization_feedback(tmp_path):
     orch = AskOrchestrator(build_adapter(cfg), Session(connection=cfg, timeout_seconds=12), _MockLLM())
     orch._reset_loop_state("validate delivered refunds", "main", True)
     slow_sql = (
-        "SELECT s.spu, li.sku, COUNT(*) "
-        "FROM stats_data.spu_delivered_refunds_stats_daily s "
-        "JOIN order_data.order_line_item_fulfillment f "
-        "ON DATE(CONVERT_TZ(f.delivered_at, '+00:00', '+08:00')) = s.delivered_date "
-        "JOIN order_data.order_line_item li ON f.id = li.id "
-        "WHERE s.delivered_date = '2026-06-01' "
-        "GROUP BY s.spu, li.sku LIMIT 20"
+        "SELECT a.id, COUNT(*) "
+        "FROM large_a a "
+        "JOIN large_b b ON LOWER(a.join_key) = b.join_key "
+        "WHERE CAST(a.created_at AS DATE) = '2026-06-01' "
+        "GROUP BY a.id LIMIT 20"
     )
 
     orch.query.validate_sql = lambda sql, **_kw: SimpleNamespace(ok=True, issues=[], normalized_sql=sql)
@@ -1027,7 +1025,8 @@ def test_execute_sql_timeout_sets_optimization_feedback(tmp_path):
     assert not result.ok
     assert result.error.retryable is True
     assert "query-plan problem" in orch.run_state.sql_feedback
-    assert "half-open UTC range" in orch.run_state.sql_feedback
+    assert "column remains bare" in orch.run_state.sql_feedback
+    assert "precomputed column" in orch.run_state.sql_feedback
     assert "Do not simply raise timeout" in result.error.message
 
 
