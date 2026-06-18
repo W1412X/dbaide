@@ -7,6 +7,7 @@ device-pixel-ratio so it stays sharp on HiDPI, tinted to the requested colour.
 
 from __future__ import annotations
 
+from functools import lru_cache
 from pathlib import Path
 
 from PyQt6.QtCore import QByteArray, QRectF, QSize, Qt
@@ -107,9 +108,17 @@ def _dpr() -> float:
     return 2.0  # render at ≥2× so it's crisp even off a real screen
 
 
+@lru_cache(maxsize=512)
+def _glyph_svg_bytes(name: str, color: str, width: float) -> bytes:
+    # Cache the formatted SVG BYTES (immutable, lifecycle-safe), not a QSvgRenderer:
+    # caching the QObject would dangle when the QApplication is torn down/recreated.
+    # This still skips the repeated string .format() while a fresh, valid renderer is
+    # built per call.
+    return _TEMPLATE.format(color=color, w=width, inner=_GLYPHS[name]).encode("utf-8")
+
+
 def _renderer(name: str, color: str, width: float) -> QSvgRenderer:
-    svg = _TEMPLATE.format(color=color, w=width, inner=_GLYPHS[name])
-    return QSvgRenderer(QByteArray(svg.encode("utf-8")))
+    return QSvgRenderer(QByteArray(_glyph_svg_bytes(name, color, width)))
 
 
 def svg_pixmap(name: str, *, color: str = Theme.MUTED, size: int = 18, width: float = 2.0,

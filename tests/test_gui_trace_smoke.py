@@ -891,3 +891,17 @@ def test_conversation_clear_resets_transient_state(qapp):
     assert v._clarification_bar is None
     assert v._follow_bottom is True   # re-engaged for the fresh session
     assert not v._chunk_timer.isActive()
+
+
+def test_svg_glyph_bytes_cached_renderer_fresh(qapp):
+    """The formatted SVG bytes are cached by (name, color, width) to skip re-formatting,
+    but each call gets a FRESH QSvgRenderer — caching the QObject would dangle across
+    QApplication teardown. Distinct keys stay distinct."""
+    from dbaide.desktop.components.icons import _glyph_svg_bytes, _renderer, svg_icon, _GLYPHS
+
+    name = next(iter(_GLYPHS))
+    assert _glyph_svg_bytes(name, "#ffffff", 2.0) is _glyph_svg_bytes(name, "#ffffff", 2.0)
+    assert _glyph_svg_bytes(name, "#ffffff", 2.0) != _glyph_svg_bytes(name, "#000000", 2.0)
+    # Renderers are fresh instances (not the cached-QObject pitfall).
+    assert _renderer(name, "#fff", 2.0) is not _renderer(name, "#fff", 2.0)
+    assert not svg_icon(name, color="#abcdef", size=16).isNull()
