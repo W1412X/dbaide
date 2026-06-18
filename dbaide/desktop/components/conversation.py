@@ -593,9 +593,18 @@ class _MarkdownBlock(QFrame):
         self._sync_body_height()
 
     def _can_update_in_place(self, new_segments: list[tuple[str, str, str]]) -> bool:
-        """Check if we can update existing widgets instead of rebuilding."""
-        old_kinds = [("browser" if not isinstance(w, _CodeBlock) else "code")
-                     for w in self._browsers + self._code_blocks]
+        """Check if we can update existing widgets instead of rebuilding. The existing
+        kinds must be read in DOCUMENT order (from the content layout), not as
+        ``browsers + code_blocks`` — otherwise interleaved content (text, code, text)
+        never matches the document-ordered new segments, defeating the in-place update
+        (forcing a full rebuild every streaming flush) and risking a slot mismatch."""
+        old_kinds: list[str] = []
+        for i in range(self._content_layout.count()):
+            w = self._content_layout.itemAt(i).widget()
+            if isinstance(w, _CodeBlock):
+                old_kinds.append("code")
+            elif isinstance(w, QTextBrowser):
+                old_kinds.append("browser")
         new_kinds = [("code" if k == "code" else "browser")
                      for k, p, _ in new_segments if k == "code" or p.strip()]
         return bool(old_kinds) and old_kinds == new_kinds

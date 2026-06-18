@@ -546,6 +546,34 @@ def test_markdown_code_blocks_update_during_streaming(qapp):
     assert QApplication.clipboard().text() == "print(2)"
 
 
+def test_markdown_interleaved_updates_in_place_and_renders_in_order(qapp):
+    # Interleaved text/code/text must update in place (same structure → same widgets)
+    # AND keep document order. The old browsers+code_blocks ordering broke both.
+    from dbaide.desktop.components.conversation import (
+        _MarkdownBlock, _CodeBlock, _split_fenced_code_blocks,
+    )
+
+    block = _MarkdownBlock("intro\n\n```sql\nSELECT 1\n```\n\noutro")
+    browsers_before = list(block._browsers)
+    codes_before = list(block._code_blocks)
+    # The structure is unchanged (text, code, text), so an in-place update applies.
+    assert block._can_update_in_place(
+        _split_fenced_code_blocks("intro2\n\n```sql\nSELECT 2\n```\n\noutro2")
+    )
+    block.set_markdown("intro2\n\n```sql\nSELECT 2\n```\n\noutro2")
+    # Same widget objects reused (no rebuild).
+    assert block._browsers == browsers_before and block._code_blocks == codes_before
+    # Document order in the layout is text, code, text.
+    kinds = []
+    for i in range(block._content_layout.count()):
+        w = block._content_layout.itemAt(i).widget()
+        if isinstance(w, _CodeBlock):
+            kinds.append("code")
+        elif w.__class__.__name__ == "QTextBrowser":
+            kinds.append("browser")
+    assert kinds == ["browser", "code", "browser"]
+
+
 def test_copy_answer_action_builds_menu_button(qapp):
     from PyQt6.QtWidgets import QToolButton
     from dbaide.desktop.views.ask_tab import AskTab
