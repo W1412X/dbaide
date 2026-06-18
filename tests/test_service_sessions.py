@@ -41,7 +41,8 @@ def test_load_missing_session_raises(service):
         service.dispatch("load_session", {"connection_name": "shop", "session_id": "nope"})
 
 
-def _fake_result(*, status="completed", pending="", question="q", answer="a", sql="SELECT 1"):
+def _fake_result(*, status="completed", pending="", question="q", answer="a", sql="SELECT 1",
+                 session_messages=None):
     return SimpleNamespace(
         status=SimpleNamespace(value=status),
         pending_question=pending,
@@ -51,6 +52,7 @@ def _fake_result(*, status="completed", pending="", question="q", answer="a", sq
         workflow_id="wf1",
         trace=[],
         created_at=0.0,
+        session_messages=session_messages,
     )
 
 
@@ -79,3 +81,37 @@ def test_turns_accumulate_in_same_session(service):
     sid2 = service._record_session_turn("shop", sid, _req("q2"), _fake_result(), "")
     assert sid2 == sid
     assert len(service.sessions.load("shop", sid)["turns"]) == 2
+
+
+def test_completed_turn_persists_messages_atomically(service):
+    """A completed turn writes the turn AND the LLM message stream in one go."""
+    msgs = [
+        {"role": "system", "content": "sys"},
+        {"role": "user", "content": "[turn:1:start]\nq1"},
+        {"role": "assistant", "content": "a1"},
+        {"role": "user", "content": "[turn:1:end] Answer delivered."},
+    ]
+    sid = service._record_session_turn(
+        "shop", "", _req("q1"), _fake_result(session_messages=msgs), "",
+    )
+    loaded = service.sessions.load("shop", sid)
+    assert len(loaded["turns"]) == 1
+    assert loaded["messages"] == msgs  # persisted in the same write
+
+
+def test_wait_user_does_not_persist_partial_messages(service):
+    """A clarification pause must not overwrite session.messages with a partial
+    stream — resume uses resume_state, and a clean stream keeps an abandoned
+    pause from corrupting a later fresh question."""
+    partial = [
+        {"role": "system", "content": "sys"},
+        {"role": "user", "content": "[turn:1:start]\nq1"},  # no end marker
+    ]
+    sid = service._record_session_turn(
+        "shop", "", _req(),
+        _fake_result(status="wait_user", pending="Which amount?", session_messages=partial),
+        "",
+    )
+    loaded = service.sessions.load("shop", sid)
+    assert loaded["turns"] == []
+    assert "messages" not in loaded or loaded.get("messages") is None

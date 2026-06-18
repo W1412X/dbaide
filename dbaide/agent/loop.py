@@ -912,8 +912,6 @@ class AskAgentLoop:
         turn_ranges = self._find_turn_ranges(messages)
         keep_recent = getattr(orch.session, "session_uncompressed_turns", 2)
         compressible = turn_ranges[:-keep_recent] if len(turn_ranges) > keep_recent else []
-        if not compressible:
-            return
 
         # Phase 1: compress raw turns → structured JSON (Layer 2)
         raw_turns = [r for r in compressible if not self._is_already_compressed(messages, r)]
@@ -931,6 +929,41 @@ class AskAgentLoop:
         compressed_indices = self._find_compressed_turn_indices(messages)
         if compressed_indices:
             self._demote_compressed_turns(orch, messages, compressed_indices, threshold)
+
+        # Phase 3 backstop: if STILL over threshold — e.g. nothing was compressible
+        # because every turn sits within keep_recent, or compression didn't shrink
+        # enough — hard-truncate the oldest middle messages so the stream always
+        # converges. Mirrors the per-turn path's truncation guard. Runs even when
+        # Phase 1/2 had no work to do (that gap previously left an oversized stream).
+        self._hard_truncate_session(messages, threshold)
+
+    @staticmethod
+    def _hard_truncate_session(messages: list[LLMMessage], threshold: int) -> None:
+        """Last-resort convergence guard for the session message stream: drop the
+        oldest middle messages, keeping the system prompt (index 0) and the
+        largest recent tail that fits — normally including the whole current
+        in-progress turn (only a single message larger than the budget on its own
+        would be trimmed). Dropped history stays reachable via retrieve_turn /
+        list_earlier_turns."""
+        total_tokens = sum(estimate_tokens(m.content) for m in messages)
+        if total_tokens <= threshold or len(messages) <= 3:
+            return
+        note = ("[Context note: earlier turns truncated to fit context budget. "
+                "Use retrieve_turn / list_earlier_turns for full history.]")
+        token_sizes = [estimate_tokens(m.content) for m in messages]
+        overhead = estimate_tokens(note)
+        cumulative = 0
+        first_keep = 1
+        for i in range(len(messages) - 1, 0, -1):
+            cumulative += token_sizes[i]
+            if token_sizes[0] + overhead + cumulative > threshold:
+                first_keep = i + 1
+                break
+        if first_keep > 1:
+            messages[1:first_keep] = [LLMMessage("user", note)]
+            logger.warning("session_compress_hard_truncate: dropped messages[1:%d], "
+                           "%d → %d tokens", first_keep, total_tokens,
+                           sum(estimate_tokens(m.content) for m in messages))
 
     @staticmethod
     def _is_already_compressed(messages: list[LLMMessage], turn_range: tuple[int, int]) -> bool:

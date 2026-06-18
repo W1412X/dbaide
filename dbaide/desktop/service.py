@@ -877,15 +877,10 @@ class DesktopService:
         )
         # Group the turn into a chat session (会话). A session is created lazily on
         # the first completed turn; clarification pauses (wait_user) don't persist a
-        # turn — the turn is appended once the question actually resolves.
+        # turn — the turn is appended once the question actually resolves. The LLM
+        # message stream is persisted atomically WITH the completed turn (one
+        # locked write) so an interleaved second turn cannot lose-update it.
         payload["session_id"] = self._record_session_turn(conn.name, in_session_id, request, result, database)
-        if result.session_messages is not None:
-            try:
-                self.sessions.save_messages(
-                    conn.name, payload["session_id"], result.session_messages,
-                )
-            except Exception:
-                logger.debug("failed to save session messages", exc_info=True)
         return payload
 
     def _build_request(self, payload: dict[str, Any], *, connection_name: str,
@@ -979,6 +974,10 @@ class DesktopService:
         status = result.status.value
         if status in ("wait_user",) or result.pending_question:
             # Not a completed turn yet — just ensure a session exists to anchor it.
+            # We deliberately do NOT persist the partial message stream here: the
+            # resume continues from the resume_state snapshot, not session.messages,
+            # so leaving session.messages at the last completed turn keeps the
+            # session clean if the user abandons the pause and asks a fresh question.
             if not session_id or self.sessions.load(conn_name, session_id) is None:
                 session_id = self.sessions.create(conn_name)["session_id"]
             return session_id
@@ -994,6 +993,9 @@ class DesktopService:
             # (b) the agent can carry forward pinned scope on follow-up turns.
             attachments = list(getattr(request, "ui_attachments", None) or [])
             schema_scope = getattr(request, "schema_scope", None) or {}
+            # Persist the completed turn and the LLM message stream in one locked
+            # write so a concurrent turn on the same session cannot lose-update it.
+            session_messages = getattr(result, "session_messages", None)
             self.sessions.append_turn(conn_name, session_id, make_turn(
                 question=request.question,
                 answer_markdown=result.answer_markdown or result.answer_plaintext or "",
@@ -1009,7 +1011,7 @@ class DesktopService:
                 created_at=result.created_at or None,
                 charts=list(getattr(result, "charts", []) or []),
                 executed_sqls=list(getattr(result, "executed_sqls", []) or []),
-            ))
+            ), messages=session_messages)
         except Exception:  # noqa: BLE001 — session persistence must never break a query
             logger.debug("failed to record session turn", exc_info=True)
         return session_id

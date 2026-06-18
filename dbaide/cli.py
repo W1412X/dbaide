@@ -215,7 +215,7 @@ def build_parser() -> argparse.ArgumentParser:
     m_add.add_argument("--api-key-env", default="", help="Env var containing the API key")
     m_add.add_argument("--api-key", default="", help="API key (prefer --api-key-env)")
     m_add.add_argument("--model", default="", help="Model name/ID")
-    m_add.add_argument("--timeout", type=int, default=60, help="Request timeout in seconds (1-600)")
+    m_add.add_argument("--timeout", type=lambda v: _bounded_int(v, min_val=1, max_val=600, name="timeout"), default=60, help="Request timeout in seconds (1-600)")
     m_add.add_argument("--context-length", default="32k", help="Context window size (e.g. 32k, 128k, 1m)")
     m_add.add_argument("--default", action="store_true", help="Set as the default model")
     m_del = msub.add_parser("delete", help="Delete a model config")
@@ -331,10 +331,10 @@ def build_parser() -> argparse.ArgumentParser:
     mcp.add_argument("--mode", choices=["full", "ask", "tools"], default="full",
                      help="full = ask + atomic tools (default), ask = AI pipeline only, tools = atomic tools only")
 
+    from dbaide.skill import SUPPORTED_TOOLS as _SUPPORTED_TOOLS
     setup = sub.add_parser("setup", help="Register dbaide as an MCP server in a coding tool's config")
     setup.add_argument("tool", nargs="?", default="",
-                       help="Tool name (claude, cursor, codex, trae, windsurf, opencode, "
-                            "qoder, mimocode, roo, cline, aider, augment), or omit for --all")
+                       help=f"Tool name ({', '.join(_SUPPORTED_TOOLS)}), or omit for --all")
     setup.add_argument("--mode", choices=["full", "ask", "tools"], default="full",
                        help="full = ask + atomic tools (default), "
                             "ask = AI pipeline only, tools = atomic tools only")
@@ -446,8 +446,12 @@ def dispatch(args: argparse.Namespace, cfg: ConfigManager) -> int:
                 continue
             if question.lower() in EXIT_WORDS:
                 return 0
-            response = assistant.ask(question, database=args.database, execute=True)
-            print(response.answer)
+            try:
+                _chat_turn(assistant, question, database=args.database)
+            except KeyboardInterrupt:
+                print("\n(interrupted)")
+            except Exception as exc:  # noqa: BLE001 — one bad turn must not kill the session
+                print(f"error: {exc}")
     if args.command == "inspect":
         adapter, session = build_adapter_session(cfg, args)
         schema = SchemaTools(adapter, session.disclosure)
@@ -1515,20 +1519,57 @@ def resolve_targets(cfg: ConfigManager, conn_spec: str, database_spec: str) -> l
     return targets
 
 
+def _chat_turn(assistant, question: str, *, database: str) -> None:
+    """Run one interactive chat turn, handling clarification/risk pauses by
+    prompting for a reply and resuming, until the agent produces a final answer."""
+    response = assistant.ask(question, database=database, execute=True)
+    while getattr(response, "status", "completed") == "wait_user":
+        pending = getattr(response, "pending_question", "") or response.answer or "Please clarify"
+        print(pending)
+        options = list(getattr(response, "pending_options", None) or [])
+        if options:
+            for i, opt in enumerate(options, start=1):
+                print(f"  {i}. {opt}")
+        resume_state = getattr(response, "resume_state", None)
+        if not resume_state:
+            # No way to resume — surface the answer and stop (avoid an infinite loop).
+            print(response.answer)
+            return
+        try:
+            reply = input("reply> ").strip()
+        except EOFError:
+            print()
+            return
+        if not reply or reply.lower() in EXIT_WORDS:
+            print("(cancelled)")
+            return
+        response = assistant.ask(
+            question, database=database, execute=True,
+            resume_state=resume_state, user_reply=reply,
+        )
+    print(response.answer)
+
+
 class _SingleAssistantWithDatabase:
     def __init__(self, assistant: DataAssistant, database: str) -> None:
         self.assistant = assistant
         self.database = database
 
-    def ask(self, question: str, *, database: str = "", execute: bool = True):
-        return self.assistant.ask(question, database=database or self.database, execute=execute)
+    def ask(self, question: str, *, database: str = "", execute: bool = True,
+            resume_state: dict | None = None, user_reply: str = ""):
+        return self.assistant.ask(
+            question, database=database or self.database, execute=execute,
+            resume_state=resume_state, user_reply=user_reply,
+        )
 
 
 class _MultiAssistantWithDatabase:
     def __init__(self, assistant: MultiInstanceAssistant) -> None:
         self.assistant = assistant
 
-    def ask(self, question: str, *, database: str = "", execute: bool = True):
+    def ask(self, question: str, *, database: str = "", execute: bool = True,
+            resume_state: dict | None = None, user_reply: str = ""):
+        # Cross-instance fan-out has no clarification pause; resume args are ignored.
         return self.assistant.ask(question, execute=execute)
 
 

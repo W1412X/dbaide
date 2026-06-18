@@ -750,6 +750,10 @@ class _ClarificationBar(QFrame):
             """
         )
         self._direct = allow_direct_submit
+        # Guard against a fast double-click/Enter emitting two replies before the
+        # bar is hidden — the second would be dropped by the controller and the
+        # user's input lost.
+        self._submitted_once = False
         outer = QVBoxLayout(self)
         outer.setContentsMargins(10, 8, 10, 10)
         outer.setSpacing(8)
@@ -785,7 +789,7 @@ class _ClarificationBar(QFrame):
 
     def _on_chip(self, value: str) -> None:
         if self._direct:
-            self.submitted.emit(value)
+            self._emit_once(value)
             return
         # Multiple questions: assemble the answer in the input rather than submit one.
         existing = self._input.text().strip()
@@ -795,7 +799,19 @@ class _ClarificationBar(QFrame):
     def _on_send(self) -> None:
         text = self._input.text().strip()
         if text:
-            self.submitted.emit(text)
+            self._emit_once(text)
+
+    def _emit_once(self, text: str) -> None:
+        """Emit the reply exactly once; lock the controls so a second click/Enter
+        (or option chip) can't fire a duplicate before the bar is removed."""
+        if self._submitted_once:
+            return
+        self._submitted_once = True
+        self._send.setEnabled(False)
+        self._input.setEnabled(False)
+        for row in self._option_rows:
+            row.setEnabled(False)
+        self.submitted.emit(text)
 
 
 class _ClarificationStepper(QFrame):
@@ -814,6 +830,8 @@ class _ClarificationStepper(QFrame):
         self._questions = questions
         self._idx = 0
         self._answers: list[str] = []
+        # Guard against a double-click on Finish emitting two replies.
+        self._submitted_once = False
         self.setObjectName("clarificationBar")
         self.setStyleSheet(
             f"QFrame#clarificationBar {{ background: {Theme.PANEL};"
@@ -913,6 +931,14 @@ class _ClarificationStepper(QFrame):
             self._idx += 1
             self._render()
             return
+        if self._submitted_once:
+            return
+        self._submitted_once = True
+        self._next.setEnabled(False)
+        self._back.setEnabled(False)
+        self._input.setEnabled(False)
+        for row in self._option_rows:
+            row.setEnabled(False)
         # Assemble a numbered reply mapping each question to its answer.
         lines = []
         for i, q in enumerate(self._questions):

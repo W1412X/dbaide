@@ -11,6 +11,7 @@ import pytest
 
 from dbaide.adapters import build_adapter
 from dbaide.agent.loop import AskAgentLoop
+from dbaide.agent.loop_prompts import estimate_tokens
 from dbaide.agent.orchestrator import AskOrchestrator
 from dbaide.core.result import WorkflowRequest, WorkflowResult
 from dbaide.history.session_store import ChatSessionStore
@@ -628,6 +629,41 @@ class TestThreeLayerCompression:
         assert AskAgentLoop._extract_turn_number_from_compressed(
             "[Compressed turn t5 — retrieve_turn(t5) for full details]\n{}"
         ) == 5
+
+    def test_hard_truncate_backstop_converges(self, tmp_path):
+        """When nothing is compressible (all turns within keep_recent) but the
+        stream still exceeds budget, Phase-3 hard truncation must converge."""
+        llm = _JsonExtractorLLM()
+        orch = _orch(tmp_path, llm=llm)
+        orch.model_config = _SmallContextConfig()
+        orch.session.compress_threshold = 50
+        orch.session.session_uncompressed_turns = 2
+        big = "X" * 8000  # ~2000 tokens each
+        msgs = [LLMMessage("system", "sys")]
+        for n in (1, 2):
+            msgs.append(LLMMessage("user", f"[turn:{n}:start]\n{big}"))
+            msgs.append(LLMMessage("assistant", big))
+            msgs.append(LLMMessage("user", f"[turn:{n}:end] done"))
+        msgs.append(LLMMessage("user", "[turn:3:start]\ncurrent question"))
+
+        loop = AskAgentLoop(orch)
+        budget = loop._context_budget()
+        threshold = int(budget * 50 / 100)
+        loop._maybe_compress_turns(orch, msgs)
+        after = sum(estimate_tokens(m.content) for m in msgs)
+
+        assert msgs[0].content == "sys"  # system prompt preserved
+        assert "current question" in msgs[-1].content  # current turn preserved
+        assert after <= threshold  # converged
+        assert any("truncated to fit" in m.content for m in msgs)
+
+    def test_hard_truncate_noop_under_threshold(self, tmp_path):
+        orch = _orch(tmp_path)
+        msgs = [LLMMessage("system", "sys"), LLMMessage("user", "small"),
+                LLMMessage("assistant", "ok"), LLMMessage("user", "tiny")]
+        original = list(msgs)
+        AskAgentLoop._hard_truncate_session(msgs, threshold=100000)
+        assert msgs == original  # nothing dropped
 
     def test_is_already_compressed(self):
         msgs = [

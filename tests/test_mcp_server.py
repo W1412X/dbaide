@@ -115,6 +115,55 @@ class TestInitialize:
         result = mcp.handle_ping({})
         assert result == {}
 
+    def test_initialize_echoes_supported_client_version(self):
+        """When the client requests a wire-compatible version, echo it back."""
+        result = mcp.handle_initialize({"protocolVersion": "2025-06-18"})
+        assert result["protocolVersion"] == "2025-06-18"
+
+    def test_initialize_falls_back_for_unknown_version(self):
+        """An unknown protocol version falls back to the server default."""
+        result = mcp.handle_initialize({"protocolVersion": "9999-99-99"})
+        assert result["protocolVersion"] == mcp.PROTOCOL_VERSION
+
+    def test_initialize_default_when_no_version(self):
+        result = mcp.handle_initialize({})
+        assert result["protocolVersion"] == mcp.PROTOCOL_VERSION
+
+
+class TestHandleOne:
+    """The per-message dispatch must never crash on malformed input."""
+
+    def test_request_returns_response(self):
+        resp = mcp._handle_one({"jsonrpc": "2.0", "id": 1, "method": "ping"})
+        assert resp == {"jsonrpc": "2.0", "id": 1, "result": {}}
+
+    def test_notification_returns_none(self):
+        # No id → notification → no response.
+        resp = mcp._handle_one({"jsonrpc": "2.0", "method": "ping"})
+        assert resp is None
+
+    def test_initialized_notification_is_silent(self):
+        resp = mcp._handle_one({"jsonrpc": "2.0", "method": "notifications/initialized"})
+        assert resp is None
+
+    def test_unknown_method_with_id_errors(self):
+        resp = mcp._handle_one({"jsonrpc": "2.0", "id": 5, "method": "resources/list"})
+        assert resp["error"]["code"] == -32601
+
+    def test_scalar_message_does_not_crash(self):
+        assert mcp._handle_one(123) is None
+        assert mcp._handle_one("oops") is None
+        assert mcp._handle_one(None) is None
+
+    def test_non_dict_params_tolerated(self):
+        resp = mcp._handle_one({"jsonrpc": "2.0", "id": 2, "method": "ping", "params": "bad"})
+        assert resp == {"jsonrpc": "2.0", "id": 2, "result": {}}
+
+    def test_tools_list_via_handle_one(self):
+        resp = mcp._handle_one({"jsonrpc": "2.0", "id": 3, "method": "tools/list"})
+        assert "tools" in resp["result"]
+        assert len(resp["result"]["tools"]) >= 1
+
 
 class TestSerialize:
     def test_primitives(self):

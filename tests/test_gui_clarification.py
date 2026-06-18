@@ -132,3 +132,39 @@ def test_clarification_stepper_back_preserves_answer(qapp):
     assert stepper._idx == 0 and stepper._input.text() == "UTC"  # answer restored
 
 
+def test_bar_double_submit_emits_once(qapp):
+    """A fast double-click/Enter must not emit two replies (the 2nd would be lost)."""
+    from dbaide.desktop.components.conversation import _ClarificationBar
+    bar = _ClarificationBar([], allow_direct_submit=True)
+    got = []
+    bar.submitted.connect(got.append)
+    bar._input.setText("only delivered")
+    bar._on_send()
+    bar._on_send()  # second click before the bar is removed
+    assert got == ["only delivered"]
+    assert not bar._send.isEnabled() and not bar._input.isEnabled()
+
+
+def test_bar_double_chip_emits_once(qapp):
+    from dbaide.desktop.components.conversation import _ClarificationBar
+    bar = _ClarificationBar(["UTC", "America/New_York"], allow_direct_submit=True)
+    got = []
+    bar.submitted.connect(got.append)
+    bar._on_chip("UTC")
+    bar._on_chip("America/New_York")  # second chip click — ignored
+    assert got == ["UTC"]
+
+
+def test_stepper_double_finish_emits_once(qapp):
+    from dbaide.desktop.components.conversation import _ClarificationStepper
+    stepper = _ClarificationStepper([
+        {"ask": "Which timezone?", "options": ["UTC", "Asia/Shanghai"]},
+    ])
+    got = []
+    stepper.submitted.connect(got.append)
+    stepper._answer("UTC")        # last question → finish + submit
+    stepper._on_next()            # a stray Enter after finish — ignored
+    assert got == ["1. UTC"]
+    assert not stepper._next.isEnabled()
+
+

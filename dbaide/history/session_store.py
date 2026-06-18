@@ -197,14 +197,24 @@ class ChatSessionStore:
         return session
 
     def append_turn(
-        self, connection_name: str, session_id: str, turn: dict[str, Any]
+        self, connection_name: str, session_id: str, turn: dict[str, Any],
+        *, messages: list[dict[str, str]] | None = None,
     ) -> dict[str, Any] | None:
-        """Append a turn; auto-titles an untitled session from the first question."""
+        """Append a turn; auto-titles an untitled session from the first question.
+
+        When ``messages`` is provided, the completed turn and the session's LLM
+        message stream are written in a SINGLE locked read-modify-write. Doing
+        both under one lock (rather than append_turn + a separate save_messages)
+        closes a lost-update window: the message stream is the agent's entire
+        cross-turn memory, so two interleaved writes could silently drop it.
+        """
         with self._lock:
             session = self.load(connection_name, session_id)
             if session is None:
                 return None
             session.setdefault("turns", []).append(turn)
+            if messages is not None:
+                session["messages"] = messages
             session["updated_at"] = _now()
             if not session.get("title") or session["title"] == DEFAULT_TITLE:
                 session["title"] = _title_from_question(str(turn.get("question") or ""))

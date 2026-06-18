@@ -37,6 +37,13 @@ logger = logging.getLogger("dbaide.mcp")
 JSONRPC = "2.0"
 SERVER_NAME = "dbaide"
 PROTOCOL_VERSION = "2024-11-05"
+# Protocol revisions whose tools wire-format is compatible with our handlers
+# (initialize / tools.list / tools.call / ping are unchanged across these).
+# When a client requests one of these we echo it back so the client stays on
+# its preferred revision; otherwise we fall back to PROTOCOL_VERSION.
+_SUPPORTED_PROTOCOL_VERSIONS = frozenset({
+    "2024-11-05", "2025-03-26", "2025-06-18",
+})
 
 
 def _server_version() -> str:
@@ -745,8 +752,10 @@ _active_mode: str = "full"
 
 
 def handle_initialize(params: dict) -> dict:
+    requested = str((params or {}).get("protocolVersion") or "")
+    negotiated = requested if requested in _SUPPORTED_PROTOCOL_VERSIONS else PROTOCOL_VERSION
     return {
-        "protocolVersion": PROTOCOL_VERSION,
+        "protocolVersion": negotiated,
         "capabilities": {"tools": {}},
         "serverInfo": {"name": SERVER_NAME, "version": _server_version()},
         "instructions": (
@@ -804,12 +813,44 @@ HANDLERS = {
 
 # ── Main loop ───────────────────────────────────────────────────────────────
 
-def _send(msg: dict) -> None:
+def _send(msg: dict | list) -> None:
     try:
         sys.stdout.write(json.dumps(msg) + "\n")
         sys.stdout.flush()
     except (BrokenPipeError, OSError):
         raise SystemExit(0)
+
+
+def _handle_one(msg: Any) -> dict | None:
+    """Dispatch a single JSON-RPC request object. Returns a response dict to
+    send, or None for notifications (and malformed messages that carry no id)."""
+    if not isinstance(msg, dict):
+        # Malformed request (scalar, array element that isn't an object, …).
+        # We have no id to correlate a response, so per JSON-RPC we drop it.
+        return None
+
+    method = msg.get("method", "")
+    msg_id = msg.get("id")
+    params = msg.get("params") or {}
+    if not isinstance(params, dict):
+        params = {}
+
+    handler = HANDLERS.get(method)
+    if handler is None:
+        if msg_id is not None and method not in HANDLERS:
+            return _error(msg_id, -32601, f"Method not found: {method}")
+        return None
+
+    try:
+        result = handler(params)
+        if msg_id is not None:
+            return _ok(msg_id, result)
+        return None
+    except Exception as exc:
+        logger.exception("handler error for %s", method)
+        if msg_id is not None:
+            return _error(msg_id, -32603, str(exc))
+        return None
 
 
 def serve(*, mode: str = "full") -> None:
@@ -839,24 +880,18 @@ def serve(*, mode: str = "full") -> None:
             except json.JSONDecodeError:
                 continue
 
-            method = msg.get("method", "")
-            msg_id = msg.get("id")
-            params = msg.get("params") or {}
-
-            handler = HANDLERS.get(method)
-            if handler is None:
-                if msg_id is not None and method not in HANDLERS:
-                    _send(_error(msg_id, -32601, f"Method not found: {method}"))
+            # JSON-RPC 2.0 batch: an array of request objects. Respond with an
+            # array of the non-notification results (or nothing if all were
+            # notifications). A non-dict scalar is dropped without crashing.
+            if isinstance(msg, list):
+                responses = [r for r in (_handle_one(m) for m in msg) if r is not None]
+                if responses:
+                    _send(responses)
                 continue
 
-            try:
-                result = handler(params)
-                if msg_id is not None:
-                    _send(_ok(msg_id, result))
-            except Exception as exc:
-                logger.exception("handler error for %s", method)
-                if msg_id is not None:
-                    _send(_error(msg_id, -32603, str(exc)))
+            response = _handle_one(msg)
+            if response is not None:
+                _send(response)
 
     except (KeyboardInterrupt, SystemExit):
         pass
