@@ -15,6 +15,21 @@ logger = logging.getLogger("dbaide.sql_writer")
 DisclosedSchema = tuple[str, str, list[ColumnInfo]]  # database, table, columns
 
 
+def _normalize_confidence(value: Any) -> float:
+    """Coerce an LLM confidence into a 0–1 fraction.
+
+    The prompt asks for 0.0–1.0, but models routinely return a 0–100 percentage
+    instead (e.g. ``50`` for 50%). Left unnormalized, ``50 < 0.8`` is False, so a
+    merely-medium-confidence draft would slip past the fast-execute gate as if it
+    were near-certain. Treat any value > 1 as a percentage and clamp to [0, 1];
+    ambiguous values resolve toward LOWER confidence (the safe direction — more
+    verification, never a spurious auto-execute)."""
+    c = _safe_confidence(value)
+    if c > 1.0:
+        c = c / 100.0
+    return max(0.0, min(1.0, c))
+
+
 @dataclass(slots=True)
 class SQLDraft:
     sql: str
@@ -94,7 +109,9 @@ class SQLWriter:
 
         sql = self._extract_field(payload, "sql", str)
         rationale = self._extract_field(payload, "rationale", str, default="")
-        confidence = self._extract_field(payload, "confidence", float, default=0.5)
+        confidence = _normalize_confidence(
+            self._extract_field(payload, "confidence", float, default=0.5)
+        )
 
         if not sql:
             raise ValueError("LLM returned empty SQL")

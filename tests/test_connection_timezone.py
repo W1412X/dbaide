@@ -32,6 +32,36 @@ class _PromptCaptureLLM:
         return {"sql": "SELECT 1", "rationale": "ok", "confidence": 0.9}
 
 
+def test_normalize_confidence_handles_percentage_scale():
+    from dbaide.agent.sql_writer import _normalize_confidence
+    # 0–1 fractions pass through
+    assert _normalize_confidence(0.85) == 0.85
+    assert _normalize_confidence(0.5) == 0.5
+    # 0–100 percentages are rescaled (the common LLM scale-confusion case)
+    assert _normalize_confidence(85) == 0.85
+    assert _normalize_confidence(50) == 0.5
+    assert _normalize_confidence(100) == 1.0
+    # clamped + junk-tolerant
+    assert _normalize_confidence(-3) == 0.0
+    assert _normalize_confidence("high") == 0.0
+
+
+class _ScaleConfusedLLM:
+    """Returns confidence on a 0–100 scale instead of 0–1."""
+    def complete_json(self, messages, schema_hint=""):
+        return {"sql": "SELECT 1", "rationale": "ok", "confidence": 50}
+
+
+def test_sql_writer_rescales_percentage_confidence():
+    """A medium-confidence draft expressed as 50 (%) must become 0.5 — not stay 50,
+    which would slip past the <0.8 fast-execute gate as if it were near-certain."""
+    from dbaide.agent.sql_writer import SQLWriter
+    writer = SQLWriter(_ScaleConfusedLLM(), dialect="sqlite")
+    draft = writer.write("count rows", "orders", [ColumnInfo(name="id", data_type="int")], context={})
+    assert draft.confidence == 0.5
+    assert draft.confidence < 0.8  # would gate OUT of fast-execute, as intended
+
+
 def test_sql_writer_prompt_includes_connection_session_timezone():
     llm = _PromptCaptureLLM()
     writer = SQLWriter(llm, dialect="mysql", server_version="8.0.36", session_timezone="+08:00")
