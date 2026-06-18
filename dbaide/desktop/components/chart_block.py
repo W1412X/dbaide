@@ -375,6 +375,7 @@ def build_chart_widget(spec_dict: dict[str, Any]) -> QWidget:
         scatter.setColor(_hex_color("ACCENT"))
         scatter.setMarkerSize(9.0)
         scatter.setBorderColor(_hex_color("ACCENT"))
+        x_vals: list[float] = []
         for x_raw, y_raw in zip(raw_categories, ys, strict=False):
             try:
                 x_val = float(x_raw)
@@ -382,12 +383,15 @@ def build_chart_widget(spec_dict: dict[str, Any]) -> QWidget:
                     raise ValueError
             except (TypeError, ValueError):
                 x_val = float(scatter.count())
+            x_vals.append(x_val)
             scatter.append(x_val, _safe_float(y_raw))
         chart.addSeries(scatter)
         all_y = list(ys)
         axis_x = QValueAxis()
         axis_x.setTitleText(_compact_axis_title(spec.x_label))
-        _style_value_axis(axis_x)
+        # Manually-attached axes don't auto-scale to the series — feed the actual x
+        # values so points aren't clipped by Qt's default [0,10] range.
+        _style_value_axis(axis_x, x_vals)
         axis_y = QValueAxis()
         axis_y.setTitleText(_compact_axis_title(_axis_label(spec, "left") or spec.y_label))
         _style_value_axis(axis_y, all_y, value_format=_axis_format(spec, "left"))

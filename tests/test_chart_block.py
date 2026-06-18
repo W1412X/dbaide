@@ -203,6 +203,29 @@ def test_chart_block_scatter_non_numeric_x_falls_back_to_order(qapp):
     assert block.layout().count() >= 3
 
 
+def test_chart_block_scatter_x_axis_fits_numeric_x(qapp):
+    """Scatter x-axis must span the actual x values — manually-attached axes don't
+    auto-scale, so a large x range would otherwise be clipped to Qt's default [0,10]."""
+    pytest.importorskip("PyQt6.QtCharts")
+    from PyQt6.QtCore import Qt
+    from PyQt6.QtCharts import QValueAxis
+    from dbaide.desktop.components.chart_block import build_chart_widget
+
+    spec = {
+        "chart_id": "chart:scx",
+        "chart_type": "scatter",
+        "title": "spread",
+        "categories": ["100", "2500", "5000"],   # numeric x well beyond [0,10]
+        "series": [{"name": "y", "values": [1.0, 2.0, 3.0]}],
+        "row_count": 3,
+    }
+    widget = build_chart_widget(spec)
+    chart = widget._view.chart()
+    x_axes = [ax for ax in chart.axes(Qt.Orientation.Horizontal) if isinstance(ax, QValueAxis)]
+    assert x_axes, "expected a horizontal value axis"
+    assert x_axes[0].max() >= 5000.0   # the largest x point is visible, not clipped
+
+
 def test_chart_block_empty_series_shows_no_data(qapp):
     # No QtCharts needed: the no-data path returns a QLabel before importing it.
     from PyQt6.QtWidgets import QLabel
