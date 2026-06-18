@@ -30,13 +30,22 @@ def test_export_insert_decimal_unquoted():
     assert sql == 'INSERT INTO "t" ("id", "price", "bad") VALUES (1, 19.99, NULL);'
 
 
-def test_export_insert_backslash_all_dialects():
-    """Trailing backslash must be doubled on every dialect, not just MySQL."""
-    rows = [{"path": "C:\\"}]
-    for dialect in ("generic", "mysql", "mariadb", "postgres", "sqlite"):
+def test_export_insert_backslash_is_dialect_aware():
+    """Backslash escaping must match each dialect's string rules: MySQL/MariaDB
+    double it (backslash is an escape); PostgreSQL uses an E'' string with a doubled
+    backslash (unambiguous regardless of standard_conforming_strings); SQLite and
+    generic keep a single literal backslash (doubling would corrupt the value)."""
+    rows = [{"path": "C:\\"}]  # one literal backslash
+    cases = {
+        "mysql": "'C:\\\\'",
+        "mariadb": "'C:\\\\'",
+        "postgres": "E'C:\\\\'",
+        "sqlite": "'C:\\'",
+        "generic": "'C:\\'",
+    }
+    for dialect, literal in cases.items():
         sql = export_insert(rows, ["path"], table="t", dialect=dialect)
-        assert "C:\\\\" in sql, f"backslash not doubled for dialect={dialect}"
-        assert sql.endswith(");"), f"trailing quote broken for dialect={dialect}"
+        assert sql.endswith(literal + ");"), f"{dialect}: {sql!r} (want …{literal});)"
 
 
 def test_export_csv_null_vs_empty():

@@ -33,10 +33,19 @@ def _sql_literal(value: Any, *, dialect: str = "generic") -> str:
             return "NULL"
         return str(value)
     s = str(value).replace("'", "''")
-    # A trailing backslash would escape the closing quote on any dialect.
-    # MySQL/MariaDB also interpret \n, \t etc. inside literals, so doubling
-    # is required there; for others it's still necessary to avoid broken SQL.
-    s = s.replace("\\", "\\\\")
+    # Backslash handling is dialect-specific:
+    # - MySQL/MariaDB treat backslash as an escape inside '' literals, so a literal
+    #   backslash MUST be doubled (and a trailing backslash would otherwise escape the
+    #   closing quote).
+    # - PostgreSQL with standard_conforming_strings (the default) and SQLite treat
+    #   backslash LITERALLY, so doubling there would corrupt the value (one → two). For
+    #   Postgres we emit an E'' escape string when a backslash is present so the literal
+    #   is unambiguous regardless of standard_conforming_strings.
+    # - Other/generic dialects: standard SQL, backslash is literal.
+    if dialect in ("mysql", "mariadb"):
+        return "'" + s.replace("\\", "\\\\") + "'"
+    if dialect in ("postgres", "postgresql") and "\\" in s:
+        return "E'" + s.replace("\\", "\\\\") + "'"
     return "'" + s + "'"
 
 
