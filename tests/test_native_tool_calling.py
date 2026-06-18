@@ -148,6 +148,26 @@ def test_native_decide_parallel_tool_calls(tmp_path):
     assert [c["tool"] for c in decision["calls"]] == ["describe_table", "list_tables"]
 
 
+def test_native_decide_captures_reasoning_content_as_thought(tmp_path):
+    # Providers often return reasoning in `content` alongside the tool call;
+    # it must survive as the decision's thought (trace + thought_trace parity).
+    orch = _orch(tmp_path)
+    orch.llm = _ToolCallLLM([{"content": "  Need the row count first.  ", "tool_calls": [
+        {"name": "execute_sql", "arguments": {"sql": "SELECT COUNT(*) FROM orders"}}]}])
+    loop = AskAgentLoop(orch)
+    decision = loop._native_decide([LLMMessage("user", "q")])
+    assert decision["thought"] == "Need the row count first."
+
+    # ...and for parallel calls too.
+    orch.llm = _ToolCallLLM([{"content": "Check both tables.", "tool_calls": [
+        {"name": "describe_table", "arguments": {"table": "orders"}},
+        {"name": "list_tables", "arguments": {}}]}])
+    loop = AskAgentLoop(orch)
+    decision = loop._native_decide([LLMMessage("user", "q")])
+    assert decision["action"] == "call_tools"
+    assert decision["thought"] == "Check both tables."
+
+
 def test_native_decide_content_is_finish(tmp_path):
     orch = _orch(tmp_path)
     orch.llm = _ToolCallLLM([{"content": "final answer", "tool_calls": []}])

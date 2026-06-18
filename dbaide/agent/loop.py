@@ -713,9 +713,14 @@ class AskAgentLoop:
             ]
             if not calls:
                 return None  # model named only unknown tools → let JSON protocol retry
+            # Many providers return the model's reasoning in `content` alongside the
+            # tool call. Keep it as the decision's thought so the native path has the
+            # same trace/thought_trace fidelity as the JSON protocol (which carries a
+            # "thought" field) instead of always showing a blank "Agent decision".
+            thought = (content or "").strip()
             if len(calls) == 1:
-                return {"action": "call_tool", "tool": calls[0]["tool"], "args": calls[0]["args"], "thought": ""}
-            return {"action": "call_tools", "calls": calls, "thought": ""}
+                return {"action": "call_tool", "tool": calls[0]["tool"], "args": calls[0]["args"], "thought": thought}
+            return {"action": "call_tools", "calls": calls, "thought": thought}
         if content and content.strip():
             # No tool call + content = the model is done → finish. Emit as one chunk
             # so the UI still receives the answer when streaming is on.
