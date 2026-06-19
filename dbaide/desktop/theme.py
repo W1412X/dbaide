@@ -205,8 +205,8 @@ def app_style() -> str:
         color: {T.TEXT};
         border: 1px solid {T.BORDER};
         border-radius: 8px;
-        min-height: 26px;
-        max-height: 26px;
+        min-height: 28px;
+        max-height: 28px;
         selection-background-color: {T.PANEL_3};
     """
 
@@ -237,43 +237,51 @@ QLabel[muted="true"] {{
     padding-left: 2px;
 }}
 QPushButton {{
-    background: transparent;
-    color: {T.TEXT_2};
-    border: 1px solid transparent;
+    background: {T.PANEL};
+    color: {T.TEXT};
+    border: 1px solid {T.BORDER};
     border-radius: 7px;
-    padding: 0px 10px;
-    min-height: 26px;
-    max-height: 26px;
+    padding: 0px 12px;
+    min-height: 28px;
+    max-height: 28px;
 }}
 QPushButton:hover {{
     background: {T.PANEL_2};
     color: {T.TEXT};
+    border-color: {T.MUTED_2};
 }}
 QPushButton:pressed {{
     background: {T.PANEL_3};
+    border-color: {T.MUTED};
 }}
 QPushButton:disabled {{
     color: {T.MUTED_2};
-    background: transparent;
+    background: {T.PANEL_2};
+    border-color: {T.BORDER_SOFT};
 }}
 QPushButton[primary="true"] {{
-    background: transparent;
-    color: {T.ACCENT};
-    border: 1px solid transparent;
+    background: {T.ACCENT};
+    color: {T.ACCENT_TEXT};
+    border: 1px solid {T.ACCENT};
     font-weight: 600;
-    padding: 0px 10px;
-    min-height: 26px;
-    max-height: 26px;
+    padding: 0px 12px;
+    min-height: 28px;
+    max-height: 28px;
 }}
 QPushButton[primary="true"]:hover {{
-    background: {T.PANEL_2};
-    border: 1px solid transparent;
-    color: {T.ACCENT_HOVER};
+    background: {T.ACCENT_HOVER};
+    border-color: {T.ACCENT_HOVER};
+    color: {T.ACCENT_TEXT};
+}}
+QPushButton[primary="true"]:pressed {{
+    background: {T.FOCUS};
+    border-color: {T.FOCUS};
+    color: {T.ACCENT_TEXT};
 }}
 QPushButton[primary="true"]:disabled {{
-    background: transparent;
+    background: {T.PANEL_2};
+    border-color: {T.BORDER_SOFT};
     color: {T.MUTED_2};
-    border: 1px solid transparent;
 }}
 QPushButton[danger="true"] {{
     color: {T.RED};
@@ -470,15 +478,23 @@ QHeaderView::section {{
     padding: 5px 10px;
     font-weight: 600;
 }}
-QSplitter::handle {{
-    background: {T.BORDER_SOFT};
-    width: 1px;
+QSplitter::handle:horizontal {{
+    background: transparent;
+    border-left: 1px solid {T.BORDER_SOFT};
+    border-right: 1px solid transparent;
+    margin: 0 1px;
 }}
-QSplitter::handle:hover {{
-    background: {T.BORDER};
+QSplitter::handle:horizontal:hover {{
+    border-left: 1px solid {T.ACCENT};
 }}
-QSplitter::handle:pressed {{
-    background: {T.ACCENT};
+QSplitter::handle:vertical {{
+    background: transparent;
+    border-top: 1px solid {T.BORDER_SOFT};
+    border-bottom: 1px solid transparent;
+    margin: 1px 0;
+}}
+QSplitter::handle:vertical:hover {{
+    border-top: 1px solid {T.ACCENT};
 }}
 QTreeWidget::item, QListWidget::item {{
     padding: 3px 6px;
@@ -552,8 +568,8 @@ QToolButton {{
     border: 1px solid transparent;
     border-radius: 7px;
     padding: 0px 10px;
-    min-height: 26px;
-    max-height: 26px;
+    min-height: 28px;
+    max-height: 28px;
 }}
 QToolButton:hover {{
     background: {T.PANEL_2};
@@ -569,7 +585,7 @@ QTabBar[segmented="true"]::tab {{
     border: 1px solid {T.BORDER_SOFT};
     margin-right: 0;
     min-width: 68px;
-    max-height: 26px;
+    max-height: 28px;
 }}
 QTabBar[segmented="true"]::tab:selected {{
     background: {T.PANEL_3};
@@ -666,11 +682,12 @@ QStatusBar {{
 }}
 /* Tooltip -- the native one is a light box that clashes with the chrome. */
 QToolTip {{
-    background: {T.PANEL_3};
-    color: {T.TEXT};
-    border: 1px solid {T.BORDER};
+    background: {T.SURFACE};
+    color: {T.TEXT_2};
+    border: 1px solid {T.BORDER_SOFT};
     border-radius: 6px;
-    padding: 4px 8px;
+    padding: 3px 7px;
+    font-size: 11px;
 }}
 /* Themed checkboxes / radios -- without this they fall back to the native platform
    control, which clashes with the dark chrome. Checked = filled accent. */

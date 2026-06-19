@@ -25,7 +25,7 @@ class ModeSwitch(QWidget):
         super().__init__(parent)
         self.setObjectName("modeSwitch")
         self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
-        self.setFixedHeight(30)
+        self.setFixedHeight(28)
         self._buttons: list[QToolButton] = []
         self._current = -1
         row = QHBoxLayout(self)
@@ -43,7 +43,7 @@ class ModeSwitch(QWidget):
         btn.setIcon(icon)
         btn.setIconSize(QSize(14, 14))
         btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        btn.setFixedHeight(26)
+        btn.setFixedHeight(28)
         configure_chrome_button(btn)
         label = label_for_chrome_button(text, icon_only=not bool(text))
         if label:
@@ -51,7 +51,7 @@ class ModeSwitch(QWidget):
             btn.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextBesideIcon)
         else:
             btn.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonIconOnly)
-        if text:
+        if text and not label:
             btn.setToolTip(text)
         btn.clicked.connect(lambda _checked=False, i=index: self.setCurrentIndex(i))
         self._buttons.append(btn)

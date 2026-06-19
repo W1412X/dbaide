@@ -80,15 +80,14 @@ class _SessionRow(QWidget):
     def __init__(self, title: str, subtitle: str, parent=None) -> None:
         super().__init__(parent)
         self.setStyleSheet("background: transparent;")
-        self.setToolTip(title)  # full title on hover, since it's elided
         layout = QVBoxLayout(self)
         layout.setContentsMargins(6, 7, 6, 7)
         layout.setSpacing(4)  # breathing room between the title and the meta line
-        self._full_title = title
+        self._full_title = ""
         title_row = QHBoxLayout()
         title_row.setContentsMargins(0, 0, 0, 0)
         title_row.setSpacing(6)
-        self._title = QLabel(title)
+        self._title = QLabel("")
         self._title.setFont(_TITLE_FONT)
         self._title.setStyleSheet(
             f"color: {Theme.TEXT}; background: transparent;"
@@ -106,12 +105,19 @@ class _SessionRow(QWidget):
         self._spinner.hide()
         title_row.addWidget(self._spinner, 0, Qt.AlignmentFlag.AlignVCenter)
         layout.addLayout(title_row)
-        sub = QLabel(subtitle)
-        sub.setFont(_SUB_FONT)
-        sub.setStyleSheet(
+        self._subtitle = QLabel("")
+        self._subtitle.setFont(_SUB_FONT)
+        self._subtitle.setStyleSheet(
             f"color: {Theme.MUTED}; background: transparent; font-size: {_SUB_PX}px;"
         )
-        layout.addWidget(sub)
+        layout.addWidget(self._subtitle)
+        self.set_content(title, subtitle)
+
+    def set_content(self, title: str, subtitle: str) -> None:
+        self._full_title = str(title or "")
+        self.setToolTip(self._full_title)  # full title on hover, since it's elided
+        self._subtitle.setText(str(subtitle or ""))
+        self._elide()
 
     def set_running(self, running: bool, *, angle: float = 0.0) -> None:
         was = self._spinner.isVisible()
@@ -244,12 +250,9 @@ class SessionList(QWidget):
         self.list.setItemWidget(item, row)
 
     def _render(self) -> None:
-        self.list.clear()
-        # Running unsaved chats first (most relevant, can be switched back to).
-        for p in self._pending:
-            self._add_row(str(p.get("key") or ""), str(p.get("title") or t("session.new")),
-                          t("session.running"))
-        if not self._pending and not self._sessions:
+        desired = self._desired_rows()
+        if not desired:
+            self.list.clear()
             item = QListWidgetItem(t("session.empty"))
             item.setFlags(Qt.ItemFlag.NoItemFlags)
             from PyQt6.QtGui import QColor
@@ -257,6 +260,63 @@ class SessionList(QWidget):
             self.list.addItem(item)
             self._apply_running()
             return
+
+        existing: dict[str, tuple[QListWidgetItem, _SessionRow]] = {}
+        for index in range(self.list.count()):
+            item = self.list.item(index)
+            if item is None:
+                continue
+            key = str(item.data(_ID_ROLE) or "")
+            row = self.list.itemWidget(item)
+            if key and isinstance(row, _SessionRow):
+                existing[key] = (item, row)
+
+        if len(existing) != self.list.count():
+            self.list.clear()
+            existing.clear()
+
+        desired_keys = {row["key"] for row in desired}
+        for key, (item, _row) in list(existing.items()):
+            if key in desired_keys:
+                continue
+            row_index = self.list.row(item)
+            removed = self.list.takeItem(row_index)
+            del removed
+            existing.pop(key, None)
+
+        for index, spec in enumerate(desired):
+            key = spec["key"]
+            pair = existing.get(key)
+            if pair is None:
+                item = QListWidgetItem()
+                item.setData(_ID_ROLE, key)
+                row = _SessionRow(spec["title"], spec["subtitle"])
+                item.setSizeHint(QSize(0, max(_SessionRow.height_for(spec["title"]), row.sizeHint().height() + 4)))
+                self.list.insertItem(index, item)
+                self.list.setItemWidget(item, row)
+                existing[key] = (item, row)
+                continue
+            item, row = pair
+            row.set_content(spec["title"], spec["subtitle"])
+            item.setData(_ID_ROLE, key)
+            item.setSizeHint(QSize(0, max(_SessionRow.height_for(spec["title"]), row.sizeHint().height() + 4)))
+            current_index = self.list.row(item)
+            if current_index != index:
+                moved = self.list.takeItem(current_index)
+                self.list.insertItem(index, moved)
+                self.list.setItemWidget(moved, row)
+
+        self._apply_running()
+        self.set_current(self._current)
+
+    def _desired_rows(self) -> list[dict[str, str]]:
+        rows: list[dict[str, str]] = []
+        for p in self._pending:
+            rows.append({
+                "key": str(p.get("key") or ""),
+                "title": str(p.get("title") or t("session.new")),
+                "subtitle": t("session.running"),
+            })
         from dbaide.history.session_store import DEFAULT_TITLE
         for s in self._sessions:
             sid = str(s.get("session_id") or "")
@@ -268,9 +328,8 @@ class SessionList(QWidget):
             bits = [t("session.turns_one") if n == 1 else t("session.turns_many", n=n)]
             if when:
                 bits.append(when)
-            self._add_row(sid, title, " · ".join(bits))
-        self._apply_running()  # restore spinners after a rebuild
-        self.set_current(self._current)
+            rows.append({"key": sid, "title": title, "subtitle": " · ".join(bits)})
+        return rows
 
     def resizeEvent(self, event) -> None:  # noqa: N802
         # Row heights are single-line (width-independent) now; just keep selection.

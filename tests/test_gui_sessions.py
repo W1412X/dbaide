@@ -109,6 +109,27 @@ def test_load_session_replaces_previous(qapp):
     qapp.processEvents()
 
 
+def test_session_list_reuses_existing_rows_for_same_session_ids(qapp):
+    from dbaide.desktop.components.session_list import SessionList
+
+    panel = SessionList()
+    panel.load([
+        {"session_id": "s1", "title": "Alpha", "turn_count": 1, "updated_at": 1},
+        {"session_id": "s2", "title": "Beta", "turn_count": 2, "updated_at": 2},
+    ])
+    item = panel.list.item(0)
+    row = panel.list.itemWidget(item)
+    assert row is not None
+
+    panel.load([
+        {"session_id": "s1", "title": "Alpha renamed", "turn_count": 3, "updated_at": 3},
+        {"session_id": "s2", "title": "Beta", "turn_count": 2, "updated_at": 2},
+    ])
+    item2 = panel.list.item(0)
+    row2 = panel.list.itemWidget(item2)
+    assert row2 is row
+
+
 def _bar_chart(cid: str = "chart:1") -> dict:
     return {
         "chart_id": cid,

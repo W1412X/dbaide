@@ -7,7 +7,7 @@ from __future__ import annotations
 
 from PyQt6.QtWidgets import QLabel, QHBoxLayout, QPlainTextEdit, QVBoxLayout
 
-from dbaide.desktop.components.base import compact_button
+from dbaide.desktop.components.base import button_icon_color, compact_button
 from dbaide.desktop.components.icons import svg_icon
 from dbaide.desktop.components.inputs import configure_wrapped_label
 from dbaide.desktop.theme import app_style, Theme
@@ -44,7 +44,12 @@ class NoteEditorDialog(ChromeDialog):
         buttons.setContentsMargins(0, 0, 0, 0)
         buttons.addStretch(1)
         cancel_btn = compact_button(_t("btn.cancel"), icon=svg_icon("x", color=Theme.TEXT_2, size=14), width=88)
-        ok_btn = compact_button(_t("btn.save"), primary=True, icon=svg_icon("check", color=Theme.ACCENT, size=14), width=88)
+        ok_btn = compact_button(
+            _t("btn.save"),
+            primary=True,
+            icon=svg_icon("check", color=button_icon_color(primary=True), size=14),
+            width=88,
+        )
         cancel_btn.clicked.connect(self.reject)
         ok_btn.clicked.connect(self.accept)
         buttons.addWidget(cancel_btn)

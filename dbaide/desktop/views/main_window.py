@@ -441,7 +441,7 @@ class MainWindow(QMainWindow):
         body.setObjectName("mainSplitter")
         self.body_splitter = body
         body.setChildrenCollapsible(False)
-        body.setHandleWidth(1)
+        body.setHandleWidth(4)
         self.sidebar = Sidebar()
         self.sidebar.schema_preview.connect(self.preview_schema)
         self.sidebar.schema_selected.connect(self.open_schema_asset)

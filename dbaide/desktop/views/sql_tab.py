@@ -33,7 +33,7 @@ class SqlTab(QWidget):
 
         self._splitter = QSplitter(Qt.Orientation.Vertical)
         self._splitter.setChildrenCollapsible(False)
-        self._splitter.setHandleWidth(1)
+        self._splitter.setHandleWidth(4)
 
         editor_wrap = QWidget()
         editor_wrap.setObjectName("sqlEditorPane")

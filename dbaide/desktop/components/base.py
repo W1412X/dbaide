@@ -9,6 +9,16 @@ from dbaide.desktop.theme import Theme
 from dbaide.desktop.components.icons import svg_icon
 
 
+def button_icon_color(*, primary: bool = False, danger: bool = False, muted: bool = False) -> str:
+    if danger:
+        return Theme.RED
+    if primary:
+        return Theme.ACCENT_TEXT
+    if muted:
+        return Theme.MUTED
+    return Theme.TEXT_2
+
+
 def ghost_action_button(
     text: str, *, icon: QIcon | None = None, tooltip: str = "", parent=None
 ) -> QPushButton:
@@ -82,7 +92,7 @@ def _button_icon_for_text(text: str, *, primary: bool = False) -> QIcon | None:
             break
     if not icon_name:
         return None
-    color = Theme.ACCENT if primary else Theme.TEXT_2
+    color = button_icon_color(primary=primary)
     return svg_icon(icon_name, color=color, size=14)
 
 
@@ -99,7 +109,7 @@ def compact_button(
     btn = AgentButton(text, primary=primary, parent=parent)
     btn.setAutoDefault(False)
     btn.setDefault(False)
-    btn.setFixedHeight(26)
+    btn.setFixedHeight(28)
     btn.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
     lower = str(text or "").strip().lower()
     danger = any(token in lower for token in ("删除", "移除", "危险", "delete", "remove", "danger"))
@@ -117,7 +127,7 @@ def compact_button(
         btn.setFixedWidth(width)
     else:
         btn.adjustSize()
-        btn.setFixedWidth(max(btn.sizeHint().width(), 74 if text else 30))
+        btn.setFixedWidth(max(btn.sizeHint().width(), 74 if text else 28))
     return btn
 
 
@@ -159,7 +169,7 @@ class StatusBadge(Pill):
             f"<span style='color:{color}; font-size:10px;'>●</span>"
             f"&nbsp;<span style='color:{Theme.TEXT_2};'>{text}</span>"
         )
-        self.setFixedHeight(30)
+        self.setFixedHeight(28)
         self.setAlignment(Qt.AlignmentFlag.AlignVCenter)
         self.setStyleSheet(
             f"background:{Theme.PANEL_2}; border:1px solid {Theme.BORDER_SOFT};"
@@ -193,7 +203,6 @@ class AgentButton(QPushButton):
         self.setAutoDefault(False)
         self.setDefault(False)
         self.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.setToolTip(text)
 
 
 def discard_widget(widget: QWidget | None) -> None:

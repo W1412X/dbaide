@@ -203,8 +203,6 @@ class AnswerDocumentWidget(QFrame):
         self._settle_timer.start(_HEIGHT_SETTLE_MS)
 
     def _schedule_height_sync(self, *_args) -> None:
-        if not self._height_timer.isActive():
-            self._sync_height()
         self._height_timer.start()
 
     def _apply_height(self, height: int) -> None:
@@ -310,6 +308,7 @@ class AnswerDocumentBlock(QFrame):
         self._stream_height_timer.setSingleShot(True)
         self._stream_height_timer.setInterval(48)
         self._stream_height_timer.timeout.connect(self._sync_stream_height)
+        self._last_stream_height = 0
         if self._answer.strip() or self._charts:
             self._start_render(defer_show=False)
 
@@ -370,8 +369,6 @@ class AnswerDocumentBlock(QFrame):
         self.set_answer(self._answer, self._charts, force_rebuild=True)
 
     def _schedule_stream_height(self) -> None:
-        if not self._stream_height_timer.isActive():
-            self._sync_stream_height()
         self._stream_height_timer.start()
 
     def _ensure_stream_view(self) -> None:
@@ -392,16 +389,19 @@ class AnswerDocumentBlock(QFrame):
         self._content_layout.addWidget(view)
         self._stream_view = view
         self._stream_shown_len = 0
+        self._last_stream_height = 0
 
     def _teardown_stream_view(self) -> None:
         if self._stream_view is None:
             self._stream_shown_len = 0
+            self._last_stream_height = 0
             return
         self._stream_view.document().contentsChanged.disconnect(self._sync_stream_height)
         self._content_layout.removeWidget(self._stream_view)
         discard_widget(self._stream_view)
         self._stream_view = None
         self._stream_shown_len = 0
+        self._last_stream_height = 0
 
     def _sync_stream_height(self, *_args) -> None:
         view = self._stream_view
@@ -411,7 +411,11 @@ class AnswerDocumentBlock(QFrame):
         width = max(view.viewport().width(), self.width() - 32, 320)
         doc.setTextWidth(width)
         height = int(doc.size().height()) + 8
-        view.setFixedHeight(max(height, 24))
+        height = max(height, 24)
+        if abs(height - self._last_stream_height) < 2:
+            return
+        self._last_stream_height = height
+        view.setFixedHeight(height)
 
     def _teardown_rendered(self) -> None:
         if self._pending_rendered is not None:

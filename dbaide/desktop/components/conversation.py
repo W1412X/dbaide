@@ -36,16 +36,28 @@ from dbaide.agent.trace_model import (
     localized_summary_line,
     step_count_from_events,
 )
-from dbaide.desktop.components.base import clear_layout_widgets, compact_button, discard_widget
+from dbaide.desktop.components.base import (
+    button_icon_color,
+    clear_layout_widgets,
+    compact_button,
+    discard_widget,
+)
 from dbaide.desktop.conversation_state import ThinkingUiState, TurnTraceState
 from dbaide.desktop.components.icons import svg_icon
 from dbaide.desktop.components.inputs import configure_readonly_text_view, configure_wrapped_label
 from dbaide.desktop.components.menu import _style_menu
 from dbaide.desktop.components.spinner import BusyAnimator, SPINNER_SIZE, spinner_pixmap
 from dbaide.desktop.components.trace import toggle_trace_drawer, update_trace_drawer
+from dbaide.desktop.trace.helpers import follow_at_bottom as _follow_at_bottom
 from dbaide.desktop.theme import Theme
 
 from dbaide.desktop.components.markdown_webview import MarkdownWebWidget, build_markdown_widget
+
+
+_STREAM_CHUNK_INTERVAL_MS = 80
+_FOLLOW_SCROLL_INTERVAL_MS = 64
+_LAYOUT_SCROLL_INTERVAL_MS = 48
+_FOLLOW_BOTTOM_SLACK_PX = 20
 
 
 def _copy_to_clipboard(text: str) -> None:
@@ -723,8 +735,9 @@ class _MarkdownBlock(QFrame):
         self._fast_render = bool(fast_render)
         self._stream_height_timer = QTimer(self)
         self._stream_height_timer.setSingleShot(True)
-        self._stream_height_timer.setInterval(48)
+        self._stream_height_timer.setInterval(_FOLLOW_SCROLL_INTERVAL_MS)
         self._stream_height_timer.timeout.connect(self._sync_stream_height)
+        self._last_stream_height = 0
         if self._markdown.strip():
             self._start_render_markdown()
 
@@ -755,8 +768,6 @@ class _MarkdownBlock(QFrame):
         self._schedule_stream_height()
 
     def _schedule_stream_height(self) -> None:
-        if not self._stream_height_timer.isActive():
-            self._sync_stream_height()
         self._stream_height_timer.start()
 
     def _ensure_stream_view(self) -> None:
@@ -777,16 +788,19 @@ class _MarkdownBlock(QFrame):
         self._content_layout.addWidget(view)
         self._stream_view = view
         self._stream_shown_len = 0
+        self._last_stream_height = 0
 
     def _teardown_stream_view(self) -> None:
         if self._stream_view is None:
             self._stream_shown_len = 0
+            self._last_stream_height = 0
             return
         self._stream_view.document().contentsChanged.disconnect(self._sync_stream_height)
         self._content_layout.removeWidget(self._stream_view)
         discard_widget(self._stream_view)
         self._stream_view = None
         self._stream_shown_len = 0
+        self._last_stream_height = 0
 
     def _sync_stream_height(self, *_args) -> None:
         view = self._stream_view
@@ -796,7 +810,11 @@ class _MarkdownBlock(QFrame):
         width = max(view.viewport().width(), self.width() - 32, 320)
         doc.setTextWidth(width)
         height = int(doc.size().height()) + 8
-        view.setFixedHeight(max(height, 24))
+        height = max(height, 24)
+        if abs(height - self._last_stream_height) < 2:
+            return
+        self._last_stream_height = height
+        view.setFixedHeight(height)
 
     def _teardown_rendered(self) -> None:
         if self._pending_rendered is not None:
@@ -980,7 +998,7 @@ class _ClarificationBar(QFrame):
         self._input.setPlaceholderText(
             t("clarify.type_answer") if allow_direct_submit else t("clarify.type_multi")
         )
-        self._input.setFixedHeight(26)
+        self._input.setFixedHeight(28)
         self._input.returnPressed.connect(self._on_send)
         row.addWidget(self._input, 1)
         self._send = compact_button(t("composer.send"), primary=True, width=72)
@@ -1065,7 +1083,7 @@ class _ClarificationStepper(QFrame):
         self._back.clicked.connect(self._on_back)
         row.addWidget(self._back)
         self._input = QLineEdit()
-        self._input.setFixedHeight(26)
+        self._input.setFixedHeight(28)
         self._input.returnPressed.connect(self._on_next)
         row.addWidget(self._input, 1)
         self._next = compact_button("", primary=True, width=84)
@@ -1096,7 +1114,13 @@ class _ClarificationStepper(QFrame):
         self._back.setVisible(self._idx > 0)
         last = self._idx == total - 1
         self._next.setText(self._t("clarify.finish") if last else self._t("clarify.next"))
-        self._next.setIcon(svg_icon("check" if last else "chevron-right", color=Theme.ACCENT, size=14))
+        self._next.setIcon(
+            svg_icon(
+                "check" if last else "chevron-right",
+                color=button_icon_color(primary=True),
+                size=14,
+            )
+        )
         self._input.setFocus()
 
     def _record_current(self, value: str) -> None:
@@ -1402,11 +1426,11 @@ class ConversationView(QScrollArea):
         self._chunk_dirty = False
         self._chunk_timer = QTimer(self)
         self._chunk_timer.setSingleShot(True)
-        self._chunk_timer.setInterval(100)
+        self._chunk_timer.setInterval(_STREAM_CHUNK_INTERVAL_MS)
         self._chunk_timer.timeout.connect(self._flush_answer_chunk)
         self._follow_scroll_timer = QTimer(self)
         self._follow_scroll_timer.setSingleShot(True)
-        self._follow_scroll_timer.setInterval(48)
+        self._follow_scroll_timer.setInterval(_FOLLOW_SCROLL_INTERVAL_MS)
         self._follow_scroll_timer.timeout.connect(self._follow_scroll_tick)
         # Tail-follow: auto-scroll during streaming only while the user is at the
         # bottom. If they scroll up to read, stop yanking them back on every chunk.
@@ -1416,7 +1440,7 @@ class ConversationView(QScrollArea):
         self._prefer_fast_markdown = False
         self._scroll_timer = QTimer(self)
         self._scroll_timer.setSingleShot(True)
-        self._scroll_timer.setInterval(32)
+        self._scroll_timer.setInterval(_LAYOUT_SCROLL_INTERVAL_MS)
         self._scroll_timer.timeout.connect(self._scroll_bottom_tick)
 
     def begin_bulk_load(self) -> None:
@@ -1450,13 +1474,15 @@ class ConversationView(QScrollArea):
                 widget.ensure_full_render()
 
     def _schedule_scroll_bottom(self) -> None:
-        if not self._scroll_timer.isActive():
-            self._scroll_bottom_tick()
         self._scroll_timer.start()
 
     def _on_scroll_value(self, value: int) -> None:
         bar = self.verticalScrollBar()
-        self._follow_bottom = value >= bar.maximum() - 8
+        self._follow_bottom = _follow_at_bottom(
+            value,
+            bar.maximum(),
+            slack=_FOLLOW_BOTTOM_SLACK_PX,
+        )
 
     def append_answer_chunk(self, text: str) -> None:
         """Append a streamed slice of the final answer to the open turn, creating the
@@ -1486,8 +1512,6 @@ class ConversationView(QScrollArea):
 
     def _schedule_follow_scroll(self) -> None:
         """Coalesce tail-follow scrolls during streaming — one lightweight jump per burst."""
-        if not self._follow_scroll_timer.isActive():
-            self._follow_scroll_tick()
         self._follow_scroll_timer.start()
 
     def _follow_scroll_tick(self) -> None:

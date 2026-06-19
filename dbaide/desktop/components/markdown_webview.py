@@ -174,8 +174,6 @@ class MarkdownWebWidget(QFrame):
         self._settle_timer.start(_HEIGHT_SETTLE_MS)
 
     def _schedule_height_sync(self, *_args) -> None:
-        if not self._height_timer.isActive():
-            self._sync_height()
         self._height_timer.start()
 
     def _apply_height(self, height: int) -> None:

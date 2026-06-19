@@ -64,7 +64,7 @@ class Sidebar(QWidget):
         # switch between the two; in Workbench mode Schema is forced.
         split = QSplitter(Qt.Orientation.Vertical)
         self._split = split
-        split.setHandleWidth(1)
+        split.setHandleWidth(4)
         split.setChildrenCollapsible(False)
 
         self.chats = SessionList()
@@ -79,7 +79,7 @@ class Sidebar(QWidget):
         self.search = QLineEdit()
         self.search.setPlaceholderText(t("sidebar.filter"))
         self.search.setToolTip(t("sidebar.filter.hint"))
-        self.search.setFixedHeight(32)
+        self.search.setFixedHeight(28)
         # A precisely-placed magnifier overlaid at the left (Qt's addAction leaves an
         # awkward double gap between icon and text); the text is inset to clear it.
         self.search.setStyleSheet(
@@ -90,7 +90,7 @@ class Sidebar(QWidget):
         search_icon = QLabel(self.search)
         search_icon.setPixmap(svg_pixmap("search", color=Theme.MUTED, size=15))
         search_icon.setFixedSize(15, 15)
-        search_icon.move(10, (32 - 15) // 2)
+        search_icon.move(10, (28 - 15) // 2)
         search_icon.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
         search_icon.setStyleSheet("background: transparent; border: none;")
         self.search.textChanged.connect(self._filter_tree)
@@ -460,14 +460,30 @@ class Sidebar(QWidget):
             self._node_refreshing.add(path)
         else:
             self._node_refreshing.discard(path)
-        self._sync_node_refreshing()
-
-    def _sync_node_refreshing(self) -> None:
         if self._node_refreshing:
             self._node_busy.start()
         else:
             self._node_busy.stop()
-        self._attach_row_actions()
+        self._refresh_row_action_for_path(path)
+
+    def _find_item_by_path(self, path: str) -> QTreeWidgetItem | None:
+        target = str(path or "").strip()
+        if not target:
+            return None
+        for item in self._iter_tree_items():
+            if self._item_path(item) == target:
+                return item
+        return None
+
+    def _refresh_row_action_for_path(self, path: str) -> None:
+        item = self._find_item_by_path(path)
+        if item is None:
+            return
+        data = item.data(0, Qt.ItemDataRole.UserRole)
+        if not isinstance(data, dict) or data.get("kind") not in ("database", "table", "column"):
+            return
+        from dbaide.i18n import t
+        self.tree.setItemWidget(item, 1, self._row_actions(data, t))
 
     def _tick_node_refreshing(self) -> None:
         for btn in list(self._node_busy_buttons.values()):
@@ -533,6 +549,7 @@ class Sidebar(QWidget):
                 self.tree.addTopLevelItem(db_item)
             self._attach_row_actions()
             self._restore_expanded_paths()
+            self._apply_tree_filter(self.search.text())
 
         self._with_tree_updates(build)
 
@@ -596,8 +613,52 @@ class Sidebar(QWidget):
                         self.tree.takeTopLevelItem(index)
 
             self._restore_expanded_paths()
+            self._apply_tree_filter(self.search.text())
 
         self._with_tree_updates(sync)
+
+    def _set_subtree_hidden(self, item: QTreeWidgetItem, hidden: bool) -> None:
+        item.setHidden(hidden)
+        for child_index in range(item.childCount()):
+            child = item.child(child_index)
+            if child is not None:
+                self._set_subtree_hidden(child, hidden)
+
+    def _filter_item(self, item: QTreeWidgetItem, needle: str) -> bool:
+        data = item.data(0, Qt.ItemDataRole.UserRole)
+        if not isinstance(data, dict) or not data.get("kind"):
+            item.setHidden(False)
+            return True
+        kind = str(data.get("kind") or "")
+        name = str(data.get("name") or "").lower()
+        direct = needle in name
+        if kind == "column":
+            item.setHidden(not direct)
+            return direct
+        if direct:
+            self._set_subtree_hidden(item, False)
+            item.setExpanded(True)
+            return True
+        any_child = False
+        for child_index in range(item.childCount()):
+            child = item.child(child_index)
+            if child is not None and self._filter_item(child, needle):
+                any_child = True
+        item.setHidden(not any_child)
+        if any_child:
+            item.setExpanded(True)
+        return any_child
+
+    def _apply_tree_filter(self, text: str) -> None:
+        needle = text.strip().lower()
+        if not needle:
+            for item in self._iter_tree_items():
+                item.setHidden(False)
+            return
+        for index in range(self.tree.topLevelItemCount()):
+            item = self.tree.topLevelItem(index)
+            if item is not None:
+                self._filter_item(item, needle)
 
     def _make_tree_item(
         self,
@@ -914,35 +975,7 @@ class Sidebar(QWidget):
         return btn
 
     def _filter_tree(self, text: str) -> None:
-        needle = text.strip().lower()
-        if not needle:
-            self._render(self._rows)
-            return
-        filtered: list[dict[str, Any]] = []
-        for db in self._rows:
-            # A match on the DATABASE name shows the whole database (all its tables) —
-            # otherwise filtering by a db name returned nothing unless a table/column
-            # also happened to contain the needle.
-            if needle in str(db.get("name") or "").lower():
-                filtered.append(dict(db))
-                continue
-            db_copy = dict(db)
-            db_copy["children"] = []
-            for table in db.get("children", []):
-                table_copy = dict(table)
-                table_copy["children"] = []
-                if needle in table["name"].lower():
-                    table_copy["children"] = list(table.get("children", []))
-                    db_copy["children"].append(table_copy)
-                    continue
-                for col in table.get("children", []):
-                    if needle in col["name"].lower():
-                        table_copy["children"].append(col)
-                if table_copy["children"]:
-                    db_copy["children"].append(table_copy)
-            if db_copy["children"]:
-                filtered.append(db_copy)
-        self._render(filtered)
+        self._with_tree_updates(lambda: self._apply_tree_filter(text))
 
     def _semantic_search(self) -> None:
         query = self.search.text().strip()

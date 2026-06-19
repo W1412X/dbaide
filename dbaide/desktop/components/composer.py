@@ -3,7 +3,12 @@ from __future__ import annotations
 from PyQt6.QtCore import QEvent, QSize, Qt, pyqtSignal
 from PyQt6.QtWidgets import QHBoxLayout, QLabel, QTextEdit, QVBoxLayout, QWidget
 
-from dbaide.desktop.components.base import clear_layout_widgets, compact_button, Panel
+from dbaide.desktop.components.base import (
+    button_icon_color,
+    clear_layout_widgets,
+    compact_button,
+    Panel,
+)
 from dbaide.desktop.components.icons import svg_icon
 from dbaide.desktop.components.inputs import configure_multiline_text_edit, sync_multiline_height
 from dbaide.desktop.components.menu import PillSelect
@@ -50,7 +55,6 @@ class ComposerWidget(Panel):
         # Clean, minimal placeholder (Codex-style); the keybind hint lives in the
         # tooltip rather than cluttering the field.
         self.input.setPlaceholderText(t("composer.placeholder.ready"))
-        self.input.setToolTip(t("composer.hint"))
         configure_multiline_text_edit(
             self.input,
             min_height=_INPUT_MIN,
@@ -99,7 +103,7 @@ class ComposerWidget(Panel):
         # Compact icon button (arrow-up to send; spinner while running) — smaller and
         # cleaner than a text button, matching the modern composer style.
         self.action_btn = compact_button("", primary=True, width=38)
-        self.action_btn.setIcon(svg_icon("arrow-up", color=Theme.ACCENT, size=18))
+        self.action_btn.setIcon(svg_icon("arrow-up", color=button_icon_color(primary=True), size=18))
         self.action_btn.setIconSize(QSize(18, 18))
         self.action_btn.setToolTip(t("composer.send"))
         self.action_btn.clicked.connect(self._on_action)
@@ -170,14 +174,18 @@ class ComposerWidget(Panel):
             self._busy.start()  # _on_spin paints the rotating ring icon
         else:
             self._busy.stop()
-            self.action_btn.setIcon(svg_icon("arrow-up", color=Theme.ACCENT, size=18))
+            self.action_btn.setIcon(
+                svg_icon("arrow-up", color=button_icon_color(primary=True), size=18)
+            )
             self.action_btn.setToolTip(t("composer.send"))
         self.input.setEnabled(not running)
         self.model_select.setEnabled(not running)
         self.attach_btn.setEnabled(not running)
 
     def _on_spin(self) -> None:
-        self.action_btn.setIcon(spinner_icon(self._busy.angle, color=Theme.ACCENT))
+        self.action_btn.setIcon(
+            spinner_icon(self._busy.angle, color=button_icon_color(primary=True))
+        )
 
     def set_placeholder(self, text: str) -> None:
         self.input.setPlaceholderText(text)

@@ -405,9 +405,15 @@ def test_sidebar_filter_matches_database_name():
     sidebar._rows = rows
     sidebar._filter_tree("analytics")          # db-name match → whole db kept
     tree = sidebar.tree
-    top = [tree.topLevelItem(i).data(0, Qt.ItemDataRole.UserRole) for i in range(tree.topLevelItemCount())]
-    names = [d.get("name") for d in top if isinstance(d, dict)]
-    assert "analytics" in names and "billing" not in names
+    visible = []
+    hidden = []
+    for i in range(tree.topLevelItemCount()):
+        item = tree.topLevelItem(i)
+        data = item.data(0, Qt.ItemDataRole.UserRole)
+        if not isinstance(data, dict):
+            continue
+        (hidden if item.isHidden() else visible).append(data.get("name"))
+    assert "analytics" in visible and "billing" in hidden
     # The matched database still shows its tables.
     assert tree.topLevelItem(0).childCount() == 1
 

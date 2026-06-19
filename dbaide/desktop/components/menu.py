@@ -50,7 +50,7 @@ class MenuButton(QToolButton):
             self.setIcon(icon)
             self.setIconSize(QSize(16, 16))
             self.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonIconOnly)
-            self.setFixedSize(30, 30)
+            self.setFixedSize(28, 28)
             self.setAutoRaise(True)
             if tooltip:
                 self.setToolTip(tooltip)
@@ -62,7 +62,7 @@ class MenuButton(QToolButton):
                 self.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextBesideIcon)
             else:
                 self.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextOnly)
-            self.setFixedHeight(28 if filled else 26)
+            self.setFixedHeight(28)
             if tooltip:
                 self.setToolTip(tooltip)
         self.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
@@ -188,7 +188,7 @@ class PillSelect(QToolButton):
         self.setIcon(svg_icon("chevron-down", color=Theme.TEXT_2, size=12))
         self.setIconSize(QSize(12, 12))
         self.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.setFixedHeight(26)
+        self.setFixedHeight(28)
         self.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Fixed)
         self._apply_style()
         self._sync_label()
@@ -316,4 +316,10 @@ class PillSelect(QToolButton):
         self.setFixedWidth(width)
         text = fm.elidedText(escape_mnemonic(label), Qt.TextElideMode.ElideRight, width - icon_pad - 4)
         self.setText(text)
-        self.setToolTip(self._tooltips.get(self._value, label))
+        custom_tip = self._tooltips.get(self._value, "")
+        if custom_tip:
+            self.setToolTip(custom_tip)
+        elif text != escape_mnemonic(label):
+            self.setToolTip(label)
+        else:
+            self.setToolTip("")

@@ -30,7 +30,7 @@ from dbaide.app_info import (
     app_version,
     project_links,
 )
-from dbaide.desktop.components.base import compact_button, ghost_action_button
+from dbaide.desktop.components.base import button_icon_color, compact_button, ghost_action_button
 from dbaide.desktop.components.icon_button import IconToolButton
 from dbaide.desktop.components.icons import more_icon, svg_icon
 from dbaide.desktop.components.inputs import Combo, FORM_INNER_LABEL_RULES, configure_form, form_label
@@ -79,25 +79,25 @@ class ModelForm(QWidget):
         form = QFormLayout(inner)
         configure_form(form)
         self.profile_name = QLineEdit()
-        self.profile_name.setFixedHeight(26)
+        self.profile_name.setFixedHeight(28)
         self.provider = Combo()
-        self.provider.setFixedHeight(26)
+        self.provider.setFixedHeight(28)
         self.provider.addItems(["none", "openai_compatible"])
         self.base_url = QLineEdit()
-        self.base_url.setFixedHeight(26)
+        self.base_url.setFixedHeight(28)
         self.api_key = QLineEdit()
-        self.api_key.setFixedHeight(26)
+        self.api_key.setFixedHeight(28)
         self.api_key.setPlaceholderText(_pt("settings.api_key_placeholder"))
         self.api_key.setEchoMode(QLineEdit.EchoMode.Password)
         self.model_id = QLineEdit()
-        self.model_id.setFixedHeight(26)
+        self.model_id.setFixedHeight(28)
         self.timeout = QSpinBox()
-        self.timeout.setFixedHeight(26)
+        self.timeout.setFixedHeight(28)
         self.timeout.setMaximumWidth(120)
         self.timeout.setRange(5, 600)
         self.timeout.setValue(60)
         self.context_length = QSpinBox()
-        self.context_length.setFixedHeight(26)
+        self.context_length.setFixedHeight(28)
         self.context_length.setMaximumWidth(120)
         self.context_length.setRange(4, 2048)
         self.context_length.setValue(32)
@@ -427,7 +427,7 @@ class SettingsDialog(ChromeDialog):
         form.addRow(group_header)
         conc_spin = QSpinBox()
         conc_spin.setRange(1, 16)
-        conc_spin.setFixedHeight(26)
+        conc_spin.setFixedHeight(28)
         conc_spin.setMinimumWidth(120)
         conc_spin.setMaximumWidth(150)
         conc_cur = self._resource_values.get("max_concurrent_runs")
@@ -450,7 +450,7 @@ class SettingsDialog(ChromeDialog):
             for key, lo, hi in fields:
                 spin = QSpinBox()
                 spin.setRange(lo, hi)
-                spin.setFixedHeight(26)
+                spin.setFixedHeight(28)
                 spin.setMinimumWidth(120)
                 spin.setMaximumWidth(150)
                 baseline = int(prod.get(key, lo))
@@ -554,7 +554,7 @@ class SettingsDialog(ChromeDialog):
         bar_layout.addWidget(mode_label)
 
         self._mode_combo = Combo()
-        self._mode_combo.setFixedHeight(26)
+        self._mode_combo.setFixedHeight(28)
         self._mode_combo.setFixedWidth(180)
         self._mode_labels = {
             "full": t("settings.integrations.mode.full"),
@@ -1098,13 +1098,17 @@ class SettingsDialog(ChromeDialog):
 
     def _set_connection_new_mode(self, new: bool) -> None:
         self.save_conn_btn.setText(_pt("btn.create") if new else _pt("btn.save"))
-        self.save_conn_btn.setIcon(svg_icon("check" if new else "save", color=Theme.ACCENT, size=14))
+        self.save_conn_btn.setIcon(
+            svg_icon("check" if new else "save", color=button_icon_color(primary=True), size=14)
+        )
         key = self._selected_list_key(self.conn_list)
         self.conn_more.setEnabled((not new) and bool(key))
 
     def _set_model_new_mode(self, new: bool) -> None:
         self.save_model_btn.setText(_pt("btn.create") if new else _pt("btn.save"))
-        self.save_model_btn.setIcon(svg_icon("check" if new else "save", color=Theme.ACCENT, size=14))
+        self.save_model_btn.setIcon(
+            svg_icon("check" if new else "save", color=button_icon_color(primary=True), size=14)
+        )
         key = self._selected_list_key(self.model_list)
         self.model_more.setEnabled((not new) and bool(key))
 

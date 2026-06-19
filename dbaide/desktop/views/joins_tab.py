@@ -19,7 +19,7 @@ from PyQt6.QtWidgets import (
 
 from dbaide.desktop.dialogs.message_dialog import alert as dialog_alert, confirm as dialog_confirm, warn as dialog_warn
 
-from dbaide.desktop.components.base import compact_button
+from dbaide.desktop.components.base import button_icon_color, compact_button
 from dbaide.desktop.components.icons import svg_icon
 from dbaide.desktop.components.inputs import configure_form, configure_wrapped_label, form_label
 from dbaide.desktop.theme import app_style, Theme
@@ -54,7 +54,12 @@ class JoinEditorDialog(ChromeDialog):
         actions.setContentsMargins(0, 6, 0, 0)
         actions.addStretch(1)
         cancel_btn = compact_button(t("btn.cancel"), icon=svg_icon("x", color=Theme.TEXT_2, size=14), width=88)
-        ok_btn = compact_button(t("btn.save"), primary=True, icon=svg_icon("check", color=Theme.ACCENT, size=14), width=88)
+        ok_btn = compact_button(
+            t("btn.save"),
+            primary=True,
+            icon=svg_icon("check", color=button_icon_color(primary=True), size=14),
+            width=88,
+        )
         cancel_btn.clicked.connect(self.reject)
         ok_btn.clicked.connect(self.accept)
         actions.addWidget(cancel_btn)

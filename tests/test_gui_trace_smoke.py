@@ -25,6 +25,16 @@ def qapp():
     return app
 
 
+def _first_opaque_hex(icon, size: int = 18) -> str:
+    image = icon.pixmap(size, size).toImage()
+    for y in range(image.height()):
+        for x in range(image.width()):
+            color = image.pixelColor(x, y)
+            if color.alpha() > 0:
+                return color.name()
+    return ""
+
+
 def test_trace_panel_live_then_finalize(qapp):
     from dbaide.desktop.components.trace import InlineTrace
 
@@ -288,6 +298,48 @@ def test_sidebar_build_progress_tracks_real_counts(qapp):
     sidebar.finish_build_progress("done")
     qapp.processEvents()
     assert sidebar._build_progress_count.text() == "2/2"
+
+
+def test_sidebar_filter_updates_visibility_without_rebuild(qapp, monkeypatch):
+    from dbaide.desktop.views.sidebar import Sidebar
+
+    sidebar = Sidebar()
+    rows = [{
+        "kind": "database",
+        "name": "shop",
+        "path": "shop",
+        "children": [{
+            "kind": "table",
+            "name": "orders",
+            "path": "shop.orders",
+            "column_count": 2,
+            "children": [
+                {"kind": "column", "name": "order_id", "path": "shop.orders.order_id", "data_type": "bigint"},
+                {"kind": "column", "name": "buyer_name", "path": "shop.orders.buyer_name", "data_type": "text"},
+            ],
+        }],
+    }]
+    sidebar.load_schema(rows)
+    root = sidebar.tree.topLevelItem(0)
+    table = root.child(0) if root is not None else None
+    assert root is not None and table is not None
+
+    monkeypatch.setattr(
+        sidebar,
+        "_render",
+        lambda _rows: (_ for _ in ()).throw(AssertionError("_render should not be called")),
+    )
+
+    sidebar._filter_tree("buyer")
+    assert sidebar.tree.topLevelItem(0) is root
+    assert not root.isHidden()
+    assert not table.isHidden()
+    assert table.child(0).isHidden()
+    assert not table.child(1).isHidden()
+
+    sidebar._filter_tree("")
+    assert sidebar.tree.topLevelItem(0) is root
+    assert not table.child(0).isHidden()
 
 
 def test_empty_schema_projection_uses_inline_progress(qapp):
@@ -1266,6 +1318,7 @@ def test_follow_at_bottom_tail_logic():
     # At/near the bottom → follow on.
     assert _follow_at_bottom(100, 100) is True
     assert _follow_at_bottom(95, 100) is True       # within slack
+    assert _follow_at_bottom(84, 100, slack=20) is True
     # Scrolled up beyond slack → follow paused.
     assert _follow_at_bottom(10, 100) is False
     # Nothing to scroll (maximum 0) → at bottom → follow stays on.
@@ -1378,6 +1431,44 @@ def test_code_block_update_code_syncs_language_label(qapp):
     assert block._lang_label.text() == "PYTHON"
     block.update_code("x = 1", language="")          # no language → generic label
     assert block._lang_label.text() and block._lang_label.text() != "PYTHON"
+
+
+def test_compact_controls_use_normalized_sizes(qapp):
+    from dbaide.desktop.components.icon_button import IconToolButton
+    from dbaide.desktop.components.icons import svg_icon
+    from dbaide.desktop.components.menu import MenuButton, PillSelect
+    from dbaide.desktop.components.composer import ComposerWidget
+    from dbaide.desktop.views.sidebar import Sidebar
+    from dbaide.desktop.theme import Theme
+
+    icon_btn = IconToolButton(svg_icon("copy"), "Copy")
+    assert icon_btn.size().width() == 26
+    assert icon_btn.size().height() == 26
+    assert icon_btn.iconSize().width() == 14
+    assert icon_btn.iconSize().height() == 14
+
+    menu_btn = MenuButton("More")
+    assert menu_btn.height() == 28
+
+    icon_menu = MenuButton(icon=svg_icon("more-horizontal"), icon_only=True, tooltip="More")
+    assert icon_menu.size().width() == 28
+    assert icon_menu.size().height() == 28
+
+    pill = PillSelect()
+    assert pill.height() == 28
+    pill.set_options([("GPT-5", "gpt5")])
+    pill.set_value("gpt5")
+    assert pill.toolTip() == ""
+    pill.set_options([("deepseek-r1-very-long-model-name", "deep")])
+    pill.set_value("deep")
+    assert pill.toolTip() == "deepseek-r1-very-long-model-name"
+
+    sidebar = Sidebar()
+    assert sidebar.search.height() == 28
+    assert sidebar._split.handleWidth() == 4
+
+    composer = ComposerWidget()
+    assert _first_opaque_hex(composer.action_btn.icon(), 18) == Theme.ACCENT_TEXT.lower()
 
 
 def test_normalize_selected_text_converts_both_separators():

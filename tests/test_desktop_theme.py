@@ -49,3 +49,21 @@ def test_light_borders_contrast_with_panel_fills():
         assert Theme.BORDER_SOFT in style
     finally:
         set_theme("dark")
+
+
+def test_tooltip_and_splitter_rules_follow_theme_tokens():
+    try:
+        set_theme("dark")
+        style = app_style()
+        tooltip = _rule(style, "QToolTip {", until="QCheckBox, QRadioButton {")
+        split_h = _rule(style, "QSplitter::handle:horizontal {", until="QSplitter::handle:vertical {")
+        split_v = _rule(style, "QSplitter::handle:vertical {", until="QScrollBar:vertical {")
+        assert f"background: {Theme.SURFACE};" in tooltip
+        assert f"color: {Theme.TEXT_2};" in tooltip
+        assert f"border: 1px solid {Theme.BORDER_SOFT};" in tooltip
+        assert "padding: 3px 7px;" in tooltip
+        assert "font-size: 11px;" in tooltip
+        assert "margin: 0 1px;" in split_h
+        assert "margin: 1px 0;" in split_v
+    finally:
+        set_theme("dark")
