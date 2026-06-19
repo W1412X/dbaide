@@ -87,6 +87,7 @@ hiddenimports = [
     "PyQt6.QtWebEngineCore",
     "PyQt6.QtWebEngineWidgets",
     "PyQt6.QtWebChannel",
+    "PyQt6.QtPrintSupport",  # required transitively by QtWebEngineWidgets
 ] + mistune_hidden + _webengine_hidden
 
 # Drop big Qt modules we never import, so nothing transitively drags them in.
@@ -98,7 +99,7 @@ _QT_EXCLUDES = [
     "PyQt6.QtDesigner", "PyQt6.QtUiTools", "PyQt6.QtHelp", "PyQt6.QtBluetooth",
     "PyQt6.QtNfc", "PyQt6.QtPositioning", "PyQt6.QtSensors", "PyQt6.QtSerialPort",
     "PyQt6.QtRemoteObjects", "PyQt6.QtScxml", "PyQt6.QtSpatialAudio",
-    "PyQt6.QtOpenGL", "PyQt6.QtOpenGLWidgets", "PyQt6.QtPrintSupport",
+    "PyQt6.QtOpenGL", "PyQt6.QtOpenGLWidgets",
     "PyQt6.Qt3DCore", "PyQt6.Qt3DRender", "PyQt6.Qt3DExtras",
 ]
 
