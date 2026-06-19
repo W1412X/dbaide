@@ -1,37 +1,59 @@
 import pytest
+import sys
+import types
+
+from dbaide.charts.echarts import chart_spec_to_echarts_option, render_echarts_html
 
 
 @pytest.fixture
 def qapp():
     from PyQt6.QtWidgets import QApplication
+
     app = QApplication.instance()
     if app is None:
         app = QApplication([])
     return app
 
 
-def test_chart_block_builds_qt_chart(qapp):
-    pytest.importorskip("PyQt6.QtCharts")
-    from dbaide.desktop.components.chart_block import ChartBlock
-
+def test_echarts_option_bar_keeps_zero_baseline_and_categories():
     spec = {
-        "chart_id": "chart:1",
+        "chart_id": "chart:bar",
+        "chart_type": "bar",
+        "title": "Losses",
+        "categories": ["Q1", "Q2", "Q3"],
+        "series": [{"name": "净利润", "values": [-10.0, -25.0, -5.0], "type": "bar"}],
+        "row_count": 3,
+    }
+
+    option = chart_spec_to_echarts_option(spec)
+
+    assert option["xAxis"]["data"] == ["Q1", "Q2", "Q3"]
+    assert option["yAxis"][0]["scale"] is False
+    assert option["series"][0]["type"] == "bar"
+    assert option["series"][0]["data"] == [-10.0, -25.0, -5.0]
+
+
+def test_echarts_option_horizontal_bar_uses_value_x_axis():
+    spec = {
+        "chart_id": "chart:hbar",
         "chart_type": "horizontal_bar",
         "title": "Factory power",
         "categories": ["A", "B"],
         "series": [{"name": "kW", "values": [10.0, 20.0]}],
         "row_count": 2,
     }
-    block = ChartBlock(spec)
-    assert block.layout().count() >= 2
+
+    option = chart_spec_to_echarts_option(spec)
+
+    assert option["xAxis"]["type"] == "value"
+    assert option["yAxis"]["type"] == "category"
+    assert option["yAxis"]["inverse"] is True
+    assert option["series"][0]["type"] == "bar"
 
 
-def test_chart_block_builds_combo_dual_axis_chart(qapp):
-    pytest.importorskip("PyQt6.QtCharts")
-    from dbaide.desktop.components.chart_block import ChartBlock
-
+def test_echarts_option_combo_dual_axis_splits_right_axis():
     spec = {
-        "chart_id": "chart:2",
+        "chart_id": "chart:combo",
         "chart_type": "combo",
         "title": "销量与广告投入",
         "categories": ["2026-06-01", "2026-06-02"],
@@ -45,16 +67,39 @@ def test_chart_block_builds_combo_dual_axis_chart(qapp):
         },
         "row_count": 2,
     }
-    block = ChartBlock(spec)
-    assert block.layout().count() >= 3
+
+    option = chart_spec_to_echarts_option(spec)
+
+    assert len(option["yAxis"]) == 2
+    assert option["yAxis"][1]["name"] == "广告投入"
+    assert option["yAxis"][1]["_valueFormat"] == "currency"
+    assert option["yAxis"][1]["_compactValues"] is True
+    assert [s["yAxisIndex"] for s in option["series"]] == [0, 1]
+    assert [s["type"] for s in option["series"]] == ["bar", "line"]
 
 
-def test_chart_block_builds_stacked_area_chart(qapp):
-    pytest.importorskip("PyQt6.QtCharts")
-    from dbaide.desktop.components.chart_block import ChartBlock
-
+def test_echarts_option_combo_area_series_keeps_area_style():
     spec = {
-        "chart_id": "chart:3",
+        "chart_id": "chart:combo-area",
+        "chart_type": "combo",
+        "title": "Volume",
+        "categories": ["A", "B"],
+        "series": [
+            {"name": "total", "values": [10, 20], "type": "bar"},
+            {"name": "running", "values": [8, 18], "type": "area"},
+        ],
+        "row_count": 2,
+    }
+
+    option = chart_spec_to_echarts_option(spec)
+
+    assert option["series"][1]["type"] == "line"
+    assert "areaStyle" in option["series"][1]
+
+
+def test_echarts_option_stacked_area_sets_stack_and_area_style():
+    spec = {
+        "chart_id": "chart:area",
         "chart_type": "stacked_area",
         "title": "渠道构成",
         "categories": ["Mon", "Tue", "Wed"],
@@ -64,17 +109,33 @@ def test_chart_block_builds_stacked_area_chart(qapp):
         ],
         "row_count": 3,
     }
-    block = ChartBlock(spec)
-    assert block.layout().count() >= 3
+
+    option = chart_spec_to_echarts_option(spec)
+
+    assert all(s["type"] == "line" for s in option["series"])
+    assert all(s["stack"] == "total" for s in option["series"])
+    assert all("areaStyle" in s for s in option["series"])
 
 
-def test_chart_block_tolerates_bad_or_short_values(qapp):
-    pytest.importorskip("PyQt6.QtCharts")
-    from PyQt6.QtWidgets import QLabel
-    from dbaide.desktop.components.chart_block import ChartBlock
-
+def test_echarts_option_scatter_numeric_x_keeps_actual_values():
     spec = {
-        "chart_id": "chart:4",
+        "chart_id": "chart:scatter",
+        "chart_type": "scatter",
+        "title": "spread",
+        "categories": ["100", "2500", "5000"],
+        "series": [{"name": "y", "values": [1.0, 2.0, 3.0]}],
+        "row_count": 3,
+    }
+
+    option = chart_spec_to_echarts_option(spec)
+
+    assert option["xAxis"]["type"] == "value"
+    assert option["series"][0]["data"] == [[100.0, 1.0], [2500.0, 2.0], [5000.0, 3.0]]
+
+
+def test_echarts_option_tolerates_bad_or_short_values():
+    spec = {
+        "chart_id": "chart:bad",
         "chart_type": "combo",
         "title": "边界值",
         "categories": ["A", "B", "C"],
@@ -85,212 +146,36 @@ def test_chart_block_tolerates_bad_or_short_values(qapp):
         "axes": {"right": {"label": "投入"}},
         "row_count": 3,
     }
-    block = ChartBlock(spec)
-    labels = [w.text() for w in block.findChildren(QLabel)]
-    assert not any("could not convert" in text for text in labels)
+
+    option = chart_spec_to_echarts_option(spec)
+
+    assert option["series"][0]["data"] == [10.0, 0.0, 0.0]
+    assert option["series"][1]["data"] == [0.0, 2.0, 3.0]
 
 
-def test_chart_block_builds_all_right_axis_combo(qapp):
-    pytest.importorskip("PyQt6.QtCharts")
-    from PyQt6.QtCharts import QValueAxis
-    from dbaide.desktop.components.chart_block import ChartBlock, build_chart_widget
-
+def test_render_echarts_html_contains_option_and_loader():
     spec = {
-        "chart_id": "chart:5",
-        "chart_type": "combo",
-        "title": "右轴组合",
+        "chart_id": "chart:html",
+        "chart_type": "line",
+        "title": "趋势",
         "categories": ["A", "B"],
-        "series": [
-            {"name": "成本", "values": [10, 12], "type": "bar", "axis": "right"},
-            {"name": "预算", "values": [8, 9], "type": "line", "axis": "right"},
-        ],
-        "axes": {"right": {"label": "金额"}},
+        "series": [{"name": "value", "values": [1, 2]}],
         "row_count": 2,
     }
-    block = ChartBlock(spec)
-    assert block.layout().count() >= 3
 
-    widget = build_chart_widget(spec)
-    chart = widget._view.chart()
-    value_axes = [ax for ax in chart.axes() if isinstance(ax, QValueAxis)]
-    assert len(value_axes) == 1
-    assert "金额" in value_axes[0].titleText()
+    html = render_echarts_html(spec, echarts_src="qrc:/echarts.min.js")
 
-
-def test_value_axis_range_always_includes_zero():
-    """Unit-level guard (no QtCharts needed): _style_value_axis must keep the zero
-    baseline within range for any sign mix, so bars drawn from 0 never overflow."""
-    from dbaide.desktop.components.chart_block import _style_value_axis
-
-    class _FakeAxis:
-        range = None
-        def setRange(self, lo, hi): self.range = (lo, hi)
-        def __getattr__(self, _name): return lambda *a, **k: None
-
-    for values in ([-10.0, -25.0, -5.0], [10, 20], [-5, 8], [0, 0, 0]):
-        ax = _FakeAxis()
-        _style_value_axis(ax, values)
-        lo, hi = ax.range
-        assert lo <= 0.0 <= hi, f"zero baseline off-axis for {values}: {ax.range}"
-        assert lo <= min(values) and hi >= max(values), f"data clipped for {values}: {ax.range}"
-
-
-def test_chart_block_all_negative_bars_keep_zero_baseline(qapp):
-    """All-negative bar series (e.g. P&L losses) must keep 0 in the axis range,
-    otherwise bars (drawn from zero) overflow the top of the plot."""
-    pytest.importorskip("PyQt6.QtCharts")
-    from PyQt6.QtCharts import QValueAxis
-    from dbaide.desktop.components.chart_block import build_chart_widget
-
-    spec = {
-        "chart_id": "chart:neg",
-        "chart_type": "bar",
-        "title": "Losses",
-        "categories": ["Q1", "Q2", "Q3"],
-        "series": [{"name": "净利润", "values": [-10.0, -25.0, -5.0], "type": "bar"}],
-        "row_count": 3,
-    }
-    widget = build_chart_widget(spec)
-    chart = widget._view.chart()
-    value_axes = [ax for ax in chart.axes() if isinstance(ax, QValueAxis)]
-    assert value_axes, "expected a value axis"
-    ax = value_axes[0]
-    assert ax.min() <= -25.0  # spans the most-negative bar
-    assert ax.max() >= 0.0     # zero baseline stays on-axis
-
-
-def test_chart_block_combo_splits_bars_by_axis(qapp):
-    pytest.importorskip("PyQt6.QtCharts")
-    from PyQt6.QtCharts import QBarSeries, QValueAxis
-    from dbaide.desktop.components.chart_block import build_chart_widget
-
-    spec = {
-        "chart_id": "chart:7",
-        "chart_type": "combo",
-        "title": "左右柱",
-        "categories": ["A", "B"],
-        "series": [
-            {"name": "销量", "values": [10, 12], "type": "bar", "axis": "left"},
-            {"name": "预算", "values": [80, 90], "type": "bar", "axis": "right"},
-        ],
-        "axes": {
-            "left": {"label": "销量"},
-            "right": {"label": "预算"},
-        },
-        "row_count": 2,
-    }
-    widget = build_chart_widget(spec)
-    chart = widget._view.chart()
-    bar_series = [s for s in chart.series() if isinstance(s, QBarSeries)]
-    value_axes = [ax for ax in chart.axes() if isinstance(ax, QValueAxis)]
-    assert len(bar_series) == 2
-    assert len(value_axes) == 2
-
-
-def test_chart_block_scatter_non_numeric_x_falls_back_to_order(qapp):
-    pytest.importorskip("PyQt6.QtCharts")
-    from dbaide.desktop.components.chart_block import ChartBlock
-
-    spec = {
-        "chart_id": "chart:6",
-        "chart_type": "scatter",
-        "title": "散点边界",
-        "categories": ["A", "B", "C"],
-        "series": [{"name": "转化率", "values": [0.1, 0.2, 0.15]}],
-        "row_count": 3,
-    }
-    block = ChartBlock(spec)
-    assert block.layout().count() >= 3
-
-
-def test_stacked_axis_values_uses_per_category_totals():
-    """Unit guard (no QtCharts): stacked axis sizing must use per-category stacked
-    sums, not flat per-series values, so the top of a stack isn't clipped."""
-    from dbaide.desktop.components.chart_block import _stacked_axis_values
-    # categories A,B; stacked totals A=25, B=25 — larger than any single segment (20)
-    vals = _stacked_axis_values([{"values": [10, 20]}, {"values": [15, 5]}], 2)
-    assert max(vals) == 25.0
-    # diverging signs stack apart: positives up, negatives down
-    div = _stacked_axis_values([{"values": [10, 5]}, {"values": [-3, -8]}], 2)
-    assert max(div) == 10.0 and min(div) == -8.0
-
-
-def test_chart_block_stacked_bar_y_axis_fits_total(qapp):
-    """A stacked bar's y-axis must reach the per-category total (25), not the largest
-    individual segment (20), or the top of the stack is clipped."""
-    pytest.importorskip("PyQt6.QtCharts")
-    from PyQt6.QtCore import Qt
-    from PyQt6.QtCharts import QValueAxis
-    from dbaide.desktop.components.chart_block import build_chart_widget
-
-    spec = {
-        "chart_id": "chart:sb",
-        "chart_type": "stacked_bar",
-        "title": "stack",
-        "categories": ["A", "B"],
-        "series": [
-            {"name": "s1", "values": [10, 20]},
-            {"name": "s2", "values": [15, 5]},
-        ],
-        "row_count": 2,
-    }
-    widget = build_chart_widget(spec)
-    chart = widget._view.chart()
-    y_axes = [ax for ax in chart.axes(Qt.Orientation.Vertical) if isinstance(ax, QValueAxis)]
-    assert y_axes and y_axes[0].max() >= 25.0
-
-
-def test_chart_block_scatter_hover_shows_point_value(qapp):
-    """Scatter charts wire a value-based hover tooltip (x is a value, not a category
-    index), so hovering a point reports its actual (x, y) without crashing."""
-    pytest.importorskip("PyQt6.QtCharts")
-    from PyQt6.QtCore import QPointF
-    from dbaide.desktop.components.chart_block import build_chart_widget
-
-    spec = {
-        "chart_id": "chart:sch",
-        "chart_type": "scatter",
-        "title": "spread",
-        "categories": ["100", "2500"],
-        "series": [{"name": "rate", "values": [1.0, 2.0]}],
-        "row_count": 2,
-    }
-    widget = build_chart_widget(spec)
-    # Should not raise and should accept an out-of-category-range x (a real value).
-    widget._on_scatter_hovered(QPointF(2500.0, 2.0), True, "rate")
-    widget._on_scatter_hovered(QPointF(2500.0, 2.0), False, "rate")  # hide path
-
-
-def test_chart_block_scatter_x_axis_fits_numeric_x(qapp):
-    """Scatter x-axis must span the actual x values — manually-attached axes don't
-    auto-scale, so a large x range would otherwise be clipped to Qt's default [0,10]."""
-    pytest.importorskip("PyQt6.QtCharts")
-    from PyQt6.QtCore import Qt
-    from PyQt6.QtCharts import QValueAxis
-    from dbaide.desktop.components.chart_block import build_chart_widget
-
-    spec = {
-        "chart_id": "chart:scx",
-        "chart_type": "scatter",
-        "title": "spread",
-        "categories": ["100", "2500", "5000"],   # numeric x well beyond [0,10]
-        "series": [{"name": "y", "values": [1.0, 2.0, 3.0]}],
-        "row_count": 3,
-    }
-    widget = build_chart_widget(spec)
-    chart = widget._view.chart()
-    x_axes = [ax for ax in chart.axes(Qt.Orientation.Horizontal) if isinstance(ax, QValueAxis)]
-    assert x_axes, "expected a horizontal value axis"
-    assert x_axes[0].max() >= 5000.0   # the largest x point is visible, not clipped
+    assert "echarts.init" in html
+    assert "qrc:/echarts.min.js" in html
+    assert '"type":"line"' in html
+    assert "function (value)" not in html
 
 
 def test_chart_block_empty_series_shows_no_data(qapp):
-    # No QtCharts needed: the no-data path returns a QLabel before importing it.
     from PyQt6.QtWidgets import QLabel
+
     from dbaide.desktop.components.chart_block import build_chart_widget
 
-    # 0-row query / malformed spec: no series, or no categories → clean placeholder,
-    # not a raw IndexError on spec.series[0].
     for spec in (
         {"chart_type": "bar", "categories": ["A", "B"], "series": [], "row_count": 0},
         {"chart_type": "pie", "categories": [], "series": [{"name": "n", "values": []}]},
@@ -298,4 +183,64 @@ def test_chart_block_empty_series_shows_no_data(qapp):
     ):
         widget = build_chart_widget(spec)
         assert isinstance(widget, QLabel)
-        assert widget.text()  # the localized "no data" message
+        assert widget.text()
+
+
+def test_chart_block_wraps_webengine_chart(qapp, monkeypatch):
+    from PyQt6.QtWidgets import QWidget
+
+    class _FakeWebEngineView(QWidget):
+        def setHtml(self, html, base_url):  # noqa: N802 - Qt API shape
+            self.html = html
+            self.base_url = base_url
+
+    fake_module = types.ModuleType("PyQt6.QtWebEngineWidgets")
+    fake_module.QWebEngineView = _FakeWebEngineView
+    monkeypatch.setitem(sys.modules, "PyQt6.QtWebEngineWidgets", fake_module)
+    monkeypatch.setenv("DBAIDE_ECHARTS_SRC", "qrc:/vendor/echarts.min.js")
+    from dbaide.desktop.components.chart_block import ChartBlock, build_chart_widget
+
+    spec = {
+        "chart_id": "chart:web",
+        "chart_type": "bar",
+        "title": "Sales",
+        "categories": ["A", "B"],
+        "series": [{"name": "value", "values": [1, 2]}],
+        "row_count": 2,
+    }
+
+    widget = build_chart_widget(spec)
+    block = ChartBlock(spec)
+    assert widget.minimumWidth() >= 280
+    assert "echarts.init" in widget.html
+    assert "qrc:/vendor/echarts.min.js" in widget.html
+    assert block.layout().count() >= 3
+
+
+def test_echarts_option_dense_dates_rotate_and_compact_labels():
+    dates = [f"2026-06-{day:02d}" for day in range(1, 11)]
+    spec = {
+        "chart_id": "chart:line-dates",
+        "chart_type": "line",
+        "title": "Daily",
+        "categories": dates,
+        "series": [
+            {"name": "App", "values": [120000.0 + i * 1000 for i in range(10)]},
+            {"name": "Web", "values": [450000.0 - i * 5000 for i in range(10)]},
+            {"name": "Kol", "values": [7600.0 + i * 10 for i in range(10)]},
+        ],
+        "y_label": "销售额",
+        "row_count": 10,
+    }
+
+    option = chart_spec_to_echarts_option(spec)
+
+    assert option["xAxis"]["axisLabel"]["rotate"] != 0
+    assert option["xAxis"]["data"][0] == "06-01"
+    assert len(option["yAxis"]) == 2
+    assert option["grid"]["containLabel"] is True
+    assert option["grid"]["top"] >= 40
+    assert "dataZoom" in option
+    assert {s["yAxisIndex"] for s in option["series"]} == {0, 1}
+    assert sum(1 for s in option["series"] if s["yAxisIndex"] == 1) == 1
+    assert option["series"][2]["yAxisIndex"] == 1

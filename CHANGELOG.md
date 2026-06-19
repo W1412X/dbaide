@@ -6,6 +6,33 @@ All notable changes to DBAide are documented here. The format is loosely based o
 
 ## [Unreleased]
 
+## [0.6.0] — 2026-06-19
+
+### Added
+
+- **ECharts chart rendering** — charts render via Qt WebEngine + Apache ECharts (auto
+  dual-axis for mixed magnitudes, compact date labels, dataZoom, ResizeObserver).
+- **WebEngine startup init** — import WebEngine before `QApplication` so frozen and
+  dev builds can render charts reliably.
+- **PyInstaller WebEngine bundling** — GUI spec includes `QtWebEngineCore/Widgets`
+  and related modules; `requirements-gui.txt` lists `PyQt6-WebEngine`.
+
+### Changed
+
+- **Chart block** — simplified to a WebEngine host; option generation lives in
+  `dbaide/charts/echarts.py` (GUI-free).
+- **Agent memory / tool output** — `latest_result_limit` accepts `0` (unlimited);
+  `_format_tool_result` supports a configurable character limit; `retrieve_turn`
+  exposes additional memory fields.
+
+### Fixed
+
+- **Startup SSL CA check** — probe runs in a background thread; UI no longer blocks
+  for up to 5s on launch.
+- **Streaming answers** — `flush_final` emits any tail missed during JSON streaming;
+  `complete_turn` merges streamed vs authoritative text and force-rebuilds markdown
+  with deferred height sync so long answers are not clipped.
+
 ## [0.3.0] — 2026-06-16
 
 ### Added

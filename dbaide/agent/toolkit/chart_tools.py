@@ -1,4 +1,4 @@
-"""render_chart tool — delegates chart planning to ChartAgent, stores spec for Qt UI."""
+"""render_chart tool: delegate chart planning to ChartAgent and store renderer-neutral specs."""
 
 from __future__ import annotations
 

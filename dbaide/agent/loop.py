@@ -832,6 +832,8 @@ class AskAgentLoop:
                     payload = orch.llm.complete_json_stream(
                         call_messages, schema_hint=schema_hint, on_text_chunk=on_chunk
                     )
+                    if isinstance(payload, dict):
+                        streamer.flush_final(str(payload.get("answer") or ""))
                 else:
                     payload = orch.llm.complete_json(call_messages, schema_hint=schema_hint)
                 if orch.cancel_check:

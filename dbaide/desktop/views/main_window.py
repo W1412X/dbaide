@@ -79,6 +79,12 @@ class _ReleaseCheckNotifier(QObject):
     completed = pyqtSignal(object)
 
 
+class _SslCheckNotifier(QObject):
+    """Marshals HTTPS CA probe results from a worker thread onto the Qt main thread."""
+
+    completed = pyqtSignal(object)
+
+
 class MainWindow(QMainWindow):
     def __init__(self, service: DesktopService) -> None:
         super().__init__()
@@ -110,6 +116,9 @@ class MainWindow(QMainWindow):
         self._release_notifier = _ReleaseCheckNotifier(self)
         self._release_notifier.completed.connect(self._apply_release_check)
         self._release_check_in_progress = False
+        self._ssl_notifier = _SslCheckNotifier(self)
+        self._ssl_notifier.completed.connect(self._apply_ssl_check)
+        self._ssl_check_in_progress = False
         self._install_shortcuts()
         self._wire_bus()
         self.refresh_all()
@@ -194,10 +203,32 @@ class MainWindow(QMainWindow):
             )
 
     def _check_https_certificates_at_startup(self) -> None:
-        from dbaide.ssl_certs import check_https_certificates
+        self._start_ssl_check()
 
-        result = check_https_certificates()
-        if result.ok:
+    def _start_ssl_check(self) -> None:
+        if self._ssl_check_in_progress:
+            return
+        self._ssl_check_in_progress = True
+        import threading
+
+        notifier = self._ssl_notifier
+
+        def worker() -> None:
+            from dbaide.ssl_certs import HttpsCertCheck, check_https_certificates
+
+            try:
+                result = check_https_certificates(timeout=3.0)
+            except Exception as exc:  # noqa: BLE001 — never leave the flag stuck
+                result = HttpsCertCheck(False, str(exc))
+            notifier.completed.emit(result)
+
+        threading.Thread(target=worker, daemon=True, name="ssl-check").start()
+
+    def _apply_ssl_check(self, result: object) -> None:
+        self._ssl_check_in_progress = False
+        from dbaide.ssl_certs import HttpsCertCheck
+
+        if not isinstance(result, HttpsCertCheck) or result.ok:
             return
         detail = str(result.detail or "").strip()
         message = _i18n_t("startup.ssl.warning.message")

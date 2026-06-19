@@ -67,3 +67,13 @@ def test_streamer_handles_literal_newline_in_answer():
     s.feed('{"action":"finish","answer":"first\n')
     s.feed('second"}')
     assert "".join(out) == "first\nsecond"
+
+
+def test_streamer_flush_final_emits_tail_after_partial_decode_gap():
+    """When partial JSON decode skips a slice, flush_final must emit the remainder."""
+    out = []
+    s = JsonFieldStreamer(out.append, field="answer")
+    s.feed('{"action":"finish","answer":"hello')
+    assert "".join(out) == "hello"
+    s.flush_final("hello world")
+    assert "".join(out) == "hello world"

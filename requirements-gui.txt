@@ -3,4 +3,5 @@
 
 -r requirements.txt
 PyQt6>=6.5.0
+PyQt6-WebEngine>=6.5.0
 mistune>=3.0   # rich Markdown rendering for answers

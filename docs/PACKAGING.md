@@ -15,7 +15,7 @@ DBAide 支持三种分发方式，按场景选择：
 ## 前置条件
 
 - Python **3.11+**
-- 构建 GUI 包需安装 PyQt6
+- 构建 GUI 包需安装 PyQt6 和 PyQt6-WebEngine（图表由 WebEngine 承载 ECharts）
 
 ```bash
 # 推荐：requirements 文件（与 pyproject.toml 同步）
@@ -203,7 +203,7 @@ Workflow 在 macOS (arm64/x86_64)、Ubuntu、Windows 上分别运行 PyInstaller
 A: 不能。PyInstaller 需在各自 OS 上构建（或用 CI matrix）。
 
 **Q: GUI 包很大？**  
-A: PyQt6 + Python 运行时通常 150–250MB，正常。CLI 单文件约 30–50MB。
+A: PyQt6 + WebEngine + Python 运行时通常会明显大于纯 QtWidgets 包，正常。CLI 单文件约 30–50MB。
 
 **Q: MySQL/PostgreSQL 驱动是否打进包？**  
 A: spec 已包含 `pymysql`、`psycopg_binary`。SQLite 用标准库。

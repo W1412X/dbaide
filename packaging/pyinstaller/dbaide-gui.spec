@@ -23,7 +23,7 @@ if sys.platform == "linux":
 # Markdown rendering breaks at runtime in the frozen app.
 mistune_hidden = collect_submodules("mistune")
 
-# The app uses ONLY these four Qt modules. We deliberately do NOT collect_all("PyQt6")
+# The app uses a small, explicit set of Qt modules. We deliberately do NOT collect_all("PyQt6")
 # (that force-bundles the entire Qt — QtQml/Quick/Network/Pdf/translations/… — and
 # bloats the package ~3-4x). PyInstaller's built-in PyQt6 hooks bundle just these
 # modules + the platform plugins they need.
@@ -63,16 +63,18 @@ hiddenimports = [
     "psycopg_binary._psycopg",
     "PyQt6.QtCore",
     "PyQt6.QtGui",
+    "PyQt6.QtNetwork",
     "PyQt6.QtWidgets",
     "PyQt6.QtSvg",
-    "PyQt6.QtCharts",
+    "PyQt6.QtWebEngineCore",
+    "PyQt6.QtWebEngineWidgets",
+    "PyQt6.QtWebChannel",
 ] + mistune_hidden
 
 # Drop big Qt modules we never import, so nothing transitively drags them in.
 _QT_EXCLUDES = [
     "PyQt6.QtQml", "PyQt6.QtQuick", "PyQt6.QtQuickWidgets", "PyQt6.QtQuick3D",
-    "PyQt6.QtNetwork", "PyQt6.QtMultimedia", "PyQt6.QtMultimediaWidgets",
-    "PyQt6.QtWebEngineCore", "PyQt6.QtWebEngineWidgets", "PyQt6.QtWebChannel",
+    "PyQt6.QtMultimedia", "PyQt6.QtMultimediaWidgets",
     "PyQt6.QtWebSockets", "PyQt6.QtDataVisualization",
     "PyQt6.QtPdf", "PyQt6.QtPdfWidgets", "PyQt6.QtSql", "PyQt6.QtTest",
     "PyQt6.QtDesigner", "PyQt6.QtUiTools", "PyQt6.QtHelp", "PyQt6.QtBluetooth",

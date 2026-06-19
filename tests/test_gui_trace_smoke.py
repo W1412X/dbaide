@@ -692,6 +692,16 @@ def test_answer_chunks_stream_live_then_finalize(qapp):
     assert v._turns[-1]["answer"] == "42 paid orders"  # full text stored for copy
 
 
+def test_complete_turn_prefers_longer_stream_when_authoritative_is_prefix(qapp):
+    """If live streaming ran ahead of partial JSON decode, keep the longer text."""
+    from dbaide.desktop.components.conversation import ConversationView
+    v = ConversationView()
+    v.begin_turn("q")
+    v.append_answer_chunk("hello world")
+    v.complete_turn(answer="hello", ok=True)
+    assert v._turns[-1]["answer"] == "hello world"
+
+
 def test_conversation_tail_follow_pauses_on_scroll_up(qapp):
     """Streaming auto-scroll must pause when the user scrolls up to read, and resume
     when they return to the bottom — no scroll-jacking on every chunk."""

@@ -24,6 +24,26 @@ def configure_application(app: QApplication) -> None:
     _ = app
 
 
+def ensure_webengine_before_qapplication() -> bool:
+    """Prepare Qt WebEngine before the first QApplication is constructed.
+
+    PyQt6 requires either importing QtWebEngineWidgets or setting
+    AA_ShareOpenGLContexts *before* QCoreApplication exists. Lazy-importing
+    WebEngine when the first chart renders fails after the GUI has started.
+    """
+    try:
+        from PyQt6.QtWidgets import QApplication
+
+        if QApplication.instance() is not None:
+            return True
+        QApplication.setAttribute(Qt.ApplicationAttribute.AA_ShareOpenGLContexts)
+        from PyQt6.QtWebEngineWidgets import QWebEngineView  # noqa: F401
+
+        return True
+    except ImportError:
+        return False
+
+
 def configure_chrome_button(btn: QToolButton | QPushButton) -> None:
     """Keep header/toolbar controls from stealing letter keys (Alt mnemonics / focus)."""
     btn.setFocusPolicy(Qt.FocusPolicy.NoFocus)

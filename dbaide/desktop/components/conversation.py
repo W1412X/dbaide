@@ -596,15 +596,15 @@ class _MarkdownBlock(QFrame):
         self._body: QTextBrowser | None = None
         self._render_segments()
 
-    def set_markdown(self, markdown: str) -> None:
+    def set_markdown(self, markdown: str, *, force_rebuild: bool = False) -> None:
         """Re-render the body (used by the progressive answer reveal)."""
         self._markdown = str(markdown or "")
         new_segments = _split_fenced_code_blocks(self._markdown)
-        if self._can_update_in_place(new_segments):
+        if not force_rebuild and self._can_update_in_place(new_segments):
             self._update_in_place(new_segments)
         else:
             self._render_segments()
-        self._sync_body_height()
+        self._schedule_body_height_sync()
 
     def _can_update_in_place(self, new_segments: list[tuple[str, str, str]]) -> bool:
         """Check if we can update existing widgets instead of rebuilding. The existing
@@ -683,6 +683,18 @@ class _MarkdownBlock(QFrame):
             if self._body is None:
                 self._body = browser
             self._content_layout.addWidget(browser)
+        self._schedule_body_height_sync()
+
+    def _schedule_body_height_sync(self) -> None:
+        """QTextDocument layout can lag one event-loop tick after setHtml — defer so
+        fixed-height browsers don't clip the tail of a long streamed answer."""
+        self._sync_body_height()
+        if not getattr(self, "_height_sync_scheduled", False):
+            self._height_sync_scheduled = True
+            QTimer.singleShot(0, self._deferred_body_height_sync)
+
+    def _deferred_body_height_sync(self) -> None:
+        self._height_sync_scheduled = False
         self._sync_body_height()
 
     def _show_body_menu(self, browser: QTextBrowser, pos) -> None:
@@ -1410,6 +1422,19 @@ class ConversationView(QScrollArea):
         from dbaide.i18n import t
         return t(key)
 
+    @staticmethod
+    def _resolve_final_answer(answer: str, live_text: str) -> str:
+        """Pick the best answer text when streaming and the final payload disagree."""
+        authoritative = str(answer or "")
+        streamed = str(live_text or "")
+        if not authoritative:
+            return streamed
+        if not streamed or len(authoritative) >= len(streamed):
+            return authoritative
+        if authoritative.startswith(streamed) or streamed.startswith(authoritative):
+            return streamed if len(streamed) > len(authoritative) else authoritative
+        return authoritative
+
     def _seed_live_trace_boot(self, turn: TurnBlock) -> None:
         """Prime the trace before the worker thread emits events (connection check, …)."""
         from dbaide.agent.progress_events import progress_event
@@ -1447,7 +1472,7 @@ class ConversationView(QScrollArea):
             and body.strip()
         ):
             try:
-                replace_widget.set_markdown(body)
+                replace_widget.set_markdown(body, force_rebuild=True)
             except RuntimeError:
                 turn.remove_content_widget(replace_widget)
                 turn.append_content(_MarkdownBlock(
@@ -1526,10 +1551,16 @@ class ConversationView(QScrollArea):
         events = list(trace_events) if trace_events else list(
             (self._current_record or {}).get("events") or []
         )
+        self._chunk_timer.stop()
+        if self._chunk_dirty:
+            self._flush_answer_chunk()
+        live = self._live_answer
+        live_text = self._live_answer_text
+        final_answer = self._resolve_final_answer(answer, live_text)
         if self._current_record is not None:
             if trace_events:
                 self._current_record["events"] = list(trace_events)
-            self._current_record["answer"] = answer
+            self._current_record["answer"] = final_answer
             if charts:
                 self._current_record["charts"] = list(charts)
         # Hand the authoritative trace to the turn so its inline view (if/when the
@@ -1541,16 +1572,11 @@ class ConversationView(QScrollArea):
 
         # Clean author label — just "DBAide" (the internal workflow id is noise in the
         # message header, Codex-style; keep it reachable as a tooltip and in the trace).
-        self._chunk_timer.stop()
-        if self._chunk_dirty:
-            self._flush_answer_chunk()
-        live = self._live_answer
-        live_text = self._live_answer_text
         self._live_answer = None
         self._live_answer_text = ""
         self._append_answer_with_embedded_charts(
             turn,
-            answer or live_text,
+            final_answer,
             charts,
             workflow_id=workflow_id,
             replace_widget=live,

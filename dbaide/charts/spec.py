@@ -1,4 +1,4 @@
-"""Serializable chart specification consumed by the Qt Charts UI."""
+"""Serializable chart specification consumed by the desktop chart renderer."""
 
 from __future__ import annotations
 

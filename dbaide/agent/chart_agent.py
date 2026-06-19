@@ -36,7 +36,7 @@ class ChartPlan:
 
 
 class ChartAgent:
-    """LLM-backed chart planner; maps tabular rows → ChartSpec for Qt Charts."""
+    """LLM-backed chart planner; maps tabular rows to a renderer-neutral ChartSpec."""
 
     def __init__(self, llm: LLMClient | None = None) -> None:
         self.llm = llm or NullLLMClient()

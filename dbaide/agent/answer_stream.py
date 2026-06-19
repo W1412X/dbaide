@@ -35,6 +35,14 @@ class JsonFieldStreamer:
         self._on_text(value[self._emitted:])
         self._emitted = len(value)
 
+    def flush_final(self, final_value: str) -> None:
+        """Emit any tail not yet streamed using the authoritative decoded value."""
+        final = str(final_value or "")
+        if len(final) <= self._emitted:
+            return
+        self._on_text(final[self._emitted:])
+        self._emitted = len(final)
+
     def _partial_value(self) -> str | None:
         m = self._key_re.search(self._buf)
         if not m:

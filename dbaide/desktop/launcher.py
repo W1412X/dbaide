@@ -9,6 +9,9 @@ from dbaide.desktop.ui import DBAideDesktop
 
 def main(argv: list[str] | None = None) -> int:
     _ = argv or sys.argv[1:]
+    from dbaide.desktop.platform_ui import ensure_webengine_before_qapplication
+
+    ensure_webengine_before_qapplication()
     from dbaide.observability.app_logging import setup_app_logging
     setup_app_logging()
     from dbaide.i18n import set_language
