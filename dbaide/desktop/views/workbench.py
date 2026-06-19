@@ -23,6 +23,7 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 
+from dbaide.desktop.components.base import discard_widget
 from dbaide.desktop.components.icons import svg_icon
 from dbaide.desktop.theme import Theme, workbench_tab_stylesheet
 from dbaide.desktop.views.doc_tab import DocTab
@@ -147,8 +148,7 @@ class WorkbenchView(QWidget):
                             break
                 self.tabs.removeTab(i)
                 self.doc_closed.emit(w)
-                w.setParent(None)
-                w.deleteLater()
+                discard_widget(w)
 
     # ── SQL editors ─────────────────────────────────────────────────────────────
 
@@ -330,6 +330,4 @@ class WorkbenchView(QWidget):
                     break
         self.tabs.removeTab(index)
         self.doc_closed.emit(widget)
-        if widget is not None:
-            widget.setParent(None)
-            widget.deleteLater()
+        discard_widget(widget)

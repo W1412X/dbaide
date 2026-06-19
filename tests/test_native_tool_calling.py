@@ -90,6 +90,7 @@ def test_tool_spec_to_function_schema():
         "limit": {"type": "integer", "default": 100},
         "cols": {"type": "list[string]"},      # dbaide's own type-string form
         "scope": {"type": "dict"},
+        "items": {"type": "list[object]"},
     })
     fn = _tool_spec_to_function(spec)
     assert fn["type"] == "function"
@@ -99,6 +100,7 @@ def test_tool_spec_to_function_schema():
     assert params["properties"]["limit"]["type"] == "integer"
     assert params["properties"]["cols"] == {"type": "array", "items": {"type": "string"}}
     assert params["properties"]["scope"] == {"type": "object"}
+    assert params["properties"]["items"] == {"type": "array", "items": {"type": "object"}}
     assert params["required"] == ["sql"]
 
 

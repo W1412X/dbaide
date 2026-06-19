@@ -20,12 +20,36 @@ from __future__ import annotations
 import json
 import time
 from dataclasses import dataclass, field
+from typing import Any
 
 from dbaide.agent.progress_events import agent_label, normalize_trace_key, phase_for, step_type
 
 ROOT_ID = "__root__"
 _ACTIVE = "running"
 _TERMINAL = {"completed", "failed", "waiting"}
+
+# Workflow envelope / post-hoc summaries — not real execution steps. The agent loop
+# already records generate_sql, validate_sql, execute_sql, substeps, and decide
+# events as they happen. These stages are kept in persisted trace for older runs
+# but must not appear on the timeline (they duplicate the real tool path).
+_TIMELINE_HIDDEN_STAGES = frozenset({
+    "workflow_started",
+    "workflow_completed",
+    "planning",
+    "agent_request",
+    "agent_progress",
+    "sql_generated",
+    "sql_validation",
+    "execution_completed",
+    "result_interpreted",
+})
+
+# When a loop tool step exists, hide workflow-level duplicates of the same work.
+_TIMELINE_DEDUP_BY_TOOL = {
+    "sql_generated": "generate_sql",
+    "sql_validation": "validate_sql",
+    "execution_completed": "execute_sql",
+}
 
 
 @dataclass(slots=True)
@@ -69,6 +93,25 @@ class TraceNode:
                 seen.append(node.agent_name)
             stack.extend(node.children)
         return seen
+
+
+@dataclass(slots=True)
+class TraceTimelineEntry:
+    node_id: str
+    title: str
+    summary: str
+    status: str
+    duration_ms: float
+    step: int
+    stage: str
+    phase: str
+    agent: str
+    node_type: str
+    detail: str
+    thought: str
+    depth: int = 0
+    raw: dict[str, Any] = field(default_factory=dict)
+    children: list["TraceTimelineEntry"] = field(default_factory=list)
 
 
 class TraceModel:
@@ -371,10 +414,10 @@ def localized_node_head(node: "TraceNode") -> str:
     if raw.get("llm_call"):
         call = raw.get("llm_call") if isinstance(raw.get("llm_call"), dict) else {}
         return _t("trace.llm_call", stage=str(call.get("stage") or node.stage or "llm"))
-    if stage == "intent" and (node.id == "intent:decompose" or raw.get("llm_calls") or title == "Decompose intent"):
-        return _t("trace.intent")
     if stage == "decide" or node.node_type == "llm":
         return _t("trace.thinking")
+    if stage == "update_agenda":
+        return _t("trace.agenda")
     if stage == "build_assets" and title:
         from dbaide.i18n import localized_build_title
         return localized_build_title(title)
@@ -412,10 +455,23 @@ def render_trace_text(model: "TraceModel") -> str:
     duration, thought, the tool's INPUT args, its OUTPUT/result, the exact multi-line
     SQL (with row count / database), and any clarification question + options. Pure (no
     Qt) so it's reusable for single-run copy and whole-conversation copy."""
-    if model is None or not model.steps:
+    timeline = build_trace_timeline(model)
+    if model is None or not timeline:
+        if model is not None and model.overall != "idle":
+            return localized_summary_line(model)
         return ""
     lines: list[str] = [localized_summary_line(model), ""]
 
+    for entry in timeline:
+        node = model.find(entry.node_id)
+        if node is None:
+            continue
+        _append_trace_node_lines(lines, node, entry.depth)
+
+    return "\n".join(lines)
+
+
+def _append_trace_node_lines(lines: list[str], node: "TraceNode", depth: int) -> None:
     def kv(indent: str, label: str, value: object) -> None:
         text = _as_text(value).strip()
         if not text:
@@ -427,97 +483,205 @@ def render_trace_text(model: "TraceModel") -> str:
         else:
             lines.append(f"{indent}    {label}: {text}")
 
-    def walk(node: "TraceNode", depth: int) -> None:
-        indent = "  " * depth
-        glyph = _GLYPHS.get(node.status, "·")
-        dur = f"  [{_fmt_ms(node.duration_ms)}]" if node.duration_ms else ""
-        status_note = f"  ({node.status})" if node.status in ("failed", "waiting", "running") else ""
-        head = localized_node_head(node)
-        lines.append(f"{indent}{glyph} {head}{status_note}{dur}")
-        raw = node.raw if isinstance(node.raw, dict) else {}
+    indent = "  " * depth
+    glyph = _GLYPHS.get(node.status, "·")
+    dur = f"  [{_fmt_ms(node.duration_ms)}]" if node.duration_ms else ""
+    status_note = f"  ({node.status})" if node.status in ("failed", "waiting", "running") else ""
+    head = localized_node_head(node)
+    lines.append(f"{indent}{glyph} {head}{status_note}{dur}")
+    raw = node.raw if isinstance(node.raw, dict) else {}
 
-        if node.thought:
-            kv(indent, _t("trace.field.thought"), node.thought)
-        # Tool INPUT.
-        if raw.get("args"):
-            kv(indent, _t("trace.field.input"), raw.get("args"))
+    if node.thought:
+        kv(indent, _t("trace.field.thought"), node.thought)
+    if raw.get("args"):
+        kv(indent, _t("trace.field.input"), raw.get("args"))
 
-        # Clarification: the question being asked + the candidate options, and the
-        # full structured per-question list when present (this is the bit that was
-        # missing from copies before).
-        question = str(raw.get("question") or "").strip()
-        is_ask = raw.get("stage") == "ask_user" or bool(raw.get("options")) or bool(raw.get("questions"))
-        if not question and is_ask:
-            question = (node.detail or "").strip()
-        if question and is_ask:
-            kv(indent, _t("trace.field.question"), question)
-        questions = raw.get("questions")
-        if isinstance(questions, list) and questions:
-            lines.append(f"{indent}    {_t('trace.field.question')}:")
-            for i, q in enumerate(questions, 1):
-                if isinstance(q, dict):
-                    ask = str(q.get("ask") or "").strip()
-                    opts = [str(o) for o in (q.get("options") or []) if str(o).strip()]
-                    suffix = f"  [{' | '.join(opts)}]" if opts else ""
-                    lines.append(f"{indent}      {i}. {ask}{suffix}")
-        options = raw.get("options")
-        if isinstance(options, list) and options:
-            lines.append(f"{indent}    {_t('trace.field.options')}:")
-            for opt in options:
-                lines.append(f"{indent}      - {opt}")
+    question = str(raw.get("question") or "").strip()
+    is_ask = raw.get("stage") == "ask_user" or bool(raw.get("options")) or bool(raw.get("questions"))
+    if not question and is_ask:
+        question = (node.detail or "").strip()
+    if question and is_ask:
+        kv(indent, _t("trace.field.question"), question)
+    questions = raw.get("questions")
+    if isinstance(questions, list) and questions:
+        lines.append(f"{indent}    {_t('trace.field.question')}:")
+        for i, q in enumerate(questions, 1):
+            if isinstance(q, dict):
+                ask = str(q.get("ask") or "").strip()
+                opts = [str(o) for o in (q.get("options") or []) if str(o).strip()]
+                suffix = f"  [{' | '.join(opts)}]" if opts else ""
+                lines.append(f"{indent}      {i}. {ask}{suffix}")
+    options = raw.get("options")
+    if isinstance(options, list) and options:
+        lines.append(f"{indent}    {_t('trace.field.options')}:")
+        for opt in options:
+            lines.append(f"{indent}      - {opt}")
 
-        # Tool OUTPUT — exact SQL (with facts) takes precedence; else the result detail.
-        sql = str(raw.get("sql") or "").strip()
-        if sql:
-            facts = []
-            if raw.get("row_count") not in (None, ""):
-                facts.append(_t("trace.field.rows", n=raw.get("row_count")))
-            if raw.get("database"):
-                facts.append(f"{_t('trace.field.database')}={raw.get('database')}")
-            if facts:
-                kv(indent, _t("trace.field.output"), " · ".join(facts))
-            kv(indent, _t("trace.field.sql"), sql)
-        elif not is_ask:  # clarification nodes already printed their question/options
-            output = str(raw.get("output") or "").strip()
-            detail = (node.detail or "").strip()
-            shown = output or detail
-            if shown and shown not in head and shown != question:
-                kv(indent, _t("trace.field.output"), shown)
-        if raw.get("decision") not in (None, "", {}, []):
-            kv(indent, _t("trace.field.decision"), raw.get("decision"))
+    sql = str(raw.get("sql") or "").strip()
+    if sql:
+        facts = []
+        if raw.get("row_count") not in (None, ""):
+            facts.append(_t("trace.field.rows", n=raw.get("row_count")))
+        if raw.get("database"):
+            facts.append(f"{_t('trace.field.database')}={raw.get('database')}")
+        if facts:
+            kv(indent, _t("trace.field.output"), " · ".join(facts))
+        kv(indent, _t("trace.field.sql"), sql)
+    elif not is_ask:
+        output = str(raw.get("output") or "").strip()
+        detail = (node.detail or "").strip()
+        shown = output or detail
+        if shown and shown not in head and shown != question:
+            kv(indent, _t("trace.field.output"), shown)
+    if raw.get("decision") not in (None, "", {}, []):
+        kv(indent, _t("trace.field.decision"), raw.get("decision"))
 
-        # Debug trace: the full structured tool result (discovery hits, resolved
-        # schema, relations, …) — the intermediate output passed between stages.
-        if raw.get("result_data") not in (None, "", {}, []):
-            kv(indent, _t("trace.field.result_data"), raw.get("result_data"))
+    if raw.get("result_data") not in (None, "", {}, []):
+        kv(indent, _t("trace.field.result_data"), raw.get("result_data"))
 
-        # Debug trace: the full prompt+response of every model call this step made.
-        single_call = raw.get("llm_call") if isinstance(raw.get("llm_call"), dict) else None
-        llm_calls = [single_call] if single_call else raw.get("llm_calls")
-        child_llm_nodes = any(isinstance(child.raw, dict) and child.raw.get("llm_call") for child in node.children)
-        if isinstance(llm_calls, list) and llm_calls and not (raw.get("llm_calls") and child_llm_nodes):
-            lines.append(f"{indent}    {_t('trace.field.llm_calls')}: {len(llm_calls)}")
-            for i, call in enumerate(llm_calls, 1):
-                if not isinstance(call, dict):
-                    continue
-                ms = call.get("ms")
-                head_bits = [b for b in (call.get("stage"), call.get("method"),
-                                         f"{ms}ms" if ms else "") if b]
-                lines.append(f"{indent}    ── {_t('trace.field.llm_calls')} {i} [{' · '.join(head_bits)}]")
-                for msg in call.get("messages") or []:
-                    if isinstance(msg, dict):
-                        kv(indent + "  ", str(msg.get("role") or "msg"), msg.get("content"))
-                kv(indent + "  ", _t("trace.field.response"), call.get("response"))
+    single_call = raw.get("llm_call") if isinstance(raw.get("llm_call"), dict) else None
+    llm_calls = [single_call] if single_call else raw.get("llm_calls")
+    child_llm_nodes = any(isinstance(child.raw, dict) and child.raw.get("llm_call") for child in node.children)
+    if isinstance(llm_calls, list) and llm_calls and not (raw.get("llm_calls") and child_llm_nodes):
+        lines.append(f"{indent}    {_t('trace.field.llm_calls')}: {len(llm_calls)}")
+        for i, call in enumerate(llm_calls, 1):
+            if not isinstance(call, dict):
+                continue
+            ms = call.get("ms")
+            head_bits = [b for b in (call.get("stage"), call.get("method"), f"{ms}ms" if ms else "") if b]
+            lines.append(f"{indent}    ── {_t('trace.field.llm_calls')} {i} [{' · '.join(head_bits)}]")
+            for msg in call.get("messages") or []:
+                if isinstance(msg, dict):
+                    kv(indent + "  ", str(msg.get("role") or "msg"), msg.get("content"))
+            kv(indent + "  ", _t("trace.field.response"), call.get("response"))
 
-        if raw:
-            kv(indent, _t("trace.field.raw_event"), raw)
+    if raw:
+        kv(indent, _t("trace.field.raw_event"), raw)
 
-        for child in node.children:
+
+def build_trace_timeline(model: "TraceModel | None") -> list[TraceTimelineEntry]:
+    """Flat, chronological timeline for UI — one card per execution unit.
+
+    The underlying ``TraceModel`` tree is preserved for detail panels and
+    ``render_trace_text`` export. Loop container nodes are unwrapped so tool
+    calls, decisions, and substeps appear in ``started_at`` order instead of
+    hiding under a single "Agent loop" row.
+    """
+    if model is None:
+        return []
+    entries: list[TraceTimelineEntry] = []
+
+    def walk(node: TraceNode, depth: int) -> None:
+        if _is_loop_container(node):
+            for child in _sorted_children(node):
+                walk(child, depth)
+            return
+        if not _should_show_in_timeline(node, model):
+            for child in _sorted_children(node):
+                walk(child, depth)
+            return
+        entries.append(_timeline_entry(node, depth=depth, nested_children=False))
+        for child in _sorted_children(node):
             walk(child, depth + 1)
 
-    for node in model.steps:
-        walk(node, 0)
-    return "\n".join(lines)
+    for root_child in _sorted_children(model.root):
+        walk(root_child, 0)
+    return entries
+
+
+def build_trace_tree_timeline(model: "TraceModel | None") -> list[TraceTimelineEntry]:
+    """Nested timeline mirroring ``model.steps`` — kept for tests/tools."""
+    if model is None:
+        return []
+    return [_timeline_entry(node, depth=0, nested_children=True) for node in model.steps]
+
+
+def count_timeline_steps(model: "TraceModel | None") -> int:
+    """Work items shown on the flat timeline (matches user-visible step count)."""
+    return len(build_trace_timeline(model))
+
+
+def _is_loop_container(node: TraceNode) -> bool:
+    node_id = str(node.id or "")
+    if node.stage == "loop":
+        return True
+    if node_id == "loop" or node_id.endswith(":loop"):
+        return True
+    return False
+
+
+def _sorted_children(node: TraceNode) -> list[TraceNode]:
+    return sorted(node.children, key=lambda n: (n.started_at, n.step, n.id))
+
+
+def _model_has_stage(model: "TraceModel", stage: str) -> bool:
+    target = str(stage or "").strip()
+    if not target:
+        return False
+    for node in model._index.values():
+        if node.id == ROOT_ID:
+            continue
+        if str(node.stage or "").strip() == target:
+            return True
+    return False
+
+
+def _should_show_in_timeline(node: TraceNode, model: "TraceModel") -> bool:
+    stage = str(node.stage or "").strip()
+    if stage in _TIMELINE_HIDDEN_STAGES:
+        return False
+    mapped = _TIMELINE_DEDUP_BY_TOOL.get(stage)
+    if mapped and _model_has_stage(model, mapped):
+        return False
+    return True
+
+
+def _timeline_entry(
+    node: "TraceNode",
+    *,
+    depth: int,
+    nested_children: bool,
+) -> TraceTimelineEntry:
+    children = (
+        [_timeline_entry(child, depth=depth + 1, nested_children=True) for child in _sorted_children(node)]
+        if nested_children
+        else []
+    )
+    return TraceTimelineEntry(
+        node_id=node.id,
+        title=localized_node_head(node),
+        summary=_timeline_summary(node, omit_child_count=not nested_children),
+        status=node.status,
+        duration_ms=node.duration_ms,
+        step=node.step,
+        stage=node.stage,
+        phase=node.phase,
+        agent=node.agent_name,
+        node_type=node.node_type,
+        detail=node.detail,
+        thought=node.thought,
+        depth=depth,
+        raw=dict(node.raw or {}),
+        children=children,
+    )
+
+
+def _timeline_summary(node: "TraceNode", *, omit_child_count: bool = False) -> str:
+    detail = " ".join(str(node.detail or "").split()).strip()
+    if detail:
+        return detail
+    if node.thought:
+        return " ".join(str(node.thought).split()).strip()
+    if node.children and not omit_child_count:
+        bits: list[str] = []
+        if node.agent_name:
+            bits.append(node.agent_name)
+        bits.append(f"{len(node.children)} substeps")
+        return " · ".join(bits)
+    raw_title = str(node.title or "").strip()
+    if raw_title and raw_title != localized_node_head(node):
+        return " ".join(raw_title.split()).strip()
+    return ""
 
 
 def localized_summary_line(model: "TraceModel") -> str:
@@ -528,7 +692,7 @@ def localized_summary_line(model: "TraceModel") -> str:
         phase = model.boot_phase or _t("trace.starting")
         return f"{phase} · {elapsed:.1f}s"
     elapsed = model.elapsed_ms() / 1000.0
-    steps = _t("trace.steps", n=len(model.steps))
+    steps = _t("trace.steps", n=count_timeline_steps(model))
     tokens = _format_tokens(model.prompt_tokens)
     if model.overall == "done":
         parts = [_t('trace.done'), steps, f"{elapsed:.1f}s"]
@@ -541,7 +705,13 @@ def localized_summary_line(model: "TraceModel") -> str:
             parts.append(tokens)
         return " · ".join(parts)
     phase = localized_phase(model._current_tool().stage, model.current_phase) if model._current_tool() else _t("trace.running")
-    current = _t("trace.step", n=model.current_step) if model.current_step else _t("trace.running")
+    timeline = build_trace_timeline(model)
+    current_step = 0
+    for entry in reversed(timeline):
+        if entry.step > 0:
+            current_step = entry.step
+            break
+    current = _t("trace.step", n=current_step) if current_step else _t("trace.running")
     agents = model.active_agents
     parts = [current, phase]
     if agents:

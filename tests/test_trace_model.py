@@ -296,3 +296,140 @@ def test_render_trace_text_recovers_detail_from_persisted_metadata():
     text = render_events_text(persisted)
     assert "question: Which timezone?" in text
     assert "- UTC" in text and "- Asia/Shanghai" in text
+
+
+def test_build_trace_timeline_unwraps_loop_and_orders_chronologically():
+    from dbaide.agent.trace_model import build_trace_timeline, count_timeline_steps
+
+    m = TraceModel()
+    _feed(m, [
+        progress_event(
+            stage="environment_check",
+            title="Checking environment",
+            status="completed",
+            kind="phase",
+            node_id="workflow:environment_check",
+        ),
+        progress_event(
+            stage="loop",
+            title="Agent loop",
+            status="running",
+            kind="phase",
+            node_id="loop",
+        ),
+        {
+            "stage": "decide",
+            "title": "Need schema evidence",
+            "status": "completed",
+            "kind": "llm",
+            "node_id": "decision:1",
+            "parent_id": "loop",
+        },
+        progress_event(
+            stage="discover_schema",
+            title="Calling discover_schema",
+            status="running",
+            kind="tool",
+            step=1,
+            parent_id="loop",
+        ),
+        progress_event(
+            stage="discover_schema",
+            title="discover_schema done",
+            status="completed",
+            kind="tool",
+            step=1,
+            duration_ms=12,
+            parent_id="loop",
+        ),
+        subagent_event(
+            agent="schema_link",
+            title="db1 kept 3",
+            parent="discover_schema",
+            node_id="schema:db1",
+            status="completed",
+        ),
+    ])
+    timeline = build_trace_timeline(m)
+    assert len(timeline) >= 4
+    assert timeline[0].stage == "environment_check"
+    assert timeline[1].stage == "decide"
+    assert timeline[2].stage == "discover_schema"
+    assert timeline[2].step == 1
+    assert timeline[3].agent == "Schema discovery"
+    assert timeline[3].depth == 1
+    assert count_timeline_steps(m) == len(timeline)
+    assert all(not entry.children for entry in timeline)
+
+
+def test_render_trace_text_still_exports_full_tree_after_flat_timeline():
+    from dbaide.agent.trace_model import build_trace_timeline, render_trace_text
+
+    m = TraceModel()
+    _feed(m, [
+        progress_event(stage="loop", title="Agent loop", status="running", kind="phase", node_id="loop"),
+        {
+            "stage": "decide",
+            "title": "Plan query",
+            "status": "completed",
+            "kind": "llm",
+            "node_id": "decision:1",
+            "parent_id": "loop",
+            "decision": {"action": "call_tool", "tool": "execute_sql"},
+        },
+        {
+            "stage": "execute_sql",
+            "title": "execute_sql done",
+            "status": "completed",
+            "kind": "tool",
+            "step": 1,
+            "sql": "SELECT 1",
+            "parent_id": "loop",
+        },
+    ])
+    m.finalize()
+    assert len(build_trace_timeline(m)) == 2
+    text = render_trace_text(m)
+    assert "SELECT 1" in text
+    assert "execute_sql" in text or "Running query" in text or "执行" in text
+
+
+def test_timeline_hides_workflow_synthetic_stages_when_tools_exist():
+    from dbaide.agent.trace_model import build_trace_timeline
+
+    m = TraceModel()
+    _feed(m, [
+        progress_event(stage="loop", title="Agent loop", status="running", kind="phase", node_id="loop"),
+        progress_event(
+            stage="generate_sql",
+            title="generate_sql done",
+            status="completed",
+            kind="tool",
+            step=1,
+            parent_id="loop",
+        ),
+        progress_event(
+            stage="validate_sql",
+            title="validate_sql done",
+            status="completed",
+            kind="tool",
+            step=2,
+            parent_id="loop",
+        ),
+        {
+            "stage": "execute_sql",
+            "title": "execute_sql done",
+            "status": "completed",
+            "kind": "tool",
+            "step": 3,
+            "sql": "SELECT 1",
+            "parent_id": "loop",
+        },
+        {"stage": "sql_generated", "title": "SQL generated", "status": "completed", "kind": "agent"},
+        {"stage": "sql_validation", "title": "Validating SQL", "status": "completed", "kind": "validation"},
+        {"stage": "execution_completed", "title": "Read-only query executed", "status": "completed", "kind": "execution"},
+        {"stage": "result_interpreted", "title": "Interpreting result", "status": "completed", "kind": "agent"},
+    ])
+    m.finalize()
+    stages = [entry.stage for entry in build_trace_timeline(m)]
+    assert stages == ["generate_sql", "validate_sql", "execute_sql"]

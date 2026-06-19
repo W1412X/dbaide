@@ -18,11 +18,15 @@ def test_ensure_webengine_before_qapplication_allows_import():
 
     from dbaide.desktop.platform_ui import ensure_webengine_before_qapplication
 
-    assert ensure_webengine_before_qapplication() is True
-    app = QApplication([])
+    webengine_ready = ensure_webengine_before_qapplication()
     try:
         from PyQt6.QtWebEngineWidgets import QWebEngineView
 
-        assert QWebEngineView is not None
-    finally:
-        app.quit()
+        assert webengine_ready is True
+        app = QApplication([])
+        try:
+            assert QWebEngineView is not None
+        finally:
+            app.quit()
+    except ImportError:
+        assert webengine_ready is False

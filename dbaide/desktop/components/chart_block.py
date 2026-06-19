@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import os
 from typing import Any
 
 from PyQt6.QtCore import QUrl
@@ -13,8 +12,7 @@ from dbaide.charts.echarts import chart_spec_to_echarts_option, render_echarts_h
 from dbaide.charts.labels import category_axis_layout
 from dbaide.charts.spec import chart_spec_from_dict
 from dbaide.desktop.theme import Theme
-
-DEFAULT_ECHARTS_SRC = "https://cdn.jsdelivr.net/npm/echarts@5/dist/echarts.min.js"
+from dbaide.desktop.vendor_assets import echarts_script_src, webengine_html_base
 
 
 def _chart_height(chart_type: str, category_count: int, categories: list[str] | None = None) -> int:
@@ -51,7 +49,7 @@ def _theme_payload() -> dict[str, Any]:
         "text": Theme.TEXT,
         "muted": Theme.MUTED,
         "border": Theme.BORDER_SOFT,
-        "panel": "transparent",
+        "panel": Theme.BG,
         "colors": [
             Theme.ACCENT,
             Theme.GREEN,
@@ -66,7 +64,7 @@ def _theme_payload() -> dict[str, Any]:
 
 
 def _echarts_src() -> str:
-    return os.environ.get("DBAIDE_ECHARTS_SRC", "").strip() or DEFAULT_ECHARTS_SRC
+    return echarts_script_src()
 
 
 def build_chart_widget(spec_dict: dict[str, Any]) -> QWidget:
@@ -85,7 +83,9 @@ def build_chart_widget(spec_dict: dict[str, Any]) -> QWidget:
         return placeholder
 
     spec = chart_spec_from_dict(spec_dict)
-    html = render_echarts_html(spec_dict, theme=_theme_payload(), echarts_src=_echarts_src())
+    echarts_src = _echarts_src()
+    html = render_echarts_html(spec_dict, theme=_theme_payload(), echarts_src=echarts_src)
+    base_url = webengine_html_base(echarts_src)
     try:
         from PyQt6.QtWebEngineWidgets import QWebEngineView
     except Exception as exc:  # noqa: BLE001
@@ -96,7 +96,13 @@ def build_chart_widget(spec_dict: dict[str, Any]) -> QWidget:
         ) from exc
 
     view = QWebEngineView()
-    view.setHtml(html, QUrl("about:blank"))
+    view.setHtml(html, base_url)
+    try:
+        from PyQt6.QtGui import QColor
+
+        view.page().setBackgroundColor(QColor(Theme.BG))
+    except Exception:
+        pass
     height = _chart_height(spec.chart_type, len(spec.categories), list(spec.categories))
     view.setFixedHeight(height)
     view.setMinimumWidth(280)

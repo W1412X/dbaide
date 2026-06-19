@@ -40,13 +40,69 @@ def test_trace_panel_live_then_finalize(qapp):
     panel.append_live_event(progress_event(stage="execute_sql", title="done", status="completed", kind="tool", step=2, duration_ms=40))
     panel.end_live()
     tree = panel._tree
-    # Summary row + 2 step rows.
-    assert tree.topLevelItemCount() == 3
+    # Summary row + flat chronological cards (tools + parallel substeps).
+    assert tree.topLevelItemCount() == 6
     assert not panel.is_empty()
-    # The first tool step has two parallel sub-agent siblings (the two db scans).
-    step1 = tree.topLevelItem(1)
-    assert step1.childCount() == 2
-    assert step1.isExpanded() is False
+    # Substeps are sibling timeline rows, not nested under the tool card.
+    assert tree.topLevelItem(1).childCount() == 0
+    assert tree.topLevelItem(2).childCount() == 0
+    assert tree.topLevelItem(3).childCount() == 0
+
+
+def test_live_trace_rebuild_does_not_orphan_cards_as_windows(qapp):
+    """Timeline rebuilds must not call setParent(None) — that spawns stray macOS windows."""
+    from PyQt6.QtWidgets import QVBoxLayout, QWidget
+    from dbaide.desktop.components.trace import InlineTrace, _TraceStepCard
+
+    host = QWidget()
+    host.setObjectName("traceRebuildHost")
+    host.resize(520, 640)
+    host.show()
+    qapp.processEvents()
+
+    trace = InlineTrace(host, show_header=False)
+    lay = QVBoxLayout(host)
+    lay.addWidget(trace)
+    trace.show()
+    qapp.processEvents()
+
+    def _orphan_cards() -> list:
+        return [
+            w
+            for w in QApplication.topLevelWidgets()
+            if isinstance(w, _TraceStepCard) or (
+                w.parent() is None and w is not host and w.objectName() == "traceTimelineCard"
+            )
+        ]
+
+    events = [
+        progress_event(stage="loop", title="started", status="running", kind="agent"),
+        progress_event(stage="discover_schema", title="Calling", status="running", kind="tool", step=1),
+    ]
+    trace.set_events(events, live=True)
+    qapp.processEvents()
+    assert trace._cards, "expected timeline cards after set_events"
+
+    for i in range(8):
+        events.append(
+            progress_event(
+                stage="execute_sql",
+                title=f"Calling {i}",
+                status="running" if i % 2 == 0 else "completed",
+                kind="tool",
+                step=2,
+                duration_ms=4 if i % 2 else 0,
+            )
+        )
+        trace.set_events(events, live=True)
+        qapp.processEvents()
+        assert not _orphan_cards(), "timeline rebuild leaked top-level card windows"
+
+    trace.set_events(events, live=False)
+    qapp.processEvents()
+    assert not _orphan_cards()
+    host.deleteLater()
+    qapp.processEvents()
 
 
 def test_trace_detail_dialog_shows_step(qapp):
@@ -119,6 +175,48 @@ def test_trace_panel_load_persisted_events(qapp):
     # Framing events filtered; one real step + summary.
     assert panel._tree.topLevelItemCount() == 2
     assert panel.copy_text()  # copy works on the new widget
+
+
+def test_conversation_turn_shows_agenda_from_trace(qapp):
+    from dbaide.desktop.components.conversation import ConversationView
+
+    view = ConversationView()
+    view.begin_turn("check orders")
+    view.append_trace_event({
+        "stage": "update_agenda",
+        "title": "update_agenda done",
+        "status": "completed",
+        "kind": "tool",
+        "step": 1,
+        "result_data": {
+            "summary": "1/2 done · 1 in progress",
+            "agenda": {
+                "items": [
+                    {"id": "task:1", "title": "Inspect schema", "status": "done", "kind": "schema"},
+                    {"id": "task:2", "title": "Write SQL", "status": "in_progress", "kind": "sql"},
+                ]
+            },
+        },
+    })
+    assert view._current_turn is not None
+    assert view._current_turn._agenda_box.isHidden() is False
+    view.complete_turn(answer="done", trace_events=view._current_record["events"])
+    block = view._turns[-1]
+    assert any(event.get("stage") == "update_agenda" for event in block["events"])
+
+
+def test_agenda_status_text_uses_i18n_keys(qapp):
+    from dbaide.desktop.components.conversation import _agenda_status_text
+    from dbaide.i18n import set_language
+
+    set_language("zh")
+    try:
+        assert _agenda_status_text("pending") == "待办"
+        assert _agenda_status_text("in_progress") == "进行中"
+        assert _agenda_status_text("done") == "完成"
+        assert _agenda_status_text("dropped") == "已放弃"
+    finally:
+        set_language("en")
 
 
 def test_build_dialog_options(qapp):
@@ -441,11 +539,9 @@ def test_copy_text_exports_structured_trace_with_sql(qapp):
     assert InlineTrace().copy_text() == ""
 
 
-def test_turn_inline_trace_toggles(qapp):
-    """Clicking a completed turn's chip expands an inline trace; clicking again hides
-    it. The trace is built lazily (no InlineTrace until first expand)."""
+def test_turn_trace_chip_toggles_drawer(qapp):
+    """Clicking a completed turn's chip opens the trace drawer; clicking again closes it."""
     from dbaide.desktop.components.conversation import ConversationView
-    from dbaide.desktop.components.trace import InlineTrace
 
     conv = ConversationView()
     conv.begin_turn("count paid orders")
@@ -462,20 +558,273 @@ def test_turn_inline_trace_toggles(qapp):
     assert turn  # record exists
     # The most recently completed TurnBlock is reachable via the layout; grab it.
     block = conv._layout.itemAt(conv._layout.count() - 1).widget()
-    assert block._trace_box is None             # lazy — not built until expanded
-    block._toggle_trace()                        # expand
-    assert isinstance(block._trace_box, InlineTrace)
-    assert block._trace_box.isHidden() is False
-    assert not block._trace_box.is_empty()
+    block._toggle_trace()
+    drawer = getattr(conv.window(), "_trace_drawer_panel", None)
+    assert drawer is not None
+    assert drawer.isHidden() is False
+    assert drawer._timeline.is_empty() is False
     assert block.status._expanded is True
-    block._toggle_trace()                        # collapse
-    # The close animation (QPropertyAnimation, 180 ms) must finish before the
-    # box is hidden. Fast-forward it so we don't depend on wall-clock timing.
-    if block._trace_anim is not None:
-        block._trace_anim.setCurrentTime(block._trace_anim.duration())
+    block._toggle_trace()
+    if drawer._anim is not None:
+        drawer._anim.setCurrentTime(drawer._anim.duration())
         qapp.processEvents()
-    assert block._trace_box.isHidden() is True
+    assert drawer.isHidden() is True
     assert block.status._expanded is False
+    conv.deleteLater()
+    qapp.processEvents()
+
+
+def test_trace_drawer_step_opens_bottom_detail(qapp):
+    from dbaide.desktop.components.conversation import ConversationView
+
+    conv = ConversationView()
+    conv.begin_turn("count paid orders")
+    conv.complete_turn(
+        answer="3 paid orders.",
+        trace_events=[{
+            "stage": "execute_sql",
+            "title": "execute_sql done",
+            "status": "completed",
+            "kind": "tool",
+            "step": 1,
+            "sql": "SELECT COUNT(*) FROM orders",
+            "duration_ms": 4,
+        }],
+        ok=True,
+    )
+    block = conv._layout.itemAt(conv._layout.count() - 1).widget()
+    block._toggle_trace()
+    drawer = getattr(conv.window(), "_trace_drawer_panel", None)
+    assert drawer is not None
+    card = drawer._timeline._cards[0]
+    drawer.show_step_detail(card.trace_data())
+    assert drawer._detail.isHidden() is False
+    assert "SELECT COUNT(*) FROM orders" in drawer._detail._body.toPlainText()
+    conv.deleteLater()
+    qapp.processEvents()
+
+
+def test_trace_drawer_does_not_auto_open_detail_on_live_updates(qapp):
+    from dbaide.desktop.components.conversation import ConversationView
+
+    conv = ConversationView()
+    conv.begin_turn("count paid orders")
+    conv.append_trace_event({"stage": "execute_sql", "title": "Calling", "status": "running",
+                             "kind": "tool", "step": 1})
+    block = conv._layout.itemAt(conv._layout.count() - 1).widget()
+    block._toggle_trace()
+    drawer = getattr(conv.window(), "_trace_drawer_panel", None)
+    assert drawer is not None
+    assert drawer._detail.isHidden() is True
+
+    conv.append_trace_event({"stage": "execute_sql", "title": "Calling 2", "status": "running",
+                             "kind": "tool", "step": 2})
+    qapp.processEvents()
+    assert drawer._detail.isHidden() is True
+
+    conv.complete_turn(
+        answer="3 paid orders.",
+        trace_events=[{
+            "stage": "execute_sql",
+            "title": "execute_sql done",
+            "status": "completed",
+            "kind": "tool",
+            "step": 1,
+            "sql": "SELECT COUNT(*) FROM orders",
+            "duration_ms": 4,
+        }],
+        ok=True,
+    )
+    qapp.processEvents()
+    assert drawer._detail.isHidden() is True
+    conv.deleteLater()
+    qapp.processEvents()
+
+
+def test_show_trace_detail_no_fallback_panel_when_drawer_closed(qapp):
+    from PyQt6.QtWidgets import QWidget
+    from dbaide.desktop.components.trace import TraceDetailPanel, show_trace_detail
+
+    host = QWidget()
+    host.resize(900, 640)
+    host.show()
+    qapp.processEvents()
+    show_trace_detail(host, {"title": "step", "stage": "execute_sql", "status": "running"})
+    qapp.processEvents()
+    panel = getattr(host.window(), "_trace_detail_panel", None)
+    assert panel is None or not panel.isVisible()
+    # Direct panel API still works for tests/tools.
+    panel = TraceDetailPanel(host)
+    panel.show_detail({"title": "step", "stage": "execute_sql", "status": "running"})
+    assert panel.isVisible()
+    panel.close_panel()
+    host.deleteLater()
+    qapp.processEvents()
+
+
+def test_trace_drawer_card_height_stays_content_sized(qapp):
+    from dbaide.desktop.components.conversation import ConversationView
+
+    conv = ConversationView()
+    conv.begin_turn("count paid orders")
+    conv.complete_turn(
+        answer="3 paid orders.",
+        trace_events=[{
+            "stage": "execute_sql",
+            "title": "execute_sql done",
+            "status": "completed",
+            "kind": "tool",
+            "step": 1,
+            "sql": "SELECT COUNT(*) FROM orders",
+            "duration_ms": 4,
+        }],
+        ok=True,
+    )
+    block = conv._layout.itemAt(conv._layout.count() - 1).widget()
+    for _ in range(3):
+        block._toggle_trace()
+        qapp.processEvents()
+        drawer = getattr(conv.window(), "_trace_drawer_panel", None)
+        assert drawer is not None
+        card = drawer._timeline._cards[0]
+        assert card.height() <= card.sizeHint().height() + 4
+        assert card.height() < 180
+        block._toggle_trace()
+        qapp.processEvents()
+    conv.deleteLater()
+    qapp.processEvents()
+
+
+def test_switching_slots_closes_trace_drawer(qapp):
+    from dbaide.desktop.views.ask_tab import AskTab
+
+    tab = AskTab()
+    tab.set_has_connection(True)
+    tab.begin_turn("s1", "count paid orders", connection="local", database="test")
+    tab.append_result("s1", {
+        "status": "completed",
+        "answer_markdown": "3 paid orders.",
+        "trace": [{"stage": "execute_sql", "title": "execute_sql done", "status": "completed",
+                   "kind": "tool", "step": 1, "sql": "SELECT COUNT(*) FROM orders", "duration_ms": 4}],
+    })
+    tab.ensure_slot("s2")
+    tab.set_active("s1")
+    view1 = tab.view("s1")
+    assert view1 is not None
+    block = view1._layout.itemAt(view1._layout.count() - 1).widget()
+    block._toggle_trace()
+    drawer = getattr(tab.window(), "_trace_drawer_panel", None)
+    assert drawer is not None and drawer.isHidden() is False
+    tab.set_active("s2")
+    qapp.processEvents()
+    assert drawer.isHidden() is True
+    tab.deleteLater()
+    qapp.processEvents()
+
+
+def test_loading_session_closes_trace_drawer_before_replacing_turns(qapp):
+    from dbaide.desktop.views.ask_tab import AskTab
+
+    tab = AskTab()
+    tab.set_has_connection(True)
+    tab.begin_turn("s1", "count paid orders", connection="local", database="test")
+    tab.append_result("s1", {
+        "status": "completed",
+        "answer_markdown": "3 paid orders.",
+        "trace": [{"stage": "execute_sql", "title": "execute_sql done", "status": "completed",
+                   "kind": "tool", "step": 1, "sql": "SELECT COUNT(*) FROM orders", "duration_ms": 4}],
+    })
+    tab.set_active("s1")
+    view = tab.view("s1")
+    assert view is not None
+    block = view._layout.itemAt(view._layout.count() - 1).widget()
+    block._toggle_trace()
+    drawer = getattr(tab.window(), "_trace_drawer_panel", None)
+    assert drawer is not None and drawer.isHidden() is False
+
+    tab.load_session("s1", [{
+        "question": "count refunded orders",
+        "answer_markdown": "5 refunded orders.",
+        "status": "completed",
+        "trace": [{"stage": "execute_sql", "title": "execute_sql done", "status": "completed",
+                   "kind": "tool", "step": 1, "sql": "SELECT COUNT(*) FROM refunds", "duration_ms": 5}],
+    }], connection="local")
+    qapp.processEvents()
+
+    assert drawer.isHidden() is True
+    view = tab.view("s1")
+    assert view is not None
+    new_block = view._layout.itemAt(view._layout.count() - 1).widget()
+    new_block._toggle_trace()
+    qapp.processEvents()
+    assert drawer.isHidden() is False
+    assert "SELECT COUNT(*) FROM refunds" in drawer._timeline.copy_text()
+    tab.deleteLater()
+    qapp.processEvents()
+
+
+def test_clearing_slot_with_open_trace_closes_drawer(qapp):
+    from dbaide.desktop.views.ask_tab import AskTab
+
+    tab = AskTab()
+    tab.set_has_connection(True)
+    tab.begin_turn("s1", "count paid orders", connection="local", database="test")
+    tab.append_result("s1", {
+        "status": "completed",
+        "answer_markdown": "3 paid orders.",
+        "trace": [{"stage": "execute_sql", "title": "execute_sql done", "status": "completed",
+                   "kind": "tool", "step": 1, "sql": "SELECT COUNT(*) FROM orders", "duration_ms": 4}],
+    })
+    tab.set_active("s1")
+    view = tab.view("s1")
+    assert view is not None
+    block = view._layout.itemAt(view._layout.count() - 1).widget()
+    block._toggle_trace()
+    drawer = getattr(tab.window(), "_trace_drawer_panel", None)
+    assert drawer is not None and drawer.isHidden() is False
+
+    tab.clear_slot("s1")
+    qapp.processEvents()
+    assert drawer.isHidden() is True
+    tab.deleteLater()
+    qapp.processEvents()
+
+
+def test_loading_other_slot_does_not_close_active_trace_drawer(qapp):
+    from dbaide.desktop.views.ask_tab import AskTab
+
+    tab = AskTab()
+    tab.set_has_connection(True)
+    for key, sql in (("s1", "SELECT 1"), ("s2", "SELECT 2")):
+        tab.begin_turn(key, key, connection="local", database="test")
+        tab.append_result(key, {
+            "status": "completed",
+            "answer_markdown": key,
+            "trace": [{"stage": "execute_sql", "title": "execute_sql done", "status": "completed",
+                       "kind": "tool", "step": 1, "sql": sql, "duration_ms": 4}],
+        })
+
+    tab.set_active("s1")
+    view = tab.view("s1")
+    assert view is not None
+    block = view._layout.itemAt(view._layout.count() - 1).widget()
+    block._toggle_trace()
+    drawer = getattr(tab.window(), "_trace_drawer_panel", None)
+    assert drawer is not None and drawer.isHidden() is False
+
+    tab.load_session("s2", [{
+        "question": "new-s2",
+        "answer_markdown": "new-s2",
+        "status": "completed",
+        "trace": [{"stage": "execute_sql", "title": "execute_sql done", "status": "completed",
+                   "kind": "tool", "step": 1, "sql": "SELECT 22", "duration_ms": 4}],
+    }], connection="local")
+    qapp.processEvents()
+
+    assert drawer.isHidden() is False
+    assert "SELECT 1" in drawer._timeline.copy_text()
+    tab.deleteLater()
+    qapp.processEvents()
 
 
 def test_conversation_copy_exports_all_turns(qapp):
@@ -535,58 +884,96 @@ def test_markdown_code_block_copy_button_copies_code_only(qapp):
 
     markdown = "Before\n\n```sql\nSELECT 1;\n```\n\nAfter"
     block = _MarkdownBlock(markdown, title="DBAide")
-    assert len(block._code_blocks) == 1
-    block._code_blocks[0]._copy_btn.click()
+    block.copy_first_code_block()
     assert QApplication.clipboard().text() == "SELECT 1;"
 
 
 def test_markdown_code_block_handles_empty_and_code_only_messages(qapp):
     from dbaide.desktop.components.conversation import _MarkdownBlock
 
+    QApplication.clipboard().clear()
     block = _MarkdownBlock("```text\n```")
-    assert len(block._code_blocks) == 1
-    block._code_blocks[0].copy_code()
+    block.copy_first_code_block()
     assert QApplication.clipboard().text() == ""
-    block.copy_message()  # no text browser exists; must not crash
+    block.copy_message()  # must not crash
 
 
 def test_markdown_code_blocks_update_during_streaming(qapp):
     from dbaide.desktop.components.conversation import _MarkdownBlock
 
     block = _MarkdownBlock("```sql\nSELECT 1\n```")
-    assert len(block._code_blocks) == 1
     block.set_markdown("Done\n\n```python\nprint(2)\n```")
-    assert len(block._code_blocks) == 1
-    block._code_blocks[0].copy_code()
+    block.copy_first_code_block()
     assert QApplication.clipboard().text() == "print(2)"
 
 
-def test_markdown_interleaved_updates_in_place_and_renders_in_order(qapp):
-    # Interleaved text/code/text must update in place (same structure → same widgets)
-    # AND keep document order. The old browsers+code_blocks ordering broke both.
-    from dbaide.desktop.components.conversation import (
-        _MarkdownBlock, _CodeBlock, _split_fenced_code_blocks,
-    )
+def _wait_markdown_ready(block, qapp, *, timeout_ms: int = 500) -> None:
+    import time
+
+    deadline = time.monotonic() + timeout_ms / 1000.0
+    while time.monotonic() < deadline:
+        qapp.processEvents()
+        if block._rendered is not None:
+            return
+        time.sleep(0.005)
+    raise AssertionError("markdown block did not finish rendering")
+
+
+def test_streaming_text_uses_plain_append_only_path(qapp):
+    from dbaide.desktop.components.conversation import _MarkdownBlock
+
+    block = _MarkdownBlock("", title="DBAide")
+    block.set_streaming_text("hel")
+    view = block._stream_view
+    assert view is not None
+    assert view.toPlainText() == "hel"
+    block.set_streaming_text("hello")
+    assert view.toPlainText() == "hello"
+    block.set_markdown("**hello**", force_rebuild=True)
+    _wait_markdown_ready(block, qapp)
+    assert block._stream_view is None
+    assert block._rendered is not None
+
+
+def test_markdown_final_render_uses_web_widget(qapp, monkeypatch):
+    import sys
+    import types
+
+    from PyQt6.QtCore import QTimer, pyqtSignal
+    from PyQt6.QtWidgets import QWidget
+
+    class _FakePage:
+        def runJavaScript(self, _js, callback=None):
+            if callback is not None:
+                callback(120)
+
+    class _FakeWebEngineView(QWidget):
+        loadFinished = pyqtSignal(bool)
+
+        def __init__(self, parent=None):
+            super().__init__(parent)
+            self._html = ""
+
+        def setHtml(self, html, _base_url=None):
+            self._html = html
+            QTimer.singleShot(0, lambda: self.loadFinished.emit(True))
+
+        def page(self):
+            return _FakePage()
+
+    fake_module = types.ModuleType("PyQt6.QtWebEngineWidgets")
+    fake_module.QWebEngineView = _FakeWebEngineView
+    monkeypatch.setitem(sys.modules, "PyQt6.QtWebEngineWidgets", fake_module)
+
+    from dbaide.desktop.components.conversation import _MarkdownBlock
 
     block = _MarkdownBlock("intro\n\n```sql\nSELECT 1\n```\n\noutro")
-    browsers_before = list(block._browsers)
-    codes_before = list(block._code_blocks)
-    # The structure is unchanged (text, code, text), so an in-place update applies.
-    assert block._can_update_in_place(
-        _split_fenced_code_blocks("intro2\n\n```sql\nSELECT 2\n```\n\noutro2")
-    )
+    _wait_markdown_ready(block, qapp)
+    assert block._rendered is not None
     block.set_markdown("intro2\n\n```sql\nSELECT 2\n```\n\noutro2")
-    # Same widget objects reused (no rebuild).
-    assert block._browsers == browsers_before and block._code_blocks == codes_before
-    # Document order in the layout is text, code, text.
-    kinds = []
-    for i in range(block._content_layout.count()):
-        w = block._content_layout.itemAt(i).widget()
-        if isinstance(w, _CodeBlock):
-            kinds.append("code")
-        elif w.__class__.__name__ == "QTextBrowser":
-            kinds.append("browser")
-    assert kinds == ["browser", "code", "browser"]
+    _wait_markdown_ready(block, qapp)
+    assert block._markdown.startswith("intro2")
+    assert block._rendered is not None
 
 
 def test_copy_answer_action_builds_menu_button(qapp):

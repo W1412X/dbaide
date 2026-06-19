@@ -40,6 +40,17 @@ def test_brief_tool_summary_render_chart():
     assert brief_tool_summary("render_chart", Result()) == "Revenue trend (12 pts)"
 
 
+def test_brief_tool_summary_update_agenda():
+    class Result:
+        ok = True
+        data = {
+            "summary": "1/2 done · 1 in progress",
+            "agenda": {"items": [{"title": "Inspect schema"}, {"title": "Write SQL"}]},
+        }
+
+    assert brief_tool_summary("update_agenda", Result()) == "1/2 done · 1 in progress"
+
+
 def test_conversation_trace_step_from_progress():
     step = conversation_trace_step(
         progress_event(stage="execute_sql", title="execute_sql done", status="completed", kind="tool")

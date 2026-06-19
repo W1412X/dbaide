@@ -5,9 +5,10 @@ from typing import Any
 from PyQt6.QtCore import pyqtSignal
 from PyQt6.QtWidgets import QApplication, QHBoxLayout, QSizePolicy, QStackedWidget, QVBoxLayout, QWidget
 
-from dbaide.desktop.components.base import compact_button
+from dbaide.desktop.components.base import compact_button, discard_widget
 from dbaide.desktop.components.conversation import ConversationView
 from dbaide.desktop.components.empty_state import EmptyState
+from dbaide.desktop.components.trace import close_trace_overlays, close_trace_overlays_for
 
 
 class AskTab(QWidget):
@@ -76,6 +77,7 @@ class AskTab(QWidget):
     def set_active(self, key: str) -> None:
         """Show ``key``'s conversation (creating its view), or the empty page for
         ``""`` / when there's no connection."""
+        close_trace_overlays(self)
         self._active = key
         if key and self._has_conn:
             self.stack.setCurrentWidget(self.ensure_slot(key))
@@ -93,17 +95,19 @@ class AskTab(QWidget):
         # Drop a stale view already sitting under new_key (shouldn't normally happen).
         existing = self._views.pop(new_key, None)
         if existing is not None and existing is not view:
+            close_trace_overlays_for(existing)
             self.stack.removeWidget(existing)
-            existing.deleteLater()
+            discard_widget(existing)
         self._views[new_key] = view
         if self._active == old_key:
             self._active = new_key
 
     def discard_slot(self, key: str) -> None:
+        close_trace_overlays(self)
         view = self._views.pop(key, None)
         if view is not None:
             self.stack.removeWidget(view)
-            view.deleteLater()
+            discard_widget(view)
         if self._active == key:
             self._active = ""
             self.stack.setCurrentIndex(0)
@@ -113,10 +117,11 @@ class AskTab(QWidget):
 
     def reset_all(self) -> None:
         """Drop every slot (e.g. when the connection changes)."""
+        close_trace_overlays(self)
         for key in list(self._views.keys()):
             view = self._views.pop(key)
             self.stack.removeWidget(view)
-            view.deleteLater()
+            discard_widget(view)
         self._active = ""
         self._hint_shown = False
         self.stack.setCurrentIndex(0)
@@ -128,6 +133,8 @@ class AskTab(QWidget):
     # ── connection / empty-state ──────────────────────────────────────────────
 
     def set_has_connection(self, has_connection: bool) -> None:
+        if bool(self._has_conn) != bool(has_connection):
+            close_trace_overlays(self)
         self._has_conn = has_connection
         self.set_active(self._active)
 
@@ -233,6 +240,7 @@ class AskTab(QWidget):
     def clear_slot(self, key: str) -> None:
         view = self._views.get(key)
         if view is not None:
+            close_trace_overlays_for(view)
             view.clear()
 
     def copy_text(self, key: str = "") -> str:
@@ -242,26 +250,31 @@ class AskTab(QWidget):
     def load_session(self, key: str, turns: list[dict[str, Any]], *, connection: str = "") -> None:
         """Render a saved session's turns into ``key``'s view (creating it)."""
         view = self.ensure_slot(key)
+        close_trace_overlays_for(view)
         view.clear()
         self._hint_shown = True
-        for turn in turns:
-            meta = turn.get("meta") or {}
-            database = str(meta.get("database") or "")
-            meta_line = " · ".join(x for x in (connection, database or "auto") if x)
-            # Restore attachment tags (db/table chips) if this turn had pinned context.
-            attachments = turn.get("attachments") or None
-            view.begin_turn(str(turn.get("question") or ""), meta=meta_line, placeholder=False,
-                            attachments=attachments)
-            status = str(turn.get("status") or "completed")
-            view.complete_turn(
-                answer=str(turn.get("answer_markdown") or ""),
-                trace_events=turn.get("trace") or [],
-                ok=status not in ("failed", "cancelled"),
-                actions_widget=self._build_actions(
-                    str(turn.get("answer_markdown") or ""), None, turn.get("selected_sql"),
-                ),
-                charts=turn.get("charts") or None,
-            )
+        view.begin_bulk_load()
+        try:
+            for turn in turns:
+                meta = turn.get("meta") or {}
+                database = str(meta.get("database") or "")
+                meta_line = " · ".join(x for x in (connection, database or "auto") if x)
+                # Restore attachment tags (db/table chips) if this turn had pinned context.
+                attachments = turn.get("attachments") or None
+                view.begin_turn(str(turn.get("question") or ""), meta=meta_line, placeholder=False,
+                                attachments=attachments)
+                status = str(turn.get("status") or "completed")
+                view.complete_turn(
+                    answer=str(turn.get("answer_markdown") or ""),
+                    trace_events=turn.get("trace") or [],
+                    ok=status not in ("failed", "cancelled"),
+                    actions_widget=self._build_actions(
+                        str(turn.get("answer_markdown") or ""), None, turn.get("selected_sql"),
+                    ),
+                    charts=turn.get("charts") or None,
+                )
+        finally:
+            view.end_bulk_load()
 
     # ── helpers ───────────────────────────────────────────────────────────────
 

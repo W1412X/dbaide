@@ -29,7 +29,7 @@ dbaide-gui = "dbaide.gui:main"
 include = ["dbaide*"]
 
 [tool.setuptools.package-data]
-"dbaide.desktop" = ["assets/*.png", "assets/tool_icons/*.png"]
+"dbaide.desktop" = ["assets/*.png", "assets/tool_icons/*.png", "assets/vendor/*.js"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

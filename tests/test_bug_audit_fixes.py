@@ -7,6 +7,8 @@ from pathlib import Path
 
 import pytest
 
+pytest.importorskip("PyQt6")
+
 from dbaide.adapters.base import append_limit, outer_limit_value
 from dbaide.agent.runtime import AgentRuntime
 from dbaide.config import ConfigManager, _toml_quote
@@ -14,6 +16,16 @@ from dbaide.models import ConnectionConfig
 from dbaide.tools.profile import ProfileTools
 from dbaide.tools.registry import ToolResult
 from dbaide.validation.sql_guard import SQLGuard
+
+
+@pytest.fixture(scope="module")
+def qapp():
+    import os
+
+    os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+    from PyQt6.QtWidgets import QApplication
+
+    return QApplication.instance() or QApplication([])
 
 
 # 1) CRITICAL: agent loop step budget actually decrements.
@@ -200,3 +212,94 @@ def test_chat_session_connection_name_stays_in_base_dir(tmp_path):
     assert not list(base.parent.glob("escape"))                 # nothing escaped base_dir
     assert len(store.list_sessions("../escape")) == 1            # round-trips via sanitized path
     assert store.load("../escape", sess["session_id"]) is not None
+
+
+def test_discard_widget_does_not_orphan_top_level_window(qapp):
+    """GUI-001: setParent(None) promotes widgets to transient top-level windows."""
+    from PyQt6.QtWidgets import QApplication, QFrame, QVBoxLayout, QWidget
+
+    from dbaide.desktop.components.base import discard_widget
+
+    host = QWidget()
+    host.resize(400, 300)
+    host.show()
+    qapp.processEvents()
+
+    child = QFrame(host)
+    child.setObjectName("discardWidgetTest")
+    child.resize(180, 80)
+    child.show()
+    qapp.processEvents()
+
+    discard_widget(child)
+    qapp.processEvents()
+
+    orphans = [
+        w
+        for w in QApplication.topLevelWidgets()
+        if w is not host and getattr(w, "objectName", lambda: "")() == "discardWidgetTest"
+    ]
+    assert not orphans
+    host.deleteLater()
+    qapp.processEvents()
+
+
+def test_clear_layout_widgets_does_not_orphan_top_level_window(qapp):
+    """GUI-001: layout rebuilds must use clear_layout_widgets, not setParent(None)."""
+    from PyQt6.QtWidgets import QApplication, QLabel, QVBoxLayout, QWidget
+
+    from dbaide.desktop.components.base import clear_layout_widgets
+
+    host = QWidget()
+    host.resize(400, 300)
+    host.show()
+    lay = QVBoxLayout(host)
+    for i in range(4):
+        label = QLabel(f"row {i}", host)
+        label.setObjectName("layoutClearTest")
+        lay.addWidget(label)
+    qapp.processEvents()
+
+    clear_layout_widgets(lay)
+    qapp.processEvents()
+
+    orphans = [
+        w
+        for w in QApplication.topLevelWidgets()
+        if w is not host and getattr(w, "objectName", lambda: "")() == "layoutClearTest"
+    ]
+    assert not orphans
+    host.deleteLater()
+    qapp.processEvents()
+
+
+def test_setparent_none_orphans_widget_on_macos_pattern(qapp):
+    """Documents the anti-pattern: setParent(None) before deleteLater orphans widgets."""
+    from PyQt6.QtWidgets import QApplication, QFrame, QVBoxLayout, QWidget
+
+    host = QWidget()
+    host.resize(400, 300)
+    host.show()
+    lay = QVBoxLayout(host)
+    child = QFrame(host)
+    child.setObjectName("setParentNoneAntiPattern")
+    child.resize(160, 60)
+    lay.addWidget(child)
+    child.show()
+    qapp.processEvents()
+
+    lay.takeAt(0)
+    child.hide()
+    child.setParent(None)  # anti-pattern — do not use in product code
+    qapp.processEvents()
+
+    orphans = [
+        w
+        for w in QApplication.topLevelWidgets()
+        if getattr(w, "objectName", lambda: "")() == "setParentNoneAntiPattern"
+    ]
+    assert orphans, "setParent(None) should promote widget to top-level (documents GUI-001)"
+    for w in orphans:
+        w.deleteLater()
+    host.deleteLater()
+    qapp.processEvents()

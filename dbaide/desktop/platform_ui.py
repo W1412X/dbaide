@@ -34,9 +34,8 @@ def ensure_webengine_before_qapplication() -> bool:
     try:
         from PyQt6.QtWidgets import QApplication
 
-        if QApplication.instance() is not None:
-            return True
-        QApplication.setAttribute(Qt.ApplicationAttribute.AA_ShareOpenGLContexts)
+        if QApplication.instance() is None:
+            QApplication.setAttribute(Qt.ApplicationAttribute.AA_ShareOpenGLContexts)
         from PyQt6.QtWebEngineWidgets import QWebEngineView  # noqa: F401
 
         return True

@@ -1,14 +1,15 @@
 """Codex-style conversation: question bubbles + answers, with a lightweight
-"thinking" indicator per turn. The detailed agent trace lives in the right panel,
-not inline — clicking a turn's indicator reveals it there."""
+thinking indicator per turn. Task lists stay inline with the turn, while the
+full trace opens in a dedicated side drawer."""
 
 from __future__ import annotations
 
 import re
+import weakref
 from typing import Any
 
-from PyQt6.QtCore import Qt, QTimer, pyqtSignal, QPropertyAnimation, QEasingCurve
-from PyQt6.QtGui import QFont
+from PyQt6.QtCore import Qt, QTimer, pyqtSignal
+from PyQt6.QtGui import QFont, QTextCursor
 from PyQt6.QtWidgets import (
     QApplication,
     QFrame,
@@ -19,30 +20,28 @@ from PyQt6.QtWidgets import (
     QPlainTextEdit,
     QScrollArea,
     QSizePolicy,
-    QTextBrowser,
     QVBoxLayout,
     QWidget,
 )
+from dbaide.agent.agenda import AgendaItem, agenda_summary, latest_agenda_from_events
 from dbaide.desktop.components.chart_block import ChartBlock
 from dbaide.desktop.components.icon_button import IconToolButton
 
 from PyQt6.QtCore import QSize
 
 from dbaide.agent.progress_events import conversation_trace_step, phase_for
-from dbaide.desktop.components.base import compact_button
+from dbaide.agent.trace_model import count_timeline_steps
+from dbaide.desktop.components.base import clear_layout_widgets, compact_button, discard_widget
 from dbaide.desktop.conversation_state import ThinkingUiState, TurnTraceState
-from dbaide.desktop.components.icons import svg_icon, svg_pixmap
+from dbaide.desktop.components.icons import svg_icon
 from dbaide.desktop.components.inputs import configure_readonly_text_view, configure_wrapped_label
 from dbaide.desktop.components.menu import _style_menu
 from dbaide.desktop.components.spinner import BusyAnimator, SPINNER_SIZE, spinner_pixmap
-from dbaide.desktop.components.trace import InlineTrace
+from dbaide.desktop.components.trace import toggle_trace_drawer, update_trace_drawer
 from dbaide.desktop.theme import Theme
 
-_TRACE_CHEVRON_SIZE = 15
-_TRACE_ANIM_MS = 180
-_TRACE_MAX_H = 340
 from dbaide.charts.embed import split_answer_with_charts
-from dbaide.rendering.markdown import render_markdown_safe
+from dbaide.desktop.components.markdown_webview import MarkdownWebWidget, build_markdown_widget
 
 
 def _copy_to_clipboard(text: str) -> None:
@@ -59,10 +58,6 @@ def _normalize_selected_text(text: str) -> str:
 
 def _selected_label_text(label: QLabel) -> str:
     return _normalize_selected_text(label.selectedText())
-
-
-def _selected_browser_text(browser: QTextBrowser) -> str:
-    return _normalize_selected_text(browser.textCursor().selectedText())
 
 
 def _show_copy_menu(widget: QWidget, pos, *, selected_text: str, full_text: str) -> None:
@@ -231,8 +226,8 @@ class _Bubble(QFrame):
 class _ThinkingIndicator(QFrame):
     """Per-turn status chip. While the agent runs it shows a spinner + the current
     phase ("Thinking…", then phase labels); when done it collapses to a muted
-    "View agent trace" link with a trailing chevron on the right. Clicking it
-    expands the run's trace inline, right below the chip. Emits ``toggled_trace``."""
+    "View agent trace" link. Clicking it opens the run's trace drawer.
+    Emits ``toggled_trace``."""
 
     toggled_trace = pyqtSignal()
 
@@ -259,19 +254,13 @@ class _ThinkingIndicator(QFrame):
         self._text.setWordWrap(False)
         self._text.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
 
-        self._chevron = QLabel()
-        self._chevron.setFixedSize(_TRACE_CHEVRON_SIZE, _TRACE_CHEVRON_SIZE)
-        self._chevron.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self._chevron.hide()
-
-        for label in (self._leading, self._text, self._chevron):
+        for label in (self._leading, self._text):
             label.setAutoFillBackground(False)
             label.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
             label.setStyleSheet("background: transparent; border: none;")
 
         row.addWidget(self._leading, 0, Qt.AlignmentFlag.AlignVCenter)
         row.addWidget(self._text, 0, Qt.AlignmentFlag.AlignVCenter)
-        row.addWidget(self._chevron, 0, Qt.AlignmentFlag.AlignVCenter)
 
         self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
         self._sync_frame()
@@ -365,9 +354,13 @@ class _ThinkingIndicator(QFrame):
                 f" border: 1px solid {Theme.BORDER_SOFT}; border-radius: {Theme.RADIUS_MD}px; }}"
                 f"{child}"
             )
+        elif idle_done and state.expanded:
+            self.setStyleSheet(
+                f"QFrame#thinkingIndicator {{ background: {Theme.PANEL_3};"
+                f" border: 1px solid {Theme.BORDER}; border-radius: {Theme.RADIUS_MD}px; }}"
+                f"{child}"
+            )
         elif idle_done:
-            # Quiet pill at rest — matches hover surface so the chevron never sits on
-            # a different fill than the label (macOS QLabel pixmap boxes read as black).
             self.setStyleSheet(
                 f"QFrame#thinkingIndicator {{ background: {Theme.PANEL_2};"
                 f" border: 1px solid transparent; border-radius: {Theme.RADIUS_MD}px; }}"
@@ -387,7 +380,7 @@ class _ThinkingIndicator(QFrame):
 
     def _fit_text_width(self, *, max_width: int = 0) -> None:
         """Size the label to its rendered string — global QSS font-size otherwise
-        makes QLabel sizeHint too narrow and the last glyphs clip under the chevron."""
+        makes QLabel sizeHint too narrow and can clip the last glyphs."""
         text = self._text.text()
         if not text:
             return
@@ -405,18 +398,12 @@ class _ThinkingIndicator(QFrame):
             return
         self._leading.setPixmap(spinner_pixmap(self._busy.angle, color=Theme.BLUE, size=SPINNER_SIZE))
 
-    def _set_chevron(self, *, expanded: bool, color: str) -> None:
-        name = "chevron-down" if expanded else "chevron-right"
-        self._chevron.setPixmap(svg_pixmap(name, color=color, size=_TRACE_CHEVRON_SIZE))
-
     def _apply_tone(self, color: str) -> None:
         self._tone = color
         show_hover = self._hover and not self._state.running and not self._state.waiting
         display = Theme.TEXT if show_hover else color
         self._text.setStyleSheet(self._text_style(display))
         if not self._state.running and not self._state.waiting and self._state.step_count > 0:
-            self._set_chevron(expanded=self._state.expanded, color=display)
-            self._chevron.setStyleSheet("background: transparent; border: none;")
             self._fit_text_width()
 
     def _sync(self) -> None:
@@ -424,7 +411,6 @@ class _ThinkingIndicator(QFrame):
         if state.running:
             phase = state.phase if state.phase.endswith("…") else f"{state.phase}…"
             self._leading.show()
-            self._chevron.hide()
             self._text.setText(phase)
             self._apply_tone(Theme.BLUE)
             self._fit_text_width(max_width=420)
@@ -432,7 +418,6 @@ class _ThinkingIndicator(QFrame):
             self.show()
         elif state.waiting:
             self._leading.hide()
-            self._chevron.hide()
             self._text.setText(state.phase)
             self._apply_tone(Theme.YELLOW)
             self._fit_text_width(max_width=420)
@@ -444,7 +429,6 @@ class _ThinkingIndicator(QFrame):
             from dbaide.i18n import t
             base = t("trace.view") if state.ok else t("trace.view_failed")
             self._leading.hide()
-            self._chevron.show()
             self._text.setText(base)
             self._apply_tone(Theme.MUTED if state.ok else Theme.RED)
             self._sync_frame()
@@ -452,6 +436,110 @@ class _ThinkingIndicator(QFrame):
             self.show()
         self.adjustSize()
         self.updateGeometry()
+
+
+class _AgendaPanel(QFrame):
+    def __init__(self, parent=None) -> None:
+        super().__init__(parent)
+        from dbaide.i18n import t
+
+        self.setObjectName("agendaPanel")
+        self.setStyleSheet(
+            f"QFrame#agendaPanel {{ background: {Theme.PANEL}; border: 1px solid {Theme.BORDER_SOFT};"
+            f" border-radius: 8px; }}"
+            f"QFrame#agendaPanel QLabel {{ background: transparent; border: none; }}"
+        )
+        outer = QVBoxLayout(self)
+        outer.setContentsMargins(12, 10, 12, 10)
+        outer.setSpacing(8)
+
+        header = QHBoxLayout()
+        header.setContentsMargins(0, 0, 0, 0)
+        header.setSpacing(6)
+        self._title = QLabel(t("conversation.agenda"))
+        self._title.setFont(QFont("Inter", 10, QFont.Weight.DemiBold))
+        self._title.setStyleSheet(f"color: {Theme.TEXT_2};")
+        self._summary = QLabel("")
+        self._summary.setStyleSheet(f"color: {Theme.MUTED_2}; font-size: 10px;")
+        header.addWidget(self._title)
+        header.addStretch(1)
+        header.addWidget(self._summary)
+        outer.addLayout(header)
+
+        self._items = QVBoxLayout()
+        self._items.setContentsMargins(0, 0, 0, 0)
+        self._items.setSpacing(6)
+        outer.addLayout(self._items)
+        self.hide()
+
+    def set_items(self, items: list[AgendaItem]) -> None:
+        clear_layout_widgets(self._items)
+        if not items:
+            self._summary.setText("")
+            self.hide()
+            return
+        self._summary.setText(agenda_summary(items))
+        for agenda_item in items:
+            self._items.addWidget(self._row(agenda_item))
+        self.show()
+
+    def _row(self, item: AgendaItem) -> QWidget:
+        row = QWidget()
+        row.setStyleSheet("background: transparent;")
+        layout = QHBoxLayout(row)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(8)
+
+        dot = QLabel(_agenda_glyph(item.status))
+        dot.setFixedWidth(14)
+        dot.setAlignment(Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignHCenter)
+        dot.setStyleSheet(f"color: {_agenda_color(item.status)}; font-size: 12px; font-weight: 700;")
+        layout.addWidget(dot)
+
+        text_col = QVBoxLayout()
+        text_col.setContentsMargins(0, 0, 0, 0)
+        text_col.setSpacing(2)
+        title = QLabel(item.title)
+        title.setWordWrap(True)
+        title.setStyleSheet(f"color: {Theme.TEXT}; font-size: 12px; font-weight: 600;")
+        text_col.addWidget(title)
+        subtitle_bits = [_agenda_status_text(item.status)]
+        if item.kind and item.kind != "other":
+            subtitle_bits.append(item.kind.replace("_", " "))
+        if item.acceptance:
+            subtitle_bits.append(item.acceptance)
+        subtitle = QLabel(" · ".join(bit for bit in subtitle_bits if bit))
+        subtitle.setWordWrap(True)
+        subtitle.setStyleSheet(f"color: {Theme.MUTED_2}; font-size: 10px;")
+        text_col.addWidget(subtitle)
+        layout.addLayout(text_col, 1)
+        return row
+
+
+def _agenda_glyph(status: str) -> str:
+    return {
+        "done": "✓",
+        "in_progress": "●",
+        "dropped": "–",
+        "pending": "○",
+    }.get(str(status or ""), "○")
+
+
+def _agenda_color(status: str) -> str:
+    return {
+        "done": Theme.GREEN,
+        "in_progress": Theme.BLUE,
+        "dropped": Theme.YELLOW,
+        "pending": Theme.MUTED,
+    }.get(str(status or ""), Theme.MUTED)
+
+
+def _agenda_status_text(status: str) -> str:
+    from dbaide.i18n import t
+
+    key = f"conversation.agenda_{status}"
+    value = t(key)
+    return value if value != key else str(status or "pending")
 
 
 class _CodeBlock(QFrame):
@@ -558,15 +646,19 @@ class _CodeBlock(QFrame):
 
 
 class _MarkdownBlock(QFrame):
-    """A rendered-markdown chunk in the conversation. By default it flows directly
-    on the background (no card) — the assistant's answer reads like prose, the way
-    Claude/Cursor present it. Pass ``boxed=True`` for set-apart content (warnings,
-    errors) that deserves a subtle inset card; ``accent`` tints that card's edge."""
+    """Assistant Markdown in the conversation.
+
+    Streaming uses a plain ``QPlainTextEdit`` with incremental appends (no HTML).
+    Finalized content (``set_markdown`` / ``complete_turn``) renders once via
+    WebEngine + marked.js + highlight.js — never re-rendered per chunk.
+    """
 
     def __init__(self, markdown: str, *, title: str = "", boxed: bool = False,
-                 accent: str = "", title_tooltip: str = "", parent=None) -> None:
+                 accent: str = "", title_tooltip: str = "", fast_render: bool = False,
+                 parent=None) -> None:
         super().__init__(parent)
         self._markdown = str(markdown or "")
+        self._background = Theme.PANEL if boxed else Theme.BG
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
         self.setObjectName("answerBlock")
         if boxed:
@@ -591,142 +683,171 @@ class _MarkdownBlock(QFrame):
                 t.setToolTip(title_tooltip)
             layout.addWidget(t)
         self._content_layout = layout
-        self._browsers: list[QTextBrowser] = []
-        self._code_blocks: list[_CodeBlock] = []
-        self._body: QTextBrowser | None = None
-        self._render_segments()
+        self._stream_view: QPlainTextEdit | None = None
+        self._stream_shown_len = 0
+        self._rendered: MarkdownWebWidget | None = None
+        self._pending_rendered: MarkdownWebWidget | None = None
+        self._fast_render = bool(fast_render)
+        self._stream_height_timer = QTimer(self)
+        self._stream_height_timer.setSingleShot(True)
+        self._stream_height_timer.setInterval(48)
+        self._stream_height_timer.timeout.connect(self._sync_stream_height)
+        if self._markdown.strip():
+            self._start_render_markdown()
+
+    def set_streaming_text(self, text: str) -> None:
+        """Cheap live update while the model streams — plain text only, no HTML/Markdown."""
+        text = str(text or "")
+        self._markdown = text
+        self._ensure_stream_view()
+        view = self._stream_view
+        if view is None:
+            return
+        shown = self._stream_shown_len
+        if shown > len(text):
+            view.setPlainText(text)
+            shown = 0
+        if len(text) > shown:
+            view.setUpdatesEnabled(False)
+            try:
+                if shown == 0:
+                    view.setPlainText(text)
+                else:
+                    cursor = view.textCursor()
+                    cursor.movePosition(QTextCursor.MoveOperation.End)
+                    cursor.insertText(text[shown:])
+                self._stream_shown_len = len(text)
+            finally:
+                view.setUpdatesEnabled(True)
+        self._schedule_stream_height()
+
+    def _schedule_stream_height(self) -> None:
+        if not self._stream_height_timer.isActive():
+            self._sync_stream_height()
+        self._stream_height_timer.start()
+
+    def _ensure_stream_view(self) -> None:
+        if self._stream_view is not None:
+            return
+        view = QPlainTextEdit()
+        view.setReadOnly(True)
+        view.setFrameShape(QFrame.Shape.NoFrame)
+        view.setFont(QFont("Inter", 13))
+        view.setLineWrapMode(QPlainTextEdit.LineWrapMode.WidgetWidth)
+        view.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        view.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        view.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        view.setStyleSheet(
+            f"QPlainTextEdit {{ background: transparent; border: none; color: {Theme.TEXT}; padding: 0; }}"
+        )
+        view.document().contentsChanged.connect(self._sync_stream_height)
+        self._content_layout.addWidget(view)
+        self._stream_view = view
+        self._stream_shown_len = 0
+
+    def _teardown_stream_view(self) -> None:
+        if self._stream_view is None:
+            self._stream_shown_len = 0
+            return
+        self._stream_view.document().contentsChanged.disconnect(self._sync_stream_height)
+        self._content_layout.removeWidget(self._stream_view)
+        discard_widget(self._stream_view)
+        self._stream_view = None
+        self._stream_shown_len = 0
+
+    def _sync_stream_height(self, *_args) -> None:
+        view = self._stream_view
+        if view is None:
+            return
+        doc = view.document()
+        width = max(view.viewport().width(), self.width() - 32, 320)
+        doc.setTextWidth(width)
+        height = int(doc.size().height()) + 8
+        view.setFixedHeight(max(height, 24))
+
+    def _teardown_rendered(self) -> None:
+        if self._pending_rendered is not None:
+            try:
+                self._pending_rendered.ready.disconnect()
+            except (RuntimeError, TypeError):
+                pass
+            self._content_layout.removeWidget(self._pending_rendered)
+            discard_widget(self._pending_rendered)
+            self._pending_rendered = None
+        if self._rendered is None:
+            return
+        self._content_layout.removeWidget(self._rendered)
+        discard_widget(self._rendered)
+        self._rendered = None
 
     def set_markdown(self, markdown: str, *, force_rebuild: bool = False) -> None:
-        """Re-render the body (used by the progressive answer reveal)."""
+        """Render finalized Markdown once (WebEngine). Not used during streaming."""
+        _ = force_rebuild
         self._markdown = str(markdown or "")
-        new_segments = _split_fenced_code_blocks(self._markdown)
-        if not force_rebuild and self._can_update_in_place(new_segments):
-            self._update_in_place(new_segments)
-        else:
-            self._render_segments()
-        self._schedule_body_height_sync()
+        if not self._markdown.strip():
+            self._teardown_stream_view()
+            self._teardown_rendered()
+            return
+        replacing_stream = self._stream_view is not None
+        self._start_render_markdown(defer_show=replacing_stream)
+        if not replacing_stream:
+            self._teardown_stream_view()
 
-    def _can_update_in_place(self, new_segments: list[tuple[str, str, str]]) -> bool:
-        """Check if we can update existing widgets instead of rebuilding. The existing
-        kinds must be read in DOCUMENT order (from the content layout), not as
-        ``browsers + code_blocks`` — otherwise interleaved content (text, code, text)
-        never matches the document-ordered new segments, defeating the in-place update
-        (forcing a full rebuild every streaming flush) and risking a slot mismatch."""
-        old_kinds: list[str] = []
-        for i in range(self._content_layout.count()):
-            w = self._content_layout.itemAt(i).widget()
-            if isinstance(w, _CodeBlock):
-                old_kinds.append("code")
-            elif isinstance(w, QTextBrowser):
-                old_kinds.append("browser")
-        new_kinds = [("code" if k == "code" else "browser")
-                     for k, p, _ in new_segments if k == "code" or p.strip()]
-        return bool(old_kinds) and old_kinds == new_kinds
-
-    def _update_in_place(self, segments: list[tuple[str, str, str]]) -> None:
-        """Update existing widget contents without destroying/recreating them."""
-        bi, ci = 0, 0
-        for kind, payload, meta in segments:
-            if kind == "code":
-                if ci < len(self._code_blocks):
-                    self._code_blocks[ci].update_code(payload, language=meta)
-                ci += 1
-            elif payload.strip():
-                if bi < len(self._browsers):
-                    self._browsers[bi].setHtml(render_markdown_safe(payload))
-                bi += 1
-
-    def _make_text_browser(self, markdown: str) -> QTextBrowser:
-        browser = QTextBrowser()
-        browser.setOpenExternalLinks(True)
-        browser.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
-        browser.customContextMenuRequested.connect(lambda pos, b=browser: self._show_body_menu(b, pos))
-        browser.setFrameShape(QFrame.Shape.NoFrame)
-        browser.setFont(QFont("Inter", 13))
-        configure_readonly_text_view(browser)
-        browser.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
-        browser.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
-        browser.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
-        browser.setStyleSheet(
-            f"QTextBrowser {{ background: transparent; border: none; color: {Theme.TEXT}; padding: 0; }}"
+    def _start_render_markdown(self, *, defer_show: bool = False) -> None:
+        if self._pending_rendered is not None:
+            self._teardown_rendered()
+        if not self._markdown.strip():
+            return
+        use_defer = defer_show and not self._fast_render
+        widget = build_markdown_widget(
+            self._markdown,
+            background=self._background,
+            fast_render=self._fast_render,
+            defer_show=use_defer,
         )
-        from dbaide.desktop.components.md_css import markdown_stylesheet
-        browser.document().setDefaultStyleSheet(markdown_stylesheet())
-        browser.setHtml(render_markdown_safe(markdown))
-        browser.document().documentLayout().documentSizeChanged.connect(self._sync_body_height)
-        return browser
+        widget.ready.connect(lambda w=widget: self._commit_rendered(w))
+        self._content_layout.addWidget(widget)
+        self._pending_rendered = widget
+        if widget._ready_emitted:
+            self._commit_rendered(widget)
 
-    def _render_segments(self) -> None:
-        while self._content_layout.count():
-            item = self._content_layout.takeAt(self._content_layout.count() - 1)
-            widget = item.widget()
-            if widget is not None and not isinstance(widget, QLabel):
-                widget.hide()
-                widget.setParent(None)
-                widget.deleteLater()
-            elif widget is not None:
-                self._content_layout.insertWidget(0, widget)
-                break
-        self._browsers = []
-        self._code_blocks = []
-        self._body = None
-        for kind, payload, meta in _split_fenced_code_blocks(self._markdown):
-            if kind == "code":
-                code = _CodeBlock(payload, language=meta)
-                self._code_blocks.append(code)
-                self._content_layout.addWidget(code)
-                continue
-            if not payload.strip():
-                continue
-            browser = self._make_text_browser(payload)
-            self._browsers.append(browser)
-            if self._body is None:
-                self._body = browser
-            self._content_layout.addWidget(browser)
-        self._schedule_body_height_sync()
-
-    def _schedule_body_height_sync(self) -> None:
-        """QTextDocument layout can lag one event-loop tick after setHtml — defer so
-        fixed-height browsers don't clip the tail of a long streamed answer."""
-        self._sync_body_height()
-        if not getattr(self, "_height_sync_scheduled", False):
-            self._height_sync_scheduled = True
-            QTimer.singleShot(0, self._deferred_body_height_sync)
-
-    def _deferred_body_height_sync(self) -> None:
-        self._height_sync_scheduled = False
-        self._sync_body_height()
-
-    def _show_body_menu(self, browser: QTextBrowser, pos) -> None:
-        _show_copy_menu(
-            browser.viewport(),
-            pos,
-            selected_text=_selected_browser_text(browser),
-            full_text=self._markdown or browser.toPlainText(),
-        )
+    def _commit_rendered(self, widget: MarkdownWebWidget) -> None:
+        if self._pending_rendered is not widget:
+            return
+        self._teardown_stream_view()
+        if self._rendered is not None and self._rendered is not widget:
+            old = self._rendered
+            self._rendered = None
+            self._content_layout.removeWidget(old)
+            discard_widget(old)
+        widget.show()
+        self._rendered = widget
+        self._pending_rendered = None
 
     def copy_message(self) -> None:
-        fallback = self._body.toPlainText() if self._body is not None else ""
-        _copy_to_clipboard(self._markdown or fallback)
+        if self._stream_view is not None:
+            _copy_to_clipboard(self._markdown or self._stream_view.toPlainText())
+            return
+        _copy_to_clipboard(self._markdown)
+
+    def copy_first_code_block(self) -> None:
+        for kind, payload, _meta in _split_fenced_code_blocks(self._markdown):
+            if kind == "code":
+                _copy_to_clipboard(payload)
+                return
 
     def copy_selection(self) -> None:
-        for browser in self._browsers:
-            selected = _selected_browser_text(browser)
+        if self._stream_view is not None:
+            selected = _normalize_selected_text(self._stream_view.textCursor().selectedText())
             if selected.strip():
                 _copy_to_clipboard(selected)
-                return
+            return
+        # WebEngine provides its own selection context menu.
 
     def resizeEvent(self, event) -> None:  # noqa: N802
         super().resizeEvent(event)
-        self._sync_body_height()
-
-    def _sync_body_height(self, *_args) -> None:
-        for browser in self._browsers:
-            doc = browser.document()
-            width = max(browser.viewport().width(), self.width() - 32, 320)
-            doc.setTextWidth(width)
-            height = int(doc.documentLayout().documentSize().height()) + 8
-            browser.setFixedHeight(max(height, 24))
+        if self._stream_view is not None:
+            self._schedule_stream_height()
 
 
 class _ClarificationOption(QFrame):
@@ -927,12 +1048,7 @@ class _ClarificationStepper(QFrame):
         self._progress.setText(self._t("clarify.progress", current=self._idx + 1, total=total))
         self._ask.setText(str(q.get("ask") or ""))
         # rebuild option rows for this question's options
-        while self._options.count():
-            item = self._options.takeAt(0)
-            w = item.widget()
-            if w is not None:
-                w.setParent(None)
-                w.deleteLater()
+        clear_layout_widgets(self._options)
         opts = [str(o) for o in (q.get("options") or []) if str(o).strip()]
         self._option_rows = []
         self._options_host.setVisible(bool(opts))
@@ -1023,23 +1139,23 @@ class TurnBlock(QFrame):
         self._layout.addWidget(self._header)
 
         # Lightweight per-turn status (spinner while thinking, then a "view trace"
-        # link). Clicking it expands this turn's trace inline, just below the chip.
+        # link). Clicking it opens this turn's trace drawer.
         self.status = _ThinkingIndicator()
         self.status.toggled_trace.connect(self._toggle_trace)
         self._layout.addWidget(self.status, 0, Qt.AlignmentFlag.AlignLeft)
 
-        # The inline trace is created lazily on first expand (most turns are never
-        # expanded — no point building a tree widget for each).
+        self._agenda_box = _AgendaPanel()
+        self._layout.addWidget(self._agenda_box)
+        self._agenda_box.hide()
+
         self.trace_state = TurnTraceState()
-        self._trace_box: InlineTrace | None = None
-        self._trace_anim: QPropertyAnimation | None = None
 
         self._content_host = QWidget()
         self._content_host.setStyleSheet("background: transparent;")
         self._content_host.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
         self._content = QVBoxLayout(self._content_host)
         self._content.setContentsMargins(0, 0, 0, 0)
-        self._content.setSpacing(10)
+        self._content.setSpacing(6)
         self._content_host.hide()
         self._layout.addWidget(self._content_host)
 
@@ -1086,22 +1202,24 @@ class TurnBlock(QFrame):
     def remove_content_widget(self, widget: QWidget) -> None:
         """Drop a widget from the answer column (e.g. replace streamed prose with embeds)."""
         self._content.removeWidget(widget)
-        widget.setParent(None)
-        widget.deleteLater()
+        discard_widget(widget)
 
-    # ── inline trace ───────────────────────────────────────────────────────────
+    # ── trace drawer ───────────────────────────────────────────────────────────
 
-    def _trace_open(self) -> bool:
-        # Explicit show/hide state — independent of ancestor visibility (isVisible()
-        # is False whenever the conversation isn't on screen, which would break the
-        # toggle and live-feed checks).
-        return self._trace_box is not None and not self._trace_box.isHidden()
+    def _trace_owner_id(self) -> str:
+        return f"turn:{id(self)}"
 
     def add_live_event(self, event: dict[str, Any]) -> None:
-        """Accumulate a streamed event; feed the inline trace if it's open."""
+        """Accumulate a streamed event and refresh the trace drawer if needed."""
         self.trace_state.append(event)
-        if self._trace_open():
-            self._trace_box.append_live_event(event)
+        self._sync_agenda_from_events(self.trace_state.events)
+        update_trace_drawer(
+            self,
+            owner_id=self._trace_owner_id(),
+            events=self.trace_state.events,
+            live=not self.trace_state.final,
+            ok=self.status._state.ok,
+        )
         self._ingest_live_stats(event)
         if not self._elapsed_timer.isActive():
             self._elapsed_timer.start()
@@ -1109,8 +1227,14 @@ class TurnBlock(QFrame):
     def set_trace(self, events: list[dict[str, Any]]) -> None:
         """Final, authoritative trace for this turn (from the persisted result)."""
         self.trace_state.set_final(events)
-        if self._trace_open():
-            self._trace_box.set_events(self.trace_state.events, live=False)
+        self._sync_agenda_from_events(events)
+        update_trace_drawer(
+            self,
+            owner_id=self._trace_owner_id(),
+            events=self.trace_state.events,
+            live=False,
+            ok=self.status._state.ok,
+        )
         self._rebuild_stats(events)
 
     def _tick_elapsed(self) -> None:
@@ -1141,7 +1265,7 @@ class TurnBlock(QFrame):
     def _render_stats(self, model: "TraceModel") -> None:
         from dbaide.agent.trace_model import _format_tokens
         from dbaide.i18n import t
-        steps = len(model.steps)
+        steps = count_timeline_steps(model)
         if steps <= 0 and model.overall in ("idle",):
             return
         elapsed = model.elapsed_ms() / 1000.0
@@ -1157,15 +1281,14 @@ class TurnBlock(QFrame):
             self._stats_label.setText(" · ".join(parts))
             self._footer.show()
 
+    def _sync_agenda_from_events(self, events: list[dict[str, Any]]) -> None:
+        items = latest_agenda_from_events(events)
+        self._agenda_box.set_items(items)
+
     def set_actions(self, widget: QWidget | None) -> None:
         """Place the action button right after the stats label."""
         if self._footer_actions is not None:
-            while self._footer_actions.count():
-                item = self._footer_actions.takeAt(0)
-                w = item.widget()
-                if w is not None:
-                    w.setParent(None)
-                    w.deleteLater()
+            clear_layout_widgets(self._footer_actions)
         if widget is None:
             return
         if self._footer_actions is None:
@@ -1178,43 +1301,30 @@ class TurnBlock(QFrame):
         self._footer.show()
 
     def _toggle_trace(self) -> None:
-        if self._trace_box is None:
-            self._trace_box = InlineTrace()
-            idx = self._layout.indexOf(self.status)
-            self._layout.insertWidget(idx + 1, self._trace_box)
-            self._trace_box.hide()
-            self._trace_box.setMaximumHeight(0)
-        if self._trace_open():
-            self._animate_trace(opening=False)
-            self.status.set_expanded(False)
-        else:
-            self._trace_box.set_events(self.trace_state.events, live=not self.trace_state.final)
-            self._animate_trace(opening=True)
-            self.status.set_expanded(True)
+        me = weakref.ref(self)
 
-    def _animate_trace(self, *, opening: bool) -> None:
-        box = self._trace_box
-        if box is None:
-            return
-        end = _TRACE_MAX_H if opening else 0
-        if opening:
-            box.show()
-        anim = QPropertyAnimation(box, b"maximumHeight", self)
-        anim.setDuration(_TRACE_ANIM_MS)
-        anim.setStartValue(box.maximumHeight())
-        anim.setEndValue(end)
-        anim.setEasingCurve(QEasingCurve.Type.OutCubic if opening else QEasingCurve.Type.InCubic)
+        def _safe_close() -> None:
+            obj = me()
+            if obj is None:
+                return
+            try:
+                from PyQt6 import sip
+                if sip.isdeleted(obj) or sip.isdeleted(obj.status):
+                    return
+            except RuntimeError:
+                return
+            obj.status.set_expanded(False)
 
-        def _on_finished() -> None:
-            if opening:
-                box.setMaximumHeight(_TRACE_MAX_H)
-            else:
-                box.hide()
-                box.setMaximumHeight(_TRACE_MAX_H)
-
-        anim.finished.connect(_on_finished)
-        anim.start()
-        self._trace_anim = anim
+        opened = toggle_trace_drawer(
+            self,
+            owner_widget=self,
+            owner_id=self._trace_owner_id(),
+            events=self.trace_state.events,
+            live=not self.trace_state.final,
+            ok=self.status._state.ok,
+            on_close=_safe_close,
+        )
+        self.status.set_expanded(opened)
 
     @property
     def _events(self) -> list[dict[str, Any]]:
@@ -1274,12 +1384,41 @@ class ConversationView(QScrollArea):
         self._chunk_dirty = False
         self._chunk_timer = QTimer(self)
         self._chunk_timer.setSingleShot(True)
-        self._chunk_timer.setInterval(80)
+        self._chunk_timer.setInterval(100)
         self._chunk_timer.timeout.connect(self._flush_answer_chunk)
+        self._follow_scroll_timer = QTimer(self)
+        self._follow_scroll_timer.setSingleShot(True)
+        self._follow_scroll_timer.setInterval(48)
+        self._follow_scroll_timer.timeout.connect(self._follow_scroll_tick)
         # Tail-follow: auto-scroll during streaming only while the user is at the
         # bottom. If they scroll up to read, stop yanking them back on every chunk.
         self._follow_bottom = True
         self.verticalScrollBar().valueChanged.connect(self._on_scroll_value)
+        self._bulk_load_depth = 0
+        self._prefer_fast_markdown = False
+        self._scroll_timer = QTimer(self)
+        self._scroll_timer.setSingleShot(True)
+        self._scroll_timer.setInterval(32)
+        self._scroll_timer.timeout.connect(self._scroll_bottom_tick)
+
+    def begin_bulk_load(self) -> None:
+        """Suppress repaint/scroll churn while rebuilding many turns (session restore)."""
+        self._bulk_load_depth += 1
+        if self._bulk_load_depth == 1:
+            self._prefer_fast_markdown = True
+            self.setUpdatesEnabled(False)
+
+    def end_bulk_load(self) -> None:
+        self._bulk_load_depth = max(0, self._bulk_load_depth - 1)
+        if self._bulk_load_depth == 0:
+            self._prefer_fast_markdown = False
+            self.setUpdatesEnabled(True)
+            self._schedule_scroll_bottom()
+
+    def _schedule_scroll_bottom(self) -> None:
+        if not self._scroll_timer.isActive():
+            self._scroll_bottom_tick()
+        self._scroll_timer.start()
 
     def _on_scroll_value(self, value: int) -> None:
         bar = self.verticalScrollBar()
@@ -1304,13 +1443,24 @@ class ConversationView(QScrollArea):
         if self._live_answer is None:
             return
         try:
-            self._live_answer.set_markdown(self._live_answer_text)
+            self._live_answer.set_streaming_text(self._live_answer_text)
         except RuntimeError:
             self._live_answer = None
             return
-        # Only follow the stream to the bottom if the user hasn't scrolled up to read.
         if self._follow_bottom:
-            self._scroll_bottom()
+            self._schedule_follow_scroll()
+
+    def _schedule_follow_scroll(self) -> None:
+        """Coalesce tail-follow scrolls during streaming — one lightweight jump per burst."""
+        if not self._follow_scroll_timer.isActive():
+            self._follow_scroll_tick()
+        self._follow_scroll_timer.start()
+
+    def _follow_scroll_tick(self) -> None:
+        if not self._follow_bottom:
+            return
+        bar = self.verticalScrollBar()
+        bar.setValue(bar.maximum())
 
     def showEvent(self, event) -> None:  # noqa: N802
         super().showEvent(event)
@@ -1340,6 +1490,7 @@ class ConversationView(QScrollArea):
     def begin_turn(self, user_text: str, *, meta: str = "", placeholder: bool = True,
                    attachments: list[dict] | None = None) -> None:
         self._chunk_timer.stop()
+        self._follow_scroll_timer.stop()
         self._chunk_dirty = False
         self._live_answer = None
         self._live_answer_text = ""
@@ -1479,6 +1630,7 @@ class ConversationView(QScrollArea):
                     body,
                     title="DBAide",
                     title_tooltip=f"workflow {workflow_id}" if workflow_id else "",
+                    fast_render=self._prefer_fast_markdown,
                 ))
             return
 
@@ -1500,6 +1652,7 @@ class ConversationView(QScrollArea):
                     str(payload),
                     title="DBAide" if first_md else "",
                     title_tooltip=f"workflow {workflow_id}" if first_md and workflow_id else "",
+                    fast_render=self._prefer_fast_markdown,
                 ))
                 first_md = False
             elif kind == "chart" and isinstance(payload, dict):
@@ -1552,6 +1705,7 @@ class ConversationView(QScrollArea):
             (self._current_record or {}).get("events") or []
         )
         self._chunk_timer.stop()
+        self._follow_scroll_timer.stop()
         if self._chunk_dirty:
             self._flush_answer_chunk()
         live = self._live_answer
@@ -1567,7 +1721,11 @@ class ConversationView(QScrollArea):
         # user expands the chip) shows the finalized run, not just what streamed.
         # Build the model first so we can derive the real tool-step count.
         turn.set_trace(events)
-        step_count = len(turn._trace_model_cache.steps) if turn._trace_model_cache else len(events)
+        step_count = (
+            count_timeline_steps(turn._trace_model_cache)
+            if turn._trace_model_cache
+            else len(events)
+        )
         turn.status.set_done(ok=ok, step_count=step_count, events=events)
 
         # Clean author label — just "DBAide" (the internal workflow id is noise in the
@@ -1639,6 +1797,7 @@ class ConversationView(QScrollArea):
         # NEXT turn's streamed answer doesn't get appended into this errored turn's
         # block. (complete_turn does the same; the error path must too.)
         self._chunk_timer.stop()
+        self._follow_scroll_timer.stop()
         self._chunk_dirty = False
         self._live_answer = None
         self._live_answer_text = ""
@@ -1647,7 +1806,11 @@ class ConversationView(QScrollArea):
         if self._current_turn:
             events = list((self._current_record or {}).get("events") or [])
             self._current_turn.set_trace(events)
-            sc = len(self._current_turn._trace_model_cache.steps) if self._current_turn._trace_model_cache else len(events)
+            sc = (
+                count_timeline_steps(self._current_turn._trace_model_cache)
+                if self._current_turn._trace_model_cache
+                else len(events)
+            )
             self._current_turn.status.set_done(ok=False, step_count=sc, events=events)
             self._current_turn.append_content(
                 _MarkdownBlock(message, title="Error", boxed=True, accent=Theme.RED)
@@ -1680,39 +1843,36 @@ class ConversationView(QScrollArea):
         self._sync_viewport_width()
 
     def _scroll_bottom(self) -> None:
-        """Keep the latest turn in view.
+        """Keep the latest turn in view (coalesced — avoids layout thrash)."""
+        if self._bulk_load_depth > 0:
+            return
+        self._schedule_scroll_bottom()
 
-        While the thread still fits the viewport the top stretch pins content to the
-        bottom without scrolling; once it overflows the bar stays at 0 unless we
-        explicitly jump to the maximum after layout settles.
-        """
-        def _do_scroll() -> None:
-            from PyQt6 import sip
-            if sip.isdeleted(self):
-                return
-            self._sync_viewport_width()
-            self._root.updateGeometry()
-            turn = self._current_turn
-            if turn is not None:
-                self.ensureWidgetVisible(turn, 0, 24)
-            bar = self.verticalScrollBar()
-            bar.setValue(bar.maximum())
-
-        QTimer.singleShot(0, _do_scroll)
-        QTimer.singleShot(32, _do_scroll)
+    def _scroll_bottom_tick(self) -> None:
+        from PyQt6 import sip
+        if sip.isdeleted(self):
+            return
+        self._sync_viewport_width()
+        self._root.updateGeometry()
+        turn = self._current_turn
+        if turn is not None:
+            self.ensureWidgetVisible(turn, 0, 24)
+        bar = self.verticalScrollBar()
+        bar.setValue(bar.maximum())
 
     def clear(self) -> None:
         while self._layout.count() > 1:
             item = self._layout.takeAt(1)
             widget = item.widget()
             if widget is not None:
-                widget.deleteLater()
+                discard_widget(widget)
         self._hint_label = None
         self._current_turn = None
         self._turns = []
         self._current_record = None
         self._last_meta = ""
         self._chunk_timer.stop()
+        self._follow_scroll_timer.stop()
         self._chunk_dirty = False
         self._live_answer = None
         self._live_answer_text = ""

@@ -212,84 +212,6 @@ def test_workflow_uses_response_charts_over_run_state_charts(tmp_path):
     assert result.charts == [{"chart_id": "chart:2", "title": "merged"}]
 
 
-def test_continue_multi_runs_all_remaining_intents(tmp_path):
-    orch = _orch(tmp_path)
-    # Simulate: intent i2 was paused and just resumed (its answer ready); i3 still to run.
-    calls: list[str] = []
-
-    def fake_run_single(text, *, database="", execute=True, resume_state=None,
-                        user_reply="", trace_parent="", answer_language=None,
-                        skip_turn_markers=False):
-        calls.append(text)
-        return AssistantResponse(answer=f"answer for {text}", status="completed")
-
-    orch._run_single = fake_run_single  # type: ignore[assignment]
-
-    multi = {
-        "question": "do A and B and C",
-        "done": [{"intent": {"id": "i1", "type": "data_query", "text": "A", "future": "ignored"},
-                  "answer": "answer for A", "sql": ""}],
-        "paused": {"id": "i2", "type": "data_query", "text": "B", "future": "ignored"},
-        "remaining": [{"id": "i3", "type": "data_query", "text": "C", "future": "ignored"}],
-    }
-    paused_resp = AssistantResponse(answer="answer for B", status="completed")
-    final = orch._continue_multi(multi, paused_resp, database="", execute=True)
-
-    # C was run to completion (not dropped); A (done) + B (paused) + C all aggregated.
-    assert calls == ["C"]
-    assert "answer for A" in final.answer
-    assert "answer for B" in final.answer
-    assert "answer for C" in final.answer
-
-
-def test_multi_resume_uses_snapshot_database_for_remaining_intents(tmp_path):
-    orch = _orch(tmp_path)
-    calls: list[tuple[str, str]] = []
-
-    def fake_run_single(text, *, database="", execute=True, resume_state=None,
-                        user_reply="", trace_parent="", answer_language=None,
-                        skip_turn_markers=False):
-        calls.append((text, database))
-        return AssistantResponse(answer=f"answer for {text}", status="completed")
-
-    orch._run_single = fake_run_single  # type: ignore[assignment]
-    resume_state = {
-        "question": "B",
-        "database": "main",
-        "execute_allowed": True,
-        "run_state": {},
-        "multi": {
-            "question": "A B C",
-            "done": [],
-            "paused": {"id": "i1", "type": "data_query", "text": "B", "language": "zh"},
-            "remaining": [{"id": "i2", "type": "data_query", "text": "C", "language": "zh"}],
-        },
-    }
-
-    orch.run("B reply", resume_state=resume_state, user_reply="daily")
-
-    assert calls == [("B reply", ""), ("C", "main")]
-
-
-def test_multi_aggregate_uses_question_language_for_section_labels(tmp_path):
-    from dbaide.agent.intent import SubIntent
-
-    orch = _orch(tmp_path)
-    result = orch._aggregate(
-        "统计订单数量，并查看表结构",
-        [
-            (SubIntent(id="i1", type="data_query", text="统计订单数量", language="zh"),
-             AssistantResponse(answer="共 3 条")),
-            (SubIntent(id="i2", type="schema_explore", text="查看表结构", language="zh"),
-             AssistantResponse(answer="包含 id")),
-        ],
-    )
-
-    assert "## 1. 数据查询" in result.answer
-    assert "## 2. 结构" in result.answer
-    assert "(no answer)" not in result.answer
-
-
 def test_sanitize_note_flattens_injection():
     from dbaide.agent.schema_context import sanitize_note
     # A note that tries to forge a new authoritative instruction line is flattened to
@@ -310,7 +232,7 @@ def test_loop_allowed_tools_match_advertised_specs(tmp_path):
     advertised = {spec.name for spec in loop_tool_specs(loop.registry)}
 
     assert loop.allowed_tool_names == advertised
-    assert {"list_databases", "list_tables", "describe_table", "list_joins", "validate_joins"} <= advertised
+    assert {"list_databases", "list_tables", "describe_table", "list_joins", "validate_joins", "update_agenda"} <= advertised
     # retrieve_memory_item was removed in the conversation-stream architecture
     assert "retrieve_memory_item" not in advertised
     assert "delete_join" not in advertised
@@ -1280,29 +1202,6 @@ def test_tool_registry_propagates_cancel_from_handler():
 
     with pytest.raises(CancelledError):
         registry.invoke("x", {}, ToolContext())
-
-
-def test_continue_multi_repause_keeps_plan(tmp_path):
-    orch = _orch(tmp_path)
-
-    def fake_run_single(text, **kw):
-        return AssistantResponse(answer="", status="wait_user", resume_state={"inner": 1})
-
-    orch._run_single = fake_run_single  # type: ignore[assignment]
-    multi = {
-        "question": "A and B",
-        "done": [],
-        "paused": {"id": "i1", "type": "data_query", "text": "A"},
-        "remaining": [{"id": "i2", "type": "data_query", "text": "B"}],
-    }
-    # The remaining intent B pauses → the plan must be re-attached, not lost.
-    paused_resp = AssistantResponse(answer="answer for A", status="completed")
-    resp = orch._continue_multi(multi, paused_resp, database="", execute=True)
-    assert resp.status == "wait_user"
-    assert resp.resume_state.get("multi") is not None
-    assert resp.resume_state["multi"]["paused"]["text"] == "B"
-    # A is now in 'done' so it isn't re-run on the next resume.
-    assert any(d["intent"]["text"] == "A" for d in resp.resume_state["multi"]["done"])
 
 
 def test_profile_table_windows_columns_and_signals_pagination(tmp_path):

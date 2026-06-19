@@ -20,6 +20,7 @@ TOOL_TRACE_STAGES = frozenset({
     "add_join",
     "update_join",
     "delete_join",
+    "update_agenda",
     "ask_user",
     "profile_table",
     "column_stats",
@@ -46,6 +47,7 @@ PHASE_LABELS: dict[str, str] = {
     "validate_sql": "Validating SQL",
     "explain_sql": "Checking query cost",
     "execute_sql": "Running query",
+    "update_agenda": "Planning work",
     "profile_table": "Profiling data",
     "column_stats": "Profiling data",
     "ask_user": "Waiting for you",
@@ -276,6 +278,12 @@ def brief_tool_summary(tool: str, result: Any) -> str:
         return f"{data.get('row_count', '?')} rows"
     if tool == "ask_user":
         return str(data.get("question") or "waiting for user")[:160]
+    if tool == "update_agenda":
+        agenda = data.get("agenda") if isinstance(data.get("agenda"), dict) else {}
+        items = agenda.get("items") if isinstance(agenda, dict) else None
+        count = len(items) if isinstance(items, list) else 0
+        summary = str(data.get("summary") or "").strip()
+        return summary or (f"{count} task(s)" if count else "task list cleared")
     if tool == "profile_table":
         return f"{data.get('column_count', '?')} column profile(s)"
     if tool == "column_stats":

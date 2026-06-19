@@ -422,6 +422,31 @@ ASK_USER = ToolSpec(
     safe_for_auto_call=True,
 )
 
+UPDATE_AGENDA = ToolSpec(
+    name="update_agenda",
+    description=(
+        "Create or replace the run's task list. Use only when the current user request "
+        "is meaningfully multi-step and you want an explicit checklist the UI can show. "
+        "Pass the FULL current list each time (this replaces the prior one), keep it "
+        "short, and update statuses as work progresses."
+    ),
+    input_schema={
+        "explanation": {"type": "string", "description": "why the task list is needed or what changed"},
+        "items": {"type": "list[object]", "required": True, "description": (
+            "full ordered task list; each item is {id?, title, status=pending|in_progress|done|dropped, "
+            "kind=schema|join|sql|verify|answer|other, acceptance?, evidence_refs?}"
+        )},
+    },
+    output_schema={
+        "summary": "string",
+        "agenda": "object",
+        "updated": "boolean",
+    },
+    permission_level=SAFE_METADATA,
+    timeout_seconds=5,
+    safe_for_auto_call=True,
+)
+
 RUN_SUBAGENT = ToolSpec(
     name="run_subagent",
     description=(
@@ -435,6 +460,12 @@ RUN_SUBAGENT = ToolSpec(
     input_schema={
         "task": {"type": "string", "required": True, "description": "specific subtask for the child agent"},
         "context": {"type": "string", "description": "extra constraints/evidence to include"},
+        "context_refs": {"type": "list[string]", "description": (
+            "optional explicit references to inject: current_sql, current_result, current_schema, "
+            "current_relations, turn:tN, or artifact:sql_id"
+        )},
+        "deliverables": {"type": "list[string]", "description": "what the child should return, e.g. verified_facts or candidate_sql"},
+        "allowed_tools": {"type": "list[string]", "description": "optional child tool allowlist"},
         "database": {"type": "string", "description": "defaults to current working database"},
         "execute": {"type": "boolean", "default": True, "description": "allow child read-only SQL execution"},
         "max_steps": {"type": "integer", "description": "child step budget, capped by the parent session"},
@@ -447,6 +478,9 @@ RUN_SUBAGENT = ToolSpec(
         "result_preview": "list[dict]",
         "row_preview": "dict",
         "warnings": "list[string]",
+        "deliverables": "list[string]",
+        "verified_facts": "list[string]",
+        "evidence_refs": "list[string]",
     },
     permission_level=SAFE_METADATA,
     timeout_seconds=120,

@@ -194,3 +194,27 @@ class AgentButton(QPushButton):
         self.setDefault(False)
         self.setCursor(Qt.CursorShape.PointingHandCursor)
         self.setToolTip(text)
+
+
+def discard_widget(widget: QWidget | None) -> None:
+    """Hide and schedule widget deletion without ``setParent(None)``.
+
+    On macOS (and some other platforms), reparenting a visible ``QWidget`` to
+    ``None`` promotes it to a transient top-level window until ``deleteLater``
+    runs — causing ghost popups, empty native frames, and flicker during rapid
+    layout rebuilds. ``takeAt`` / ``removeWidget`` already detach from layout;
+    hiding first avoids paint ghosts before the event loop deletes the widget.
+    """
+    from PyQt6.QtWidgets import QWidget
+
+    if widget is None:
+        return
+    widget.hide()
+    widget.deleteLater()
+
+
+def clear_layout_widgets(layout) -> None:
+    """Remove every widget from *layout* using :func:`discard_widget`."""
+    while layout.count():
+        item = layout.takeAt(0)
+        discard_widget(item.widget())

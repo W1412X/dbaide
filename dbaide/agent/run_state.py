@@ -16,6 +16,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any
 
+from dbaide.agent.agenda import AgendaItem
 from dbaide.agent.memory import AgentMemory
 from dbaide.models import ColumnInfo
 
@@ -42,6 +43,7 @@ class RunState:
 
     # Compressed action-oriented working memory for the single-brain agent loop.
     memory: AgentMemory = field(default_factory=AgentMemory)
+    agenda: list[AgendaItem] = field(default_factory=list)
 
     # SQL draft + outcome.
     sql: str = ""

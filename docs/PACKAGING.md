@@ -15,7 +15,8 @@ DBAide 支持三种分发方式，按场景选择：
 ## 前置条件
 
 - Python **3.11+**
-- 构建 GUI 包需安装 PyQt6 和 PyQt6-WebEngine（图表由 WebEngine 承载 ECharts）
+- 构建 GUI 包需安装 PyQt6 和 PyQt6-WebEngine（图表与 Markdown 由 WebEngine 渲染）
+- WebEngine 依赖的 **marked / highlight.js / echarts** 已随包内置在 `dbaide/desktop/assets/vendor/`（离线可用）；可用 `tools/download_vendor_assets.sh` 更新
 
 ```bash
 # 推荐：requirements 文件（与 pyproject.toml 同步）

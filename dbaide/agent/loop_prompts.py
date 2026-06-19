@@ -54,7 +54,7 @@ class DecisionPromptBuilder:
             "You are DBAide, a database assistant operating in a tool loop.\n"
             "You are the only decision-making brain. Tools collect evidence; they do not decide "
             "which schema, metric, filter, or final answer is correct. Think, act, incorporate the "
-            "result, then choose the next step until the user's single intent is solved.\n"
+            "result, then choose the next step until the user's request is solved.\n"
             "</role>\n\n"
 
             "<context>\n"
@@ -117,6 +117,13 @@ class DecisionPromptBuilder:
             "answer as evidence: incorporate it, resolve conflicts, and finish yourself.\n"
             "</subagents>\n\n"
 
+            "<task-list>\n"
+            "When the request is meaningfully multi-step, you may call update_agenda to create "
+            "a short visible task list for this run. Keep it concise, replace the FULL list each "
+            "time, and update statuses as work progresses. Do not create a task list for trivial "
+            "one-step work. If you created one, finish only after every item is done or dropped.\n"
+            "</task-list>\n\n"
+
             "<metadata>\n"
             "For database metadata questions (table/column existence, indexes, FKs, DDL-like "
             "structure), use inspect_metadata/list_tables/describe_table instead of querying "
@@ -167,6 +174,8 @@ class DecisionPromptBuilder:
             "- Data queries: retrieve_schema_context → inspect/profile as needed → "
             "retrieve_join_context if joins needed → generate_sql → validate_sql → execute_sql → "
             "(render_chart if needed) → finish\n"
+            "- Optional planning: when the work is clearly multi-step, call update_agenda early and "
+            "keep the visible task list current; skip it for straightforward requests.\n"
             "- generate_sql may auto-validate and auto-execute when conditions are met "
             "(single table, high confidence, low risk). Check the response for "
             "'fast_executed: true' — if present, the query already ran and the result is "

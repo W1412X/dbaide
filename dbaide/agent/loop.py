@@ -16,6 +16,7 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Callable
 
 from dbaide.agent.answer_stream import JsonFieldStreamer
+from dbaide.agent.agenda import agenda_open_items, agenda_summary
 from dbaide.agent.loop_state import dump_loop_state, restore_loop_state
 from dbaide.agent.progress_events import brief_tool_summary, from_trace_event, progress_event
 from dbaide.agent.sql_executions import response_sql_exports
@@ -134,6 +135,10 @@ class AskAgentLoop:
         self.registry = build_tool_registry(orchestrator)
         self.prompts = DecisionPromptBuilder(orchestrator)
         self.allowed_tool_specs = loop_tool_specs(self.registry)
+        allowlist = getattr(orchestrator, "tool_allowlist", None)
+        if allowlist:
+            allowed = set(allowlist)
+            self.allowed_tool_specs = [spec for spec in self.allowed_tool_specs if spec.name in allowed]
         self.allowed_tool_names = frozenset(s.name for s in self.allowed_tool_specs)
         self._trace_parent = ""
         self._agent_loop_node_id = ""
@@ -458,6 +463,21 @@ class AskAgentLoop:
             self.progress(ev)
 
             if action == "finish":
+                open_agenda = agenda_open_items(orch.run_state.agenda)
+                if open_agenda:
+                    remaining = "; ".join(
+                        f"{item.title} [{item.status}]"
+                        for item in open_agenda[:6]
+                    )
+                    messages.append(LLMMessage(
+                        "user",
+                        "Error: you tried to finish while the current task list still has open items. "
+                        "Either complete/drop them with update_agenda or keep working.\n"
+                        f"Open items: {remaining}\n"
+                        f"Task list summary: {agenda_summary(orch.run_state.agenda)}"
+                    ))
+                    runtime.consume_step()
+                    continue
                 answer = str(decision.get("answer") or "").strip()
                 if not answer or answer == "Query complete.":
                     answer = self._answer_from_state(orch)
@@ -1396,6 +1416,7 @@ _TOOL_FORMATTERS: dict[str, str] = {
     "explain_sql": "_explain_sql",
     "list_tables": "_list_items",
     "list_databases": "_list_items",
+    "update_agenda": "_agenda",
     "ask_user": "_ask_user",
     "run_subagent": "_subagent",
 }
@@ -1727,6 +1748,37 @@ def _fmt_ask_user(data: Any) -> str:
         parts.append(f"Question: {data['question']}")
     if data.get("options"):
         parts.append(f"Options: {data['options']}")
+    return "\n".join(parts) if parts else _fmt_generic(data)
+
+
+def _fmt_agenda(data: Any) -> str:
+    if not isinstance(data, dict):
+        return _fmt_generic(data)
+    parts: list[str] = []
+    if data.get("summary"):
+        parts.append(f"Summary: {data['summary']}")
+    agenda = data.get("agenda") if isinstance(data.get("agenda"), dict) else {}
+    explanation = str(agenda.get("explanation") or "").strip()
+    if explanation:
+        parts.append(f"Why: {explanation}")
+    items = agenda.get("items") if isinstance(agenda.get("items"), list) else []
+    if items:
+        lines = []
+        for item in items:
+            if not isinstance(item, dict):
+                continue
+            title = str(item.get("title") or "").strip()
+            if not title:
+                continue
+            status = str(item.get("status") or "pending").strip()
+            kind = str(item.get("kind") or "other").strip()
+            accept = str(item.get("acceptance") or "").strip()
+            line = f"- {title} ({kind}, {status})"
+            if accept:
+                line += f" — accept: {accept}"
+            lines.append(line)
+        if lines:
+            parts.append("Tasks:\n" + "\n".join(lines))
     return "\n".join(parts) if parts else _fmt_generic(data)
 
 

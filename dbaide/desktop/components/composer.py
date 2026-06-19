@@ -3,7 +3,7 @@ from __future__ import annotations
 from PyQt6.QtCore import QEvent, QSize, Qt, pyqtSignal
 from PyQt6.QtWidgets import QHBoxLayout, QLabel, QTextEdit, QVBoxLayout, QWidget
 
-from dbaide.desktop.components.base import compact_button, Panel
+from dbaide.desktop.components.base import clear_layout_widgets, compact_button, Panel
 from dbaide.desktop.components.icons import svg_icon
 from dbaide.desktop.components.inputs import configure_multiline_text_edit, sync_multiline_height
 from dbaide.desktop.components.menu import PillSelect
@@ -209,15 +209,8 @@ class ComposerWidget(Panel):
         self._render_chips()
 
     def _render_chips(self) -> None:
-        # Clear existing chip widgets. setParent(None) removes them from the display
-        # immediately — relying on deleteLater alone leaves ghost chips floating at
-        # their old positions until the event loop runs (visible overlap).
-        while self._chips_row.count():
-            item = self._chips_row.takeAt(0)
-            w = item.widget()
-            if w is not None:
-                w.setParent(None)
-                w.deleteLater()
+        # Hide before deleteLater — never setParent(None); that spawns stray windows on macOS.
+        clear_layout_widgets(self._chips_row)
         if not self._attachments:
             self._chips_host.setVisible(False)
             return

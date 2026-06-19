@@ -89,7 +89,7 @@ def test_orchestrator_returns_honest_failure_no_alternate_pipeline(tmp_path):
 
     class _BadLLM(LLMClient):
         def complete_json(self, messages, *, schema_hint=""):
-            return {}  # never a valid action (and intent-decompose falls back to single)
+            return {}  # never a valid loop decision
 
         def complete_text(self, messages):
             return ""
