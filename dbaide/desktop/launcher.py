@@ -7,8 +7,27 @@ from dbaide.desktop.service import DesktopService
 from dbaide.desktop.ui import DBAideDesktop
 
 
+def _verify_webengine_import() -> int:
+    """Exit 0 when Qt WebEngine imports cleanly (used by frozen-bundle CI smoke)."""
+    try:
+        from PyQt6.QtCore import Qt
+        from PyQt6.QtWidgets import QApplication
+
+        QApplication.setAttribute(Qt.ApplicationAttribute.AA_ShareOpenGLContexts)
+        from PyQt6.QtWebEngineWidgets import QWebEngineView  # noqa: F401
+
+        print("webengine ok")
+        return 0
+    except Exception as exc:
+        print(f"webengine import failed: {exc}", file=sys.stderr)
+        return 1
+
+
 def main(argv: list[str] | None = None) -> int:
-    _ = argv or sys.argv[1:]
+    argv = list(argv or sys.argv[1:])
+    if "--verify-webengine" in argv:
+        return _verify_webengine_import()
+
     from dbaide.desktop.platform_ui import ensure_webengine_before_qapplication
 
     ensure_webengine_before_qapplication()

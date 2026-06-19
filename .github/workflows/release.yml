@@ -57,6 +57,19 @@ jobs:
       - name: Build desktop bundle (PyInstaller)
         run: python -m PyInstaller packaging/pyinstaller/dbaide-gui.spec --noconfirm --clean
 
+      - name: Verify WebEngine in frozen bundle
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ "${{ runner.os }}" = "macOS" ]; then
+            bin="dist/DBAide.app/Contents/MacOS/DBAide"
+          elif [ "${{ runner.os }}" = "Linux" ]; then
+            bin="dist/DBAide/DBAide"
+          else
+            bin="dist/DBAide/DBAide.exe"
+          fi
+          "$bin" --verify-webengine
+
       - name: Bundle Qt xcb runtime libraries (Linux)
         if: runner.os == 'Linux'
         run: |

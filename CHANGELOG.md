@@ -32,6 +32,9 @@ All notable changes to DBAide are documented here. The format is loosely based o
 - **Streaming answers** — `flush_final` emits any tail missed during JSON streaming;
   `complete_turn` merges streamed vs authoritative text and force-rebuilds markdown
   with deferred height sync so long answers are not clipped.
+- **Frozen GUI charts (WebEngine)** — PyInstaller spec uses `collect_all` for WebEngine
+  binaries/resources, pins aligned `PyQt6`/`PyQt6-WebEngine` versions, disables strip on
+  Qt libs; CI runs `--verify-webengine` on the built bundle.
 
 ## [0.3.0] — 2026-06-16
 

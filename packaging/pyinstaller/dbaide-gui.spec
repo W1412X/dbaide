@@ -4,7 +4,7 @@
 import sys
 from pathlib import Path
 
-from PyInstaller.utils.hooks import collect_data_files, collect_submodules
+from PyInstaller.utils.hooks import collect_all, collect_data_files, collect_submodules
 
 ROOT = Path(SPECPATH).resolve().parents[1]
 ICON_DIR = ROOT / "packaging" / "icons"
@@ -12,7 +12,9 @@ ICON_DIR = ROOT / "packaging" / "icons"
 ICON = str(ICON_DIR / ("dbaide.ico" if sys.platform == "win32" else "dbaide.icns"))
 
 block_cipher = None
-STRIP = sys.platform != "win32"  # strip symbols on macOS/Linux (saves size); not on Windows
+# Do not strip Qt/WebEngine shared libraries — macOS/Linux strip can break SIP
+# bindings and cause "cannot import type … from PyQt6.QtCore" at runtime.
+STRIP = False
 
 _runtime_hooks = []
 if sys.platform == "linux":
@@ -29,6 +31,22 @@ mistune_hidden = collect_submodules("mistune")
 # modules + the platform plugins they need.
 certifi_datas = collect_data_files("certifi")
 desktop_datas = collect_data_files("dbaide.desktop")
+
+# WebEngine ships Chromium + QtWebEngineProcess helper outside the normal PyQt6
+# widget hook graph. collect_all ensures frameworks/DLLs/resources land in the
+# frozen bundle with matching layout (especially QtWebEngineCore.framework on macOS).
+_webengine_datas: list = []
+_webengine_binaries: list = []
+_webengine_hidden: list = []
+for _mod in (
+    "PyQt6.QtWebEngineCore",
+    "PyQt6.QtWebEngineWidgets",
+    "PyQt6.QtWebChannel",
+):
+    _d, _b, _h = collect_all(_mod)
+    _webengine_datas += _d
+    _webengine_binaries += _b
+    _webengine_hidden += _h
 
 hiddenimports = [
     "certifi",
@@ -69,7 +87,7 @@ hiddenimports = [
     "PyQt6.QtWebEngineCore",
     "PyQt6.QtWebEngineWidgets",
     "PyQt6.QtWebChannel",
-] + mistune_hidden
+] + mistune_hidden + _webengine_hidden
 
 # Drop big Qt modules we never import, so nothing transitively drags them in.
 _QT_EXCLUDES = [
@@ -87,8 +105,8 @@ _QT_EXCLUDES = [
 a = Analysis(
     [str(ROOT / "dbaide" / "desktop" / "launcher.py")],
     pathex=[str(ROOT)],
-    binaries=[],
-    datas=desktop_datas + certifi_datas,
+    binaries=_webengine_binaries,
+    datas=desktop_datas + certifi_datas + _webengine_datas,
     hiddenimports=hiddenimports,
     hookspath=[],
     hooksconfig={},
