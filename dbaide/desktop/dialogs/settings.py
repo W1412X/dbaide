@@ -186,7 +186,7 @@ class SettingsDialog(ChromeDialog):
             ("agent_max_steps", 1, 100),
             ("prior_turns_window", 0, 20),
             ("max_batch_tools", 1, 16),
-            ("latest_result_limit", 500, 20000),
+            ("latest_result_limit", 0, 20000),
             ("compress_threshold", 50, 95),
         )),
         ("res.group.build", (

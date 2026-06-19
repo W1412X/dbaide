@@ -165,6 +165,18 @@ class AskAgentLoop:
                 return pt
         return 0
 
+    @staticmethod
+    def _tool_result_char_limit(orch: AskOrchestrator) -> int | None:
+        """Configured character cap for one formatted tool result.
+
+        ``latest_result_limit <= 0`` means unlimited.
+        """
+        try:
+            limit = int(getattr(getattr(orch, "session", None), "latest_result_limit", 0))
+        except (TypeError, ValueError):
+            return None
+        return None if limit <= 0 else limit
+
     def _speculative_prefetch(
         self, orch: AskOrchestrator, question: str, database: str,
     ) -> ToolResult | None:
@@ -192,7 +204,11 @@ class AskAgentLoop:
         self, orch: AskOrchestrator, messages: list[LLMMessage], result: ToolResult,
     ) -> None:
         """Append a successful prefetch result into the conversation."""
-        formatted = _format_tool_result("retrieve_schema_context", result)
+        formatted = _format_tool_result(
+            "retrieve_schema_context",
+            result,
+            char_limit=self._tool_result_char_limit(orch),
+        )
         messages.append(LLMMessage("user", f"[Tool result: retrieve_schema_context]\n{formatted}"))
         orch.run_state.schema_prefetched = True
         prefetch_node = f"{self._trace_parent}:prefetch" if self._trace_parent else "prefetch"
@@ -419,7 +435,11 @@ class AskAgentLoop:
                     done_event["row_count"] = data.get("row_count")
             self.progress(done_event)
             if result.ok:
-                formatted = _format_tool_result(approved_risk_tool, result)
+                formatted = _format_tool_result(
+                    approved_risk_tool,
+                    result,
+                    char_limit=self._tool_result_char_limit(orch),
+                )
                 messages.append(LLMMessage("user", f"[Tool result: {approved_risk_tool}]\n{formatted}"))
             else:
                 reason = (result.error.message if result.error else "") or brief or "confirmed_execution_failed"
@@ -668,7 +688,11 @@ class AskAgentLoop:
             result = runtime.call_tool(tool_name, args, tool_ctx)
 
         try:
-            formatted = _format_tool_result(tool_name, result)
+            formatted = _format_tool_result(
+                tool_name,
+                result,
+                char_limit=self._tool_result_char_limit(orch),
+            )
         except Exception:
             formatted = f"ERROR: {result.error.message}" if result.error else "(format error)"
         brief = brief_tool_summary(tool_name, result)
@@ -852,7 +876,10 @@ class AskAgentLoop:
         repeatedly.
         """
         budget = self._context_budget()
-        total_tokens = sum(estimate_tokens(m.content) for m in messages)
+        total_tokens = max(
+            sum(estimate_tokens(m.content) for m in messages),
+            self._reported_prompt_tokens(orch),
+        )
         pct = getattr(orch.session, "compress_threshold", _DEFAULT_COMPRESS_THRESHOLD)
         pct = max(50, min(95, int(pct)))
         threshold = int(budget * pct / 100)
@@ -1428,7 +1455,7 @@ _TOOL_FORMATTERS: dict[str, str] = {
 }
 
 
-def _format_tool_result(tool: str, result: ToolResult) -> str:
+def _format_tool_result(tool: str, result: ToolResult, *, char_limit: int | None = None) -> str:
     """Smart per-tool formatting for conversation messages.
 
     Unlike blind json.dumps[:1400] truncation, this preserves structure
@@ -1436,25 +1463,34 @@ def _format_tool_result(tool: str, result: ToolResult) -> str:
     """
     if not result.ok:
         if result.error:
-            return f"ERROR: {result.error.message}"
-        return "FAILED (no details)"
+            return _cap_text(f"ERROR: {result.error.message}", char_limit)
+        return _cap_text("FAILED (no details)", char_limit)
     data = result.data
     if data is None:
-        return "ok (empty)"
+        return _cap_text("ok (empty)", char_limit)
 
     formatter_key = _TOOL_FORMATTERS.get(tool)
     if formatter_key:
         fn = globals().get(f"_fmt{formatter_key}")
         if fn:
-            return fn(data)
-    return _fmt_generic(data)
+            return _cap_text(fn(data), char_limit)
+    return _cap_text(_fmt_generic(data), char_limit)
+
+
+def _cap_text(text: str, char_limit: int | None) -> str:
+    try:
+        limit = int(char_limit) if char_limit is not None else 0
+    except (TypeError, ValueError):
+        limit = _RESULT_SOFT_CAP
+    if limit <= 0:
+        return text
+    if len(text) > limit:
+        return text[:limit] + f"\n…[truncated from {len(text)} chars]"
+    return text
 
 
 def _fmt_generic(data: Any) -> str:
-    text = json.dumps(data, ensure_ascii=False, default=str)
-    if len(text) > _RESULT_SOFT_CAP:
-        return text[:_RESULT_SOFT_CAP] + f"\n…[truncated from {len(text)} chars]"
-    return text
+    return json.dumps(data, ensure_ascii=False, default=str)
 
 
 def _fmt_sql_result(data: Any) -> str:
@@ -1553,8 +1589,6 @@ def _fmt_schema(data: Any) -> str:
     text = "\n".join(parts)
     if not text:
         return _fmt_generic(data)
-    if len(text) > _RESULT_SOFT_CAP:
-        return text[:_RESULT_SOFT_CAP] + f"\n…[truncated from {len(text)} chars]"
     return text
 
 

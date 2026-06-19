@@ -48,7 +48,7 @@ class ResourcePolicy:
     agent_max_steps: int = 64            # tool-loop iterations before the agent must answer
     prior_turns_window: int = 3          # how many prior session turns to show in the agent prompt
     max_batch_tools: int = 6             # max parallel tool calls the agent may issue per decision
-    latest_result_limit: int = 4000      # max chars of the latest step's full result in the prompt
+    latest_result_limit: int = 0         # max chars of one tool result in the prompt; <=0 means unlimited
 
     # Cost gates.
     big_table_rows: int = 1_000_000      # estimated rows above which profiling drops to metadata-only
@@ -98,7 +98,7 @@ LOAD_PROFILES: dict[str, ResourcePolicy] = {
         prior_turns_window=3,
         max_batch_tools=6,
 
-        latest_result_limit=4000,
+        latest_result_limit=0,
         big_table_rows=1_000_000,
         explain_max_rows=5_000_000,
         join_sample_size=150,
@@ -115,7 +115,7 @@ LOAD_PROFILES: dict[str, ResourcePolicy] = {
         prior_turns_window=3,
         max_batch_tools=6,
 
-        latest_result_limit=4000,
+        latest_result_limit=0,
         big_table_rows=5_000_000,
         explain_max_rows=20_000_000,
         join_sample_size=150,
@@ -132,7 +132,7 @@ LOAD_PROFILES: dict[str, ResourcePolicy] = {
         prior_turns_window=5,
         max_batch_tools=6,
 
-        latest_result_limit=6000,
+        latest_result_limit=0,
         big_table_rows=50_000_000,
         explain_max_rows=200_000_000,
         join_sample_size=200,

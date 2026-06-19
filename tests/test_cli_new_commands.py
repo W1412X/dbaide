@@ -8,8 +8,11 @@ from pathlib import Path
 
 
 def run_cli(tmp_path, *args, expect_fail=False):
+    home = tmp_path / "home"
+    home.mkdir(exist_ok=True)
     env = {
         **os.environ,
+        "HOME": str(home),
         "DBAIDE_CONFIG": str(tmp_path / "config.toml"),
         "DBAIDE_ASSETS": str(tmp_path / "assets"),
     }
@@ -78,11 +81,10 @@ def test_config_set_and_reset(tmp_path):
 # ── setup (MCP registration) ─────────────────────────────────────────────────
 
 def test_setup_claude_registers_mcp(tmp_path):
-    """setup claude writes mcpServers.dbaide into ~/.claude/settings.json."""
+    """setup claude writes mcpServers.dbaide into ~/.claude.json."""
     r = run_cli(tmp_path, "setup", "claude")
     assert "claude" in r.stdout
-    from pathlib import Path
-    target = Path.home() / ".claude" / "settings.json"
+    target = tmp_path / "home" / ".claude.json"
     assert target.exists()
     data = json.loads(target.read_text())
     assert "dbaide" in (data.get("mcpServers") or {})
@@ -92,8 +94,9 @@ def test_setup_uninstall(tmp_path):
     """setup --uninstall removes the MCP entry."""
     run_cli(tmp_path, "setup", "claude")
     run_cli(tmp_path, "setup", "claude", "--uninstall")
-    from dbaide.skill import is_installed
-    assert not is_installed("claude")
+    target = tmp_path / "home" / ".claude.json"
+    data = json.loads(target.read_text())
+    assert "dbaide" not in (data.get("mcpServers") or {})
 
 
 def test_setup_unknown_tool(tmp_path):

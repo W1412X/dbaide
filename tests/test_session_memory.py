@@ -104,7 +104,9 @@ def test_retrieve_turn_returns_full_fields_by_default(tmp_path):
         {"question": "5月妥投", "answer_markdown": "1234 orders.",
          "selected_sql": "SELECT count(*) FROM orders",
          "status": "completed", "clarifications": ["按北京时间"],
-         "disclosed_tables": ["main.orders"]},
+         "disclosed_tables": ["main.orders"],
+         "verified_facts": ["status=2 means cancelled"],
+         "excluded_paths": [{"target": "orders.legacy_amount", "reason": "all NULL"}]},
     ]
     reg = build_tool_registry(orch)
     r = reg.invoke("retrieve_turn", {"turn_id": "t1"}, ToolContext())
@@ -116,6 +118,8 @@ def test_retrieve_turn_returns_full_fields_by_default(tmp_path):
     assert d["selected_sql"].startswith("SELECT count(*)")
     assert d["answer_markdown"] == "1234 orders."
     assert d["disclosed_tables"] == ["main.orders"]
+    assert d["verified_facts"] == ["status=2 means cancelled"]
+    assert d["excluded_paths"][0]["target"] == "orders.legacy_amount"
 
 
 def test_retrieve_turn_filters_by_include(tmp_path):
@@ -133,6 +137,24 @@ def test_retrieve_turn_filters_by_include(tmp_path):
     assert "clarifications" in r.data and "selected_sql" in r.data
     assert "answer_markdown" not in r.data
     assert "disclosed_tables" not in r.data
+    assert "verified_facts" not in r.data
+
+
+def test_retrieve_turn_can_filter_memory_fields(tmp_path):
+    orch = _orch(tmp_path)
+    orch._reset_loop_state("q", "", True)
+    orch.session_turns = [
+        {"question": "q1", "answer_markdown": "a1", "status": "completed",
+         "verified_facts": ["f1"], "excluded_paths": [{"target": "t.c", "reason": "bad"}]},
+    ]
+    reg = build_tool_registry(orch)
+    r = reg.invoke("retrieve_turn", {"turn_id": "t1", "include": ["memory"]}, ToolContext())
+
+    assert r.ok
+    assert r.data["verified_facts"] == ["f1"]
+    assert r.data["excluded_paths"] == [{"target": "t.c", "reason": "bad"}]
+    assert "answer_markdown" not in r.data
+    assert "selected_sql" not in r.data
 
 
 def test_retrieve_turn_rejects_unknown_id_and_bad_include(tmp_path):

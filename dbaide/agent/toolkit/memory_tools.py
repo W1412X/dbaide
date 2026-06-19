@@ -50,7 +50,7 @@ def register(registry: ToolRegistry, orchestrator) -> None:
             )
         turn = orchestrator.session_turns[idx]
         include = _string_list(args.get("include"))
-        all_fields = {"question", "status", "clarifications", "sql", "answer", "tables"}
+        all_fields = {"question", "status", "clarifications", "sql", "answer", "tables", "memory"}
         wanted = set(include) if include else all_fields
         invalid = sorted(wanted - all_fields)
         if invalid:
@@ -83,6 +83,13 @@ def register(registry: ToolRegistry, orchestrator) -> None:
             data["answer_markdown"] = str(turn.get("answer_markdown") or "")
         if "tables" in wanted:
             data["disclosed_tables"] = [str(x) for x in (turn.get("disclosed_tables") or [])]
+        if "memory" in wanted:
+            data["verified_facts"] = [str(x) for x in (turn.get("verified_facts") or [])]
+            data["excluded_paths"] = [
+                dict(item)
+                for item in (turn.get("excluded_paths") or [])
+                if isinstance(item, dict)
+            ]
         return ToolResult(ok=True, data=data)
 
     def _list_earlier_turns(args: dict[str, Any], _ctx: ToolContext) -> ToolResult:

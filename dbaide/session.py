@@ -17,7 +17,7 @@ class Session:
     agent_max_steps: int = 64
     prior_turns_window: int = 3
     max_batch_tools: int = 6
-    latest_result_limit: int = 4000
+    latest_result_limit: int = 0
     compress_threshold: int = 80
     session_uncompressed_turns: int = 2
 

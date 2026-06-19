@@ -430,7 +430,7 @@ _STRINGS: dict[str, dict[str, str]] = {
     "res.prior_turns_window": {"en": "Prior turns in context", "zh": "上下文中的历史轮数"},
     "res.max_batch_tools": {"en": "Max parallel tool calls", "zh": "最大并行工具调用数"},
 
-    "res.latest_result_limit": {"en": "Latest result limit (chars)", "zh": "最新结果上限（字符）"},
+    "res.latest_result_limit": {"en": "Latest result limit (chars, 0=unlimited)", "zh": "最新结果上限（字符，0=不限）"},
     "res.compress_threshold": {"en": "Compress threshold (%)", "zh": "压缩触发阈值（%）"},
     "res.max_concurrent_runs": {"en": "Max concurrent runs", "zh": "最大并发运行数"},
     "res.per_run_note": {

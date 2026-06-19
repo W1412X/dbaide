@@ -6,7 +6,7 @@ from dbaide.agent.orchestrator import AskOrchestrator
 from dbaide.agent.toolkit import build_tool_registry
 from dbaide.models import ColumnInfo, ConnectionConfig
 from dbaide.session import Session
-from dbaide.tools.registry import ToolContext
+from dbaide.tools.registry import ToolContext, ToolResult
 from tests.llm_mock import AgentMockLLM
 
 
@@ -181,6 +181,88 @@ def test_max_tail_keep_index_keeps_largest_fitting_tail():
     # When the whole tail fits, keep all of it (first_keep == head).
     small = [10, 10, 5, 5, 5]
     assert _max_tail_keep_index(small, 100, head=2, overhead=5) == 2
+
+
+def test_non_session_compression_uses_reported_prompt_tokens(tmp_path):
+    from dbaide.llm import LLMMessage
+
+    db = tmp_path / "usage.db"
+    make_db(db)
+    cfg = ConnectionConfig(name="local", type="sqlite", path=str(db))
+    llm = AgentMockLLM()
+    llm.last_usage = {"prompt_tokens": 7000}
+    orch = AskOrchestrator(build_adapter(cfg), Session(connection=cfg), llm)
+    orch.model_config = type("_SmallContext", (), {"context_length": 8000})()
+    orch.session.compress_threshold = 50
+    loop = AskAgentLoop(orch)
+    messages = [
+        LLMMessage("system", "sys"),
+        LLMMessage("user", "question"),
+        LLMMessage("assistant", '{"action":"call_tool","tool":"list_tables","args":{}}'),
+        LLMMessage("user", "[Tool result: list_tables]\nsmall"),
+        LLMMessage("assistant", '{"action":"call_tool","tool":"describe_table","args":{"table":"orders"}}'),
+        LLMMessage("user", "[Tool result: describe_table]\nsmall"),
+        LLMMessage("assistant", '{"action":"call_tool","tool":"validate_sql","args":{"sql":"SELECT 1"}}'),
+        LLMMessage("user", "[Tool result: validate_sql]\nok"),
+        LLMMessage("assistant", '{"action":"finish","answer":"done"}'),
+        LLMMessage("user", "tail"),
+    ]
+
+    loop._maybe_compress(orch, messages)
+
+    assert any("Context summary" in m.content or "earlier messages were dropped" in m.content for m in messages)
+
+
+def test_tool_result_formatter_uses_configurable_char_limit():
+    from dbaide.agent.loop import _format_tool_result
+
+    result = ToolResult(ok=True, data={"payload": "x" * 200})
+    text = _format_tool_result("unknown_tool", result, char_limit=80)
+
+    assert len(text) < 140
+    assert "truncated from" in text
+
+
+def test_tool_result_formatter_allows_unlimited_char_limit():
+    from dbaide.agent.loop import _format_tool_result
+
+    result = ToolResult(ok=True, data={"payload": "x" * 200})
+    text = _format_tool_result("unknown_tool", result, char_limit=0)
+
+    assert "truncated from" not in text
+    assert "x" * 200 in text
+
+
+def test_tool_result_formatter_defaults_to_unlimited_char_limit():
+    from dbaide.agent.loop import _format_tool_result
+
+    result = ToolResult(ok=True, data={"payload": "x" * 200})
+    text = _format_tool_result("unknown_tool", result)
+
+    assert "truncated from" not in text
+    assert "x" * 200 in text
+
+
+def test_loop_reads_latest_result_limit_from_session(tmp_path):
+    db = tmp_path / "limit.db"
+    make_db(db)
+    cfg = ConnectionConfig(name="local", type="sqlite", path=str(db))
+    session = Session(connection=cfg)
+    session.latest_result_limit = 0
+    orch = AskOrchestrator(build_adapter(cfg), session, AgentMockLLM())
+
+    assert AskAgentLoop._tool_result_char_limit(orch) is None
+    session.latest_result_limit = 1234
+    assert AskAgentLoop._tool_result_char_limit(orch) == 1234
+
+
+def test_latest_result_limit_defaults_to_unlimited():
+    from dbaide.db.policy import ResourcePolicy
+
+    cfg = ConnectionConfig(name="local", type="sqlite", path=":memory:")
+    assert ResourcePolicy().latest_result_limit == 0
+    assert Session(connection=cfg).latest_result_limit == 0
+    assert Session.from_policy(cfg, ResourcePolicy()).latest_result_limit == 0
 
 
 def test_run_single_propagates_cancellation(tmp_path):

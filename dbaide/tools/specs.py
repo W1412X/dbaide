@@ -489,14 +489,14 @@ RETRIEVE_TURN = ToolSpec(
         "Fetch the full content of one earlier turn in this chat session by turn_id "
         "(t1, t2, …). [Prior turns in this session] shows only Q/A/SQL summaries; "
         "call this when you need the user's exact clarifications, the full SQL history, the "
-        "full answer, or the disclosed tables from that turn. `include` selects which "
-        "fields to return (clarifications/sql/answer/tables); omit it for all. "
+        "full answer, disclosed tables, verified facts, or ruled-out paths from that turn. "
+        "`include` selects which fields to return (clarifications/sql/answer/tables/memory); omit it for all. "
         "When include contains sql, returns selected_sql (last query) and executed_sqls "
         "(all auto-executed queries with purpose tags)."
     ),
     input_schema={
         "turn_id": {"type": "string", "required": True, "description": "t1, t2, …"},
-        "include": {"type": "list[string]", "description": "clarifications/sql/answer/tables; omit for all"},
+        "include": {"type": "list[string]", "description": "clarifications/sql/answer/tables/memory; omit for all"},
     },
     output_schema={
         "turn_id": "string",
@@ -507,6 +507,8 @@ RETRIEVE_TURN = ToolSpec(
         "executed_sqls": "list[object]",
         "answer_markdown": "string",
         "disclosed_tables": "list[string]",
+        "verified_facts": "list[string]",
+        "excluded_paths": "list[object]",
         "created_at": "number",
     },
     permission_level=SAFE_METADATA,
