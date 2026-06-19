@@ -20,6 +20,7 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 
+from dbaide.step_budget import MAX_AGENT_MAX_STEPS, MIN_AGENT_MAX_STEPS
 from dbaide.desktop.dialogs.message_dialog import alert as dialog_alert, confirm as dialog_confirm, warn as dialog_warn
 from dbaide.app_info import (
     APP_NAME,
@@ -183,7 +184,7 @@ class SettingsDialog(ChromeDialog):
             ("join_sample_size", 10, 1000),
         )),
         ("res.group.agent", (
-            ("agent_max_steps", 1, 100),
+            ("agent_max_steps", MIN_AGENT_MAX_STEPS, MAX_AGENT_MAX_STEPS),
             ("prior_turns_window", 0, 20),
             ("max_batch_tools", 1, 16),
             ("latest_result_limit", 0, 20000),

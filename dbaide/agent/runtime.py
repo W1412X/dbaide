@@ -5,6 +5,7 @@ import logging
 import time
 from typing import Any, Callable
 
+from dbaide.step_budget import DEFAULT_AGENT_MAX_STEPS, clamp_agent_max_steps
 from dbaide.core.cancellation import CancelledError
 from dbaide.core.events import TraceEvent
 from dbaide.llm import LLMClient, NullLLMClient
@@ -23,7 +24,7 @@ class AgentRuntime:
     - Supports cancellation
     """
 
-    MAX_STEPS = 64  # default; overridable per-run via the ``max_steps`` argument
+    MAX_STEPS = DEFAULT_AGENT_MAX_STEPS  # backwards-compatible alias
 
     def __init__(
         self,
@@ -37,7 +38,7 @@ class AgentRuntime:
         self.llm = llm or NullLLMClient()
         self.tool_registry = tool_registry or ToolRegistry()
         self.trace_sink = trace_sink or (lambda _: None)
-        self.max_steps = max(1, int(max_steps)) if max_steps else self.MAX_STEPS
+        self.max_steps = clamp_agent_max_steps(max_steps if max_steps is not None else DEFAULT_AGENT_MAX_STEPS)
         self.cancel_check = cancel_check
         self._step_count = 0
         self._cancelled = False

@@ -75,11 +75,16 @@ def test_live_trace_rebuild_does_not_orphan_cards_as_windows(qapp):
             )
         ]
 
+    def _flush_trace(trace) -> None:
+        trace._render_timer.stop()
+        trace._render()
+
     events = [
         progress_event(stage="loop", title="started", status="running", kind="agent"),
         progress_event(stage="discover_schema", title="Calling", status="running", kind="tool", step=1),
     ]
     trace.set_events(events, live=True)
+    _flush_trace(trace)
     qapp.processEvents()
     assert trace._cards, "expected timeline cards after set_events"
 
@@ -95,11 +100,12 @@ def test_live_trace_rebuild_does_not_orphan_cards_as_windows(qapp):
             )
         )
         trace.set_events(events, live=True)
+        _flush_trace(trace)
         qapp.processEvents()
         assert not _orphan_cards(), "timeline rebuild leaked top-level card windows"
 
     trace.set_events(events, live=False)
-    qapp.processEvents()
+    _flush_trace(trace)
     assert not _orphan_cards()
     host.deleteLater()
     qapp.processEvents()
@@ -1005,18 +1011,19 @@ def test_sql_only_action_builds_menu_button(qapp):
 
 
 def test_complete_turn_renders_answer_only(qapp):
-    from dbaide.desktop.components.conversation import ConversationView, _MarkdownBlock
+    from dbaide.desktop.components.answer_document import AnswerDocumentBlock
+    from dbaide.desktop.components.conversation import ConversationView
 
     conv = ConversationView()
     conv.begin_turn("q")
     conv.complete_turn(answer="Done.", ok=True)
     block = conv._layout.itemAt(conv._layout.count() - 1).widget()
-    markdowns = [
-        w._markdown
+    answers = [
+        w.markdown
         for i in range(block._content.count())
-        if isinstance((w := block._content.itemAt(i).widget()), _MarkdownBlock)
+        if isinstance((w := block._content.itemAt(i).widget()), AnswerDocumentBlock)
     ]
-    assert markdowns == ["Done."]
+    assert answers == ["Done."]
 
 
 def test_md_inline_escape_preserves_error_text():
@@ -1126,8 +1133,8 @@ def test_finish_turn_error_clears_live_stream_state(qapp):
 
 
 def test_complete_turn_embeds_charts_inline(qapp):
-    from dbaide.desktop.components.chart_block import ChartBlock
-    from dbaide.desktop.components.conversation import ConversationView, _MarkdownBlock
+    from dbaide.desktop.components.answer_document import AnswerDocumentBlock
+    from dbaide.desktop.components.conversation import ConversationView
 
     chart = {
         "chart_id": "chart:1",
@@ -1150,10 +1157,13 @@ def test_complete_turn_embeds_charts_inline(qapp):
         for i in range(block._content.count())
         if (w := block._content.itemAt(i).widget()) is not None
     ]
-    assert types == ["_MarkdownBlock", "ChartBlock", "_MarkdownBlock"]
-    first = block._content.itemAt(0).widget()
-    assert isinstance(first, _MarkdownBlock)
-    assert "Before" in first._markdown
+    assert types == ["AnswerDocumentBlock"]
+    doc_block = block._content.itemAt(0).widget()
+    assert isinstance(doc_block, AnswerDocumentBlock)
+    assert "Before" in doc_block.markdown
+    from dbaide.rendering.compose import compose_blocks
+    composed = compose_blocks(doc_block._answer, doc_block._charts)
+    assert [b["type"] for b in composed] == ["markdown", "chart", "markdown"]
 
 
 def _bar_chart(cid: str):
@@ -1172,26 +1182,31 @@ def _block_types(block):
 
 
 def test_complete_turn_appends_unreferenced_charts(qapp):
-    # Answer prose with NO {{chart:N}} placeholder must still render the chart
-    # (appended), not silently drop it.
     from dbaide.desktop.components.conversation import ConversationView
 
     conv = ConversationView()
     conv.begin_turn("show chart")
     conv.complete_turn(answer="Here is the breakdown.", charts=[_bar_chart("chart:1")], ok=True)
     block = conv._layout.itemAt(conv._layout.count() - 1).widget()
-    assert _block_types(block) == ["_MarkdownBlock", "ChartBlock"]
+    assert _block_types(block) == ["AnswerDocumentBlock"]
+    doc_block = block._content.itemAt(0).widget()
+    from dbaide.rendering.compose import compose_blocks
+    composed = compose_blocks(doc_block._answer, doc_block._charts)
+    assert [b["type"] for b in composed] == ["markdown", "chart"]
 
 
 def test_complete_turn_chart_only_answer_renders_chart(qapp):
-    # Empty prose + charts: the chart must still render.
     from dbaide.desktop.components.conversation import ConversationView
 
     conv = ConversationView()
     conv.begin_turn("just the chart")
     conv.complete_turn(answer="", charts=[_bar_chart("chart:1")], ok=True)
     block = conv._layout.itemAt(conv._layout.count() - 1).widget()
-    assert "ChartBlock" in _block_types(block)
+    assert _block_types(block) == ["AnswerDocumentBlock"]
+    doc_block = block._content.itemAt(0).widget()
+    from dbaide.rendering.compose import compose_blocks
+    composed = compose_blocks(doc_block._answer, doc_block._charts)
+    assert composed and composed[0]["type"] == "chart"
 
 
 def test_follow_at_bottom_tail_logic():
@@ -1222,6 +1237,41 @@ def test_trace_follow_pauses_and_resumes_on_scroll(qapp):
     # User scrolls back to the bottom → follow resumes (tail behavior).
     panel._on_user_scroll(100)
     assert panel._state.follow_live is True
+
+
+def test_trace_incremental_updates_reuse_step_cards(qapp):
+    """Status/duration changes must patch existing cards, not destroy/recreate them."""
+    from dbaide.desktop.components.trace import InlineTrace
+
+    panel = InlineTrace()
+    panel.begin_live()
+    ev = progress_event(stage="execute_sql", title="Calling", status="running", kind="tool", step=1)
+    panel.append_live_event(ev)
+    panel._render_timer.stop()
+    panel._render()
+    assert len(panel._cards) == 1
+    first_card = panel._cards[0]
+    panel.append_live_event(
+        progress_event(stage="execute_sql", title="done", status="completed", kind="tool", step=1, duration_ms=12)
+    )
+    panel._render()
+    assert len(panel._cards) == 1
+    assert panel._cards[0] is first_card
+
+
+def test_trace_incremental_appends_new_step_cards(qapp):
+    from dbaide.desktop.components.trace import InlineTrace
+
+    panel = InlineTrace()
+    panel.begin_live()
+    panel.append_live_event(progress_event(stage="discover_schema", title="Calling", status="running", kind="tool", step=1))
+    panel._render_timer.stop()
+    panel._render()
+    first_card = panel._cards[0]
+    panel.append_live_event(progress_event(stage="execute_sql", title="Calling", status="running", kind="tool", step=2))
+    panel._render()
+    assert len(panel._cards) == 2
+    assert panel._cards[0] is first_card
 
 
 def test_config_stream_answers_default_on(tmp_path):

@@ -83,7 +83,8 @@ layout.removeWidget(w); discard_widget(w)  # 单个移除
 
 - **`build_trace_timeline()`** 改为**扁平、按 `started_at` 排序**的时间线：unwrap loop 容器，每个 decision/tool/substep 独立一行，用 `depth` 缩进
 - 保留 **`build_trace_tree_timeline()`** 供嵌套视图/测试
-- **`count_timeline_steps()`** 统一 footer / chip 步骤计数
+- **`count_timeline_steps()` / `step_count_from_events()`** 统一 footer、drawer summary、chip 步骤计数
+- **`dbaide/step_budget.py`** 统一 agent 步数预算常量（`DEFAULT_AGENT_MAX_STEPS` 等）与子 agent 预算
 - **`render_trace_text()`** 不变，完整执行日志（args/sql/llm_calls/raw）仍从树导出
 
 ### 回归测试

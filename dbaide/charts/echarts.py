@@ -14,7 +14,6 @@ from typing import Any
 
 from dbaide.charts.labels import category_axis_layout, format_category_label
 from dbaide.charts.spec import chart_spec_from_dict
-from dbaide.rendering.vendor_scripts import echarts_script_src
 
 
 DEFAULT_PALETTE = [
@@ -39,7 +38,6 @@ def chart_spec_to_echarts_option(spec_dict: dict[str, Any], *, theme: Mapping[st
     text_color = str(theme.get("text") or "#d1d5db")
     muted = str(theme.get("muted") or "#9ca3af")
     border = str(theme.get("border") or "#374151")
-    panel = str(theme.get("panel") or theme.get("bg") or "#07080a")
 
     categories = [format_category_label(c) for c in spec.categories]
     raw_categories = list(spec.categories)
@@ -47,7 +45,7 @@ def chart_spec_to_echarts_option(spec_dict: dict[str, Any], *, theme: Mapping[st
     cat_display, cat_angle, cat_bottom = category_axis_layout(raw_categories)
 
     option: dict[str, Any] = {
-        "backgroundColor": panel,
+        "backgroundColor": "transparent",
         "color": colors,
         "textStyle": {"color": text_color, "fontFamily": "Inter, -apple-system, BlinkMacSystemFont, sans-serif"},
         "title": {"show": False},
@@ -205,6 +203,8 @@ def render_echarts_html(
     theme: Mapping[str, Any] | None = None,
     echarts_src: str | None = None,
 ) -> str:
+    from dbaide.rendering.vendor_scripts import echarts_script_src
+
     option = chart_spec_to_echarts_option(spec_dict, theme=theme)
     option_json = json.dumps(option, ensure_ascii=False, separators=(",", ":"))
     src = str(echarts_src if echarts_src is not None else echarts_script_src())

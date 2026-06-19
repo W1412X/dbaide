@@ -24,13 +24,13 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 from dbaide.agent.agenda import AgendaItem, agenda_summary, latest_agenda_from_events
-from dbaide.desktop.components.chart_block import ChartBlock
+from dbaide.desktop.components.answer_document import AnswerDocumentBlock
 from dbaide.desktop.components.icon_button import IconToolButton
 
 from PyQt6.QtCore import QSize
 
 from dbaide.agent.progress_events import conversation_trace_step, phase_for
-from dbaide.agent.trace_model import count_timeline_steps
+from dbaide.agent.trace_model import count_timeline_steps, step_count_from_events, build_trace_model_from_events
 from dbaide.desktop.components.base import clear_layout_widgets, compact_button, discard_widget
 from dbaide.desktop.conversation_state import ThinkingUiState, TurnTraceState
 from dbaide.desktop.components.icons import svg_icon
@@ -40,7 +40,6 @@ from dbaide.desktop.components.spinner import BusyAnimator, SPINNER_SIZE, spinne
 from dbaide.desktop.components.trace import toggle_trace_drawer, update_trace_drawer
 from dbaide.desktop.theme import Theme
 
-from dbaide.charts.embed import split_answer_with_charts
 from dbaide.desktop.components.markdown_webview import MarkdownWebWidget, build_markdown_widget
 
 
@@ -470,20 +469,49 @@ class _AgendaPanel(QFrame):
         self._items.setContentsMargins(0, 0, 0, 0)
         self._items.setSpacing(6)
         outer.addLayout(self._items)
+        self._agenda_rows: list[tuple[AgendaItem, QLabel, QLabel, QLabel]] = []
         self.hide()
 
     def set_items(self, items: list[AgendaItem]) -> None:
-        clear_layout_widgets(self._items)
         if not items:
+            self._agenda_rows = []
+            clear_layout_widgets(self._items)
             self._summary.setText("")
             self.hide()
             return
-        self._summary.setText(agenda_summary(items))
+
+        summary = agenda_summary(items)
+        self._summary.setText(summary)
+        if len(items) == len(self._agenda_rows) and all(
+            row[0].id == item.id for row, item in zip(self._agenda_rows, items, strict=False)
+        ):
+            updated: list[tuple[AgendaItem, QLabel, QLabel, QLabel]] = []
+            for (_old, dot, title, subtitle), item in zip(self._agenda_rows, items, strict=False):
+                dot.setText(_agenda_glyph(item.status))
+                dot.setStyleSheet(
+                    f"color: {_agenda_color(item.status)}; font-size: 12px; font-weight: 700;"
+                )
+                title.setText(item.title)
+                subtitle_bits = [_agenda_status_text(item.status)]
+                if item.kind and item.kind != "other":
+                    subtitle_bits.append(item.kind.replace("_", " "))
+                if item.acceptance:
+                    subtitle_bits.append(item.acceptance)
+                subtitle.setText(" · ".join(bit for bit in subtitle_bits if bit))
+                updated.append((item, dot, title, subtitle))
+            self._agenda_rows = updated
+            self.show()
+            return
+
+        self._agenda_rows = []
+        clear_layout_widgets(self._items)
         for agenda_item in items:
-            self._items.addWidget(self._row(agenda_item))
+            row, dot, title, subtitle = self._row(agenda_item)
+            self._items.addWidget(row)
+            self._agenda_rows.append((agenda_item, dot, title, subtitle))
         self.show()
 
-    def _row(self, item: AgendaItem) -> QWidget:
+    def _row(self, item: AgendaItem) -> tuple[QWidget, QLabel, QLabel, QLabel]:
         row = QWidget()
         row.setStyleSheet("background: transparent;")
         layout = QHBoxLayout(row)
@@ -513,7 +541,7 @@ class _AgendaPanel(QFrame):
         subtitle.setStyleSheet(f"color: {Theme.MUTED_2}; font-size: 10px;")
         text_col.addWidget(subtitle)
         layout.addLayout(text_col, 1)
-        return row
+        return row, dot, title, subtitle
 
 
 def _agenda_glyph(status: str) -> str:
@@ -1252,13 +1280,8 @@ class TurnBlock(QFrame):
         self._render_stats(self._trace_model_cache)
 
     def _rebuild_stats(self, events: list[dict[str, Any]]) -> None:
-        from dbaide.agent.trace_model import TraceModel
         self._elapsed_timer.stop()
-        model = TraceModel()
-        for ev in events or []:
-            if isinstance(ev, dict):
-                model.ingest(ev)
-        model.finalize()
+        model = build_trace_model_from_events(events, live=False)
         self._trace_model_cache = model
         self._render_stats(model)
 
@@ -1379,7 +1402,7 @@ class ConversationView(QScrollArea):
         # events for the open turn (None until the first chunk arrives). There is no
         # front-end simulation — if the model can't stream, the answer simply renders
         # once at complete_turn.
-        self._live_answer: "_MarkdownBlock | None" = None
+        self._live_answer: AnswerDocumentBlock | None = None
         self._live_answer_text = ""
         self._chunk_dirty = False
         self._chunk_timer = QTimer(self)
@@ -1412,8 +1435,24 @@ class ConversationView(QScrollArea):
         self._bulk_load_depth = max(0, self._bulk_load_depth - 1)
         if self._bulk_load_depth == 0:
             self._prefer_fast_markdown = False
+            self._upgrade_bulk_loaded_charts()
             self.setUpdatesEnabled(True)
             self._schedule_scroll_bottom()
+
+    def _upgrade_bulk_loaded_charts(self) -> None:
+        """Re-render chart answers with WebEngine after session restore bulk load."""
+        for index in range(self._layout.count()):
+            item = self._layout.itemAt(index)
+            widget = item.widget() if item is not None else None
+            if isinstance(widget, TurnBlock):
+                self._upgrade_turn_chart_blocks(widget)
+
+    def _upgrade_turn_chart_blocks(self, turn: TurnBlock) -> None:
+        for index in range(turn._content.count()):
+            item = turn._content.itemAt(index)
+            widget = item.widget() if item is not None else None
+            if isinstance(widget, AnswerDocumentBlock):
+                widget.ensure_full_render()
 
     def _schedule_scroll_bottom(self) -> None:
         if not self._scroll_timer.isActive():
@@ -1431,7 +1470,7 @@ class ConversationView(QScrollArea):
         if not text or self._current_turn is None:
             return
         if self._live_answer is None:
-            self._live_answer = _MarkdownBlock("", title="DBAide")
+            self._live_answer = AnswerDocumentBlock("", title="DBAide")
             self._current_turn.append_content(self._live_answer)
         self._live_answer_text += text
         if not self._chunk_dirty:
@@ -1601,70 +1640,40 @@ class ConversationView(QScrollArea):
         if self._current_record is not None:
             self._current_record["events"].append(boot)
 
-    def _append_answer_with_embedded_charts(
+    def _append_answer_document(
         self,
         turn: TurnBlock,
         answer: str,
         charts: list[dict[str, Any]] | None,
         *,
         workflow_id: str = "",
-        replace_widget: _MarkdownBlock | None = None,
+        replace_widget: AnswerDocumentBlock | _MarkdownBlock | None = None,
     ) -> None:
-        """Render answer prose and charts in document order (inline placeholders)."""
-        from dbaide.charts.embed import CHART_EMBED_RE
-
+        """Compose markdown + charts into a single answer document block."""
         body = str(answer or "")
         chart_list = [c for c in (charts or []) if isinstance(c, dict) and c.get("chart_id")]
-        has_embeds = bool(CHART_EMBED_RE.search(body))
-        if (
-            replace_widget is not None
-            and not chart_list
-            and not has_embeds
-            and body.strip()
-        ):
+        title_tooltip = f"workflow {workflow_id}" if workflow_id else ""
+
+        if isinstance(replace_widget, AnswerDocumentBlock):
             try:
-                replace_widget.set_markdown(body, force_rebuild=True)
+                replace_widget.set_answer(body, chart_list, force_rebuild=True)
+                return
             except RuntimeError:
                 turn.remove_content_widget(replace_widget)
-                turn.append_content(_MarkdownBlock(
-                    body,
-                    title="DBAide",
-                    title_tooltip=f"workflow {workflow_id}" if workflow_id else "",
-                    fast_render=self._prefer_fast_markdown,
-                ))
-            return
-
-        if replace_widget is not None:
+                replace_widget = None
+        elif replace_widget is not None:
             turn.remove_content_widget(replace_widget)
 
         if not body.strip() and not chart_list:
             return
 
-        segments = split_answer_with_charts(body, chart_list)
-        if not segments and body.strip():
-            segments = [("md", body)]
-
-        first_md = True
-        rendered_chart_ids: set[str] = set()
-        for kind, payload in segments:
-            if kind == "md":
-                turn.append_content(_MarkdownBlock(
-                    str(payload),
-                    title="DBAide" if first_md else "",
-                    title_tooltip=f"workflow {workflow_id}" if first_md and workflow_id else "",
-                    fast_render=self._prefer_fast_markdown,
-                ))
-                first_md = False
-            elif kind == "chart" and isinstance(payload, dict):
-                rendered_chart_ids.add(str(payload.get("chart_id")))
-                turn.append_content(ChartBlock(payload))
-
-        # The answer may not reference every chart inline (or may have no prose at
-        # all). split_answer_with_charts omits unreferenced charts, so append them
-        # here — a generated visualization must never be silently dropped.
-        for chart in chart_list:
-            if str(chart.get("chart_id")) not in rendered_chart_ids:
-                turn.append_content(ChartBlock(chart))
+        turn.append_content(AnswerDocumentBlock(
+            body,
+            chart_list,
+            title="DBAide",
+            title_tooltip=title_tooltip,
+            fast_render=self._prefer_fast_markdown and not chart_list,
+        ))
 
     def _dismiss_clarification_bar(self) -> None:
         """Retract a pending clarification bar so its (now stale) option chips don't
@@ -1721,18 +1730,14 @@ class ConversationView(QScrollArea):
         # user expands the chip) shows the finalized run, not just what streamed.
         # Build the model first so we can derive the real tool-step count.
         turn.set_trace(events)
-        step_count = (
-            count_timeline_steps(turn._trace_model_cache)
-            if turn._trace_model_cache
-            else len(events)
-        )
+        step_count = step_count_from_events(events, live=False)
         turn.status.set_done(ok=ok, step_count=step_count, events=events)
 
         # Clean author label — just "DBAide" (the internal workflow id is noise in the
         # message header, Codex-style; keep it reachable as a tooltip and in the trace).
         self._live_answer = None
         self._live_answer_text = ""
-        self._append_answer_with_embedded_charts(
+        self._append_answer_document(
             turn,
             final_answer,
             charts,
@@ -1806,11 +1811,7 @@ class ConversationView(QScrollArea):
         if self._current_turn:
             events = list((self._current_record or {}).get("events") or [])
             self._current_turn.set_trace(events)
-            sc = (
-                count_timeline_steps(self._current_turn._trace_model_cache)
-                if self._current_turn._trace_model_cache
-                else len(events)
-            )
+            sc = step_count_from_events(events, live=False)
             self._current_turn.status.set_done(ok=False, step_count=sc, events=events)
             self._current_turn.append_content(
                 _MarkdownBlock(message, title="Error", boxed=True, accent=Theme.RED)

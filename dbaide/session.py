@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 
 from .context.disclosure import DisclosureContext
+from .step_budget import DEFAULT_AGENT_MAX_STEPS
 from .models import ConnectionConfig
 
 
@@ -14,7 +15,7 @@ class Session:
     timeout_seconds: int = 60
     # Agent reasoning budget — defaults match ResourcePolicy so a directly-built
     # Session (e.g. in tests) behaves like the conservative "production" preset.
-    agent_max_steps: int = 64
+    agent_max_steps: int = DEFAULT_AGENT_MAX_STEPS
     prior_turns_window: int = 3
     max_batch_tools: int = 6
     latest_result_limit: int = 0

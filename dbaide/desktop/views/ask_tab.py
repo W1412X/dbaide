@@ -212,7 +212,13 @@ class AskTab(QWidget):
             errors=result.get("errors") or None,
             workflow_id=workflow_id,
             ok=ok,
-            actions_widget=self._build_actions(answer, result.get("cli_command"), result.get("selected_sql")),
+            actions_widget=self._build_actions(
+                answer,
+                result.get("cli_command"),
+                result.get("selected_sql"),
+                charts=result.get("charts") or None,
+                export_title=str(result.get("question") or ""),
+            ),
             charts=result.get("charts") or None,
         )
 
@@ -269,7 +275,11 @@ class AskTab(QWidget):
                     trace_events=turn.get("trace") or [],
                     ok=status not in ("failed", "cancelled"),
                     actions_widget=self._build_actions(
-                        str(turn.get("answer_markdown") or ""), None, turn.get("selected_sql"),
+                        str(turn.get("answer_markdown") or ""),
+                        None,
+                        turn.get("selected_sql"),
+                        charts=turn.get("charts") or None,
+                        export_title=str(turn.get("question") or ""),
                     ),
                     charts=turn.get("charts") or None,
                 )
@@ -278,25 +288,46 @@ class AskTab(QWidget):
 
     # ── helpers ───────────────────────────────────────────────────────────────
 
-    def _build_actions(self, answer: str, cli_command: str | None, selected_sql: str | None = None) -> QWidget | None:
-        answer = str(answer or "").strip()
+    def _build_actions(
+        self,
+        answer: str,
+        cli_command: str | None,
+        selected_sql: str | None = None,
+        charts: list[dict[str, Any]] | None = None,
+        *,
+        export_title: str = "",
+    ) -> QWidget | None:
+        raw_answer = str(answer or "")
+        answer = raw_answer.strip()
         selected_sql = str(selected_sql or "").strip()
+        chart_list = [
+            dict(c) for c in (charts or []) if isinstance(c, dict) and c.get("chart_id")
+        ]
         if not answer and not cli_command and not selected_sql:
             return None
+        from dbaide.desktop.components.answer_document import answer_theme_payload
         from dbaide.desktop.components.icon_button import IconToolButton
         from dbaide.desktop.components.icons import svg_icon
         from dbaide.desktop.components.menu import _style_menu
         from dbaide.desktop.theme import Theme
         from dbaide.i18n import t as _t
 
-        items: list[tuple[str, str]] = []
+        menu_items: list[tuple[str, str, object]] = []
+        export_theme = answer_theme_payload()
         if answer:
-            items.append((_t("ask.copy_answer"), answer))
+            menu_items.append(("copy", _t("ask.copy_answer"), answer))
+            menu_items.append((
+                "download",
+                _t("ask.export_answer_html"),
+                lambda: self._open_answer_export_dialog(
+                    raw_answer, chart_list, export_title, export_theme,
+                ),
+            ))
         if selected_sql:
-            items.append((_t("ask.copy_sql"), selected_sql))
+            menu_items.append(("copy", _t("ask.copy_sql"), selected_sql))
         if cli_command:
-            items.append((_t("ask.copy_cli"), str(cli_command)))
-        if not items:
+            menu_items.append(("copy", _t("ask.copy_cli"), str(cli_command)))
+        if not menu_items:
             return None
 
         btn = IconToolButton(
@@ -308,10 +339,33 @@ class AskTab(QWidget):
             from PyQt6.QtWidgets import QMenu
             menu = QMenu(btn)
             _style_menu(menu)
-            for label, payload in items:
-                action = menu.addAction(svg_icon("copy", color=Theme.TEXT_2, size=13), label)
-                action.triggered.connect(lambda _checked=False, p=payload: QApplication.clipboard().setText(p))
+            for kind, label, payload in menu_items:
+                icon_name = "download" if kind == "download" else "copy"
+                action = menu.addAction(svg_icon(icon_name, color=Theme.TEXT_2, size=13), label)
+                if callable(payload):
+                    action.triggered.connect(lambda _checked=False, fn=payload: fn())
+                else:
+                    action.triggered.connect(
+                        lambda _checked=False, p=str(payload): QApplication.clipboard().setText(p)
+                    )
             menu.exec(btn.mapToGlobal(btn.rect().bottomLeft()))
 
         btn.clicked.connect(_show_menu)
         return btn
+
+    def _open_answer_export_dialog(
+        self,
+        answer: str,
+        charts: list[dict[str, Any]] | None,
+        export_title: str,
+        theme: dict[str, Any],
+    ) -> None:
+        from dbaide.desktop.dialogs.answer_export import open_answer_export_dialog
+
+        open_answer_export_dialog(
+            self.window(),
+            answer=answer,
+            charts=charts,
+            title=export_title,
+            theme=theme,
+        )

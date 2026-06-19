@@ -4,6 +4,7 @@ from __future__ import annotations
 import json
 from typing import Any
 
+from dbaide.step_budget import clamp_agent_max_steps, child_step_budget
 from dbaide.charts.embed import merge_chart_specs, remap_chart_refs
 from dbaide.agent.toolkit.result_preview import preview_rows
 from dbaide.agent.toolkit.support import _err, _string_list
@@ -36,7 +37,7 @@ def register(registry: ToolRegistry, orchestrator) -> None:
         execute = bool(args.get("execute", True))
         if not orchestrator.run_state.execute_allowed:
             execute = False
-        child_steps = _child_step_budget(args.get("max_steps"), orchestrator.session.agent_max_steps)
+        child_steps = child_step_budget(args.get("max_steps"), orchestrator.session.agent_max_steps)
         child_session = _child_session(orchestrator.session, max_steps=child_steps)
 
         from dbaide.agent.loop import AskAgentLoop
@@ -138,21 +139,13 @@ def _child_session(parent: Session, *, max_steps: int) -> Session:
         disclosure=parent.disclosure,
         default_limit=parent.default_limit,
         timeout_seconds=parent.timeout_seconds,
-        agent_max_steps=max_steps,
+        agent_max_steps=clamp_agent_max_steps(max_steps),
         prior_turns_window=parent.prior_turns_window,
         max_batch_tools=parent.max_batch_tools,
         latest_result_limit=parent.latest_result_limit,
         compress_threshold=parent.compress_threshold,
         session_uncompressed_turns=parent.session_uncompressed_turns,
     )
-
-
-def _child_step_budget(value: Any, parent_max: int) -> int:
-    try:
-        requested = int(value)
-    except (TypeError, ValueError):
-        requested = min(24, max(4, int(parent_max or 64) // 2))
-    return max(4, min(requested, int(parent_max or 64), 32))
 
 
 def _subagent_id(orchestrator) -> str:

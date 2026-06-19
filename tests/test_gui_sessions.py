@@ -109,6 +109,45 @@ def test_load_session_replaces_previous(qapp):
     qapp.processEvents()
 
 
+def _bar_chart(cid: str = "chart:1") -> dict:
+    return {
+        "chart_id": cid,
+        "chart_type": "bar",
+        "title": "Sales",
+        "categories": ["A", "B"],
+        "series": [{"name": "n", "values": [1.0, 2.0]}],
+        "row_count": 2,
+    }
+
+
+def test_load_session_restores_charts_with_full_render(qapp):
+    from dbaide.desktop.components.answer_document import AnswerDocumentBlock
+    from dbaide.desktop.views.ask_tab import AskTab
+    from dbaide.rendering.compose import compose_blocks
+
+    tab = AskTab()
+    tab.set_has_connection(True)
+    tab.load_session("s1", [{
+        "question": "show chart",
+        "answer_markdown": "Before\n\n{{chart:1}}\n\nAfter",
+        "charts": [_bar_chart()],
+        "status": "completed",
+        "trace": [],
+        "meta": {},
+    }], connection="shop")
+    view = tab.view("s1")
+    turn = view._layout.itemAt(view._layout.count() - 1).widget()
+    doc_block = turn._content.itemAt(0).widget()
+    assert isinstance(doc_block, AnswerDocumentBlock)
+    assert doc_block._charts
+    # Bulk load must not downgrade chart turns to the fast plain-text path.
+    assert doc_block._fast_render is False
+    composed = compose_blocks(doc_block._answer, doc_block._charts)
+    assert [b["type"] for b in composed] == ["markdown", "chart", "markdown"]
+    tab.deleteLater()
+    qapp.processEvents()
+
+
 def test_relative_time_includes_year_for_old_dates(qapp):
     import time
     from dbaide.desktop.components.session_list import _relative_time

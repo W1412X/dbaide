@@ -9,27 +9,10 @@ from PyQt6.QtGui import QFont
 from PyQt6.QtWidgets import QFrame, QLabel, QScrollArea, QSizePolicy, QVBoxLayout, QWidget
 
 from dbaide.charts.echarts import chart_spec_to_echarts_option, render_echarts_html
-from dbaide.charts.labels import category_axis_layout
+from dbaide.charts.layout import estimate_chart_height
 from dbaide.charts.spec import chart_spec_from_dict
 from dbaide.desktop.theme import Theme
 from dbaide.desktop.vendor_assets import echarts_script_src, webengine_html_base
-
-
-def _chart_height(chart_type: str, category_count: int, categories: list[str] | None = None) -> int:
-    cats = list(categories or [])
-    _, angle, bottom_extra = category_axis_layout(cats) if cats else ("", 0, 0)
-    if chart_type == "horizontal_bar":
-        return min(560, max(240, 52 * max(category_count, 1) + 80))
-    if chart_type in {"pie", "donut"}:
-        return 360
-    base = 280 + bottom_extra
-    if angle:
-        base += 16
-    if category_count > 10:
-        base += 24
-    if category_count > 1:
-        base += min(120, 18 * category_count)
-    return min(560, max(320, base))
 
 
 def _compact_axis_title(text: str) -> str:
@@ -103,7 +86,7 @@ def build_chart_widget(spec_dict: dict[str, Any]) -> QWidget:
         view.page().setBackgroundColor(QColor(Theme.BG))
     except Exception:
         pass
-    height = _chart_height(spec.chart_type, len(spec.categories), list(spec.categories))
+    height = estimate_chart_height(spec.chart_type, len(spec.categories), list(spec.categories))
     view.setFixedHeight(height)
     view.setMinimumWidth(280)
     view.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)

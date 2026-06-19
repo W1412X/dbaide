@@ -40,7 +40,7 @@ from dbaide.desktop.trace.helpers import (
     clamp_drawer_geometry,
     follow_at_bottom as _follow_at_bottom,
     is_descendant as _is_descendant,
-    timeline_fingerprint,
+    timeline_structure_fingerprint,
 )
 from dbaide.desktop.trace.session import TraceViewState
 from dbaide.desktop.trace_state import InlineTraceState
@@ -138,7 +138,7 @@ class InlineTrace(QFrame):
         self._cards: list[_TraceStepCard] = []
         self._running_glyphs: list[_TraceTimelineGlyph] = []
         self._render_epoch = 0
-        self._last_fp: tuple[tuple, ...] = ()
+        self._last_struct_fp: tuple[tuple, ...] = ()
         self._tree = _TraceTreeCompat(self)
         self._busy = BusyAnimator(self._on_spin, parent=self)
         self._render_timer = QTimer(self)
@@ -155,7 +155,15 @@ class InlineTrace(QFrame):
         """Rebuild from a list of events. ``live=True`` leaves the model un-finalized
         (the run is still going); ``live=False`` finalizes it."""
         self._state.set_events(events, live=live)
-        self._render()
+        if live:
+            self._schedule_render()
+        else:
+            self._render_timer.stop()
+            self._render()
+
+    def _schedule_render(self) -> None:
+        if not self._render_timer.isActive():
+            self._render_timer.start()
 
     def begin_live(self) -> None:
         self._state.begin_live()
@@ -163,8 +171,7 @@ class InlineTrace(QFrame):
 
     def append_live_event(self, event: dict[str, Any]) -> None:
         self._state.append_live_event(event)
-        if not self._render_timer.isActive():
-            self._render_timer.start()  # coalesce bursts into one render per ~60ms
+        self._schedule_render()
 
     def end_live(self) -> None:
         self._render_timer.stop()
@@ -173,7 +180,7 @@ class InlineTrace(QFrame):
 
     def clear_trace(self) -> None:
         self._state.clear()
-        self._last_fp = ()
+        self._last_struct_fp = ()
         self._clear_cards()
         self._running_glyphs = []
         self._busy.stop()
@@ -212,13 +219,12 @@ class InlineTrace(QFrame):
         QTimer.singleShot(1200, _restore_icon)
 
     def _render(self) -> None:
-        self._render_epoch += 1
         self.setUpdatesEnabled(False)
         last_widget: QWidget | None = None
         try:
             model = self._state.model
             if model is None:
-                self._last_fp = ()
+                self._last_struct_fp = ()
                 self._clear_cards()
                 self._running_glyphs = []
                 self._summary.setText("")
@@ -227,29 +233,34 @@ class InlineTrace(QFrame):
 
             self._summary.setText(localized_summary_line(model))
             timeline = build_trace_timeline(model)
-            fp = timeline_fingerprint(timeline)
+            struct_fp = timeline_structure_fingerprint(timeline)
             total = len(timeline)
-            if fp == self._last_fp and len(self._cards) == total and self._try_incremental_sync(timeline):
-                last_widget = self._cards[-1] if self._cards else None
-            else:
-                self._last_fp = fp
-                self._clear_cards()
+            prefix = struct_fp[: len(self._cards)]
+            can_sync_prefix = (
+                len(self._cards) > 0
+                and len(self._cards) <= total
+                and prefix == self._last_struct_fp[: len(self._cards)]
+                and self._card_ids_match(timeline, len(self._cards))
+            )
+            if can_sync_prefix:
                 self._running_glyphs = []
-                for index, entry in enumerate(timeline):
-                    card = _TraceStepCard(
-                        entry,
-                        is_first=index == 0,
-                        is_last=index == total - 1,
-                        depth=entry.depth,
-                        expanded_ids=self._state.expanded_node_ids,
-                        on_toggle=self._set_expanded,
-                        on_open=self._open_detail,
-                        render_epoch=lambda: self._render_epoch,
-                        running_glyphs=self._running_glyphs,
-                    )
-                    self._body_layout.addWidget(card, 0, Qt.AlignmentFlag.AlignTop)
-                    self._cards.append(card)
-                    last_widget = card
+                if self._sync_existing_cards(timeline[: len(self._cards)]):
+                    if total > len(self._cards):
+                        last_widget = self._append_cards(timeline, start=len(self._cards))
+                    else:
+                        last_widget = self._cards[-1] if self._cards else None
+                    self._last_struct_fp = struct_fp
+                else:
+                    last_widget = self._full_rebuild(timeline, struct_fp)
+            elif struct_fp == self._last_struct_fp and len(self._cards) == total:
+                self._running_glyphs = []
+                if self._sync_existing_cards(timeline):
+                    last_widget = self._cards[-1] if self._cards else None
+                else:
+                    last_widget = self._full_rebuild(timeline, struct_fp)
+            else:
+                last_widget = self._full_rebuild(timeline, struct_fp)
+
             if self._running_glyphs:
                 self._busy.start()
             else:
@@ -259,10 +270,57 @@ class InlineTrace(QFrame):
         if self._state.follow_live and last_widget is not None:
             QTimer.singleShot(0, lambda w=last_widget: self._scroll_to_widget(w))
 
-    def _try_incremental_sync(self, timeline: list[TraceTimelineEntry]) -> bool:
+    def _card_ids_match(self, timeline: list[TraceTimelineEntry], count: int) -> bool:
+        if count > len(self._cards) or count > len(timeline):
+            return False
+        for index in range(count):
+            if self._cards[index]._entry.node_id != timeline[index].node_id:
+                return False
+            if self._cards[index]._depth != timeline[index].depth:
+                return False
+        return True
+
+    def _full_rebuild(
+        self,
+        timeline: list[TraceTimelineEntry],
+        struct_fp: tuple[tuple, ...],
+    ) -> QWidget | None:
+        self._render_epoch += 1
+        self._last_struct_fp = struct_fp
+        self._clear_cards()
+        self._running_glyphs = []
+        return self._append_cards(timeline, start=0)
+
+    def _append_cards(
+        self,
+        timeline: list[TraceTimelineEntry],
+        *,
+        start: int,
+    ) -> QWidget | None:
+        total = len(timeline)
+        last_widget: QWidget | None = None
+        for index in range(start, total):
+            entry = timeline[index]
+            card = _TraceStepCard(
+                entry,
+                is_first=index == 0,
+                is_last=index == total - 1,
+                depth=entry.depth,
+                expanded_ids=self._state.expanded_node_ids,
+                on_toggle=self._set_expanded,
+                on_open=self._open_detail,
+                render_epoch=lambda: self._render_epoch,
+                running_glyphs=self._running_glyphs,
+            )
+            self._body_layout.addWidget(card, 0, Qt.AlignmentFlag.AlignTop)
+            self._cards.append(card)
+            last_widget = card
+        return last_widget
+
+    def _sync_existing_cards(self, timeline: list[TraceTimelineEntry]) -> bool:
         self._running_glyphs = []
         total = len(timeline)
-        for index, (card, entry) in enumerate(zip(self._cards, timeline)):
+        for index, (card, entry) in enumerate(zip(self._cards, timeline, strict=False)):
             if not card.apply_entry(
                 entry,
                 depth=entry.depth,
@@ -412,6 +470,8 @@ class _TraceStepCard(QFrame):
         self._details_layout = QVBoxLayout(self._details)
         self._details_layout.setContentsMargins(0, 1, 0, 0)
         self._details_layout.setSpacing(4)
+        self._child_box: QWidget | None = None
+        self._child_layout: QVBoxLayout | None = None
         self._build_details()
         layout.addWidget(self._details)
 
@@ -451,15 +511,11 @@ class _TraceStepCard(QFrame):
         is_last: bool,
         running_glyphs: list["_TraceTimelineGlyph"],
     ) -> bool:
+        if depth != self._depth:
+            return False
         child_sig = tuple((c.node_id, c.status, len(c.children)) for c in entry.children)
         old_child_sig = tuple((c.node_id, c.status, len(c.children)) for c in self._entry.children)
         expanded = entry.node_id in self._expanded_ids
-        if (
-            child_sig != old_child_sig
-            or expanded != self._is_expanded
-            or depth != self._depth
-        ):
-            return False
         self._entry = entry
         self._data = _entry_payload(entry)
         self._title_label.setText(entry.title)
@@ -476,7 +532,47 @@ class _TraceStepCard(QFrame):
         self._marker.set_status(entry.status, is_first=is_first, is_last=is_last)
         if entry.status == "running":
             running_glyphs.append(self._marker)
+        if expanded != self._is_expanded:
+            self._is_expanded = expanded
+            if self._expandable:
+                self._details.setVisible(self._is_expanded)
+                self._sync_toggle()
+        if child_sig != old_child_sig and not self._sync_child_cards(entry, running_glyphs):
+            return False
         self._sync_height_constraints()
+        return True
+
+    def _sync_child_cards(
+        self,
+        entry: TraceTimelineEntry,
+        running_glyphs: list["_TraceTimelineGlyph"],
+    ) -> bool:
+        if not entry.children:
+            if self._child_box is not None:
+                self._child_box.hide()
+            return True
+        if self._child_layout is None or self._child_box is None:
+            return False
+        self._child_box.show()
+        while self._child_layout.count():
+            item = self._child_layout.takeAt(0)
+            widget = item.widget()
+            if widget is not None:
+                discard_widget(widget)
+        total = len(entry.children)
+        for index, child in enumerate(entry.children):
+            self._child_layout.addWidget(_TraceStepCard(
+                child,
+                is_first=index == 0,
+                is_last=index == total - 1,
+                depth=self._depth + 1,
+                expanded_ids=self._expanded_ids,
+                on_toggle=self._on_toggle,
+                on_open=self._on_open,
+                render_epoch=self._render_epoch,
+                running_glyphs=running_glyphs,
+                parent=self._child_box,
+            ))
         return True
 
     def child_cards(self) -> list["_TraceStepCard"]:
@@ -522,6 +618,8 @@ class _TraceStepCard(QFrame):
             child_layout = QVBoxLayout(child_box)
             child_layout.setContentsMargins(0, 0, 0, 0)
             child_layout.setSpacing(4)
+            self._child_box = child_box
+            self._child_layout = child_layout
             total = len(self._entry.children)
             for index, child in enumerate(self._entry.children):
                 child_layout.addWidget(_TraceStepCard(

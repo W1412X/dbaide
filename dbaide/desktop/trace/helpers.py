@@ -38,8 +38,22 @@ def follow_at_bottom(value: int, maximum: int, *, slack: int = 8) -> bool:
     return value >= maximum - slack
 
 
+def timeline_structure_fingerprint(timeline: list[TraceTimelineEntry]) -> tuple[tuple, ...]:
+    """Identity/layout signature — stable across status/title/duration updates."""
+
+    def _struct(entry: TraceTimelineEntry) -> tuple:
+        return (
+            entry.node_id,
+            entry.depth,
+            entry.step,
+            tuple(_struct(child) for child in entry.children),
+        )
+
+    return tuple(_struct(entry) for entry in timeline)
+
+
 def timeline_fingerprint(timeline: list[TraceTimelineEntry]) -> tuple[tuple, ...]:
-    """Stable signature for incremental timeline sync."""
+    """Full content signature (used by tests and diagnostics)."""
 
     def _fp(entry: TraceTimelineEntry) -> tuple:
         return (

@@ -16,6 +16,8 @@ import threading
 from dataclasses import dataclass, fields, replace
 from typing import Any
 
+from dbaide.step_budget import DEFAULT_AGENT_MAX_STEPS
+
 # Profiling tiers, ordered from cheapest to most expensive.
 PROFILE_MODES = ("none", "light", "auto", "all")
 LOAD_PROFILE_NAMES = ("production", "staging", "dev")
@@ -45,7 +47,7 @@ class ResourcePolicy:
     max_row_limit: int = 1000
 
     # Agent reasoning budget (how hard the agent is allowed to work per question).
-    agent_max_steps: int = 64            # tool-loop iterations before the agent must answer
+    agent_max_steps: int = DEFAULT_AGENT_MAX_STEPS            # tool-loop iterations before the agent must answer
     prior_turns_window: int = 3          # how many prior session turns to show in the agent prompt
     max_batch_tools: int = 6             # max parallel tool calls the agent may issue per decision
     latest_result_limit: int = 0         # max chars of one tool result in the prompt; <=0 means unlimited
@@ -94,7 +96,7 @@ LOAD_PROFILES: dict[str, ResourcePolicy] = {
         build_profile_mode="light",
         default_row_limit=100,
         max_row_limit=1000,
-        agent_max_steps=64,
+        agent_max_steps=DEFAULT_AGENT_MAX_STEPS,
         prior_turns_window=3,
         max_batch_tools=6,
 
@@ -111,7 +113,7 @@ LOAD_PROFILES: dict[str, ResourcePolicy] = {
         build_profile_mode="auto",
         default_row_limit=100,
         max_row_limit=5000,
-        agent_max_steps=64,
+        agent_max_steps=DEFAULT_AGENT_MAX_STEPS,
         prior_turns_window=3,
         max_batch_tools=6,
 
@@ -128,7 +130,7 @@ LOAD_PROFILES: dict[str, ResourcePolicy] = {
         build_profile_mode="auto",
         default_row_limit=200,
         max_row_limit=50000,
-        agent_max_steps=64,
+        agent_max_steps=DEFAULT_AGENT_MAX_STEPS,
         prior_turns_window=5,
         max_batch_tools=6,
 

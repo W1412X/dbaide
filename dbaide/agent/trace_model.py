@@ -314,6 +314,7 @@ class TraceModel:
 
     @property
     def current_step(self) -> int:
+        """Agent loop iteration index (tool ``step`` field), not the UI timeline count."""
         for node in reversed(self.steps):
             if node.step > 0:
                 return node.step
@@ -597,8 +598,28 @@ def build_trace_tree_timeline(model: "TraceModel | None") -> list[TraceTimelineE
 
 
 def count_timeline_steps(model: "TraceModel | None") -> int:
-    """Work items shown on the flat timeline (matches user-visible step count)."""
+    """Visible timeline units — one per flat trace card (drawer + footer + summary)."""
     return len(build_trace_timeline(model))
+
+
+def build_trace_model_from_events(
+    events: list[dict[str, Any]] | None,
+    *,
+    live: bool = False,
+) -> TraceModel:
+    """Construct a ``TraceModel`` from persisted or streaming progress events."""
+    model = TraceModel()
+    for event in events or []:
+        if isinstance(event, dict):
+            model.ingest(event)
+    if not live:
+        model.finalize()
+    return model
+
+
+def step_count_from_events(events: list[dict[str, Any]] | None, *, live: bool = False) -> int:
+    """Canonical UI step count for a raw event list (matches the trace timeline)."""
+    return count_timeline_steps(build_trace_model_from_events(events, live=live))
 
 
 def _is_loop_container(node: TraceNode) -> bool:
@@ -705,15 +726,8 @@ def localized_summary_line(model: "TraceModel") -> str:
             parts.append(tokens)
         return " · ".join(parts)
     phase = localized_phase(model._current_tool().stage, model.current_phase) if model._current_tool() else _t("trace.running")
-    timeline = build_trace_timeline(model)
-    current_step = 0
-    for entry in reversed(timeline):
-        if entry.step > 0:
-            current_step = entry.step
-            break
-    current = _t("trace.step", n=current_step) if current_step else _t("trace.running")
     agents = model.active_agents
-    parts = [current, phase]
+    parts = [p for p in (steps, phase) if p]
     if agents:
         parts.append(", ".join(agents))
     return " · ".join(p for p in parts if p) + f" · {elapsed:.1f}s"
