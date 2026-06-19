@@ -6,6 +6,38 @@ All notable changes to DBAide are documented here. The format is loosely based o
 
 ## [Unreleased]
 
+## [0.7.0] — 2026-06-12
+
+### Added
+
+- **Unified answer documents** — Markdown + inline ECharts compose into a single
+  WebEngine page (`compose` / `answer_page` / `AnswerDocumentBlock`); session
+  restore keeps chart rendering.
+- **HTML export** — merged copy/save into an export dialog with configurable
+  padding, live preview, and shared render path with the in-app answer view.
+- **Ask agenda / task list** — in-run task list tools and trace integration for
+  multi-step planning (`agenda` module replaces deprecated intent routing).
+- **Step budget defaults** — default agent max steps raised to 128 (cap 256);
+  timeline step count and loop budget share one source of truth.
+- **Settings** — `session_uncompressed_turns` controls how many recent turns stay
+  full-fidelity in session memory.
+
+### Changed
+
+- **Trace UI** — incremental timeline rendering (structure fingerprint) reduces
+  flicker during live runs and session bulk load.
+- **Agent loop** — removed schema prefetching from decision prompts; simplified
+  loop state.
+- **UI polish** — standardized 28px control heights, sidebar/session list loading
+  states, theme token cleanup, localized turn summary lines.
+
+### Fixed
+
+- **Session restore charts** — chart answers no longer downgrade to plain-text
+  fast path during bulk load.
+- **Chart styling** — transparent ECharts canvas background blends with the chat
+  surface.
+
 ## [0.6.0] — 2026-06-19
 
 ### Added
@@ -661,7 +693,9 @@ and a PyQt6 desktop app, sharing one Python core.
   drag-to-Applications)**, **Windows (`.msi` wizard)**, and **Linux (`.tar.gz`)** —
   pushing a `v*` tag cuts a GitHub Release automatically.
 
-[Unreleased]: https://github.com/W1412X/dbaide/compare/v0.3.0...HEAD
+[Unreleased]: https://github.com/W1412X/dbaide/compare/v0.7.0...HEAD
+[0.7.0]: https://github.com/W1412X/dbaide/compare/v0.6.0...v0.7.0
+[0.6.0]: https://github.com/W1412X/dbaide/compare/v0.3.0...v0.6.0
 [0.3.0]: https://github.com/W1412X/dbaide/compare/v0.2.18...v0.3.0
 [0.2.18]: https://github.com/W1412X/dbaide/compare/v0.2.17...v0.2.18
 [0.2.5]: https://github.com/W1412X/dbaide/compare/v0.2.4...v0.2.5
