@@ -437,6 +437,7 @@ _STRINGS: dict[str, dict[str, str]] = {
     "res.max_batch_tools": {"en": "Max parallel tool calls", "zh": "最大并行工具调用数"},
 
     "res.latest_result_limit": {"en": "Latest result limit (chars, 0=unlimited)", "zh": "最新结果上限（字符，0=不限）"},
+    "res.session_uncompressed_turns": {"en": "Recent turns kept uncompressed", "zh": "保持未压缩的最近轮次"},
     "res.compress_threshold": {"en": "Compress threshold (%)", "zh": "压缩触发阈值（%）"},
     "res.max_concurrent_runs": {"en": "Max concurrent runs", "zh": "最大并发运行数"},
     "res.per_run_note": {

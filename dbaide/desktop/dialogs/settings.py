@@ -188,6 +188,7 @@ class SettingsDialog(ChromeDialog):
             ("prior_turns_window", 0, 20),
             ("max_batch_tools", 1, 16),
             ("latest_result_limit", 0, 20000),
+            ("session_uncompressed_turns", 0, 10),
             ("compress_threshold", 50, 95),
         )),
         ("res.group.build", (

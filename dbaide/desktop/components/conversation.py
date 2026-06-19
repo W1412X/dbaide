@@ -30,7 +30,12 @@ from dbaide.desktop.components.icon_button import IconToolButton
 from PyQt6.QtCore import QSize
 
 from dbaide.agent.progress_events import conversation_trace_step, phase_for
-from dbaide.agent.trace_model import count_timeline_steps, step_count_from_events, build_trace_model_from_events
+from dbaide.agent.trace_model import (
+    build_trace_model_from_events,
+    count_timeline_steps,
+    localized_summary_line,
+    step_count_from_events,
+)
 from dbaide.desktop.components.base import clear_layout_widgets, compact_button, discard_widget
 from dbaide.desktop.conversation_state import ThinkingUiState, TurnTraceState
 from dbaide.desktop.components.icons import svg_icon
@@ -1286,22 +1291,12 @@ class TurnBlock(QFrame):
         self._render_stats(model)
 
     def _render_stats(self, model: "TraceModel") -> None:
-        from dbaide.agent.trace_model import _format_tokens
-        from dbaide.i18n import t
+        summary = localized_summary_line(model)
         steps = count_timeline_steps(model)
-        if steps <= 0 and model.overall in ("idle",):
+        if steps <= 0 and model.overall in ("idle",) and not summary:
             return
-        elapsed = model.elapsed_ms() / 1000.0
-        parts: list[str] = []
-        if steps > 0:
-            parts.append(t("trace.steps", n=steps))
-        if elapsed >= 0.1:
-            parts.append(f"{elapsed:.1f}s")
-        tokens = _format_tokens(model.prompt_tokens)
-        if tokens:
-            parts.append(tokens)
-        if parts:
-            self._stats_label.setText(" · ".join(parts))
+        if summary:
+            self._stats_label.setText(summary)
             self._footer.show()
 
     def _sync_agenda_from_events(self, events: list[dict[str, Any]]) -> None:
@@ -1552,7 +1547,7 @@ class ConversationView(QScrollArea):
         if placeholder:
             turn.status.start()
             self._seed_live_trace_boot(turn)
-        self._scroll_bottom()
+        self._scroll_bottom(force=True)
 
     def append_trace(self, message: str, *, kind: str = "", detail: str = "") -> None:
         if self._current_turn is None:
@@ -1843,9 +1838,11 @@ class ConversationView(QScrollArea):
         self._layout.addWidget(turn)
         self._sync_viewport_width()
 
-    def _scroll_bottom(self) -> None:
+    def _scroll_bottom(self, *, force: bool = False) -> None:
         """Keep the latest turn in view (coalesced — avoids layout thrash)."""
         if self._bulk_load_depth > 0:
+            return
+        if not force and not self._follow_bottom:
             return
         self._schedule_scroll_bottom()
 

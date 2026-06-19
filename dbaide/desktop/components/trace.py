@@ -1419,27 +1419,11 @@ class TraceDetailPanel(QFrame):
             return
         self._closing = True
         self._stop_animation()
-        w = self.width()
-        h = self.height()
-        x = self.x()
-        anim = QPropertyAnimation(self, b"geometry", self)
-        anim.setDuration(180)
-        anim.setStartValue(QRect(x, 0, w, h))
-        anim.setEndValue(QRect(self._host.width(), 0, w, h))
-        anim.setEasingCurve(QEasingCurve.Type.InCubic)
-
-        def _on_closed() -> None:
-            try:
-                if sip.isdeleted(self):
-                    return
-            except RuntimeError:
-                return
-            self._closing = False
-            self.hide()
-
-        anim.finished.connect(_on_closed)
-        anim.start()
-        self._anim = anim
+        # This legacy detail slide-over is not the primary trace surface anymore.
+        # Closing it synchronously avoids Qt lifetime races between the animation
+        # callback and host/widget teardown during markdown/web render tests.
+        self.hide()
+        self._closing = False
 
     def _panel_width(self) -> int:
         return min(440, max(320, int(self._host.width() * 0.36)))

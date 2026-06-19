@@ -355,16 +355,22 @@ def test_settings_resources_page_roundtrip(qapp):
     dlg = SettingsDialog(
         connections=[],
         models=[],
-        resource_defaults={"values": {"max_inflight_queries": 5}, "presets": {"production": {"max_inflight_queries": 2}}},
+        resource_defaults={
+            "values": {"max_inflight_queries": 5},
+            "presets": {"production": {"max_inflight_queries": 2, "session_uncompressed_turns": 2}},
+        },
         initial_page="resources",
     )
     dlg.resource_saved.connect(lambda payload: captured.update(payload))
     # Prefilled value shows.
     assert dlg._resource_spins["max_inflight_queries"].value() == 5
+    assert "session_uncompressed_turns" in dlg._resource_spins
     dlg._resource_spins["max_row_limit"].setValue(321)
+    dlg._resource_spins["session_uncompressed_turns"].setValue(4)
     dlg._save_resources()
     assert captured["values"]["max_inflight_queries"] == 5
     assert captured["values"]["max_row_limit"] == 321
+    assert captured["values"]["session_uncompressed_turns"] == 4
 
 
 def test_settings_new_connection_and_model_are_explicit_drafts(qapp):
@@ -1113,6 +1119,51 @@ def test_conversation_tail_follow_pauses_on_scroll_up(qapp):
     v._follow_bottom = False
     v._flush_answer_chunk()
     assert v._live_answer_text == "partial"
+
+
+def test_trace_events_do_not_scroll_when_user_is_reading_above(qapp, monkeypatch):
+    from dbaide.desktop.components.conversation import ConversationView
+
+    v = ConversationView()
+    calls: list[str] = []
+    monkeypatch.setattr(v, "_schedule_scroll_bottom", lambda: calls.append("scroll"))
+    v.begin_turn("q")
+    calls.clear()
+
+    v._follow_bottom = False
+    v.append_trace_event({"stage": "execute_sql", "title": "Calling", "status": "running", "kind": "tool"})
+    assert calls == []
+
+    v._follow_bottom = True
+    v.append_trace_event({"stage": "execute_sql", "title": "Done", "status": "completed", "kind": "tool"})
+    assert calls == ["scroll"]
+
+
+def test_turn_footer_summary_matches_trace_drawer_summary(qapp):
+    from dbaide.desktop.components.conversation import ConversationView
+
+    conv = ConversationView()
+    conv.begin_turn("count paid orders")
+    conv.complete_turn(
+        answer="3 paid orders.",
+        trace_events=[{
+            "stage": "execute_sql",
+            "title": "execute_sql done",
+            "status": "completed",
+            "kind": "tool",
+            "step": 1,
+            "sql": "SELECT COUNT(*) FROM orders",
+            "duration_ms": 4,
+            "prompt_tokens": 1200,
+        }],
+        ok=True,
+    )
+    block = conv._layout.itemAt(conv._layout.count() - 1).widget()
+    block._toggle_trace()
+    qapp.processEvents()
+    drawer = getattr(conv.window(), "_trace_drawer_panel", None)
+    assert drawer is not None
+    assert block._stats_label.text() == drawer._summary.text()
 
 
 def test_finish_turn_error_clears_live_stream_state(qapp):
