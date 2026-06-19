@@ -28,7 +28,7 @@ from dbaide.core.cancellation import CancelledError
 from dbaide.core.events import TraceEvent
 from dbaide.llm import LLMMessage, ToolsUnsupported as _ToolsUnsupported
 from dbaide.models import AssistantResponse
-from dbaide.tools.registry import ToolContext, ToolResult
+from dbaide.tools.registry import ToolContext
 
 if TYPE_CHECKING:
     from dbaide.agent.orchestrator import AskOrchestrator
@@ -177,53 +177,6 @@ class AskAgentLoop:
             return None
         return None if limit <= 0 else limit
 
-    def _speculative_prefetch(
-        self, orch: AskOrchestrator, question: str, database: str,
-    ) -> ToolResult | None:
-        if not question.strip():
-            return None
-        scope = orch.schema_scope if orch.schema_scope else None
-        tool_ctx = ToolContext(
-            workflow_id=self._trace_parent or "prefetch",
-            connection=orch.session.connection,
-            adapter=orch.adapter,
-            asset_store=orch.asset_store,
-            session=orch.session,
-            trace_sink=self._trace_sink,
-            cancel_check=orch.cancel_check,
-        )
-        args: dict[str, Any] = {"request": question, "database": database}
-        if scope:
-            args["scope"] = scope
-        try:
-            return self.registry.invoke("retrieve_schema_context", args, tool_ctx)
-        except Exception:
-            return None
-
-    def _inject_prefetch(
-        self, orch: AskOrchestrator, messages: list[LLMMessage], result: ToolResult,
-    ) -> None:
-        """Append a successful prefetch result into the conversation."""
-        formatted = _format_tool_result(
-            "retrieve_schema_context",
-            result,
-            char_limit=self._tool_result_char_limit(orch),
-        )
-        messages.append(LLMMessage("user", f"[Tool result: retrieve_schema_context]\n{formatted}"))
-        orch.run_state.schema_prefetched = True
-        prefetch_node = f"{self._trace_parent}:prefetch" if self._trace_parent else "prefetch"
-        summary = brief_tool_summary("retrieve_schema_context", result)
-        ev = progress_event(
-            stage="retrieve_schema_context",
-            title="Schema prefetch",
-            status="completed",
-            kind="tool",
-            detail=(summary or "")[:200],
-        )
-        ev["node_id"] = prefetch_node
-        ev["parent_id"] = self._agent_loop_node_id or self._trace_parent
-        self.progress(ev)
-
     def run(
         self,
         question: str,
@@ -351,9 +304,6 @@ class AskAgentLoop:
                 user_msg = self.prompts.session_turn_prompt(state, self._turn_number)
                 messages.append(LLMMessage("user",
                     f"[turn:{self._turn_number}:start]\n{user_msg}"))
-                prefetch_result = self._speculative_prefetch(orch, question, database)
-                if prefetch_result and prefetch_result.ok:
-                    self._inject_prefetch(orch, messages, prefetch_result)
                 self._maybe_compress_turns(orch, messages)
             elif session_messages is not None:
                 # Bootstrap: first turn in a session — add turn markers so the
@@ -363,17 +313,11 @@ class AskAgentLoop:
                 user = self.prompts.initial_user_prompt(state)
                 messages = [LLMMessage("system", system),
                             LLMMessage("user", f"[turn:1:start]\n{user}")]
-                prefetch_result = self._speculative_prefetch(orch, question, database)
-                if prefetch_result and prefetch_result.ok:
-                    self._inject_prefetch(orch, messages, prefetch_result)
             else:
                 # Per-turn isolation (no session)
                 system = self.prompts.system_prompt(state, tool_lines, execute_note)
                 user = self.prompts.initial_user_prompt(state)
                 messages = [LLMMessage("system", system), LLMMessage("user", user)]
-                prefetch_result = self._speculative_prefetch(orch, question, database)
-                if prefetch_result and prefetch_result.ok:
-                    self._inject_prefetch(orch, messages, prefetch_result)
 
             self.progress(
                 progress_event(

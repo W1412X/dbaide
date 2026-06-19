@@ -49,12 +49,6 @@ class DecisionPromptBuilder:
 
     def system_prompt(self, state: Any, tool_lines: str, execute_note: str) -> str:
         lang_directive = answer_language_directive(state.answer_language)
-        prefetched = getattr(self.orchestrator.run_state, "schema_prefetched", False)
-        prefetch_hint = (
-            "Schema evidence has been pre-fetched and is visible in the conversation. "
-            "Use it directly — do NOT call retrieve_schema_context or discover_schema again "
-            "unless the evidence is insufficient.\n"
-        ) if prefetched else ""
         return (
             "<role>\n"
             "You are DBAide, a database assistant operating in a tool loop.\n"
@@ -85,7 +79,6 @@ class DecisionPromptBuilder:
             "User-attached schema: when the user prompt contains a 'User-attached schema' line, "
             "start by calling retrieve_schema_context on them directly — do NOT run a broad "
             "discover_schema first. Broaden only if pinned tables are insufficient.\n"
-            f"{prefetch_hint}"
             "</schema-discovery>\n\n"
 
             "<joins>\n"

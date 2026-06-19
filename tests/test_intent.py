@@ -135,7 +135,7 @@ def test_run_multi_aggregates_and_nests_trace(tmp_path):
     assert model.find("intent:i1") is not None and model.find("intent:i2") is not None
     # the data-query intent's execute step nests under that intent's main loop
     assert model.find("intent:i2:loop") is not None and model.find("intent:i2:loop").parent_id == "intent:i2"
-    # Find the execute_sql step under intent:i2 (step number varies with prefetch).
+    # Find the execute_sql step under intent:i2 (step number can vary with tool path).
     exec_node = model.find("intent:i2:step:4") or model.find("intent:i2:step:3")
     assert exec_node is not None and exec_node.parent_id == "intent:i2:loop"
 
