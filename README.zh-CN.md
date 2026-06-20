@@ -113,15 +113,26 @@ sudo apt install -y libxcb-cursor0 libxkbcommon-x11-0 libgl1 libegl1
 支持 **SQLite、MySQL/MariaDB、PostgreSQL**，界面与回答支持 **English / 简体中文**，
 **深色 / 浅色**主题。
 
+## 延伸阅读
+
+- [截图导览（中文）](docs/SHOWCASE.zh-CN.md)
+- [截图导览（English）](docs/SHOWCASE.md)
+- [架构设计](docs/DESIGN.md)
+- [宣传博文](docs/BLOG.zh-CN.md)
+
 ## 截图
 
-| 对话 — 回答 · 轨迹 · Schema | SQL 工作台 |
+| 图表渲染 | SQL 工作台 |
 | --- | --- |
-| <img src="docs/images/ask.png" width="420"> | <img src="docs/images/sql.png" width="420"> |
+| <img src="docs/images/promo/03-chart-answer-analysis.png" width="420"> | <img src="docs/images/promo/06-database-client-sql.png" width="420"> |
 
-| 连接 · 导入导出 | 资源与安全 |
+| Agent Trace | 澄清问题 |
 | --- | --- |
-| <img src="docs/images/settings-connections.png" width="420"> | <img src="docs/images/settings-resources.png" width="420"> |
+| <img src="docs/images/promo/17-agent-trace.png" width="420"> | <img src="docs/images/promo/05-clarification.png" width="420"> |
+
+| 资源与安全 | MCP 集成 |
+| --- | --- |
+| <img src="docs/images/promo/12-settings-resources.png" width="420"> | <img src="docs/images/promo/13-settings-integrations.png" width="420"> |
 
 ## 快速开始
 

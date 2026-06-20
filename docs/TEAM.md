@@ -1,5 +1,11 @@
 # DBAide — Team Operations Guide
 
+Companion docs:
+
+- [SHOWCASE.md](SHOWCASE.md)
+- [SHOWCASE.zh-CN.md](SHOWCASE.zh-CN.md)
+- [BLOG.zh-CN.md](BLOG.zh-CN.md)
+
 This guide covers day-to-day use, troubleshooting, and support workflows for small
 teams running DBAide locally (no package signing required).
 

@@ -1,11 +1,15 @@
 """Generate promotional screenshots for DBAide.
 
-The script starts the real desktop UI offscreen, seeds a complex ecommerce
+The script starts the real desktop UI, seeds a complex ecommerce
 SQLite database, builds assets, drives representative assistant/workbench states,
 and writes screenshots plus a copy deck to docs/images/promo/.
 
 Usage:
-    QT_QPA_PLATFORM=offscreen venv/bin/python tools/shoot_promo.py
+    ./venv/bin/python tools/shoot_promo.py
+
+The chart-answer scenarios are captured from the real Qt WebEngine answer view.
+If WebEngine is unavailable or the page does not render, the script fails instead
+of falling back to placeholder text or composited PNGs.
 """
 from __future__ import annotations
 
@@ -13,22 +17,37 @@ import os
 import random
 import shutil
 import sqlite3
+import subprocess
+import sys
 import tempfile
+import time
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
 
-os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+os.environ.setdefault("QTWEBENGINE_DISABLE_SANDBOX", "1")
+os.environ.setdefault(
+    "QTWEBENGINE_CHROMIUM_FLAGS",
+    "--no-sandbox --disable-dev-shm-usage --disable-gpu",
+)
 
-from PyQt6.QtCore import Qt
-from PyQt6.QtTest import QTest
+from dbaide.desktop.platform_ui import ensure_webengine_before_qapplication
+
+if not ensure_webengine_before_qapplication():
+    raise RuntimeError("PyQt6-WebEngine is required for promo screenshots.")
+
+from PyQt6.QtCore import QEventLoop, Qt
 from PyQt6.QtWidgets import QApplication
 
 from dbaide.assets import AssetBuilder, AssetStore
 from dbaide.adapters import build_adapter
 from dbaide.config import ConfigManager
 from dbaide.desktop.service import DesktopService
-from dbaide.desktop.theme import app_style
+from dbaide.desktop.dialogs.backup import BackupManager
+from dbaide.desktop.dialogs.build_assets import BuildAssetsDialog
+from dbaide.desktop.dialogs.connection import ConnectionDialog
+from dbaide.desktop.dialogs.settings import SettingsDialog
+from dbaide.desktop.theme import Theme, app_style
 from dbaide.desktop.views.main_window import MainWindow
 from dbaide.i18n import set_language
 from dbaide.joins import JoinCatalogStore
@@ -38,6 +57,57 @@ from dbaide.models import ConnectionConfig, ModelConfig
 ROOT = Path(__file__).resolve().parents[1]
 OUT = ROOT / "docs" / "images" / "promo"
 TMP = Path(tempfile.mkdtemp(prefix="dbaide-promo-"))
+
+DOC_SCENARIOS = [
+    "assets",
+    "thinking",
+    "trace",
+    "analysis",
+    "breakdown",
+    "clarify",
+    "sql",
+    "table",
+    "field",
+    "audit",
+    "settings-connections",
+    "settings-models",
+    "settings-resources",
+    "settings-integrations",
+    "backup",
+    "build-dialog",
+    "connection-dialog",
+]
+
+
+def _docs_python_executable() -> str:
+    venv_python = ROOT / "venv" / "bin" / "python"
+    if venv_python.exists():
+        return str(venv_python)
+    return sys.executable
+
+
+def _verify_webengine_runtime() -> None:
+    env = dict(os.environ)
+    result = subprocess.run(
+        [_docs_python_executable(), str(ROOT / "tools" / "probe_webengine_runtime.py")],
+        cwd=str(ROOT),
+        env=env,
+        capture_output=True,
+        text=True,
+    )
+    if result.returncode == 0:
+        env["DBAIDE_WEBENGINE_RUNTIME_VERIFIED"] = "1"
+        os.environ["DBAIDE_WEBENGINE_RUNTIME_VERIFIED"] = "1"
+        return
+    detail = ""
+    if os.environ.get("DBAIDE_DEBUG_WEBENGINE_PROBE") == "1":
+        raw = (result.stderr or result.stdout or "").strip()
+        if raw:
+            detail = f"\n{raw}"
+    raise SystemExit(
+        "Qt WebEngine runtime probe failed. Promo screenshots must be generated from a "
+        f"GUI-capable desktop session.{detail}"
+    )
 
 
 TABLES = [
@@ -391,9 +461,10 @@ def seed_ecommerce_db(path: Path) -> None:
 
 
 def _build_window(app: QApplication) -> tuple[MainWindow, DesktopService]:
-    db = TMP / "omnichannel_ecommerce.db"
+    case_dir = Path(tempfile.mkdtemp(prefix="case-", dir=TMP))
+    db = case_dir / "omnichannel_ecommerce.db"
     seed_ecommerce_db(db)
-    cfg = ConfigManager(path=TMP / "config.toml")
+    cfg = ConfigManager(path=case_dir / "config.toml")
     cfg.set_ui_language("zh")
     conn = ConnectionConfig(name="omni_shop", type="sqlite", path=str(db), load_profile="dev", session_timezone="+08:00")
     cfg.upsert_connection(conn, make_default=True)
@@ -407,12 +478,12 @@ def _build_window(app: QApplication) -> tuple[MainWindow, DesktopService]:
         ),
         make_default=True,
     )
-    store = AssetStore(TMP / "assets")
+    store = AssetStore(case_dir / "assets")
     AssetBuilder(
         connection=conn,
         adapter=build_adapter(conn),
         store=store,
-        join_catalog=JoinCatalogStore(base_dir=TMP / "joins"),
+        join_catalog=JoinCatalogStore(base_dir=case_dir / "joins"),
     ).build(profile_mode="none", sample=False)
     service = DesktopService(cfg, store)
     win = MainWindow(service)
@@ -428,8 +499,192 @@ def _build_window(app: QApplication) -> tuple[MainWindow, DesktopService]:
 
 def _process(app: QApplication, cycles: int = 3) -> None:
     for _ in range(cycles):
-        app.processEvents()
-        QTest.qWait(30)
+        app.processEvents(QEventLoop.ProcessEventsFlag.AllEvents, 5)
+
+
+def _wait_until(app: QApplication, predicate, *, timeout_s: float = 2.5) -> bool:
+    deadline = time.monotonic() + max(0.1, timeout_s)
+    while time.monotonic() < deadline:
+        _process(app, 4)
+        if predicate():
+            return True
+        time.sleep(0.03)
+    _process(app, 4)
+    return bool(predicate())
+
+
+def _run_page_js_bool(page, app: QApplication, script: str, *, timeout_s: float = 1.5) -> bool:
+    state = {"value": False, "done": False}
+
+    def _apply(raw: object) -> None:
+        state["value"] = bool(raw)
+        state["done"] = True
+
+    page.runJavaScript(script, _apply)
+    deadline = time.monotonic() + max(0.05, timeout_s)
+    while time.monotonic() < deadline:
+        app.processEvents(QEventLoop.ProcessEventsFlag.AllEvents, 10)
+        if state["done"]:
+            return state["value"]
+        time.sleep(0.02)
+    return state["value"]
+
+
+_CHART_READY_JS = """
+(function(){
+  if (!window.echarts) return false;
+  const blocks = document.querySelectorAll('.chart-block').length;
+  if (!blocks) return false;
+  const canvases = document.querySelectorAll('.chart-canvas canvas').length;
+  return canvases >= blocks;
+})()
+"""
+
+_MARKDOWN_READY_JS = """
+(function(){
+  var root = document.querySelector('.answer-document') || document.body;
+  if (!root) return false;
+  var text = (root.innerText || '').replace(/\\s+/g, ' ').trim();
+  return text.length > 40;
+})()
+"""
+
+
+def _find_latest_turn(view) -> object | None:
+    for i in range(view._layout.count() - 1, -1, -1):
+        item = view._layout.itemAt(i)
+        widget = item.widget() if item is not None else None
+        if widget is not None and hasattr(widget, "_toggle_trace"):
+            return widget
+    return None
+
+
+def _wait_for_trace_drawer(app: QApplication, win: MainWindow) -> bool:
+    def _ready() -> bool:
+        panel = getattr(win, "_trace_drawer_panel", None)
+        return bool(panel is not None and panel.isVisible() and panel.width() > 120)
+
+    return _wait_until(app, _ready, timeout_s=2.0)
+
+
+def _answer_document_host(block) -> object | None:
+    return getattr(block, "_rendered", None) or getattr(block, "_pending_rendered", None)
+
+
+def _is_webengine_view(view) -> bool:
+    if view is None:
+        return False
+    try:
+        from PyQt6.QtWebEngineWidgets import QWebEngineView
+    except Exception:
+        return False
+    return isinstance(view, QWebEngineView)
+
+
+def _has_chart_webengine(block) -> bool:
+    rendered = _answer_document_host(block)
+    if rendered is None:
+        return False
+    view = getattr(rendered, "_view", None)
+    return _is_webengine_view(view)
+
+
+def _locate_answer_block(view) -> object | None:
+    turn = _find_latest_turn(view)
+    if turn is None:
+        return None
+    for i in range(turn._content.count() - 1, -1, -1):
+        item = turn._content.itemAt(i)
+        widget = item.widget() if item is not None else None
+        if widget is not None and widget.__class__.__name__ == "AnswerDocumentBlock":
+            return widget
+    return None
+
+
+def _ensure_chat_visible(win: MainWindow) -> None:
+    win.switch_tab("Chat")
+
+
+def _answer_page(app: QApplication, win: MainWindow, key: str):
+    view = win.ask_tab.view(key)
+    if view is None:
+        raise RuntimeError(f"no conversation view for {key}")
+
+    def _locate_block():
+        return _locate_answer_block(view)
+
+    if not _wait_until(
+        app,
+        lambda: (block := _locate_block()) is not None and _has_chart_webengine(block),
+        timeout_s=8.0,
+    ):
+        block = _locate_block()
+        if block is None:
+            raise RuntimeError("answer document block not ready for screenshot")
+        raise RuntimeError(
+            "Answer screenshot requires PyQt6-WebEngine. "
+            "Current environment fell back to plaintext answer rendering."
+        )
+
+    block = _locate_block()
+    if block is None:
+        raise RuntimeError("answer document block missing")
+    if hasattr(block, "ensure_full_render"):
+        block.ensure_full_render()
+    _process(app, 24)
+
+    if not _wait_until(
+        app,
+        lambda: (block := _locate_block()) is not None and getattr(block, "_rendered", None) is not None,
+        timeout_s=8.0,
+    ):
+        raise RuntimeError("answer document WebEngine view did not commit before capture")
+
+    block = _locate_block()
+    rendered = _answer_document_host(block)
+    page = getattr(getattr(rendered, "_view", None), "page", lambda: None)()
+    if page is None:
+        raise RuntimeError("answer page missing")
+    return view, page
+
+
+def _wait_for_answer_document(
+    app: QApplication,
+    win: MainWindow,
+    key: str,
+    *,
+    require_charts: bool = False,
+    chart_count: int = 0,
+) -> None:
+    view, page = _answer_page(app, win, key)
+
+    if not _wait_until(
+        app,
+        lambda: _run_page_js_bool(page, app, _MARKDOWN_READY_JS, timeout_s=1.5),
+        timeout_s=10.0,
+    ):
+        raise RuntimeError("answer markdown did not render before capture")
+
+    if not require_charts:
+        return
+
+    chart_timeout = max(18.0, 6.0 + chart_count * 2.5)
+
+    def _probe() -> bool:
+        return _run_page_js_bool(page, app, _CHART_READY_JS, timeout_s=2.0)
+
+    if not _wait_until(app, _probe, timeout_s=chart_timeout):
+        raise RuntimeError("chart canvases did not render before capture")
+
+
+def _wait_for_answer_charts(app: QApplication, win: MainWindow, key: str, *, chart_count: int = 0) -> None:
+    _wait_for_answer_document(
+        app,
+        win,
+        key,
+        require_charts=True,
+        chart_count=chart_count,
+    )
 
 
 def _grab(app: QApplication, widget, name: str) -> Path:
@@ -500,12 +755,14 @@ def _expand_latest_trace(app: QApplication, win: MainWindow, key: str) -> None:
     view = win.ask_tab.view(key)
     if view is None:
         return
-    for i in range(view._layout.count() - 1, -1, -1):
-        item = view._layout.itemAt(i)
-        w = item.widget() if item is not None else None
-        if w is not None and hasattr(w, "_toggle_trace"):
-            w._toggle_trace()
-            break
+    turn = _find_latest_turn(view)
+    if turn is None:
+        return
+    turn._toggle_trace()
+    if _wait_for_trace_drawer(app, win):
+        panel = getattr(win, "_trace_drawer_panel", None)
+        if panel is not None:
+            panel.relayout(animate=False, raise_panel=True)
     _process(app, 4)
 
 
@@ -528,7 +785,7 @@ def show_assets_initializing(app: QApplication, win: MainWindow) -> Path:
 
 
 def show_runtime_thinking(app: QApplication, win: MainWindow) -> Path:
-    win.switch_tab("Chat")
+    _ensure_chat_visible(win)
     win.sidebar.finish_build_progress("构建完成")
     win.ask_tab.set_has_connection(True)
     key = "promo-thinking"
@@ -554,39 +811,70 @@ def show_runtime_thinking(app: QApplication, win: MainWindow) -> Path:
         "workflow_id": "wf_promo_thinking",
     })
     _expand_latest_trace(app, win, key)
+    _wait_for_answer_document(app, win, key)
     _process(app, 8)
-    return _grab(app, win, "02-runtime-thinking")
+    return _grab(app, win.ask_tab, "02-runtime-thinking")
 
 
-def show_chart_answer(app: QApplication, win: MainWindow) -> tuple[Path, Path]:
-    key = "promo-answer"
+def show_trace_timeline(app: QApplication, win: MainWindow) -> Path:
+    _ensure_chat_visible(win)
+    win.ask_tab.set_has_connection(True)
+    key = "promo-trace"
     win._active_key = key
     win.ask_tab.set_active(key)
     win.ask_tab.begin_turn(
         key,
-        "从 3-5 月看，哪些因素导致净收入下滑？请给出 SQL 证据、趋势图、渠道拆解和可执行建议。",
+        "开发排障：orders、payments、refunds、ledger_entries 四张表做一致性校验，给出异常类型和修复优先级。",
         connection="omni_shop",
         database="main",
         attachments=[
-            {"kind": "database", "name": "main", "path": "omni_shop.main"},
             {"kind": "table", "name": "orders", "path": "omni_shop.main.orders"},
             {"kind": "table", "name": "payments", "path": "omni_shop.main.payments"},
             {"kind": "table", "name": "refunds", "path": "omni_shop.main.refunds"},
+            {"kind": "table", "name": "ledger_entries", "path": "omni_shop.main.ledger_entries"},
         ],
     )
+    win.ask_tab.append_result(key, {
+        "status": "completed",
+        "answer_markdown": "已完成订单级聚合、支付/退款/总账差异比对，并按 missing ledger、duplicate ledger、cancelled paid、refund without item 四类分桶。",
+        "trace": _developer_consistency_trace(),
+        "workflow_id": "wf_promo_trace",
+    })
+    _expand_latest_trace(app, win, key)
+    _process(app, 12)
+    return _grab(app, win.ask_tab, "17-agent-trace")
+
+
+def _promo_chart_answer_payload() -> dict[str, Any]:
     answer = (
-        "结论：5 月净收入环比下降主要不是流量问题，而是 **直播渠道退款率上升** 与 **华南前置仓缺货导致履约延迟** 共同造成。\n\n"
-        "- 3 月到 5 月 GMV 仍增长 7.8%，但退款金额增长 34.6%，净收入被吃掉。\n"
-        "- 直播渠道贡献了 41% 的新增退款，退款原因集中在“未按时送达”和“质量问题”。\n"
-        "- 缺货风险最高的 SKU 与退款订单中的商品高度重合，说明库存与履约是可操作抓手。\n\n"
+        "## 结论摘要\n\n"
+        "5 月净收入环比下降 **10.5%**（177.5 万 → 158.8 万）。主因不是流量萎缩，而是 **直播渠道退款率抬升** "
+        "与 **华南前置仓缺货导致履约延迟** 叠加。\n\n"
+        "**关键发现**\n"
+        "- 3–5 月 GMV 仍增长 7.8%，但退款金额增长 34.6%，净收入被持续侵蚀。\n"
+        "- 直播渠道贡献了 41% 的新增退款，「未按时送达」「质量问题」占比最高。\n"
+        "- 缺货 SKU 与退款商品重合度高，库存与履约是最可操作的抓手。\n\n"
         "{{chart:1}}\n\n"
-        "渠道层面看，搜索广告净收入稳定，直播净收入从 4 月开始下滑；同时内容种草的 CPA 上升但转化没有同步增长。\n\n"
+        "## 趋势与双轴拆解\n\n"
+        "左轴观察 GMV 与净收入走势，右轴同步查看退款率，便于识别「量增利减」区间。\n\n"
         "{{chart:2}}\n\n"
-        "建议先做三件事：\n"
-        "1. 对直播渠道的 TOP 20 SKU 设定安全库存，不足时自动降权推荐。\n"
-        "2. 将“未按时送达”退款订单回溯到仓库和承运商，优先处理华南前置仓。\n"
-        "3. 将退款率作为投放预算闸门，避免只按 GMV 加预算。\n\n"
-        "下面 SQL 展示了核心口径，按订单先聚合再 join，避免 item 行放大收入。"
+        "## 渠道结构\n\n"
+        "搜索广告净收入稳定；直播净收入 4 月起持续下滑。内容种草 CPA 上升而转化未同步改善。\n\n"
+        "{{chart:3}}\n\n"
+        "{{chart:4}}\n\n"
+        "## 退款、履约与转化\n\n"
+        "退款原因与履约指标共同指向「直播爆单 + 仓配承压」的组合风险。\n\n"
+        "{{chart:5}}\n\n"
+        "{{chart:6}}\n\n"
+        "{{chart:7}}\n\n"
+        "## 品类热力与库存风险\n\n"
+        "{{chart:8}}\n\n"
+        "{{chart:9}}\n\n"
+        "## 行动建议\n\n"
+        "1. 对直播 TOP 20 SKU 设定安全库存，不足时自动降权推荐。\n"
+        "2. 将「未按时送达」退款订单回溯到仓库与承运商，优先处理华南前置仓。\n"
+        "3. 将退款率纳入投放预算闸门，避免只按 GMV 加预算。\n\n"
+        "核心 SQL 已按 **订单粒度先聚合再 join**，避免 order_items 行级放大收入口径。"
     )
     charts = [
         {
@@ -600,7 +888,31 @@ def show_chart_answer(app: QApplication, win: MainWindow) -> tuple[Path, Path]:
             "x_label": "月份", "y_label": "指标", "row_count": 3,
         },
         {
-            "chart_id": "chart:2", "chart_type": "bar", "title": "5 月渠道净收入与退款率",
+            "chart_id": "chart:2", "chart_type": "combo", "title": "净收入与退款率（双轴）",
+            "categories": ["2026-03", "2026-04", "2026-05"],
+            "series": [
+                {"name": "净收入(万元)", "values": [169.2, 177.5, 158.8], "type": "bar", "axis": "left"},
+                {"name": "退款率(%)", "values": [5.8, 8.4, 12.7], "type": "line", "axis": "right"},
+            ],
+            "axes": {
+                "left": {"label": "净收入", "format": "number"},
+                "right": {"label": "退款率", "format": "percent"},
+            },
+            "row_count": 3,
+        },
+        {
+            "chart_id": "chart:3", "chart_type": "stacked_area", "title": "渠道净收入构成（堆叠）",
+            "categories": ["2026-03", "2026-04", "2026-05"],
+            "series": [
+                {"name": "搜索广告", "values": [38.2, 41.0, 42.5], "type": "area"},
+                {"name": "直播", "values": [36.8, 34.5, 31.2], "type": "area"},
+                {"name": "内容种草", "values": [24.1, 25.6, 26.8], "type": "area"},
+                {"name": "自然流量", "values": [22.4, 23.0, 24.1], "type": "area"},
+            ],
+            "row_count": 3,
+        },
+        {
+            "chart_id": "chart:4", "chart_type": "bar", "title": "5 月渠道净收入与退款率",
             "categories": ["搜索广告", "直播", "内容种草", "自然流量", "私域", "联盟"],
             "series": [
                 {"name": "净收入(万元)", "values": [42.5, 31.2, 26.8, 24.1, 19.7, 14.5]},
@@ -609,7 +921,38 @@ def show_chart_answer(app: QApplication, win: MainWindow) -> tuple[Path, Path]:
             "x_label": "渠道", "y_label": "值", "row_count": 6,
         },
         {
-            "chart_id": "chart:3", "chart_type": "horizontal_bar", "title": "库存风险 SKU",
+            "chart_id": "chart:5", "chart_type": "donut", "title": "5 月退款原因构成",
+            "categories": ["未按时送达", "质量问题", "尺码不合适", "七天无理由", "其他"],
+            "series": [{"name": "退款笔数", "values": [142, 98, 76, 54, 31]}],
+            "row_count": 5,
+        },
+        {
+            "chart_id": "chart:6", "chart_type": "funnel", "title": "直播渠道转化漏斗",
+            "categories": ["曝光", "点击", "加购", "下单", "支付成功"],
+            "series": [{"name": "用户数", "values": [82000, 24600, 9800, 4200, 3610]}],
+            "options": {"sort_order": "descending"},
+            "row_count": 5,
+        },
+        {
+            "chart_id": "chart:7", "chart_type": "gauge", "title": "5 月准时履约率",
+            "options": {"gauge_min": 0, "gauge_max": 100, "gauge_target": 95},
+            "data": {"value": 87.6, "name": "准时履约率(%)"},
+        },
+        {
+            "chart_id": "chart:8", "chart_type": "heatmap", "title": "品类 × 渠道退款强度",
+            "data": {
+                "x_categories": ["搜索广告", "直播", "内容种草", "自然流量"],
+                "y_categories": ["护肤", "智能配件", "厨房", "露营"],
+                "points": [
+                    [0, 0, 6.2], [1, 0, 18.4], [2, 0, 12.1], [3, 0, 7.0],
+                    [0, 1, 5.8], [1, 1, 16.2], [2, 1, 11.4], [3, 1, 6.5],
+                    [0, 2, 4.1], [1, 2, 9.8], [2, 2, 8.2], [3, 2, 5.3],
+                    [0, 3, 3.6], [1, 3, 7.4], [2, 3, 6.1], [3, 3, 4.8],
+                ],
+            },
+        },
+        {
+            "chart_id": "chart:9", "chart_type": "horizontal_bar", "title": "库存风险 SKU（缺口件数）",
             "categories": ["SKU-00017", "SKU-00042", "SKU-00009", "SKU-00058", "SKU-00031"],
             "series": [{"name": "缺口件数", "values": [420, 360, 310, 260, 220]}],
             "x_label": "缺口", "y_label": "SKU", "row_count": 5,
@@ -628,21 +971,50 @@ def show_chart_answer(app: QApplication, win: MainWindow) -> tuple[Path, Path]:
         "FROM paid LEFT JOIN refund ON refund.order_id = paid.id\n"
         "GROUP BY month, channel;"
     )
-    win.ask_tab.append_result(key, {
-        "status": "completed",
+    return {
+        "question": "从 3–5 月看，哪些因素导致净收入下滑？请给出 SQL 证据、趋势图、渠道拆解和可执行建议。",
+        "attachments": [
+            {"kind": "database", "name": "main", "path": "omni_shop.main"},
+            {"kind": "table", "name": "orders", "path": "omni_shop.main.orders"},
+            {"kind": "table", "name": "payments", "path": "omni_shop.main.payments"},
+            {"kind": "table", "name": "refunds", "path": "omni_shop.main.refunds"},
+        ],
         "answer_markdown": answer,
         "charts": charts,
         "selected_sql": sql,
+    }
+
+
+def show_chart_answer(app: QApplication, win: MainWindow) -> tuple[Path, Path]:
+    _ensure_chat_visible(win)
+    key = "promo-answer"
+    win._active_key = key
+    win.ask_tab.set_active(key)
+    payload = _promo_chart_answer_payload()
+    win.ask_tab.begin_turn(
+        key,
+        str(payload["question"]),
+        connection="omni_shop",
+        database="main",
+        attachments=payload["attachments"],
+    )
+    win.ask_tab.append_result(key, {
+        "status": "completed",
+        "answer_markdown": payload["answer_markdown"],
+        "charts": payload["charts"],
+        "selected_sql": payload["selected_sql"],
         "trace": _trace_events(final=True),
         "workflow_id": "wf_promo_root_cause",
     })
     view = win.ask_tab.view(key)
+    chart_count = len(payload["charts"])
+    _wait_for_answer_charts(app, win, key, chart_count=chart_count)
     if view is not None:
         first = _grab_scrolled(app, view, win.ask_tab, "03-chart-answer-analysis", 0.0)
     else:
         first = _grab(app, win.ask_tab, "03-chart-answer-analysis")
     if view is not None:
-        second = _grab_scrolled(app, view, win.ask_tab, "04-chart-answer-breakdown", 0.52)
+        second = _grab_scrolled(app, view, win.ask_tab, "04-chart-answer-breakdown", 0.44)
     else:
         second = _grab(app, win.ask_tab, "04-chart-answer-breakdown")
     return first, second
@@ -673,7 +1045,7 @@ def _developer_field_trace() -> list[dict[str, Any]]:
 
 
 def show_developer_field_exploration(app: QApplication, win: MainWindow) -> Path:
-    win.switch_tab("Chat")
+    _ensure_chat_visible(win)
     key = "promo-dev-field"
     win._active_key = key
     win.ask_tab.set_active(key)
@@ -697,13 +1069,16 @@ def show_developer_field_exploration(app: QApplication, win: MainWindow) -> Path
         "ORDER BY r.requested_at DESC;"
     )
     answer = (
-        "**字段核查结果：`refunds.refund_amount` 不存在。**\n\n"
+        "## 字段核查结果\n\n"
+        "**`refunds.refund_amount` 不存在。** Agent 未按错误字段硬写 SQL，而是先搜索字段、读取表结构、"
+        "确认 join path，再自动改写为可执行版本。\n\n"
         "| 目标 | 发现 | 说明 |\n"
         "|---|---|---|\n"
         "|退款申请金额|`refunds.amount`|退款业务表里的金额字段|\n"
         "|退款入账金额|`ledger_entries.amount`|总账表里的金额，退款通常为负数|\n"
         "|关联路径|`refunds.id = ledger_entries.refund_id`|可用于校验申请金额与入账金额|\n\n"
-        "我没有按不存在的字段硬写 SQL，而是先搜索字段、读取表结构、确认 join path，然后把查询自动修正为下面这个可执行版本。"
+        "推荐在开发排障时同时对比 `refunds.amount` 与 `ledger_entries.amount`，"
+        "避免把申请金额误当作入账金额。"
     )
     win.ask_tab.append_result(key, {
         "status": "completed",
@@ -713,8 +1088,9 @@ def show_developer_field_exploration(app: QApplication, win: MainWindow) -> Path
         "workflow_id": "wf_promo_field_explore",
     })
     _expand_latest_trace(app, win, key)
+    _wait_for_answer_document(app, win, key)
     _process(app, 8)
-    return _grab(app, win, "08-developer-field-exploration")
+    return _grab(app, win.ask_tab, "08-developer-field-exploration")
 
 
 def _developer_consistency_trace() -> list[dict[str, Any]]:
@@ -744,22 +1120,57 @@ def _developer_consistency_trace() -> list[dict[str, Any]]:
     ]
 
 
-def show_developer_consistency_audit(app: QApplication, win: MainWindow) -> Path:
-    key = "promo-dev-audit"
-    win._active_key = key
-    win.ask_tab.set_active(key)
-    win.ask_tab.begin_turn(
-        key,
-        "开发排障：自动校验 orders、payments、refunds、ledger_entries 的金额一致性；找出不一致订单，并继续探索不一致原因。",
-        connection="omni_shop",
-        database="main",
-        attachments=[
-            {"kind": "table", "name": "orders", "path": "omni_shop.main.orders"},
-            {"kind": "table", "name": "payments", "path": "omni_shop.main.payments"},
-            {"kind": "table", "name": "refunds", "path": "omni_shop.main.refunds"},
-            {"kind": "table", "name": "ledger_entries", "path": "omni_shop.main.ledger_entries"},
-        ],
+def _promo_consistency_audit_payload() -> dict[str, Any]:
+    answer = (
+        "## 一致性校验结论\n\n"
+        "已对 `orders`、`payments`、`refunds`、`ledger_entries` 四张表完成 **订单粒度** 交叉对账。"
+        "共识别 **4 类可复现异常**，合计影响 **48 笔订单**。\n\n"
+        "| 异常类型 | 订单数 | 主要原因 | 建议动作 |\n"
+        "|---|---:|---|---|\n"
+        "|退款已批准但无总账退款|21|`refunds.status='approved'` 后未写入 `ledger_entries`|补偿写账或回滚退款状态|\n"
+        "|同一退款重复入账|9|`ledger_entries.refund_id` 出现重复|增加唯一约束或幂等键|\n"
+        "|取消订单存在成功支付|6|取消流程晚于支付回调|检查状态机与回调顺序|\n"
+        "|退款挂订单但未挂 item|12|部分退款缺少 `item_id`|补齐 item 级退款明细|\n\n"
+        "Agent 先自动探索字段与 join graph，再按 `order_id` 聚合到同一粒度做差异比较，"
+        "最后按异常特征分桶归因。\n\n"
+        "{{chart:1}}\n\n"
+        "{{chart:2}}\n\n"
+        "下图展示订单资金从应付 → 支付 → 总账 → 退款的主链路，便于定位断点环节。\n\n"
+        "{{chart:3}}\n\n"
+        "下方 SQL 为只读校验语句，可直接在客户端复核异常样本。"
     )
+    charts = [
+        {
+            "chart_id": "chart:1", "chart_type": "bar", "title": "四类异常订单数量",
+            "categories": ["退款无总账", "重复入账", "取消仍支付", "退款缺 item"],
+            "series": [{"name": "订单数", "values": [21, 9, 6, 12]}],
+            "row_count": 4,
+        },
+        {
+            "chart_id": "chart:2", "chart_type": "donut", "title": "异常类型占比",
+            "categories": ["退款无总账", "重复入账", "取消仍支付", "退款缺 item"],
+            "series": [{"name": "订单数", "values": [21, 9, 6, 12]}],
+            "row_count": 4,
+        },
+        {
+            "chart_id": "chart:3", "chart_type": "sankey", "title": "订单资金流向校验",
+            "data": {
+                "nodes": [
+                    {"name": "订单应付"},
+                    {"name": "支付入账"},
+                    {"name": "总账支付"},
+                    {"name": "退款申请"},
+                    {"name": "总账退款"},
+                ],
+                "links": [
+                    {"source": "订单应付", "target": "支付入账", "value": 1842},
+                    {"source": "支付入账", "target": "总账支付", "value": 1818},
+                    {"source": "订单应付", "target": "退款申请", "value": 248},
+                    {"source": "退款申请", "target": "总账退款", "value": 229},
+                ],
+            },
+        },
+    ]
     sql = (
         "WITH order_money AS (\n"
         "  SELECT id AS order_id, gross_amount - discount_amount + shipping_fee AS expected_paid\n"
@@ -784,31 +1195,53 @@ def show_developer_consistency_audit(app: QApplication, win: MainWindow) -> Path
         "WHERE ABS(COALESCE(paid_amount,0) - COALESCE(ledger_paid,0)) > 0.01\n"
         "   OR ABS(COALESCE(refund_amount,0) - COALESCE(ledger_refund,0)) > 0.01;"
     )
-    answer = (
-        "**一致性校验完成：发现 4 类可复现异常。**\n\n"
-        "| 异常类型 | 数量 | 主要原因 | 下一步 |\n"
-        "|---|---:|---|---|\n"
-        "|退款已批准但无总账退款|21|`refunds.status='approved'` 后未写入 `ledger_entries`|补偿写账或回滚退款状态|\n"
-        "|同一退款重复入账|9|`ledger_entries.refund_id` 出现重复|增加唯一约束或幂等键|\n"
-        "|取消订单存在成功支付|6|订单取消流程晚于支付回调|检查取消状态机和支付回调顺序|\n"
-        "|退款挂订单但未挂 item|12|部分退款缺少 `item_id`，难以归因到商品|补齐 item 级退款明细|\n\n"
-        "Agent 先自动探索四张表的字段和 join graph，再按 `order_id` 聚合到同一粒度做差异比较，最后继续按异常特征分桶归因。"
+    return {
+        "question": (
+            "开发排障：自动校验 orders、payments、refunds、ledger_entries 的金额一致性；"
+            "找出不一致订单，并继续探索不一致原因。"
+        ),
+        "attachments": [
+            {"kind": "table", "name": "orders", "path": "omni_shop.main.orders"},
+            {"kind": "table", "name": "payments", "path": "omni_shop.main.payments"},
+            {"kind": "table", "name": "refunds", "path": "omni_shop.main.refunds"},
+            {"kind": "table", "name": "ledger_entries", "path": "omni_shop.main.ledger_entries"},
+        ],
+        "answer_markdown": answer,
+        "charts": charts,
+        "selected_sql": sql,
+    }
+
+
+def show_developer_consistency_audit(app: QApplication, win: MainWindow) -> Path:
+    _ensure_chat_visible(win)
+    key = "promo-dev-audit"
+    win._active_key = key
+    win.ask_tab.set_active(key)
+    payload = _promo_consistency_audit_payload()
+    win.ask_tab.begin_turn(
+        key,
+        str(payload["question"]),
+        connection="omni_shop",
+        database="main",
+        attachments=payload["attachments"],
     )
     win.ask_tab.append_result(key, {
         "status": "completed",
-        "answer_markdown": answer,
-        "selected_sql": sql,
+        "answer_markdown": payload["answer_markdown"],
+        "charts": payload["charts"],
+        "selected_sql": payload["selected_sql"],
         "trace": _developer_consistency_trace(),
         "workflow_id": "wf_promo_consistency_audit",
     })
-    _expand_latest_trace(app, win, key)
     view = win.ask_tab.view(key)
+    _wait_for_answer_charts(app, win, key, chart_count=len(payload["charts"]))
     if view is not None:
-        return _grab_scrolled(app, view, win, "09-developer-consistency-audit", 0.0)
-    return _grab(app, win, "09-developer-consistency-audit")
+        return _grab_scrolled(app, view, win.ask_tab, "09-developer-consistency-audit", 0.0)
+    return _grab(app, win.ask_tab, "09-developer-consistency-audit")
 
 
 def show_clarification(app: QApplication, win: MainWindow) -> Path:
+    _ensure_chat_visible(win)
     key = "promo-clarify"
     win._active_key = key
     win.ask_tab.set_active(key)
@@ -901,6 +1334,152 @@ def show_database_client(app: QApplication, win: MainWindow) -> tuple[Path, Path
     return sql_path, data_path
 
 
+def _connection_payloads(service: DesktopService) -> list[dict[str, Any]]:
+    out: list[dict[str, Any]] = []
+    for conn in service.cfg.connections().values():
+        target = conn.path or f"{conn.host}:{conn.port or ''}/{conn.database or ''}".strip("/")
+        out.append({
+            "name": conn.name,
+            "type": conn.type,
+            "path": conn.path,
+            "host": conn.host,
+            "port": conn.port,
+            "database": conn.database,
+            "user": conn.user,
+            "has_password": bool(conn.password or conn.password_env),
+            "load_profile": conn.load_profile,
+            "session_timezone": conn.session_timezone,
+            "sslmode": conn.sslmode,
+            "ssl_ca": conn.ssl_ca,
+            "target": target,
+            "asset_status": "ready",
+        })
+    return out
+
+
+def _model_payloads(service: DesktopService) -> list[dict[str, Any]]:
+    out: list[dict[str, Any]] = []
+    for model in service.cfg.models().values():
+        out.append({
+            "name": model.name,
+            "provider": model.provider,
+            "base_url": model.base_url,
+            "model": model.model,
+            "timeout_seconds": model.timeout_seconds,
+            "context_length": model.context_length,
+            "has_api_key": bool(model.api_key or model.api_key_env),
+        })
+    return out
+
+
+def _build_settings_dialog(service: DesktopService, *, initial_page: str) -> SettingsDialog:
+    dialog = SettingsDialog(
+        connections=_connection_payloads(service),
+        models=_model_payloads(service),
+        default_connection=service.cfg.get_connection(None).name,
+        default_model=service.cfg.model().name,
+        resource_defaults=service.resource_defaults(),
+        language="zh",
+        stream_answers=True,
+        debug_trace=True,
+        initial_page=initial_page,
+    )
+    dialog.resize(1020, 700)
+    dialog.show()
+    if initial_page == "connections":
+        dialog.conn_list.setCurrentRow(0)
+    if initial_page == "models":
+        dialog.model_list.setCurrentRow(0)
+    _process(QApplication.instance() or QApplication([sys.argv[0] or "shoot_promo"]), 8)
+    return dialog
+
+
+def _prepare_integrations_demo() -> None:
+    import dbaide.skill as skill
+
+    home = TMP / "skill-home"
+    home.mkdir(parents=True, exist_ok=True)
+    skill._HOME = home  # type: ignore[attr-defined]
+    for tool in ("claude", "codex", "cursor"):
+        try:
+            skill.uninstall_tool(tool)
+        except Exception:
+            pass
+    skill.setup_tool("claude", mode="ask")
+    skill.setup_tool("codex", mode="tools")
+    skill.setup_tool("cursor", mode="full")
+
+
+def show_settings_pages(app: QApplication, service: DesktopService) -> list[Path]:
+    _prepare_integrations_demo()
+    paths: list[Path] = []
+    pages = [
+        ("connections", "10-settings-connections"),
+        ("models", "11-settings-models"),
+        ("resources", "12-settings-resources"),
+        ("integrations", "13-settings-integrations"),
+    ]
+    for page, name in pages:
+        dialog = _build_settings_dialog(service, initial_page=page)
+        paths.append(_grab(app, dialog, name))
+        dialog.close()
+        _process(app, 3)
+    return paths
+
+
+def show_settings_page(app: QApplication, service: DesktopService, *, page: str, name: str) -> Path:
+    _prepare_integrations_demo()
+    dialog = _build_settings_dialog(service, initial_page=page)
+    path = _grab(app, dialog, name)
+    dialog.close()
+    _process(app, 2)
+    return path
+
+
+def show_backup_and_setup(app: QApplication, service: DesktopService) -> list[Path]:
+    from dbaide.backup import registry as backup_registry
+
+    backup_registry._DEFAULT_DIR = TMP / "backups"  # type: ignore[attr-defined]
+    service.backup_run({
+        "connection_name": "omni_shop",
+        "database": "main",
+        "table": "orders",
+        "scope": "table",
+        "format": "csv",
+        "batch_size": 2000,
+    })
+
+    manager = BackupManager(service=service)
+    manager.resize(980, 520)
+    manager.show()
+    _process(app, 8)
+    manager_path = _grab(app, manager, "14-backup-manager")
+    manager.close()
+
+    build = BuildAssetsDialog(
+        connection_name="omni_shop",
+        databases=[{"name": "main", "has_assets": True}, {"name": "analytics", "has_assets": False}],
+        default_max_workers=2,
+    )
+    build.show()
+    _process(app, 8)
+    build_path = _grab(app, build, "15-build-assets-dialog")
+    build.close()
+
+    conn = ConnectionDialog(conn_type="postgres")
+    conn.form.name.setText("warehouse_pg")
+    conn.form.host.setText("analytics.internal")
+    conn.form.database.setText("warehouse")
+    conn.form.user.setText("readonly_analyst")
+    conn.form.session_timezone.setText("+08:00")
+    conn.form.sslmode.setCurrentText("require")
+    conn.show()
+    _process(app, 8)
+    conn_path = _grab(app, conn, "16-connection-dialog")
+    conn.close()
+    return [manager_path, build_path, conn_path]
+
+
 def write_copy(paths: list[Path]) -> Path:
     copy = OUT / "copy.md"
     copy.write_text(
@@ -921,26 +1500,50 @@ def write_copy(paths: list[Path]) -> Path:
             "2. `02-runtime-thinking.png`",
             "   复杂问题运行时可见：意图拆解、结构发现、关联校验、SQL 生成与风险检查都能追踪。",
             "",
-            "3. `03-chart-answer-analysis.png`",
-            "   业务问题直接给出结论、证据和图表：净收入、退款率、渠道表现一屏可读。",
+            "3. `17-agent-trace.png`",
+            "   Trace 不再是树状噪音，而是右侧时间线抽屉：步骤、耗时和详情分层查看。",
             "",
-            "4. `04-chart-answer-breakdown.png`",
-            "   回答不是纯文本：渠道拆解、库存风险和后续建议可以连续展示，适合业务复盘。",
+            "4. `03-chart-answer-analysis.png`",
+            "   业务问题直接给出结构化结论：摘要、关键发现、趋势折线与双轴组合图同屏可读。",
             "",
-            "5. `05-clarification.png`",
+            "5. `04-chart-answer-breakdown.png`",
+            "   回答连续展示多种图表类型：堆叠面积、柱状、环形图、漏斗、仪表盘、热力图与库存风险条。",
+            "",
+            "6. `05-clarification.png`",
             "   当口径不唯一时先澄清：避免 AI 擅自假设财务归属、取消订单和差异阈值。",
             "",
-            "6. `06-database-client-sql.png`",
+            "7. `06-database-client-sql.png`",
             "   内置数据库客户端：多标签 SQL 编辑、结果表格、导出、历史和结构树在同一界面，SQL 证据可继续复核。",
             "",
-            "7. `07-database-client-table.png`",
+            "8. `07-database-client-table.png`",
             "   表数据浏览与结构查看一体化：适合开发排障，也适合业务同学快速核对明细。",
             "",
-            "8. `08-developer-field-exploration.png`",
+            "9. `08-developer-field-exploration.png`",
             "   开发者专项：当字段名不存在时，Agent 会先查字段、读表结构、验证关联路径，再自动改写成可执行 SQL。",
             "",
-            "9. `09-developer-consistency-audit.png`",
-            "   开发者专项：跨 orders/payments/refunds/ledger_entries 自动对账，继续探索异常分桶和根因，而不是停在单条 SQL。",
+            "10. `09-developer-consistency-audit.png`",
+            "   开发者专项：跨 orders/payments/refunds/ledger_entries 自动对账，表格结论配合柱状、环形与桑基图展示异常分布与资金链路。",
+            "",
+            "11. `10-settings-connections.png`",
+            "    连接管理、导入导出、默认连接切换都在一个面板里完成，便于团队迁移与环境管理。",
+            "",
+            "12. `11-settings-models.png`",
+            "    模型配置与超时、上下文长度、API 凭据分离管理；桌面与 CLI 共享同一套模型配置。",
+            "",
+            "13. `12-settings-resources.png`",
+            "    所有关键资源限制都可配置：SQL 超时、行数上限、Agent 步数、压缩阈值、结果截断长度与并发运行数。",
+            "",
+            "14. `13-settings-integrations.png`",
+            "    MCP / coding tool 集成页可直接安装到 Claude、Codex、Cursor 等工具，并支持 full / ask / tools 三种模式。",
+            "",
+            "15. `14-backup-manager.png`",
+            "    备份管理器统一查看历史备份、格式、行数、大小和文件位置，适合做本地快照与审计留存。",
+            "",
+            "16. `15-build-assets-dialog.png`",
+            "    构建资产支持按库选择、并发与时间预算设置，不必每次重扫整实例。",
+            "",
+            "17. `16-connection-dialog.png`",
+            "    连接表单内置只读负载配置、会话时区和 SSL 选项，便于安全地接入生产或分析库。",
             "",
             "## 面向技术人员",
             "- 看得见 agent 的每一步，便于调试 prompt、SQL、join 推断和性能风险。",
@@ -966,18 +1569,24 @@ def main() -> int:
         for png in OUT.glob("*.png"):
             png.unlink()
     OUT.mkdir(parents=True, exist_ok=True)
-    set_language("zh")
-    app = QApplication.instance() or QApplication([])
-    app.setStyleSheet(app_style())
-    win, _service = _build_window(app)
     paths: list[Path] = []
-    paths.append(show_assets_initializing(app, win))
-    paths.append(show_runtime_thinking(app, win))
-    paths.extend(show_chart_answer(app, win))
-    paths.append(show_clarification(app, win))
-    paths.extend(show_database_client(app, win))
-    paths.append(show_developer_field_exploration(app, win))
-    paths.append(show_developer_consistency_audit(app, win))
+    _verify_webengine_runtime()
+    env = dict(os.environ)
+    env.setdefault("PYTHONPATH", str(ROOT))
+    set_language("zh")
+    for scenario in DOC_SCENARIOS:
+        result = subprocess.run(
+            [_docs_python_executable(), str(ROOT / "tools" / "shoot_docs.py"), scenario],
+            cwd=str(ROOT),
+            env=env,
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+        for line in result.stdout.splitlines():
+            candidate = line.strip()
+            if candidate.endswith(".png"):
+                paths.append(Path(candidate))
     copy = write_copy(paths)
     print(f"promo screenshots -> {OUT}")
     print(f"copy -> {copy}")

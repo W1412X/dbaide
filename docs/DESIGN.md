@@ -1,5 +1,11 @@
 # DBAide Architecture Design
 
+See also:
+
+- [SHOWCASE.md](SHOWCASE.md)
+- [SHOWCASE.zh-CN.md](SHOWCASE.zh-CN.md)
+- [BLOG.zh-CN.md](BLOG.zh-CN.md)
+
 ## Positioning
 
 DBAide is a database assistant (CLI + desktop GUI). It is not a pure SQL generator. The system can inspect schema, profile data, generate safe read-only SQL, execute queries, diagnose SQL, and explain results.

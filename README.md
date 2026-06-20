@@ -125,15 +125,25 @@ number. DBAide is built on the opposite principle:
 Supports **SQLite, MySQL/MariaDB, and PostgreSQL**, in **English and 简体中文**, with
 **dark and light themes**.
 
+## Further reading
+
+- [Screenshot tour](docs/SHOWCASE.md)
+- [Architecture notes](docs/DESIGN.md)
+- [Chinese product blog](docs/BLOG.zh-CN.md)
+
 ## Screenshots
 
-| Ask — answer · trace · schema | SQL workspace |
+| Chart rendering | SQL workspace |
 | --- | --- |
-| <img src="docs/images/ask.png" width="420"> | <img src="docs/images/sql.png" width="420"> |
+| <img src="docs/images/promo/03-chart-answer-analysis.png" width="420"> | <img src="docs/images/promo/06-database-client-sql.png" width="420"> |
 
-| Connections · import/export | Resources & safety |
+| Agent trace | Clarification |
 | --- | --- |
-| <img src="docs/images/settings-connections.png" width="420"> | <img src="docs/images/settings-resources.png" width="420"> |
+| <img src="docs/images/promo/17-agent-trace.png" width="420"> | <img src="docs/images/promo/05-clarification.png" width="420"> |
+
+| Resources & safety | MCP integrations |
+| --- | --- |
+| <img src="docs/images/promo/12-settings-resources.png" width="420"> | <img src="docs/images/promo/13-settings-integrations.png" width="420"> |
 
 ## Quickstart
 
