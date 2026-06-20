@@ -161,6 +161,28 @@ def sync_topbar_safe_area(window: QWidget, topbar: TopBar) -> None:
     topbar.apply_safe_area(left, top, right, bottom, height)
 
 
+def sync_dialog_minimum_size(window: QWidget) -> None:
+    """Ensure dialog height fits its content after safe-area insets apply."""
+    layout = window.layout()
+    if layout is None:
+        return
+    layout.activate()
+    hint = layout.sizeHint()
+    extra = 0
+    handle = window.windowHandle()
+    if handle is not None:
+        safe = handle.safeAreaMargins()
+        extra = int(safe.top()) + int(safe.bottom())
+    min_h = hint.height() + extra
+    min_w = hint.width()
+    if min_w > 0 and window.minimumWidth() < min_w:
+        window.setMinimumWidth(min_w)
+    if window.minimumHeight() < min_h:
+        window.setMinimumHeight(min_h)
+    if window.height() < min_h:
+        window.resize(max(window.width(), window.minimumWidth()), min_h)
+
+
 def install_top_level_chrome(
     window: QWidget,
     *,
@@ -176,6 +198,8 @@ def install_top_level_chrome(
             sync_topbar_safe_area(window, topbar)
         elif layout is not None:
             sync_layout_safe_area(window, layout)
+        if isinstance(window, QDialog):
+            sync_dialog_minimum_size(window)
 
     handle = window.windowHandle()
     if handle is None:

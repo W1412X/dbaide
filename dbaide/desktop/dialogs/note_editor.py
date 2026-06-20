@@ -9,7 +9,7 @@ from PyQt6.QtWidgets import QLabel, QHBoxLayout, QPlainTextEdit, QVBoxLayout
 
 from dbaide.desktop.components.base import button_icon_color, compact_button
 from dbaide.desktop.components.icons import svg_icon
-from dbaide.desktop.components.inputs import configure_wrapped_label
+from dbaide.desktop.components.inputs import configure_wrapped_label, dialog_action_row
 from dbaide.desktop.theme import app_style, Theme
 from dbaide.desktop.window_chrome import ChromeDialog
 from dbaide.i18n import t as _t
@@ -40,8 +40,7 @@ class NoteEditorDialog(ChromeDialog):
         self.note.setPlaceholderText(_t("notes.editor_ph"))
         layout.addWidget(self.note)
 
-        buttons = QHBoxLayout()
-        buttons.setContentsMargins(0, 0, 0, 0)
+        buttons_host, buttons = dialog_action_row()
         buttons.addStretch(1)
         cancel_btn = compact_button(_t("btn.cancel"), icon=svg_icon("x", color=Theme.TEXT_2, size=14), width=88)
         ok_btn = compact_button(
@@ -54,7 +53,7 @@ class NoteEditorDialog(ChromeDialog):
         ok_btn.clicked.connect(self.accept)
         buttons.addWidget(cancel_btn)
         buttons.addWidget(ok_btn)
-        layout.addLayout(buttons)
+        layout.addWidget(buttons_host)
 
     def value(self) -> str:
         return self.note.toPlainText().strip()

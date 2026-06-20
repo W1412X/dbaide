@@ -445,6 +445,14 @@ QLabel#formLabel {{
     padding: 0 10px 0 0;
     margin: 0;
 }}
+QTabBar::tab-bar {{
+    border: none;
+    background: transparent;
+}}
+QTabBar::base {{
+    border: none;
+    background: transparent;
+}}
 QTabWidget::pane {{
     border: 1px solid {T.BORDER_SOFT};
     border-radius: 8px;
@@ -456,6 +464,7 @@ QTabWidget {{
 }}
 QTabWidget::tab-bar {{
     background: {T.SURFACE};
+    border: none;
 }}
 QTabBar::tab {{
     background: {T.PANEL};
@@ -606,6 +615,10 @@ QTabBar[sidebarSwitch="true"] {{
     border-radius: 8px;
     padding: 3px;
 }}
+QTabBar[sidebarSwitch="true"]::base {{
+    border: none;
+    background: transparent;
+}}
 QTabBar[sidebarSwitch="true"]::tab {{
     background: transparent;
     color: {T.MUTED};
@@ -633,6 +646,11 @@ QTabBar[panelTabs="true"] {{
        below instead of reading as a stark dark band. Also stops the native macOS
        style painting a system-appearance strip. */
     background: {T.SURFACE};
+    border: none;
+}}
+QTabBar[panelTabs="true"]::base {{
+    border: none;
+    background: transparent;
 }}
 QTabBar[panelTabs="true"]::tab {{
     background: transparent;
@@ -644,6 +662,7 @@ QTabBar[panelTabs="true"]::tab {{
        "Query 1" aren't clipped to "Quer…" (padding + the 16px close button + its
        margins eat ~42px before any text). */
     min-width: 90px;
+    max-width: 160px;
     min-height: 24px;
     max-height: 24px;
     font-size: 12px;
@@ -804,6 +823,7 @@ def workbench_tab_stylesheet(*, bordered_pane: bool = False) -> str:
         pane = f"border: none; background: {T.SURFACE};"
     return (
         f"QTabWidget {{ background: {T.SURFACE}; }}"
-        f"QTabWidget::tab-bar {{ background: {T.SURFACE}; }}"
+        f"QTabWidget::tab-bar {{ background: {T.SURFACE}; border: none; }}"
+        f"QTabBar::base {{ border: none; background: transparent; }}"
         f"QTabWidget::pane {{ {pane} }}"
     )

@@ -97,6 +97,24 @@ def test_echarts_option_combo_area_series_keeps_area_style():
     assert "areaStyle" in option["series"][1]
 
 
+def test_echarts_option_line_honors_straight_segments_and_step_mode():
+    spec = {
+        "chart_id": "chart:line-straight",
+        "chart_type": "line",
+        "title": "Trend",
+        "categories": ["A", "B", "C"],
+        "series": [{"name": "value", "values": [1, 3, 2]}],
+        "options": {"smooth": False, "step": "middle", "show_symbols": True},
+        "row_count": 3,
+    }
+
+    option = chart_spec_to_echarts_option(spec)
+
+    assert option["series"][0]["smooth"] is False
+    assert option["series"][0]["step"] == "middle"
+    assert option["series"][0]["showSymbol"] is True
+
+
 def test_echarts_option_stacked_area_sets_stack_and_area_style():
     spec = {
         "chart_id": "chart:area",
@@ -131,6 +149,27 @@ def test_echarts_option_scatter_numeric_x_keeps_actual_values():
 
     assert option["xAxis"]["type"] == "value"
     assert option["series"][0]["data"] == [[100.0, 1.0], [2500.0, 2.0], [5000.0, 3.0]]
+
+
+def test_echarts_option_bubble_uses_point_payload_and_per_item_symbol_sizes():
+    spec = {
+        "chart_id": "chart:bubble",
+        "chart_type": "bubble",
+        "title": "Bubble",
+        "series": [{"name": "value", "values": [1, 2]}],
+        "data": {
+            "points": [
+                {"name": "A", "x": 10, "y": 3, "size": 25},
+                {"name": "B", "x": 12, "y": 4, "size": 9},
+            ],
+        },
+    }
+
+    option = chart_spec_to_echarts_option(spec)
+
+    assert option["series"][0]["type"] == "scatter"
+    assert option["series"][0]["data"][0]["value"] == [10.0, 3.0, 25.0]
+    assert option["series"][0]["data"][0]["symbolSize"] > option["series"][0]["data"][1]["symbolSize"]
 
 
 def test_echarts_option_tolerates_bad_or_short_values():
@@ -171,6 +210,134 @@ def test_render_echarts_html_contains_option_and_loader():
     assert "function (value)" not in html
 
 
+def test_echarts_option_heatmap_uses_visual_map_and_points():
+    spec = {
+        "chart_id": "chart:heatmap",
+        "chart_type": "heatmap",
+        "title": "Heatmap",
+        "data": {
+            "x_categories": ["Mon", "Tue"],
+            "y_categories": ["App", "Web"],
+            "points": [[0, 0, 10], [1, 0, 12], [0, 1, 8]],
+        },
+    }
+
+    option = chart_spec_to_echarts_option(spec)
+
+    assert option["series"][0]["type"] == "heatmap"
+    assert option["visualMap"]["max"] == 12.0
+    assert option["series"][0]["data"][1] == [1, 0, 12.0]
+
+
+def test_echarts_option_radar_uses_special_payload():
+    spec = {
+        "chart_id": "chart:radar",
+        "chart_type": "radar",
+        "title": "Radar",
+        "options": {"radar_shape": "circle", "legend_position": "top"},
+        "data": {
+            "indicators": [{"name": "A", "max": 10}, {"name": "B", "max": 20}],
+            "radar_series": [{"name": "Alpha", "value": [8, 12]}, {"name": "Beta", "value": [6, 16]}],
+        },
+    }
+
+    option = chart_spec_to_echarts_option(spec)
+
+    assert option["radar"]["shape"] == "circle"
+    assert option["legend"]["top"] == 4
+    assert option["series"][0]["type"] == "radar"
+
+
+def test_echarts_option_scatter_accepts_points_without_series():
+    spec = {
+        "chart_id": "chart:scatter",
+        "chart_type": "scatter",
+        "title": "Scatter",
+        "series": [],
+        "data": {"points": [{"name": "A", "x": 1.0, "y": 2.0}]},
+    }
+    option = chart_spec_to_echarts_option(spec)
+    assert option["series"][0]["type"] == "scatter"
+    assert option["series"][0]["data"][0]["value"] == [1.0, 2.0]
+
+
+def test_echarts_option_gauge_uses_range_options():
+    spec = {
+        "chart_id": "chart:gauge",
+        "chart_type": "gauge",
+        "title": "Gauge",
+        "options": {"gauge_min": 0, "gauge_max": 200, "gauge_target": 150},
+        "data": {"value": 132, "name": "Completion"},
+    }
+
+    option = chart_spec_to_echarts_option(spec)
+
+    assert option["series"][0]["type"] == "gauge"
+    assert option["series"][0]["min"] == 0
+    assert option["series"][0]["max"] == 200
+    assert option["series"][0]["data"][0]["value"] == 132.0
+    assert option["series"][0]["axisLine"]["lineStyle"]["color"][0][0] == pytest.approx(0.66, abs=0.01)
+    assert "150" in option["series"][0]["detail"]["formatter"]
+
+
+def test_echarts_option_sankey_and_tree_types_render():
+    sankey = {
+        "chart_id": "chart:sankey",
+        "chart_type": "sankey",
+        "title": "Flow",
+        "options": {"node_align": "left"},
+        "data": {
+            "nodes": [{"name": "A"}, {"name": "B"}],
+            "links": [{"source": "A", "target": "B", "value": 10}],
+        },
+    }
+    sankey_option = chart_spec_to_echarts_option(sankey)
+    assert sankey_option["series"][0]["type"] == "sankey"
+    assert sankey_option["series"][0]["nodeAlign"] == "left"
+
+    treemap = {
+        "chart_id": "chart:tree",
+        "chart_type": "treemap",
+        "title": "Tree",
+        "data": {"tree": [{"name": "A", "value": 10}, {"name": "B", "value": 5}]},
+    }
+    treemap_option = chart_spec_to_echarts_option(treemap)
+    assert treemap_option["series"][0]["type"] == "treemap"
+
+
+def test_echarts_option_candlestick_boxplot_and_waterfall_render():
+    candlestick = {
+        "chart_id": "chart:k",
+        "chart_type": "candlestick",
+        "title": "K",
+        "categories": ["2026-06-01", "2026-06-02"],
+        "data": {"ohlc": [[10, 12, 9, 14], [12, 11, 10, 13]]},
+    }
+    candle_option = chart_spec_to_echarts_option(candlestick)
+    assert candle_option["series"][0]["type"] == "candlestick"
+
+    boxplot = {
+        "chart_id": "chart:box",
+        "chart_type": "boxplot",
+        "title": "Box",
+        "categories": ["A", "B"],
+        "data": {"boxes": [[1, 2, 3, 4, 5], [2, 3, 4, 5, 6]], "outliers": []},
+    }
+    box_option = chart_spec_to_echarts_option(boxplot)
+    assert box_option["series"][0]["type"] == "boxplot"
+
+    waterfall = {
+        "chart_id": "chart:waterfall",
+        "chart_type": "waterfall",
+        "title": "Waterfall",
+        "categories": ["Start", "Gain", "Loss"],
+        "series": [{"name": "PnL", "values": [100, 50, -20]}],
+    }
+    waterfall_option = chart_spec_to_echarts_option(waterfall)
+    assert len(waterfall_option["series"]) == 2
+    assert waterfall_option["series"][1]["type"] == "bar"
+
+
 def test_chart_block_empty_series_shows_no_data(qapp):
     from PyQt6.QtWidgets import QLabel
 
@@ -180,6 +347,7 @@ def test_chart_block_empty_series_shows_no_data(qapp):
         {"chart_type": "bar", "categories": ["A", "B"], "series": [], "row_count": 0},
         {"chart_type": "pie", "categories": [], "series": [{"name": "n", "values": []}]},
         {"chart_type": "line", "categories": ["A"], "series": [{"name": "n", "values": []}]},
+        {"chart_type": "heatmap", "data": {"x_categories": ["A"], "y_categories": ["B"], "points": []}},
     ):
         widget = build_chart_widget(spec)
         assert isinstance(widget, QLabel)

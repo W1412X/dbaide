@@ -21,7 +21,7 @@ from dbaide.desktop.dialogs.message_dialog import alert as dialog_alert, confirm
 
 from dbaide.desktop.components.base import button_icon_color, compact_button
 from dbaide.desktop.components.icons import svg_icon
-from dbaide.desktop.components.inputs import configure_form, configure_wrapped_label, form_label
+from dbaide.desktop.components.inputs import configure_compact_field, configure_form, configure_wrapped_label, dialog_action_row, form_label, STANDARD_FIELD_HEIGHT
 from dbaide.desktop.theme import app_style, Theme
 from dbaide.desktop.window_chrome import ChromeDialog
 
@@ -32,8 +32,13 @@ class JoinEditorDialog(ChromeDialog):
         from dbaide.i18n import t
         self.setStyleSheet(app_style())
         self.setWindowTitle(t("join.edit_title") if initial else t("join.add_title"))
-        layout = QFormLayout(self)
-        configure_form(layout)
+        self.setMinimumWidth(480)
+        root = QVBoxLayout(self)
+        root.setContentsMargins(16, 16, 16, 16)
+        root.setSpacing(12)
+        form_host = QWidget()
+        form = QFormLayout(form_host)
+        configure_form(form)
         initial = initial or {}
         self.table = QLineEdit(str(initial.get("table") or ""))
         self.column = QLineEdit(str(initial.get("column") or ""))
@@ -49,9 +54,10 @@ class JoinEditorDialog(ChromeDialog):
             (t("join.database"), self.database),
             (t("join.note"), self.reason),
         ):
-            layout.addRow(form_label(label), widget)
-        actions = QHBoxLayout()
-        actions.setContentsMargins(0, 6, 0, 0)
+            configure_compact_field(widget, height=STANDARD_FIELD_HEIGHT)
+            form.addRow(form_label(label), widget)
+        root.addWidget(form_host)
+        actions_host, actions = dialog_action_row(top_margin=6)
         actions.addStretch(1)
         cancel_btn = compact_button(t("btn.cancel"), icon=svg_icon("x", color=Theme.TEXT_2, size=14), width=88)
         ok_btn = compact_button(
@@ -64,7 +70,7 @@ class JoinEditorDialog(ChromeDialog):
         ok_btn.clicked.connect(self.accept)
         actions.addWidget(cancel_btn)
         actions.addWidget(ok_btn)
-        layout.addRow(actions)
+        root.addWidget(actions_host)
 
     def payload(self) -> dict[str, str]:
         return {

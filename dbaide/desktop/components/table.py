@@ -367,6 +367,7 @@ class ResultTableWidget(QWidget):
         self.meta.setText(_t("result.no_results"))
 
 
+from dbaide.desktop.components.inputs import dialog_action_row
 from dbaide.desktop.theme import Theme
 from dbaide.desktop.window_chrome import ChromeDialog
 
@@ -388,8 +389,7 @@ class CellValueDialog(ChromeDialog):
         view.setFont(QFont("Menlo", 11))
         view.setPlainText(value)
         layout.addWidget(view, 1)
-        buttons = QHBoxLayout()
-        buttons.setContentsMargins(0, 0, 0, 0)
+        buttons_host, buttons = dialog_action_row()
         buttons.addStretch(1)
         copy_btn = compact_button(_t("btn.copy"), icon=svg_icon("copy", color=Theme.TEXT_2, size=14), width=78)
         copy_btn.clicked.connect(lambda: QApplication.clipboard().setText(value))
@@ -397,7 +397,7 @@ class CellValueDialog(ChromeDialog):
         close_btn = compact_button(_t("btn.close"), icon=svg_icon("x", color=Theme.TEXT_2, size=14), width=82)
         close_btn.clicked.connect(self.reject)
         buttons.addWidget(close_btn)
-        layout.addLayout(buttons)
+        layout.addWidget(buttons_host)
 
 
 def _full_text(value: Any) -> str:

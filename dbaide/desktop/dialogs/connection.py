@@ -13,7 +13,15 @@ from PyQt6.QtWidgets import (
 )
 
 from dbaide.desktop.components.base import compact_button
-from dbaide.desktop.components.inputs import FORM_INNER_LABEL_RULES, Combo, configure_form, form_label
+from dbaide.desktop.components.inputs import (
+    FORM_INNER_LABEL_RULES,
+    Combo,
+    configure_compact_field,
+    configure_form,
+    dialog_action_row,
+    form_label,
+    STANDARD_FIELD_HEIGHT,
+)
 from dbaide.desktop.dialogs.file_dialogs import get_open_file_name
 from dbaide.desktop.theme import Theme
 
@@ -40,44 +48,47 @@ class ConnectionForm(QWidget):
         configure_form(form)
 
         self.name = QLineEdit()
-        self.name.setFixedHeight(28)
         self.type_select = Combo()
-        self.type_select.setFixedHeight(28)
         self.type_select.addItems(["sqlite", "mysql", "mariadb", "postgres"])
         self.type_select.setCurrentText(conn_type)
         self.path = QLineEdit()
-        self.path.setFixedHeight(28)
         self.host = QLineEdit("localhost")
-        self.host.setFixedHeight(28)
         self.port = QSpinBox()
         self.port.setRange(1, 65535)
         self.port.setValue(3306)
-        self.port.setFixedHeight(28)
-        self.port.setMaximumWidth(120)
         self.database = QLineEdit()
-        self.database.setFixedHeight(28)
         self.user = QLineEdit()
-        self.user.setFixedHeight(28)
         self.password = QLineEdit()
-        self.password.setFixedHeight(28)
         self.password.setEchoMode(QLineEdit.EchoMode.Password)
         self.load_profile = Combo()
-        self.load_profile.setFixedHeight(28)
         self.load_profile.addItems(["production", "staging", "dev"])
         from dbaide.i18n import t as _ct
         self.load_profile.setToolTip(_ct("conn.load_profile_tooltip"))
         self.session_timezone = QLineEdit("UTC")
-        self.session_timezone.setFixedHeight(28)
         self.session_timezone.setPlaceholderText("UTC, +00:00, +08:00")
         self.session_timezone.setToolTip(_ct("conn.timezone_tooltip"))
         self.sslmode = Combo()
-        self.sslmode.setFixedHeight(28)
         self.sslmode.addItems(["", "disable", "allow", "prefer", "require", "verify-ca", "verify-full"])
         self.sslmode.setToolTip(_ct("conn.sslmode_tooltip"))
         self.ssl_ca = QLineEdit()
-        self.ssl_ca.setFixedHeight(28)
         self.ssl_ca.setPlaceholderText("/path/to/ca.pem")
         self.ssl_ca.setToolTip(_ct("conn.ssl_ca_tooltip"))
+
+        for field in (
+            self.name,
+            self.type_select,
+            self.path,
+            self.host,
+            self.database,
+            self.user,
+            self.password,
+            self.load_profile,
+            self.session_timezone,
+            self.sslmode,
+            self.ssl_ca,
+        ):
+            configure_compact_field(field, height=STANDARD_FIELD_HEIGHT)
+        configure_compact_field(self.port, height=STANDARD_FIELD_HEIGHT, max_width=120)
 
         from dbaide.i18n import t
         browse = compact_button(t("conn.browse"), width=88)
@@ -225,9 +236,7 @@ class ConnectionDialog(ChromeDialog):
         layout = QVBoxLayout(self)
         self.form = ConnectionForm(conn_type=conn_type)
         layout.addWidget(self.form)
-        # Match the app's button language (accent primary + ghost) so dialogs read consistently.
-        btn_row = QHBoxLayout()
-        btn_row.setContentsMargins(0, 6, 0, 0)
+        btn_host, btn_row = dialog_action_row(top_margin=6)
         btn_row.addStretch(1)
         cancel_btn = compact_button(t("btn.cancel"), width=88)
         save_btn = compact_button(t("btn.save"), primary=True, width=88)
@@ -236,7 +245,7 @@ class ConnectionDialog(ChromeDialog):
         btn_row.addWidget(cancel_btn)
         btn_row.addSpacing(8)
         btn_row.addWidget(save_btn)
-        layout.addLayout(btn_row)
+        layout.addWidget(btn_host)
 
     def payload(self) -> dict:
         return self.form.payload(make_default=True)

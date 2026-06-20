@@ -17,6 +17,12 @@ from dbaide.desktop.components.menu import MenuButton, PillSelect
 from dbaide.desktop.platform_ui import configure_chrome_button, label_for_chrome_button
 from dbaide.desktop.theme import Theme
 
+# Outer chrome leaves vertical padding so rounded pills aren't clipped by the
+# container (global QToolButton min-height is 28px; Qt may lay out slightly taller).
+_MODE_PAD = 2
+_MODE_BTN_H = 28
+_MODE_CHROME_H = 34
+
 
 class ModeSwitch(QWidget):
     currentChanged = pyqtSignal(int)
@@ -25,11 +31,11 @@ class ModeSwitch(QWidget):
         super().__init__(parent)
         self.setObjectName("modeSwitch")
         self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
-        self.setFixedHeight(28)
+        self.setFixedHeight(_MODE_CHROME_H)
         self._buttons: list[QToolButton] = []
         self._current = -1
         row = QHBoxLayout(self)
-        row.setContentsMargins(2, 2, 2, 2)
+        row.setContentsMargins(_MODE_PAD, _MODE_PAD, _MODE_PAD, _MODE_PAD)
         row.setSpacing(2)
         self._row = row
         self._apply_style()
@@ -43,7 +49,7 @@ class ModeSwitch(QWidget):
         btn.setIcon(icon)
         btn.setIconSize(QSize(14, 14))
         btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        btn.setFixedHeight(28)
+        btn.setFixedHeight(_MODE_BTN_H)
         configure_chrome_button(btn)
         label = label_for_chrome_button(text, icon_only=not bool(text))
         if label:
@@ -103,6 +109,8 @@ class ModeSwitch(QWidget):
                 border-radius: {Theme.RADIUS_MD}px;
                 padding: 0 8px;
                 margin: 0;
+                min-height: {_MODE_BTN_H}px;
+                max-height: {_MODE_BTN_H}px;
                 color: {Theme.TEXT_2};
                 font-size: 11px;
                 font-weight: 600;

@@ -13,10 +13,11 @@ from PyQt6.QtWidgets import (
     QSpinBox,
     QVBoxLayout,
     QWidget,
+    QSizePolicy,
 )
 
 from dbaide.desktop.components.base import compact_button
-from dbaide.desktop.components.inputs import configure_wrapped_label
+from dbaide.desktop.components.inputs import configure_compact_field, configure_wrapped_label, dialog_action_row, STANDARD_FIELD_HEIGHT
 from dbaide.desktop.theme import Theme
 
 
@@ -85,7 +86,7 @@ class BuildAssetsDialog(ChromeDialog):
         scroll.setMaximumHeight(180)
         root.addWidget(scroll)
 
-        select_row = QHBoxLayout()
+        select_host, select_row = dialog_action_row()
         select_row.setSpacing(8)
         select_all = compact_button(t("build.select_all"), width=96)
         select_none = compact_button(t("build.select_none"), width=104)
@@ -94,39 +95,42 @@ class BuildAssetsDialog(ChromeDialog):
         select_row.addWidget(select_all)
         select_row.addWidget(select_none)
         select_row.addStretch(1)
-        root.addLayout(select_row)
+        root.addWidget(select_host)
 
-        # ── Resource options (concurrency / total timeout) ──
-        options = QFormLayout()
+        options_host = QWidget()
+        options_host.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        options = QFormLayout(options_host)
+        options.setContentsMargins(0, 0, 0, 0)
         options.setSpacing(8)
 
         self._workers = QSpinBox()
         self._workers.setRange(1, 32)
         self._workers.setValue(max(1, int(default_max_workers or 1)))
-        options.addRow(t("build.concurrency"), self._workers)
+        configure_compact_field(self._workers, height=STANDARD_FIELD_HEIGHT)
 
         self._timeout = QSpinBox()
         self._timeout.setRange(0, 7200)
         self._timeout.setValue(3600)
         self._timeout.setSuffix(t("build.time_suffix"))
+        configure_compact_field(self._timeout, height=STANDARD_FIELD_HEIGHT)
+
+        options.addRow(t("build.concurrency"), self._workers)
         options.addRow(t("build.time_budget"), self._timeout)
 
-        root.addLayout(options)
+        root.addWidget(options_host)
 
-        # Pool any extra height here so the action row stays pinned to the bottom.
         root.addStretch(1)
 
-        actions = QHBoxLayout()
-        actions.setSpacing(8)
-        actions.addStretch(1)
+        actions_host, actions = dialog_action_row()
         cancel = compact_button(t("btn.cancel"), width=88)
         build = compact_button(t("btn.build"), primary=True, width=88)
         cancel.clicked.connect(self.reject)
         build.clicked.connect(self._accept_if_valid)
         self._build_btn = build
+        actions.addStretch(1)
         actions.addWidget(cancel)
         actions.addWidget(build)
-        root.addLayout(actions)
+        root.addWidget(actions_host)
 
         for box in self._checks:
             box.toggled.connect(self._sync_build_enabled)

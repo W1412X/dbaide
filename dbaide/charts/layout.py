@@ -19,6 +19,16 @@ def estimate_chart_height(
         return min(560, max(240, 52 * max(category_count, 1) + 80))
     if chart_type in {"pie", "donut"}:
         return 360
+    if chart_type == "gauge":
+        return 320
+    if chart_type in {"radar", "sunburst"}:
+        return 420
+    if chart_type in {"heatmap", "treemap", "sankey"}:
+        return 440
+    if chart_type in {"funnel"}:
+        return 400
+    if chart_type in {"candlestick", "boxplot", "waterfall"}:
+        return 380
     base = 280 + bottom_extra
     if angle:
         base += 16

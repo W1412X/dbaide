@@ -128,9 +128,176 @@ def test_chart_agent_tolerates_scalar_optional_fields():
     payload = chart_spec_to_dict(spec)
     assert payload["series"][0]["type"] == "line"
     assert payload["series"][1]["type"] == "line"
-    assert payload["series"][0]["axis"] == "right"
+    assert payload["series"][0]["axis"] == "left"
     assert payload["series"][1]["axis"] == "right"
     assert payload["series"][0]["unit"] == "单"
+
+
+def test_chart_agent_line_options_and_special_data_materialize():
+    rows = [
+        {"day": "2026-06-01", "sales": 120, "spend": 35.5},
+        {"day": "2026-06-02", "sales": 150, "spend": 42.0},
+    ]
+    llm = _ChartMockLLM({
+        "chart_type": "line",
+        "title": "趋势",
+        "category_field": "day",
+        "value_fields": ["sales"],
+        "series_names": ["销售额"],
+        "options": {"smooth": False, "step": "start", "show_symbols": True},
+    })
+    spec = ChartAgent(llm).render(
+        chart_id="chart:1",
+        question="q",
+        intent="趋势",
+        columns=["day", "sales", "spend"],
+        rows=rows,
+    )
+    payload = chart_spec_to_dict(spec)
+    assert payload["options"]["smooth"] is False
+    assert payload["options"]["step"] == "start"
+
+
+def test_chart_agent_materializes_heatmap():
+    rows = [
+        {"weekday": "Mon", "channel": "App", "sales": 10},
+        {"weekday": "Tue", "channel": "App", "sales": 12},
+        {"weekday": "Mon", "channel": "Web", "sales": 8},
+        {"weekday": "Mon", "channel": "App", "sales": 2},
+    ]
+    llm = _ChartMockLLM({
+        "chart_type": "heatmap",
+        "title": "热力图",
+        "x_field": "weekday",
+        "y_field": "channel",
+        "value_fields": ["sales"],
+    })
+    spec = ChartAgent(llm).render(
+        chart_id="chart:2",
+        question="q",
+        intent="热力图",
+        columns=["weekday", "channel", "sales"],
+        rows=rows,
+    )
+    payload = chart_spec_to_dict(spec)
+    assert payload["chart_type"] == "heatmap"
+    assert payload["data"]["x_categories"] == ["Mon", "Tue"]
+    assert len(payload["data"]["points"]) == 3
+    mon_app = next(p for p in payload["data"]["points"] if p[0] == 0 and p[1] == 0)
+    assert mon_app[2] == 12.0
+
+
+def test_chart_agent_heatmap_requires_value_fields():
+    rows = [{"weekday": "Mon", "channel": "App", "sales": 10}]
+    with pytest.raises(ValueError, match="value_fields"):
+        ChartAgent(_ChartMockLLM({
+            "chart_type": "heatmap",
+            "title": "热力图",
+            "x_field": "weekday",
+            "y_field": "channel",
+            "value_fields": [],
+        })).plan(
+            question="q",
+            intent="热力图",
+            columns=["weekday", "channel", "sales"],
+            rows=rows,
+        )
+
+
+def test_chart_agent_gauge_uses_category_label():
+    rows = [{"metric": "Completion", "score": 88.0}]
+    llm = _ChartMockLLM({
+        "chart_type": "gauge",
+        "title": "KPI",
+        "category_field": "metric",
+        "value_fields": ["score"],
+        "series_names": [],
+    })
+    spec = ChartAgent(llm).render(
+        chart_id="chart:g",
+        question="q",
+        intent="KPI",
+        columns=["metric", "score"],
+        rows=rows,
+    )
+    payload = chart_spec_to_dict(spec)
+    assert payload["data"]["name"] == "Completion"
+    assert payload["data"]["value"] == 88.0
+
+
+def test_chart_agent_funnel_sort_order_follows_sort_by():
+    rows = [
+        {"stage": "Visit", "count": 100},
+        {"stage": "Signup", "count": 40},
+        {"stage": "Paid", "count": 10},
+    ]
+    llm = _ChartMockLLM({
+        "chart_type": "funnel",
+        "title": "Funnel",
+        "category_field": "stage",
+        "value_fields": ["count"],
+        "sort_by": "category_asc",
+    })
+    spec = ChartAgent(llm).render(
+        chart_id="chart:f",
+        question="q",
+        intent="funnel",
+        columns=["stage", "count"],
+        rows=rows,
+    )
+    payload = chart_spec_to_dict(spec)
+    assert payload["options"]["sort_order"] == "none"
+    assert payload["categories"] == ["Paid", "Signup", "Visit"]
+
+
+def test_chart_agent_treemap_aggregates_duplicate_paths():
+    rows = [
+        {"region": "East", "product": "A", "sales": 10},
+        {"region": "East", "product": "A", "sales": 5},
+    ]
+    llm = _ChartMockLLM({
+        "chart_type": "treemap",
+        "title": "Sales",
+        "path_fields": ["region", "product"],
+        "value_fields": ["sales"],
+    })
+    spec = ChartAgent(llm).render(
+        chart_id="chart:t",
+        question="q",
+        intent="treemap",
+        columns=["region", "product", "sales"],
+        rows=rows,
+    )
+    payload = chart_spec_to_dict(spec)
+    leaf = payload["data"]["tree"][0]["children"][0]
+    assert leaf["name"] == "A"
+    assert leaf["value"] == 15.0
+
+
+def test_chart_agent_materializes_sankey_aggregates_duplicate_links():
+    rows = [
+        {"source": "A", "target": "B", "amount": 10},
+        {"source": "A", "target": "B", "amount": 5},
+        {"source": "B", "target": "C", "amount": 3},
+    ]
+    llm = _ChartMockLLM({
+        "chart_type": "sankey",
+        "title": "Flow",
+        "source_field": "source",
+        "target_field": "target",
+        "value_fields": ["amount"],
+    })
+    spec = ChartAgent(llm).render(
+        chart_id="chart:s",
+        question="q",
+        intent="flow",
+        columns=["source", "target", "amount"],
+        rows=rows,
+    )
+    payload = chart_spec_to_dict(spec)
+    assert len(payload["data"]["links"]) == 2
+    ab = next(link for link in payload["data"]["links"] if link["source"] == "A")
+    assert ab["value"] == 15.0
 
 
 def test_chart_agent_requires_llm():

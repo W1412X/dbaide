@@ -20,6 +20,7 @@ from PyQt6.QtWidgets import (
 )
 
 from dbaide.desktop.components.base import compact_button, ghost_action_button
+from dbaide.desktop.components.inputs import compact_field_column, dialog_action_column, STANDARD_FIELD_HEIGHT
 from dbaide.desktop.components.markdown_webview import try_create_webengine_view
 from dbaide.desktop.dialogs.file_dialogs import get_save_file_name
 from dbaide.desktop.theme import Theme, app_style
@@ -117,18 +118,16 @@ class AnswerExportDialog(ChromeDialog):
             (1, 0, "bottom", "ask.export_padding_bottom"),
             (1, 1, "left", "ask.export_padding_left"),
         ):
-            cell = QVBoxLayout()
-            cell.setSpacing(4)
-            label = QLabel(t(label_key))
-            label.setStyleSheet(f"color: {Theme.MUTED}; font-size: 11px; background: transparent;")
-            cell.addWidget(label)
-            cell.addWidget(self._spins[key])
-            wrap = QWidget()
-            wrap.setLayout(cell)
-            grid.addWidget(wrap, row, col)
+            grid.addWidget(
+                compact_field_column(t(label_key), self._spins[key], height=STANDARD_FIELD_HEIGHT),
+                row,
+                col,
+            )
         sidebar_layout.addLayout(grid)
 
-        preset_col = QVBoxLayout()
+        preset_host = QWidget()
+        preset_host.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        preset_col = QVBoxLayout(preset_host)
         preset_col.setContentsMargins(0, 0, 0, 0)
         preset_col.setSpacing(6)
         preset_col.addWidget(self._preset_btn(
@@ -139,12 +138,10 @@ class AnswerExportDialog(ChromeDialog):
             t("ask.export_padding_preset_comfortable"),
             lambda: self._apply_padding_preset(16, 20, 32, 20),
         ))
-        sidebar_layout.addLayout(preset_col)
+        sidebar_layout.addWidget(preset_host)
         sidebar_layout.addStretch(1)
 
-        actions_col = QVBoxLayout()
-        actions_col.setContentsMargins(0, 0, 0, 0)
-        actions_col.setSpacing(8)
+        actions_host, actions_col = dialog_action_column()
         self._save_btn = compact_button(t("ask.export_save_html"), primary=True)
         self._save_btn.clicked.connect(self._save_html)
         self._copy_btn = compact_button(t("ask.export_copy_html"))
@@ -154,7 +151,7 @@ class AnswerExportDialog(ChromeDialog):
         actions_col.addWidget(self._save_btn)
         actions_col.addWidget(self._copy_btn)
         actions_col.addWidget(cancel_btn)
-        sidebar_layout.addLayout(actions_col)
+        sidebar_layout.addWidget(actions_host)
         root.addWidget(sidebar)
 
         preview_host = QFrame()

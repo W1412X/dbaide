@@ -6,6 +6,35 @@ All notable changes to DBAide are documented here. The format is loosely based o
 
 ## [Unreleased]
 
+## [0.9.0] — 2026-06-12
+
+### Added
+
+- **Chart agent coverage** — full materialization and ECharts paths for all 22 chart
+  types (heatmap, sankey, treemap, gauge, boxplot, waterfall, etc.) with expanded
+  unit tests.
+- **Dialog layout helpers** — shared `configure_compact_field`, `compact_field_column`,
+  and `dialog_action_row` / `dialog_action_column` for consistent form control sizing.
+
+### Changed
+
+- **ChromeDialog sizing** — after macOS safe-area insets apply, dialogs auto-sync
+  minimum height from layout `sizeHint()` so content is not clipped or overlapped.
+
+### Fixed
+
+- **Chart pipeline** — heatmap/sankey duplicate-cell aggregation; gauge progress arc
+  and target label; funnel `sort_order`; scatter/bubble validation and empty-series
+  render; multi-axis `"right"` hint mapping for two-series charts.
+- **Backup dialog** — format/batch controls no longer squashed; action button no longer
+  overlaps inputs after safe-area layout.
+- **Dialog layouts** — backup, text input, message/choice, note editor, connection,
+  build assets, join editor, cell value, and HTML export sidebar: fixed-height fields
+  and separated action rows.
+- **Desktop chrome** — mode switch (对话/工作台) clipping; workbench tab bar black
+  native edge; panel tab max-width.
+- **CI** — GUI tests stub WebEngine so pytest passes on Linux headless runners.
+
 ## [0.8.0] — 2026-06-12
 
 ### Added
@@ -718,7 +747,8 @@ and a PyQt6 desktop app, sharing one Python core.
   drag-to-Applications)**, **Windows (`.msi` wizard)**, and **Linux (`.tar.gz`)** —
   pushing a `v*` tag cuts a GitHub Release automatically.
 
-[Unreleased]: https://github.com/W1412X/dbaide/compare/v0.8.0...HEAD
+[Unreleased]: https://github.com/W1412X/dbaide/compare/v0.9.0...HEAD
+[0.9.0]: https://github.com/W1412X/dbaide/compare/v0.8.0...v0.9.0
 [0.8.0]: https://github.com/W1412X/dbaide/compare/v0.7.0...v0.8.0
 [0.7.0]: https://github.com/W1412X/dbaide/compare/v0.6.0...v0.7.0
 [0.6.0]: https://github.com/W1412X/dbaide/compare/v0.3.0...v0.6.0

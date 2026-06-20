@@ -6,6 +6,7 @@ from PyQt6.QtCore import Qt
 from PyQt6.QtWidgets import QDialog, QHBoxLayout, QLabel, QLineEdit, QVBoxLayout, QWidget
 
 from dbaide.desktop.components.base import compact_button
+from dbaide.desktop.components.inputs import configure_compact_field, dialog_action_row, STANDARD_FIELD_HEIGHT
 from dbaide.desktop.theme import Theme, app_style
 from dbaide.desktop.window_chrome import ChromeDialog
 from dbaide.i18n import t
@@ -47,13 +48,12 @@ class TextInputDialog(ChromeDialog):
 
         self._input = QLineEdit(str(text or ""))
         self._input.setPlaceholderText(str(placeholder or ""))
+        configure_compact_field(self._input, height=STANDARD_FIELD_HEIGHT)
         self._input.selectAll()
         self._input.returnPressed.connect(self._submit)
         root.addWidget(self._input)
 
-        actions = QHBoxLayout()
-        actions.setContentsMargins(0, 2, 0, 0)
-        actions.setSpacing(8)
+        actions_host, actions = dialog_action_row(top_margin=2)
         actions.addStretch(1)
 
         cancel_btn = compact_button(t("dialog.cancel"), width=88)
@@ -62,7 +62,7 @@ class TextInputDialog(ChromeDialog):
         ok_btn.clicked.connect(self._submit)
         actions.addWidget(cancel_btn)
         actions.addWidget(ok_btn)
-        root.addLayout(actions)
+        root.addWidget(actions_host)
 
     def showEvent(self, event) -> None:  # noqa: N802
         super().showEvent(event)

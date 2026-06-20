@@ -6,6 +6,7 @@ from PyQt6.QtCore import Qt
 from PyQt6.QtWidgets import QDialog, QFrame, QHBoxLayout, QLabel, QSizePolicy, QTextBrowser, QVBoxLayout, QWidget
 
 from dbaide.desktop.components.base import compact_button
+from dbaide.desktop.components.inputs import dialog_action_row
 from dbaide.desktop.theme import Theme, app_style
 from dbaide.desktop.window_chrome import ChromeDialog
 
@@ -79,9 +80,7 @@ class MessageDialog(ChromeDialog):
         self._sync_body_height()
         root.addWidget(body)
 
-        actions = QHBoxLayout()
-        actions.setContentsMargins(0, 0, 0, 0)
-        actions.setSpacing(8)
+        actions_host, actions = dialog_action_row()
         actions.addStretch(1)
 
         cancel_text = cancel_label or t("dialog.cancel")
@@ -95,7 +94,7 @@ class MessageDialog(ChromeDialog):
         ok_btn = compact_button(ok_text, primary=True, width=96)
         ok_btn.clicked.connect(self.accept)
         actions.addWidget(ok_btn)
-        root.addLayout(actions)
+        root.addWidget(actions_host)
 
     def _sync_body_height(self) -> None:
         self._body.document().setTextWidth(_CONTENT_WIDTH)
@@ -201,9 +200,7 @@ class ChoiceDialog(ChromeDialog):
         body.resize(_CONTENT_WIDTH, body_height)
         root.addWidget(body)
 
-        actions = QHBoxLayout()
-        actions.setContentsMargins(0, 0, 0, 0)
-        actions.setSpacing(8)
+        actions_host, actions = dialog_action_row()
         actions.addStretch(1)
 
         cancel_btn = compact_button(cancel_label or t("dialog.cancel"), width=88)
@@ -215,7 +212,7 @@ class ChoiceDialog(ChromeDialog):
             btn.clicked.connect(lambda _checked=False, value=key: self._accept_choice(value))
             actions.addWidget(btn)
 
-        root.addLayout(actions)
+        root.addWidget(actions_host)
 
     def _accept_choice(self, choice: str) -> None:
         self._choice = str(choice or "")

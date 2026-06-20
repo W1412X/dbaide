@@ -6,13 +6,22 @@ from PyQt6.QtCore import Qt
 from PyQt6.QtWidgets import (
     QComboBox,
     QFormLayout,
+    QHBoxLayout,
     QLabel,
+    QLayout,
     QPlainTextEdit,
     QSizePolicy,
     QTextEdit,
+    QVBoxLayout,
+    QWidget,
 )
 
 from dbaide.desktop.theme import Theme
+
+# Matches global QSS ``_INPUT`` min/max-height in ``app_style()``.
+STANDARD_FIELD_HEIGHT = 28
+# Slightly taller controls for narrow modal dialogs (backup, etc.).
+COMPACT_DIALOG_FIELD_HEIGHT = 32
 
 # Scoped on form containers — QFormLayout is not a widget, so parent #id rules are required.
 FORM_INNER_LABEL_RULES = f"""
@@ -144,6 +153,80 @@ def configure_readonly_text_view(view: QTextEdit) -> None:
     view.setLineWrapMode(QTextEdit.LineWrapMode.WidgetWidth)
     view.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
     view.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+
+
+def configure_compact_field(
+    widget: QWidget,
+    *,
+    height: int = STANDARD_FIELD_HEIGHT,
+    min_width: int | None = None,
+    max_width: int | None = None,
+) -> None:
+    """Lock vertical size so stretched dialog layouts cannot squash inputs."""
+    widget.setFixedHeight(height)
+    widget.setMinimumHeight(height)
+    widget.setMaximumHeight(height)
+    widget.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+    if min_width is not None:
+        widget.setMinimumWidth(min_width)
+    if max_width is not None:
+        widget.setMaximumWidth(max_width)
+
+
+def compact_field_label(text: str, *, muted: bool = True) -> QLabel:
+    label = QLabel(text)
+    color = Theme.MUTED if muted else Theme.TEXT
+    label.setStyleSheet(f"font-size: 11px; color: {color}; background: transparent;")
+    label.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Fixed)
+    return label
+
+
+def compact_field_column(
+    label: QLabel | str,
+    control: QWidget,
+    *,
+    height: int = COMPACT_DIALOG_FIELD_HEIGHT,
+) -> QWidget:
+    """Label + control stack with a fixed vertical footprint."""
+    if isinstance(label, str):
+        label = compact_field_label(label)
+    col = QWidget()
+    col.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+    col_layout = QVBoxLayout(col)
+    col_layout.setContentsMargins(0, 0, 0, 0)
+    col_layout.setSpacing(4)
+    col_layout.setSizeConstraint(QLayout.SizeConstraint.SetFixedSize)
+    col_layout.addWidget(label)
+    configure_compact_field(control, height=height)
+    col_layout.addWidget(control)
+    return col
+
+
+def finalize_compact_dialog(dialog: QWidget) -> None:
+    """Ensure a narrow dialog is tall enough for its content."""
+    from dbaide.desktop.window_chrome import sync_dialog_minimum_size
+
+    sync_dialog_minimum_size(dialog)
+
+
+def dialog_action_row(*, top_margin: int = 0, spacing: int = 8) -> tuple[QWidget, QHBoxLayout]:
+    """Bottom button row host — keeps actions on their own layout band."""
+    host = QWidget()
+    host.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+    row = QHBoxLayout(host)
+    row.setContentsMargins(0, top_margin, 0, 0)
+    row.setSpacing(spacing)
+    return host, row
+
+
+def dialog_action_column(*, spacing: int = 8) -> tuple[QWidget, QVBoxLayout]:
+    """Vertical action stack for sidebars."""
+    host = QWidget()
+    host.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+    col = QVBoxLayout(host)
+    col.setContentsMargins(0, 0, 0, 0)
+    col.setSpacing(spacing)
+    return host, col
 
 
 class Combo(QComboBox):

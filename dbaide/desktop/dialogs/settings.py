@@ -33,7 +33,14 @@ from dbaide.app_info import (
 from dbaide.desktop.components.base import button_icon_color, compact_button, ghost_action_button
 from dbaide.desktop.components.icon_button import IconToolButton
 from dbaide.desktop.components.icons import more_icon, svg_icon
-from dbaide.desktop.components.inputs import Combo, FORM_INNER_LABEL_RULES, configure_form, form_label
+from dbaide.desktop.components.inputs import (
+    Combo,
+    FORM_INNER_LABEL_RULES,
+    configure_compact_field,
+    configure_form,
+    form_label,
+    STANDARD_FIELD_HEIGHT,
+)
 from dbaide.desktop.components.menu import MenuButton
 from dbaide.desktop.dialogs.connection import ConnectionForm
 from dbaide.desktop.dialogs.file_dialogs import get_open_file_name
@@ -80,29 +87,26 @@ class ModelForm(QWidget):
         form = QFormLayout(inner)
         configure_form(form)
         self.profile_name = QLineEdit()
-        self.profile_name.setFixedHeight(28)
         self.provider = Combo()
-        self.provider.setFixedHeight(28)
         self.provider.addItems(["none", "openai_compatible"])
         self.base_url = QLineEdit()
-        self.base_url.setFixedHeight(28)
         self.api_key = QLineEdit()
-        self.api_key.setFixedHeight(28)
         self.api_key.setPlaceholderText(_pt("settings.api_key_placeholder"))
         self.api_key.setEchoMode(QLineEdit.EchoMode.Password)
         self.model_id = QLineEdit()
-        self.model_id.setFixedHeight(28)
         self.timeout = QSpinBox()
-        self.timeout.setFixedHeight(28)
         self.timeout.setMaximumWidth(120)
         self.timeout.setRange(5, 600)
         self.timeout.setValue(60)
         self.context_length = QSpinBox()
-        self.context_length.setFixedHeight(28)
         self.context_length.setMaximumWidth(120)
         self.context_length.setRange(4, 2048)
         self.context_length.setValue(32)
         self.context_length.setSuffix(" k")
+        for field in (self.profile_name, self.provider, self.base_url, self.api_key, self.model_id):
+            configure_compact_field(field, height=STANDARD_FIELD_HEIGHT)
+        configure_compact_field(self.timeout, height=STANDARD_FIELD_HEIGHT, max_width=120)
+        configure_compact_field(self.context_length, height=STANDARD_FIELD_HEIGHT, max_width=120)
         form.addRow(form_label(t("model.profile")), self.profile_name)
         form.addRow(form_label(t("model.provider")), self.provider)
         form.addRow(form_label(t("model.base_url")), self.base_url)
@@ -428,9 +432,9 @@ class SettingsDialog(ChromeDialog):
         form.addRow(group_header)
         conc_spin = QSpinBox()
         conc_spin.setRange(1, 16)
-        conc_spin.setFixedHeight(28)
         conc_spin.setMinimumWidth(120)
         conc_spin.setMaximumWidth(150)
+        configure_compact_field(conc_spin, height=STANDARD_FIELD_HEIGHT, max_width=150)
         conc_cur = self._resource_values.get("max_concurrent_runs")
         conc_spin.setValue(int(conc_cur) if conc_cur not in (None, "") else DEFAULT_MAX_CONCURRENT_RUNS)
         self._resource_spins["max_concurrent_runs"] = conc_spin
@@ -451,9 +455,9 @@ class SettingsDialog(ChromeDialog):
             for key, lo, hi in fields:
                 spin = QSpinBox()
                 spin.setRange(lo, hi)
-                spin.setFixedHeight(28)
                 spin.setMinimumWidth(120)
                 spin.setMaximumWidth(150)
+                configure_compact_field(spin, height=STANDARD_FIELD_HEIGHT, max_width=150)
                 baseline = int(prod.get(key, lo))
                 self._resource_baselines[key] = baseline
                 current = self._resource_values.get(key)
@@ -555,7 +559,7 @@ class SettingsDialog(ChromeDialog):
         bar_layout.addWidget(mode_label)
 
         self._mode_combo = Combo()
-        self._mode_combo.setFixedHeight(28)
+        configure_compact_field(self._mode_combo, height=STANDARD_FIELD_HEIGHT)
         self._mode_combo.setFixedWidth(180)
         self._mode_labels = {
             "full": t("settings.integrations.mode.full"),
@@ -763,6 +767,7 @@ class SettingsDialog(ChromeDialog):
         form = QFormLayout()
         form.setSpacing(10)
         self.language_select = Combo()
+        configure_compact_field(self.language_select, height=STANDARD_FIELD_HEIGHT)
         for code in ("en", "zh"):
             self.language_select.addItem(LANGUAGE_NAMES[code], code)
         idx = max(0, self.language_select.findData(self._language))
@@ -773,6 +778,7 @@ class SettingsDialog(ChromeDialog):
         form.addRow(t("settings.language"), self.language_select)
 
         self.theme_select = Combo()
+        configure_compact_field(self.theme_select, height=STANDARD_FIELD_HEIGHT)
         self.theme_select.addItem(t("settings.theme.dark"), "dark")
         self.theme_select.addItem(t("settings.theme.light"), "light")
         idx_t = max(0, self.theme_select.findData(self._theme))

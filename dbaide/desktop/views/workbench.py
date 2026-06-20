@@ -66,13 +66,9 @@ class WorkbenchView(QWidget):
         self.tabs.tabBar().setElideMode(Qt.TextElideMode.ElideRight)
         self.tabs.tabBar().setExpanding(False)
         self.tabs.tabBar().setDrawBase(False)
-        self.tabs.tabBar().setStyleSheet(
-            "QTabBar::tab { max-width: 160px; }"
-        )
         self.tabs.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
-        # The tab bar itself must stay on the global panelTabs stylesheet. Setting
-        # a widget-local QTabBar stylesheet here makes Qt drop the app-level tab
-        # subcontrol rules, so document tabs fall back to native gray colors.
+        # Tab bar styling lives in the global QSS (`panelTabs`); a local QTabBar
+        # stylesheet drops those rules and brings back native gray/base lines.
         self.tabs.setStyleSheet(workbench_tab_stylesheet(bordered_pane=False))
         layout.addWidget(self.tabs)
 
@@ -86,6 +82,8 @@ class WorkbenchView(QWidget):
         new_btn = self._corner_icon("plus", t("workbench.new_query"), lambda: self.new_sql_editor())
         hist_btn = self._corner_icon("clock", t("tab.history"), self.focus_history)
         holder = QWidget()
+        holder.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
+        holder.setStyleSheet(f"background: {Theme.SURFACE}; border: none;")
         hl = QHBoxLayout(holder)
         hl.setContentsMargins(4, 0, 2, 0)   # right≈flush so the icons line up with the editor strip
         hl.setSpacing(2)

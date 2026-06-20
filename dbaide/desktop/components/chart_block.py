@@ -52,20 +52,13 @@ def _echarts_src() -> str:
 
 def build_chart_widget(spec_dict: dict[str, Any]) -> QWidget:
     """Build a Qt WebEngine-hosted ECharts view from a serialized chart spec."""
-    raw_series = [s for s in (spec_dict.get("series") or []) if isinstance(s, dict)]
-    raw_categories = list(spec_dict.get("categories") or [])
-    chart_type = str(spec_dict.get("chart_type") or "bar")
-    has_values = any(isinstance(s.get("values"), list) and s.get("values") for s in raw_series)
-    needs_categories = chart_type not in {"pie", "donut", "scatter"}
-    if not raw_series or not has_values or (needs_categories and not raw_categories):
-        from dbaide.i18n import t
+    try:
+        spec = chart_spec_from_dict(spec_dict)
+    except Exception:
+        spec = None
+    if spec is None or not _has_chart_payload(spec):
+        return _chart_placeholder()
 
-        placeholder = QLabel(t("conversation.chart_no_data"))
-        placeholder.setAlignment(QtAlignCenter())
-        placeholder.setStyleSheet(f"color: {Theme.MUTED}; background: transparent; padding: 24px;")
-        return placeholder
-
-    spec = chart_spec_from_dict(spec_dict)
     echarts_src = _echarts_src()
     html = render_echarts_html(spec_dict, theme=_theme_payload(), echarts_src=echarts_src)
     base_url = webengine_html_base(echarts_src)
@@ -92,6 +85,38 @@ def build_chart_widget(spec_dict: dict[str, Any]) -> QWidget:
     view.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
     view.setContextMenuPolicy(ContextMenuPolicyNoMenu())
     return view
+
+
+def _chart_placeholder() -> QLabel:
+    from dbaide.i18n import t
+
+    placeholder = QLabel(t("conversation.chart_no_data"))
+    placeholder.setAlignment(QtAlignCenter())
+    placeholder.setStyleSheet(f"color: {Theme.MUTED}; background: transparent; padding: 24px;")
+    return placeholder
+
+
+def _has_chart_payload(spec) -> bool:
+    chart_type = str(getattr(spec, "chart_type", "") or "")
+    if chart_type in {"bar", "horizontal_bar", "grouped_bar", "stacked_bar", "line", "area", "stacked_area", "multi_axis_line", "combo", "pie", "donut", "funnel", "waterfall"}:
+        return bool(spec.series) and any(isinstance(item.get("values"), list) and item.get("values") for item in spec.series)
+    if chart_type in {"scatter", "bubble"}:
+        return bool(spec.data.get("points")) or (bool(spec.series) and bool(spec.categories))
+    if chart_type == "heatmap":
+        return bool(spec.data.get("points"))
+    if chart_type == "radar":
+        return bool(spec.data.get("indicators")) and bool(spec.data.get("radar_series"))
+    if chart_type == "gauge":
+        return spec.data.get("value") is not None
+    if chart_type == "sankey":
+        return bool(spec.data.get("nodes")) and bool(spec.data.get("links"))
+    if chart_type in {"treemap", "sunburst"}:
+        return bool(spec.data.get("tree"))
+    if chart_type == "candlestick":
+        return bool(spec.categories) and bool(spec.data.get("ohlc"))
+    if chart_type == "boxplot":
+        return bool(spec.categories) and bool(spec.data.get("boxes"))
+    return False
 
 
 def QtAlignCenter():

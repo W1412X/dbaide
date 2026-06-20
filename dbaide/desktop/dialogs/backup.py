@@ -7,7 +7,7 @@ import sys
 from pathlib import Path
 from typing import Any
 
-from PyQt6.QtCore import QSize, Qt, pyqtSignal
+from PyQt6.QtCore import QPoint, QSize, Qt, pyqtSignal
 from PyQt6.QtGui import QColor, QFont
 from PyQt6.QtWidgets import (
     QHBoxLayout,
@@ -20,10 +20,15 @@ from PyQt6.QtWidgets import (
     QToolButton,
     QVBoxLayout,
     QWidget,
+    QSizePolicy,
 )
 
 from dbaide.desktop.components.icons import svg_icon
-from dbaide.desktop.components.inputs import Combo
+from dbaide.desktop.components.inputs import (
+    Combo,
+    compact_field_column,
+    dialog_action_row,
+)
 from dbaide.desktop.dialogs.message_dialog import confirm as dialog_confirm
 from dbaide.desktop.theme import Theme
 from dbaide.desktop.window_chrome import ChromeDialog
@@ -48,12 +53,6 @@ def _icon_btn(icon_name: str, tooltip: str, *, size: int = 16) -> QToolButton:
 
 
 # ── Backup Dialog ─────────────────────────────────────────────────────────────
-
-
-_INPUT_STYLE = (
-    f"background: {Theme.PANEL}; border: 1px solid {Theme.BORDER};"
-    f" border-radius: 6px; padding: 3px 8px; color: {Theme.TEXT}; font-size: 12px;"
-)
 
 
 class BackupDialog(ChromeDialog):
@@ -81,7 +80,7 @@ class BackupDialog(ChromeDialog):
         )
 
         layout = QVBoxLayout(self)
-        layout.setSpacing(10)
+        layout.setSpacing(12)
         layout.setContentsMargins(16, 14, 16, 14)
 
         if scope == "table":
@@ -93,62 +92,38 @@ class BackupDialog(ChromeDialog):
             f"font-size: 13px; font-weight: 600; color: {Theme.TEXT};"
             f" padding-bottom: 2px;"
         )
+        target_label.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Fixed)
         layout.addWidget(target_label)
 
         # Inline form: Format | Batch | Threads
         form = QWidget()
         form.setStyleSheet("background: transparent;")
+        form.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         form_layout = QHBoxLayout(form)
         form_layout.setContentsMargins(0, 0, 0, 0)
         form_layout.setSpacing(8)
 
-        fmt_col = QVBoxLayout()
-        fmt_col.setSpacing(2)
-        fl = QLabel(t("backup.format"))
-        fl.setStyleSheet(f"font-size: 11px; color: {Theme.MUTED};")
         self._fmt_combo = Combo()
         self._fmt_combo.addItems(["csv", "sql", "sqlite"])
-        self._fmt_combo.setFixedHeight(28)
-        self._fmt_combo.setStyleSheet(f"QComboBox {{ {_INPUT_STYLE} }}")
-        fmt_col.addWidget(fl)
-        fmt_col.addWidget(self._fmt_combo)
-        form_layout.addLayout(fmt_col, 1)
+        form_layout.addWidget(compact_field_column(t("backup.format"), self._fmt_combo), 1)
 
-        batch_col = QVBoxLayout()
-        batch_col.setSpacing(2)
-        bl = QLabel(t("backup.batch_size"))
-        bl.setStyleSheet(f"font-size: 11px; color: {Theme.MUTED};")
         self._batch_spin = QSpinBox()
         self._batch_spin.setRange(100, 100_000)
         self._batch_spin.setValue(5000)
         self._batch_spin.setSingleStep(1000)
-        self._batch_spin.setFixedHeight(28)
-        self._batch_spin.setStyleSheet(f"QSpinBox {{ {_INPUT_STYLE} }}")
-        batch_col.addWidget(bl)
-        batch_col.addWidget(self._batch_spin)
-        form_layout.addLayout(batch_col, 1)
+        form_layout.addWidget(compact_field_column(t("backup.batch_size"), self._batch_spin), 1)
 
         if scope == "database":
-            th_col = QVBoxLayout()
-            th_col.setSpacing(2)
-            tl = QLabel(t("backup.threads"))
-            tl.setStyleSheet(f"font-size: 11px; color: {Theme.MUTED};")
             self._thread_spin = QSpinBox()
             self._thread_spin.setRange(1, 16)
             self._thread_spin.setValue(4)
-            self._thread_spin.setFixedHeight(28)
-            self._thread_spin.setStyleSheet(f"QSpinBox {{ {_INPUT_STYLE} }}")
-            th_col.addWidget(tl)
-            th_col.addWidget(self._thread_spin)
-            form_layout.addLayout(th_col, 1)
+            form_layout.addWidget(compact_field_column(t("backup.threads"), self._thread_spin), 1)
         else:
             self._thread_spin = None
 
         layout.addWidget(form)
 
-        # Bottom row: status + start button
-        bottom = QHBoxLayout()
-        bottom.setSpacing(8)
+        bottom_host, bottom = dialog_action_row()
         self._status = QLabel("")
         self._status.setStyleSheet(f"font-size: 11px; color: {Theme.MUTED}; background: transparent;")
         self._status.setWordWrap(True)
@@ -157,6 +132,7 @@ class BackupDialog(ChromeDialog):
         self._start_btn = QPushButton(t("backup.start"))
         self._start_btn.setFixedHeight(28)
         self._start_btn.setMinimumWidth(110)
+        self._start_btn.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
         self._start_btn.setStyleSheet(
             f"QPushButton {{ background: {Theme.ACCENT}; color: white;"
             f" border: none; border-radius: 6px; padding: 0 12px;"
@@ -166,7 +142,7 @@ class BackupDialog(ChromeDialog):
         )
         self._start_btn.clicked.connect(self._start_backup)
         bottom.addWidget(self._start_btn)
-        layout.addLayout(bottom)
+        layout.addWidget(bottom_host)
 
     def _start_backup(self) -> None:
         self._start_btn.setEnabled(False)
