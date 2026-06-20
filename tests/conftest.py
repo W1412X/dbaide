@@ -7,10 +7,34 @@ import os
 # Run any PyQt6 widget tests headlessly by default (no display needed). Must be set
 # before Qt is imported anywhere, so it lives at the top of the shared conftest.
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+# Chromium-based WebEngine aborts in headless Linux CI unless sandboxing is disabled.
+os.environ.setdefault("QTWEBENGINE_DISABLE_SANDBOX", "1")
+os.environ.setdefault(
+    "QTWEBENGINE_CHROMIUM_FLAGS",
+    "--no-sandbox --disable-dev-shm-usage --disable-gpu",
+)
 
 from pathlib import Path
 
 import pytest
+
+
+@pytest.fixture(autouse=True)
+def _disable_webengine_in_unit_tests(request, monkeypatch):
+    """Linux CI installs PyQt6-WebEngine; real views SIGABRT under offscreen.
+
+    Force the QTextBrowser fallback path for GUI unit tests. Tests that need a
+    stand-in WebEngine widget patch ``sys.modules`` themselves; ``webengine``
+    marks opt out for import-only checks.
+    """
+    if request.node.get_closest_marker("webengine"):
+        yield
+        return
+
+    import dbaide.desktop.components.markdown_webview as markdown_webview
+
+    monkeypatch.setattr(markdown_webview, "try_create_webengine_view", lambda: None)
+    yield
 
 
 @pytest.fixture(autouse=True)

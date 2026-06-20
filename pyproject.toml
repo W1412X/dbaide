@@ -34,3 +34,6 @@ include = ["dbaide*"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 norecursedirs = ["codex", ".*", "build", "dist", "node_modules"]
+markers = [
+    "webengine: opt out of the headless WebEngine stub and use real Qt WebEngine",
+]

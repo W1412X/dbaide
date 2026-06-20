@@ -10,6 +10,7 @@ pytest.importorskip("PyQt6")
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 
+@pytest.mark.webengine
 def test_ensure_webengine_before_qapplication_allows_import():
     from PyQt6.QtWidgets import QApplication
 
@@ -23,10 +24,6 @@ def test_ensure_webengine_before_qapplication_allows_import():
         from PyQt6.QtWebEngineWidgets import QWebEngineView
 
         assert webengine_ready is True
-        app = QApplication([])
-        try:
-            assert QWebEngineView is not None
-        finally:
-            app.quit()
+        assert QWebEngineView is not None
     except ImportError:
         assert webengine_ready is False

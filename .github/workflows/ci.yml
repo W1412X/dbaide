@@ -11,6 +11,8 @@ jobs:
     runs-on: ubuntu-latest
     env:
       QT_QPA_PLATFORM: offscreen
+      QTWEBENGINE_DISABLE_SANDBOX: "1"
+      QTWEBENGINE_CHROMIUM_FLAGS: "--no-sandbox --disable-dev-shm-usage --disable-gpu"
 
     steps:
       - uses: actions/checkout@v4
