@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Iterator, MutableMapping
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -29,6 +30,65 @@ class RunStatusUiState:
     running_ids: set[str] = field(default_factory=set)
     pending_rows: list[dict[str, Any]] = field(default_factory=list)
     selected_chat: str = ""
+
+
+@dataclass
+class ConversationSlotState:
+    question: str = ""
+    trace: list[dict[str, Any]] = field(default_factory=list)
+    session_id: str = ""
+    connection: str = ""
+    pending_resume: dict[str, Any] | None = None
+
+    def is_empty(self) -> bool:
+        return not (
+            self.question
+            or self.trace
+            or self.session_id
+            or self.connection
+            or self.pending_resume
+        )
+
+
+class _SlotFieldView(MutableMapping[str, Any]):
+    """Mutable mapping facade over one field of ``ConversationSlotState``.
+
+    This keeps old dict-shaped call sites and tests working while the underlying
+    state is stored per-slot instead of spread across parallel dictionaries.
+    """
+
+    def __init__(self, owner: "ConversationRunState", field_name: str) -> None:
+        self._owner = owner
+        self._field_name = field_name
+
+    def __getitem__(self, key: str) -> Any:
+        slot = self._owner.slots.get(str(key))
+        if slot is None:
+            raise KeyError(key)
+        value = getattr(slot, self._field_name)
+        if self._owner._field_is_empty(value):
+            raise KeyError(key)
+        return value
+
+    def __setitem__(self, key: str, value: Any) -> None:
+        self._owner._set_slot_field(str(key), self._field_name, value)
+
+    def __delitem__(self, key: str) -> None:
+        slot_key = str(key)
+        slot = self._owner.slots.get(slot_key)
+        if slot is None:
+            raise KeyError(key)
+        setattr(slot, self._field_name, self._owner._field_default(self._field_name))
+        self._owner._prune_slot(slot_key)
+
+    def __iter__(self) -> Iterator[str]:
+        for key, slot in self._owner.slots.items():
+            value = getattr(slot, self._field_name)
+            if not self._owner._field_is_empty(value):
+                yield key
+
+    def __len__(self) -> int:
+        return sum(1 for _ in self.__iter__())
 
 
 @dataclass
@@ -66,22 +126,15 @@ class ConversationRunState:
     max_runs: int = 4
     runs: dict[str, TaskHandle] = field(default_factory=dict)
     queue: list[tuple[str, dict[str, Any]]] = field(default_factory=list)
-    pending_resume: dict[str, dict[str, Any]] = field(default_factory=dict)
-    slot_trace: dict[str, list[dict[str, Any]]] = field(default_factory=dict)
-    slot_question: dict[str, str] = field(default_factory=dict)
-    slot_session: dict[str, str] = field(default_factory=dict)
-    slot_connection: dict[str, str] = field(default_factory=dict)
+    slots: dict[str, ConversationSlotState] = field(default_factory=dict)
     new_counter: int = 0
     active_key: str = ""
+    _field_views: dict[str, _SlotFieldView] = field(default_factory=dict, init=False, repr=False)
 
     def reset(self) -> None:
         self.runs.clear()
         self.queue.clear()
-        self.pending_resume.clear()
-        self.slot_trace.clear()
-        self.slot_question.clear()
-        self.slot_session.clear()
-        self.slot_connection.clear()
+        self.slots.clear()
         self.active_key = ""
 
     def new_slot_key(self) -> str:
@@ -115,7 +168,7 @@ class ConversationRunState:
         return bool(self.active_key and any(key == self.active_key for key, _payload in self.queue))
 
     def is_active_waiting(self) -> bool:
-        return bool(self.active_key and self.active_key in self.pending_resume)
+        return bool(self.active_key and self.pending_resume_for(self.active_key))
 
     def pending_rows(self) -> list[dict[str, Any]]:
         rows: list[dict[str, Any]] = []
@@ -124,7 +177,7 @@ class ConversationRunState:
             if key in seen or not key.startswith("new:"):
                 continue
             seen.add(key)
-            rows.append({"key": key, "title": self.slot_question.get(key, "")})
+            rows.append({"key": key, "title": self.question_for(key)})
         return rows
 
     def remap(self, old: str, new: str) -> None:
@@ -133,11 +186,7 @@ class ConversationRunState:
         if self.active_key == old:
             self.active_key = new
         self._move_key(self.runs, old, new)
-        self._move_key(self.pending_resume, old, new)
-        self._move_key(self.slot_trace, old, new)
-        self._move_key(self.slot_question, old, new)
-        self._move_key(self.slot_session, old, new)
-        self._move_key(self.slot_connection, old, new)
+        self._move_key(self.slots, old, new)
         self.queue = [(new if key == old else key, payload) for key, payload in self.queue]
 
     @staticmethod
@@ -147,6 +196,206 @@ class ConversationRunState:
         value = mapping.pop(old)
         if new not in mapping:
             mapping[new] = value
+
+    @property
+    def pending_resume(self) -> MutableMapping[str, dict[str, Any]]:
+        return self._field_view("pending_resume")
+
+    @property
+    def slot_trace(self) -> MutableMapping[str, list[dict[str, Any]]]:
+        return self._field_view("trace")
+
+    @property
+    def slot_question(self) -> MutableMapping[str, str]:
+        return self._field_view("question")
+
+    @property
+    def slot_session(self) -> MutableMapping[str, str]:
+        return self._field_view("session_id")
+
+    @property
+    def slot_connection(self) -> MutableMapping[str, str]:
+        return self._field_view("connection")
+
+    def slot(self, key: str) -> ConversationSlotState | None:
+        return self.slots.get(str(key))
+
+    def ensure_slot(self, key: str) -> ConversationSlotState:
+        slot_key = str(key or "")
+        if not slot_key:
+            raise ValueError("slot key is required")
+        return self.slots.setdefault(slot_key, ConversationSlotState())
+
+    def activate(self, key: str) -> None:
+        self.active_key = str(key or "")
+
+    def clear_active(self) -> None:
+        self.active_key = ""
+
+    def question_for(self, key: str) -> str:
+        slot = self.slot(key)
+        return str(slot.question) if slot is not None else ""
+
+    def set_question(self, key: str, question: str) -> None:
+        self.ensure_slot(key).question = str(question or "")
+
+    def trace_for(self, key: str) -> list[dict[str, Any]]:
+        slot = self.slot(key)
+        return list(slot.trace) if slot is not None else []
+
+    def set_trace(self, key: str, events: list[dict[str, Any]]) -> None:
+        self.ensure_slot(key).trace = [dict(item) for item in (events or []) if isinstance(item, dict)]
+
+    def append_trace_event(self, key: str, event: dict[str, Any]) -> None:
+        self.ensure_slot(key).trace.append(dict(event))
+
+    def session_for(self, key: str) -> str:
+        slot = self.slot(key)
+        return str(slot.session_id) if slot is not None else ""
+
+    def set_session(self, key: str, session_id: str) -> None:
+        self.ensure_slot(key).session_id = str(session_id or "")
+
+    def connection_for(self, key: str) -> str:
+        slot = self.slot(key)
+        return str(slot.connection) if slot is not None else ""
+
+    def set_connection(self, key: str, connection: str) -> None:
+        self.ensure_slot(key).connection = str(connection or "")
+
+    def pending_resume_for(self, key: str) -> dict[str, Any] | None:
+        slot = self.slot(key)
+        if slot is None or not isinstance(slot.pending_resume, dict):
+            return None
+        return dict(slot.pending_resume)
+
+    def set_pending_resume(self, key: str, resume_state: dict[str, Any] | None) -> None:
+        slot = self.ensure_slot(key)
+        slot.pending_resume = dict(resume_state or {}) if resume_state else None
+
+    def clear_pending_resume(self, key: str) -> None:
+        slot = self.slot(key)
+        if slot is None:
+            return
+        slot.pending_resume = None
+        self._prune_slot(str(key))
+
+    def clear_runtime(self, key: str) -> None:
+        slot = self.slot(key)
+        if slot is None:
+            return
+        slot.question = ""
+        slot.trace = []
+        slot.connection = ""
+        slot.pending_resume = None
+        self._prune_slot(str(key))
+
+    def discard_slot(self, key: str) -> None:
+        slot_key = str(key or "")
+        self.runs.pop(slot_key, None)
+        self.remove_queued(slot_key)
+        self.slots.pop(slot_key, None)
+        if self.active_key == slot_key:
+            self.active_key = ""
+
+    def active_debug_context(self, *, connection_name: str, session_id: str) -> dict[str, Any]:
+        key = self.active_key
+        return {
+            "connection_name": str(connection_name or ""),
+            "session_id": str(session_id or ""),
+            "active_slot": key,
+            "trace": self.trace_for(key) if key else [],
+            "question": self.question_for(key) if key else "",
+        }
+
+    def _field_view(self, field_name: str) -> _SlotFieldView:
+        view = self._field_views.get(field_name)
+        if view is None:
+            view = _SlotFieldView(self, field_name)
+            self._field_views[field_name] = view
+        return view
+
+    def _set_slot_field(self, key: str, field_name: str, value: Any) -> None:
+        slot = self.ensure_slot(key)
+        if field_name in {"question", "session_id", "connection"}:
+            setattr(slot, field_name, str(value or ""))
+        elif field_name == "trace":
+            slot.trace = [dict(item) for item in (value or []) if isinstance(item, dict)]
+        elif field_name == "pending_resume":
+            slot.pending_resume = dict(value or {}) if value else None
+        else:
+            setattr(slot, field_name, value)
+        self._prune_slot(key)
+
+    @staticmethod
+    def _field_default(field_name: str) -> Any:
+        if field_name in {"question", "session_id", "connection"}:
+            return ""
+        if field_name == "trace":
+            return []
+        if field_name == "pending_resume":
+            return None
+        return None
+
+    @staticmethod
+    def _field_is_empty(value: Any) -> bool:
+        return value in (None, "", [], {})
+
+    def _prune_slot(self, key: str) -> None:
+        slot = self.slots.get(key)
+        if slot is None:
+            return
+        if key == self.active_key:
+            return
+        if key in self.runs or any(queued_key == key for queued_key, _ in self.queue):
+            return
+        if slot.is_empty():
+            self.slots.pop(key, None)
+
+
+@dataclass(frozen=True)
+class BackgroundWorkItem:
+    action: str
+    connection: str
+    label: str
+
+
+@dataclass
+class BackgroundWorkState:
+    items: list[BackgroundWorkItem] = field(default_factory=list)
+
+    def push(self, action: str, connection: str, label: str) -> None:
+        self.items.append(BackgroundWorkItem(str(action or ""), str(connection or ""), str(label or "")))
+
+    def pop(self, action: str, connection: str = "") -> None:
+        target_action = str(action or "")
+        target_conn = str(connection or "")
+        for index in range(len(self.items) - 1, -1, -1):
+            item = self.items[index]
+            if item.action != target_action:
+                continue
+            if target_conn and item.connection and item.connection != target_conn:
+                continue
+            self.items.pop(index)
+            return
+
+    def clear(self) -> None:
+        self.items.clear()
+
+    def label_for(self, connection: str) -> str:
+        target = str(connection or "")
+        if not target:
+            return ""
+        for item in reversed(self.items):
+            if item.connection == target:
+                return item.label
+        return ""
+
+    def busy(self, connection: str = "") -> bool:
+        target = str(connection or "")
+        if not target:
+            return bool(self.items)
+        return any(item.connection == target for item in self.items)
 
 
 class UiStateBinder:

@@ -66,6 +66,7 @@ from dbaide.desktop.views.topbar import TopBar
 from dbaide.desktop.run_controllers import ConversationRunController, OneOffActionController
 from dbaide.desktop.task_manager import TaskHandle, TaskManager
 from dbaide.desktop.ui_state import (
+    BackgroundWorkState,
     ConversationRunState,
     ModeUiState,
     OneOffRunState,
@@ -94,10 +95,9 @@ class MainWindow(QMainWindow):
         self.tasks = TaskManager(service, self)
         self.run_state = ConversationRunState(max_runs=self.service.cfg.max_concurrent_runs())
         self.oneoff_state = OneOffRunState()
+        self.background_work = BackgroundWorkState()
         self.oneoff_controller = OneOffActionController(self)
         self.conversation_controller = ConversationRunController(self)
-        # (action, connection, label) — background asset/schema work tracked for the top bar.
-        self._asset_work_stack: list[tuple[str, str, str]] = []
         self.bootstrap: dict[str, Any] = {}
         self.schema_rows: list[dict[str, Any]] = []
         self._last_question = ""
@@ -247,6 +247,25 @@ class MainWindow(QMainWindow):
             self.oneoff_state = OneOffRunState()
         return self.oneoff_state
 
+    def _ensure_background_work(self) -> BackgroundWorkState:
+        if "background_work" not in self.__dict__:
+            self.background_work = BackgroundWorkState()
+        return self.background_work
+
+    @property
+    def _asset_work_stack(self) -> list[tuple[str, str, str]]:
+        return [
+            (item.action, item.connection, item.label)
+            for item in self._ensure_background_work().items
+        ]
+
+    @_asset_work_stack.setter
+    def _asset_work_stack(self, value: list[tuple[str, str, str]]) -> None:
+        state = self._ensure_background_work()
+        state.clear()
+        for action, connection, label in value or []:
+            state.push(action, connection, label)
+
     def _ensure_ui_state(self) -> UiStateBinder:
         if "ui_state" not in self.__dict__:
             self.ui_state = UiStateBinder(self)
@@ -278,43 +297,53 @@ class MainWindow(QMainWindow):
 
     @property
     def _pending_resume(self) -> dict[str, dict[str, Any]]:
-        return self._ensure_run_state().pending_resume
+        return self._ensure_run_state().pending_resume  # type: ignore[return-value]
 
     @_pending_resume.setter
     def _pending_resume(self, value: dict[str, dict[str, Any]]) -> None:
-        self._ensure_run_state().pending_resume = value
+        view = self._ensure_run_state().pending_resume
+        view.clear()
+        view.update(value or {})
 
     @property
     def _slot_trace(self) -> dict[str, list[dict[str, Any]]]:
-        return self._ensure_run_state().slot_trace
+        return self._ensure_run_state().slot_trace  # type: ignore[return-value]
 
     @_slot_trace.setter
     def _slot_trace(self, value: dict[str, list[dict[str, Any]]]) -> None:
-        self._ensure_run_state().slot_trace = value
+        view = self._ensure_run_state().slot_trace
+        view.clear()
+        view.update(value or {})
 
     @property
     def _slot_question(self) -> dict[str, str]:
-        return self._ensure_run_state().slot_question
+        return self._ensure_run_state().slot_question  # type: ignore[return-value]
 
     @_slot_question.setter
     def _slot_question(self, value: dict[str, str]) -> None:
-        self._ensure_run_state().slot_question = value
+        view = self._ensure_run_state().slot_question
+        view.clear()
+        view.update(value or {})
 
     @property
     def _slot_session(self) -> dict[str, str]:
-        return self._ensure_run_state().slot_session
+        return self._ensure_run_state().slot_session  # type: ignore[return-value]
 
     @_slot_session.setter
     def _slot_session(self, value: dict[str, str]) -> None:
-        self._ensure_run_state().slot_session = value
+        view = self._ensure_run_state().slot_session
+        view.clear()
+        view.update(value or {})
 
     @property
     def _slot_connection(self) -> dict[str, str]:
-        return self._ensure_run_state().slot_connection
+        return self._ensure_run_state().slot_connection  # type: ignore[return-value]
 
     @_slot_connection.setter
     def _slot_connection(self, value: dict[str, str]) -> None:
-        self._ensure_run_state().slot_connection = value
+        view = self._ensure_run_state().slot_connection
+        view.clear()
+        view.update(value or {})
 
     @property
     def _new_counter(self) -> int:
@@ -637,29 +666,22 @@ class MainWindow(QMainWindow):
     def _push_asset_work(self, action: str, payload: dict[str, Any]) -> None:
         conn = self._asset_work_connection(payload)
         label = self._asset_status_label(action)
-        self._asset_work_stack.append((action, conn, label))
+        self._ensure_background_work().push(action, conn, label)
         if conn == self.current_connection():
             self.conversation_controller.sync_work_ui()
 
     def _pop_asset_work(self, action: str, payload: dict[str, Any]) -> None:
         conn = self._asset_work_connection(payload)
-        for index in range(len(self._asset_work_stack) - 1, -1, -1):
-            item_action, item_conn, _label = self._asset_work_stack[index]
-            if item_action != action:
-                continue
-            if conn and item_conn and item_conn != conn:
-                continue
-            self._asset_work_stack.pop(index)
-            break
+        self._ensure_background_work().pop(action, conn)
         self.conversation_controller.sync_work_ui()
 
     def _current_asset_label(self, conn: str | None = None) -> str:
         conn = conn or self.current_connection()
         if not conn:
             return ""
-        for _action, item_conn, label in reversed(self._asset_work_stack):
-            if item_conn == conn:
-                return label
+        label = self._ensure_background_work().label_for(conn)
+        if label:
+            return label
         oneoff = self._oneoff
         if self._building and str(oneoff.connection or "") == conn:
             return _i18n_t("status.building")
@@ -670,8 +692,8 @@ class MainWindow(QMainWindow):
     def _assets_busy(self, conn: str | None = None) -> bool:
         conn = conn or self.current_connection()
         if not conn:
-            return bool(self._asset_work_stack) or self._building
-        if any(item_conn == conn for _action, item_conn, _label in self._asset_work_stack):
+            return self._ensure_background_work().busy() or self._building
+        if self._ensure_background_work().busy(conn):
             return True
         oneoff = self._oneoff
         if self._building and str(oneoff.connection or "") == conn:
@@ -788,7 +810,7 @@ class MainWindow(QMainWindow):
         if worker is not None and not worker.is_cancelled:
             worker.cancel()
         self.tasks.cancel_matching(lambda handle: handle.action in self._BACKGROUND_CANCEL_ACTIONS)
-        self._asset_work_stack.clear()
+        self._ensure_background_work().clear()
 
     def _refresh_connection_context(self, conn_name: str) -> None:
         self.sidebar.reset_live_updates()
@@ -1119,9 +1141,9 @@ class MainWindow(QMainWindow):
         self.workbench.open_sql(sql)
 
     def submit_composer(self, question: str) -> None:
-        key = self._active_key
+        key = self.run_state.active_key
         # Active slot is awaiting a clarification reply → route there.
-        if key and key in self._pending_resume:
+        if key and self.run_state.pending_resume_for(key):
             self._submit_clarification(key, question)
             return
         if not question:
@@ -1140,11 +1162,11 @@ class MainWindow(QMainWindow):
         # A brand-new chat has no slot yet — mint one and make it active.
         if not key:
             key = self.conversation_controller.new_slot_key()
-            self._active_key = key
+            self.run_state.activate(key)
             self.current_session_id = ""
             self.ask_tab.set_active(key)
         self._last_question = question
-        self._slot_question[key] = question
+        self.run_state.set_question(key, question)
         # Database scope for the agent comes from composer attachments (schema_scope),
         # not a global selector — payload database is left empty for auto scope.
         attachments = self.composer.attachments()
@@ -1153,12 +1175,12 @@ class MainWindow(QMainWindow):
         self.composer.clear_input()
         self.ask_tab.append_user(key, question, connection=conn, database="", attachments=attachments)
         # Fresh trace for this turn (streamed inline into the turn's status chip).
-        self._slot_trace[key] = []
+        self.run_state.set_trace(key, [])
         self.conversation_controller.start_ask(key, {
             "connection_name": conn,
             "question": question,
             "database": "",
-            "session_id": self._slot_session.get(key, ""),
+            "session_id": self.run_state.session_for(key),
             "schema_scope": schema_scope,
             "attachments": attachments,  # raw UI chips — persisted on the turn
         })
@@ -1168,10 +1190,10 @@ class MainWindow(QMainWindow):
         if not reply:
             self.toast(_i18n_t("toast.enter_reply"))
             return
-        resume_state = self._pending_resume.get(key)
+        resume_state = self.run_state.pending_resume_for(key)
         if not resume_state:
             # No pause for this slot — treat as a fresh question on the active slot.
-            if key == self._active_key:
+            if key == self.run_state.active_key:
                 self.submit_composer(reply)
             return
         conn = self.current_connection()
@@ -1181,11 +1203,11 @@ class MainWindow(QMainWindow):
         if self._assets_busy(conn):
             self.toast(_i18n_t("toast.assets_busy"))
             return
-        original_question = str(resume_state.get("question") or self._slot_question.get(key, ""))
+        original_question = str(resume_state.get("question") or self.run_state.question_for(key))
         # Consume the pause: controller queueing guarantees the reply is never
         # lost even when every run slot is busy (it waits for a free slot).
-        self._pending_resume.pop(key, None)
-        if key == self._active_key:
+        self.run_state.clear_pending_resume(key)
+        if key == self.run_state.active_key:
             self.composer.clear_input()
         self.ask_tab.append_clarification_reply(key, reply)
         self.ask_tab.append_activity(key, f"User replied: {reply[:80]}")
@@ -1195,7 +1217,7 @@ class MainWindow(QMainWindow):
             "user_reply": reply,
             "resume_state": resume_state,
             "database": "",
-            "session_id": self._slot_session.get(key, ""),
+            "session_id": self.run_state.session_for(key),
         })
 
     def build_assets(self) -> None:
@@ -2215,7 +2237,7 @@ class MainWindow(QMainWindow):
         """Open a fresh chat thread in its own slot. Other sessions keep running in
         the background; we just switch the view to a new, empty conversation."""
         key = self.conversation_controller.new_slot_key()
-        self._active_key = key
+        self.run_state.activate(key)
         self.current_session_id = ""
         self.ask_tab.set_active(key)
         self.ask_tab.set_has_connection(bool(self.current_connection()))
@@ -2239,8 +2261,8 @@ class MainWindow(QMainWindow):
             sid = str(data.get("session_id") or session_id)
             turns = data.get("turns") or []
             self.ask_tab.load_session(sid, turns, connection=conn)
-            self._slot_session[sid] = sid
-            self._slot_trace[sid] = (turns[-1].get("trace") if turns else []) or []
+            self.run_state.set_session(sid, sid)
+            self.run_state.set_trace(sid, (turns[-1].get("trace") if turns else []) or [])
             self._activate_slot(sid)
             self.switch_tab("Chat")
 
@@ -2250,8 +2272,8 @@ class MainWindow(QMainWindow):
         """Bring slot ``key`` to the front: show its conversation and sync the
         composer to whether it is idle / running / awaiting a reply. (Each turn's
         trace travels inline with the conversation, so there's nothing else to swap.)"""
-        self._active_key = key
-        self.current_session_id = self._slot_session.get(key, "") or (key if not key.startswith("new:") else "")
+        self.run_state.activate(key)
+        self.current_session_id = self.run_state.session_for(key) or (key if not key.startswith("new:") else "")
         self.ask_tab.set_has_connection(bool(self.current_connection()))
         self.ask_tab.set_active(key)
         self.conversation_controller.sync_work_ui()
@@ -2284,12 +2306,10 @@ class MainWindow(QMainWindow):
                 worker = self._runs.pop(session_id, None)
                 if worker and not worker.is_cancelled:
                     worker.cancel()
-                for d in (self._pending_resume, self._slot_question, self._slot_session, self._slot_trace, self._slot_connection):
-                    d.pop(session_id, None)
-                was_active = session_id == self._active_key
+                was_active = session_id == self.run_state.active_key
+                self.run_state.discard_slot(session_id)
                 self.ask_tab.discard_slot(session_id)
                 if was_active:
-                    self._active_key = ""
                     self.current_session_id = ""
                     self.ask_tab.set_has_connection(bool(conn))
                     self.conversation_controller.sync_work_ui()
@@ -2326,14 +2346,10 @@ class MainWindow(QMainWindow):
         from dbaide.history.debug_bundle import create_desktop_debug_bundle
         from dbaide.observability.app_logging import tail_log_lines
 
-        key = self._active_key
-        context = {
-            "connection_name": self.current_connection(),
-            "session_id": self.current_session_id,
-            "active_slot": key,
-            "trace": list(self._slot_trace.get(key, [])) if key else [],
-            "question": self._slot_question.get(key, "") if key else "",
-        }
+        context = self.run_state.active_debug_context(
+            connection_name=self.current_connection(),
+            session_id=self.current_session_id,
+        )
         try:
             path = create_desktop_debug_bundle(
                 config=sanitize_config_data(self.service.cfg._data),

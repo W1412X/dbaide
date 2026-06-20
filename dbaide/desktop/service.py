@@ -40,85 +40,18 @@ from dbaide.core import WorkflowRequest
 from dbaide.core.workflow import WorkflowEngine
 from dbaide.db.identifiers import normalize_db_table_for_dialect
 from dbaide.desktop.service_actions import build_action_handlers
+from dbaide.desktop.service_payloads import (
+    connection_payload,
+    model_payload,
+    to_payload,
+    validate_model_config,
+)
 from dbaide.history.store import WorkflowHistoryStore
 from dbaide.history.session_store import ChatSessionStore, make_turn
 from dbaide.llm import LLMMessage, NullLLMClient, build_llm_client
 from dbaide.models import ConnectionConfig, ModelConfig
 from dbaide.session import Session
 from dbaide.tools import QueryTools
-
-
-def _to_dict(obj: Any) -> Any:
-    if obj is None:
-        return None
-    if isinstance(obj, (str, int, float, bool)):
-        return obj
-    if isinstance(obj, list):
-        return [_to_dict(item) for item in obj]
-    if isinstance(obj, tuple):
-        return [_to_dict(item) for item in obj]
-    if isinstance(obj, dict):
-        return {str(key): _to_dict(value) for key, value in obj.items()}
-    if hasattr(obj, "to_dict"):
-        return obj.to_dict()
-    if hasattr(obj, "__slots__"):
-        return {slot: _to_dict(getattr(obj, slot)) for slot in obj.__slots__ if hasattr(obj, slot)}
-    if hasattr(obj, "__dict__"):
-        return {key: _to_dict(value) for key, value in obj.__dict__.items()}
-    return str(obj)
-
-
-def _conn_payload(conn: ConnectionConfig, *, has_assets: bool) -> dict[str, Any]:
-    target = conn.path if conn.type == "sqlite" else f"{conn.host}:{conn.port or ''}/{conn.database}"
-    return {
-        "name": conn.name,
-        "type": conn.type,
-        "database": conn.database,
-        "host": conn.host,
-        "port": conn.port,
-        "user": conn.user,
-        "password_env": conn.password_env,
-        "has_password": bool(conn.password or conn.password_env),
-        "path": conn.path,
-        "target": target,
-        "load_profile": getattr(conn, "load_profile", "production"),
-        "session_timezone": getattr(conn, "session_timezone", "UTC"),
-        "sslmode": getattr(conn, "sslmode", ""),
-        "ssl_ca": getattr(conn, "ssl_ca", ""),
-        "asset_status": "ready" if has_assets else "missing",
-    }
-
-
-def _model_payload(model: ModelConfig) -> dict[str, Any]:
-    return {
-        "name": model.name,
-        "provider": model.provider,
-        "base_url": model.base_url,
-        "api_key_env": model.api_key_env,
-        "has_api_key": bool(model.api_key or model.api_key_env),
-        "model": model.model,
-        "timeout_seconds": model.timeout_seconds,
-        "context_length": model.context_length,
-    }
-
-
-def _validate_model_config(model: ModelConfig) -> None:
-    if model.provider in {"none", ""}:
-        return
-    missing: list[str] = []
-    if not model.base_url.strip():
-        missing.append("Base URL")
-    if not model.model.strip():
-        missing.append("Model ID")
-    if not model.api_key.strip() and not model.api_key_env.strip():
-        missing.append("API Key")
-    if missing:
-        raise ValueError(
-            "Model configuration incomplete. Missing: "
-            + ", ".join(missing)
-            + ". All three are required for openai_compatible."
-        )
-
 
 class DesktopService:
     """Facade used by the desktop UI and tests.
@@ -134,6 +67,7 @@ class DesktopService:
         self.annotations = AnnotationStore()
         self.history = WorkflowHistoryStore()
         self.sessions = ChatSessionStore()
+        self._handlers = build_action_handlers(self)
         import threading
         self._build_lock = threading.Lock()
         self._active_builds: set[str] = set()
@@ -160,10 +94,9 @@ class DesktopService:
 
     def dispatch(self, action: str, payload: dict[str, Any] | None = None) -> Any:
         payload = payload or {}
-        handlers = build_action_handlers(self)
-        if action not in handlers:
+        if action not in self._handlers:
             raise ValueError(f"Unknown desktop action: {action}")
-        return handlers[action](payload)
+        return self._handlers[action](payload)
 
     def bootstrap(self, _payload: dict[str, Any] | None = None) -> dict[str, Any]:
         conns = self.cfg.connections()
@@ -173,15 +106,15 @@ class DesktopService:
         return {
             "connections": [
                 {
-                    **_conn_payload(conn, has_assets=bool(self.store.instance_doc(conn.name, connection=conn))),
+                    **connection_payload(conn, has_assets=bool(self.store.instance_doc(conn.name, connection=conn))),
                     "default": name == default,
                 }
                 for name, conn in conns.items()
             ],
             "default_connection": default,
-            "models": [_model_payload(m) for m in models_map.values()],
+            "models": [model_payload(m) for m in models_map.values()],
             "default_model": default_model,
-            "model": _model_payload(self.cfg.model()),
+            "model": model_payload(self.cfg.model()),
             "asset_root": str(self.store.base_dir),
         }
 
@@ -201,7 +134,7 @@ class DesktopService:
                 payload["password_env"] = existing.password_env
         conn = self._connection_from_payload(payload)
         self.cfg.upsert_connection(conn, make_default=bool(payload.get("make_default", False)))
-        return {"connection": _conn_payload(conn, has_assets=bool(self.store.instance_doc(conn.name, connection=conn)))}
+        return {"connection": connection_payload(conn, has_assets=bool(self.store.instance_doc(conn.name, connection=conn)))}
 
     def delete_connection(self, payload: dict[str, Any]) -> dict[str, Any]:
         name = str(payload.get("name") or "").strip()
@@ -249,9 +182,9 @@ class DesktopService:
             timeout_seconds=int(payload.get("timeout_seconds") or payload.get("timeout") or 60),
             context_length=payload.get("context_length") or 32000,
         )
-        _validate_model_config(model)
+        validate_model_config(model)
         self.cfg.upsert_model(model, make_default=bool(payload.get("make_default", False)))
-        return {"model": _model_payload(model)}
+        return {"model": model_payload(model)}
 
     def delete_model(self, payload: dict[str, Any]) -> dict[str, Any]:
         name = str(payload.get("name") or "").strip()
@@ -263,7 +196,7 @@ class DesktopService:
     def set_default_model(self, payload: dict[str, Any]) -> dict[str, Any]:
         name = str(payload.get("name") or "").strip()
         self.cfg.set_default_model(name)
-        return {"default_model": name, "model": _model_payload(self.cfg.model(name))}
+        return {"default_model": name, "model": model_payload(self.cfg.model(name))}
 
     def list_databases(self, payload: dict[str, Any]) -> dict[str, Any]:
         conn = self.cfg.get_connection(str(payload.get("name") or payload.get("connection_name") or "") or None)
@@ -323,7 +256,7 @@ class DesktopService:
             )
         finally:
             self._end_build(conn.name)
-        return {"stats": _to_dict(stats)}
+        return {"stats": to_payload(stats)}
 
     def project_instance(self, payload: dict[str, Any]) -> dict[str, Any]:
         """Build the BASE (catalog-only) document from the live catalog — table/column
@@ -355,7 +288,7 @@ class DesktopService:
             )
         finally:
             self._end_build(conn.name)
-        return {"stats": _to_dict(stats)}
+        return {"stats": to_payload(stats)}
 
     def _project_table_doc(self, summarizer, adapter, instance: str, database: str, table_info) -> dict[str, Any]:
         """Build ONE table's base doc (catalog-only) in memory — no write, no LLM, no
@@ -638,7 +571,7 @@ class DesktopService:
             )
         finally:
             self._end_build(conn.name)
-        return {"stats": _to_dict(stats)}
+        return {"stats": to_payload(stats)}
 
     def schema_tree(self, payload: dict[str, Any]) -> list[dict[str, Any]]:
         name = str(payload.get("name") or payload.get("connection_name") or "")
@@ -1308,7 +1241,7 @@ class DesktopService:
             timeout_seconds=int(payload.get("timeout_seconds") or payload.get("timeout") or 60),
             context_length=payload.get("context_length") or 32000,
         )
-        _validate_model_config(model)
+        validate_model_config(model)
         llm = build_llm_client(model)
         if isinstance(llm, NullLLMClient):
             return {"ok": False, "message": "No model configured"}
@@ -1851,7 +1784,7 @@ class DesktopService:
         from dbaide.backup import BackupRegistry
         registry = BackupRegistry()
         records = registry.list_backups()
-        return {"records": [_to_dict(r) for r in records]}
+        return {"records": [to_payload(r) for r in records]}
 
     def backup_delete(self, payload: dict[str, Any]) -> dict[str, Any]:
         from dbaide.backup import BackupRegistry

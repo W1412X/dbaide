@@ -107,7 +107,7 @@ class OneOffActionController:
                 return
             key = win.conversation_controller.active_or_new_key()
             win.ask_tab.set_active(key)
-            win._active_key = key
+            win.run_state.activate(key)
             win.ask_tab.append_search_hits(key, win._last_question, result or [])
             win.switch_tab("Chat")
             return
@@ -214,11 +214,11 @@ class ConversationRunController:
 
     def active_or_new_key(self) -> str:
         win = self.win
-        if not win._active_key:
-            win._active_key = win.run_state.active_or_new_key()
+        if not win.run_state.active_key:
+            win.run_state.activate(win.run_state.active_or_new_key())
             win.current_session_id = ""
-            win.ask_tab.set_active(win._active_key)
-        return win._active_key
+            win.ask_tab.set_active(win.run_state.active_key)
+        return win.run_state.active_key
 
     def start_ask(self, key: str, payload: dict[str, Any]) -> None:
         win = self.win
@@ -240,7 +240,7 @@ class ConversationRunController:
             metadata={"slot": key},
         )
         win._runs[key] = handle
-        win._slot_connection[key] = str(payload.get("connection_name") or win.current_connection() or "")
+        win.run_state.set_connection(key, str(payload.get("connection_name") or win.current_connection() or ""))
         self.sync_work_ui()
 
     def on_progress(self, key: str, message: object) -> None:
@@ -251,52 +251,52 @@ class ConversationRunController:
             if message.get("kind") == "answer_chunk":
                 win.ask_tab.append_answer_chunk(key, str(message.get("text") or ""))
                 return
-            win._slot_trace.setdefault(key, []).append(message)
+            win.run_state.append_trace_event(key, message)
             win.ask_tab.append_activity_event(key, message)
-            if key == win._active_key:
+            if key == win.run_state.active_key:
                 win._ensure_ui_state().statusbar_message(progress_label(message))
         else:
             text = str(message or "").strip()
             if text:
                 win.ask_tab.append_activity(key, text)
-                if key == win._active_key:
+                if key == win.run_state.active_key:
                     win._ensure_ui_state().statusbar_message(progress_label(text))
 
     def on_done(self, key: str, result: Any) -> None:
         win = self.win
         if key not in win._runs:
             return
-        run_connection = win._slot_connection.get(key) or win.current_connection()
+        run_connection = win.run_state.connection_for(key) or win.current_connection()
         win._runs.pop(key, None)
-        server_id = str(result.get("session_id") or win._slot_session.get(key) or "")
+        server_id = str(result.get("session_id") or win.run_state.session_for(key) or "")
         if server_id and server_id != key and not win.ask_tab.has_slot(server_id):
             self.bind_slot_to_session(key, server_id)
             key = server_id
-        win._slot_session[key] = server_id
+        win.run_state.set_session(key, server_id)
         if result.get("trace"):
-            win._slot_trace[key] = list(result.get("trace") or [])
+            win.run_state.set_trace(key, result.get("trace") or [])
         status = str(result.get("status") or "")
         if status == "wait_user":
-            win._pending_resume[key] = result.get("resume_state") or {}
-            win._slot_question[key] = str(result.get("question") or win._slot_question.get(key, ""))
+            win.run_state.set_pending_resume(key, result.get("resume_state") or {})
+            win.run_state.set_question(key, str(result.get("question") or win.run_state.question_for(key)))
             win.ask_tab.append_result(key, result)
-            if key == win._active_key:
+            if key == win.run_state.active_key:
                 win.toast(_i18n_t("toast.waiting_reply"))
         elif status == "cancelled":
-            win._pending_resume.pop(key, None)
+            win.run_state.clear_pending_resume(key)
             if win.ask_tab.turn_open(key):
                 win.ask_tab.finish_turn_error(key, _i18n_t("error.turn.cancelled"))
             win.toast(_i18n_t("toast.cancelled"))
         else:
-            win._pending_resume.pop(key, None)
+            win.run_state.clear_pending_resume(key)
             win.ask_tab.append_result(key, result)
             win.bus.emit(QUERY_COMPLETED, {"instance": run_connection})
-        if key == win._active_key:
+        if key == win.run_state.active_key:
             win.current_session_id = server_id or win.current_session_id
         if server_id and run_connection == win.current_connection():
             win._load_sessions(run_connection)
         if status != "wait_user":
-            win._slot_connection.pop(key, None)
+            win.run_state.set_connection(key, "")
         self.drain_queue()
         self.sync_work_ui()
 
@@ -305,10 +305,7 @@ class ConversationRunController:
         if key not in win._runs:
             return
         win._runs.pop(key, None)
-        win._slot_connection.pop(key, None)
-        win._pending_resume.pop(key, None)
-        win._slot_question.pop(key, None)
-        win._slot_trace.pop(key, None)
+        win.run_state.clear_runtime(key)
         if win.ask_tab.turn_open(key):
             win.ask_tab.finish_turn_error(key, self._format_turn_error(exc))
         win.toast(self._user_error_message(exc))
@@ -340,7 +337,7 @@ class ConversationRunController:
 
     def stop_task(self) -> None:
         win = self.win
-        key = win._active_key
+        key = win.run_state.active_key
         worker = win._runs.get(key) if key else None
         if worker and not worker.is_cancelled:
             worker.cancel()
@@ -407,7 +404,7 @@ class ConversationRunController:
         ))
 
     def chat_selection_id(self) -> str:
-        key = self.win._active_key
+        key = self.win.run_state.active_key
         return key if (key and key.startswith("new:")) else self.win.current_session_id
 
     def pending_chat_rows(self) -> list[dict[str, Any]]:
