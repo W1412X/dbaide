@@ -21,6 +21,7 @@ from PyQt6.QtWidgets import (
 
 from dbaide.desktop.components.base import compact_button, ghost_action_button
 from dbaide.desktop.components.markdown_webview import try_create_webengine_view
+from dbaide.desktop.dialogs.file_dialogs import get_save_file_name
 from dbaide.desktop.theme import Theme, app_style
 from dbaide.desktop.window_chrome import ChromeDialog
 from dbaide.i18n import t
@@ -239,10 +240,8 @@ class AnswerExportDialog(ChromeDialog):
         QTimer.singleShot(1600, lambda: self._copy_btn.setText(t("ask.export_copy_html")))
 
     def _save_html(self) -> None:
-        from PyQt6.QtWidgets import QFileDialog
-
         default_name = suggest_export_filename(self._title)
-        path, _ = QFileDialog.getSaveFileName(
+        path, _ = get_save_file_name(
             self,
             t("ask.export_save_html"),
             default_name,

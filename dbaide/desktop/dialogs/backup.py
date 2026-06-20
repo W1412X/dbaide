@@ -10,12 +10,9 @@ from typing import Any
 from PyQt6.QtCore import QSize, Qt, pyqtSignal
 from PyQt6.QtGui import QColor, QFont
 from PyQt6.QtWidgets import (
-    QComboBox,
-    QDialog,
     QHBoxLayout,
     QHeaderView,
     QLabel,
-    QMessageBox,
     QPushButton,
     QSpinBox,
     QTableWidget,
@@ -26,7 +23,10 @@ from PyQt6.QtWidgets import (
 )
 
 from dbaide.desktop.components.icons import svg_icon
+from dbaide.desktop.components.inputs import Combo
+from dbaide.desktop.dialogs.message_dialog import confirm as dialog_confirm
 from dbaide.desktop.theme import Theme
+from dbaide.desktop.window_chrome import ChromeDialog
 from dbaide.i18n import t
 
 
@@ -56,7 +56,7 @@ _INPUT_STYLE = (
 )
 
 
-class BackupDialog(QDialog):
+class BackupDialog(ChromeDialog):
     """Compact backup configuration dialog.
 
     Accepts a ``service`` (DesktopService) and ``connection_name`` so that all
@@ -106,7 +106,7 @@ class BackupDialog(QDialog):
         fmt_col.setSpacing(2)
         fl = QLabel(t("backup.format"))
         fl.setStyleSheet(f"font-size: 11px; color: {Theme.MUTED};")
-        self._fmt_combo = QComboBox()
+        self._fmt_combo = Combo()
         self._fmt_combo.addItems(["csv", "sql", "sqlite"])
         self._fmt_combo.setFixedHeight(28)
         self._fmt_combo.setStyleSheet(f"QComboBox {{ {_INPUT_STYLE} }}")
@@ -382,8 +382,7 @@ class BackupManager(QWidget):
         rec = self._selected_record()
         if rec is None:
             return
-        reply = QMessageBox.question(self, t("backup.delete"), t("backup.delete_confirm"))
-        if reply != QMessageBox.StandardButton.Yes:
+        if not dialog_confirm(self, t("backup.delete"), t("backup.delete_confirm")):
             return
         self._do_delete(int(rec.get("id", 0)))
         self.refresh()

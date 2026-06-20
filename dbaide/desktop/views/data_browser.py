@@ -174,11 +174,20 @@ class DataBrowser(QWidget):
         self._filter_completer.setWidget(self._filter)
         self._filter_completer.setCompletionMode(QCompleter.CompletionMode.PopupCompletion)
         self._filter_completer.setCaseSensitivity(Qt.CaseSensitivity.CaseInsensitive)
-        self._filter_completer.popup().setStyleSheet(
+        popup = self._filter_completer.popup()
+        popup.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        popup.setStyleSheet(
             f"QListView {{ background: {Theme.SURFACE}; color: {Theme.TEXT};"
             f" border: 1px solid {Theme.BORDER}; border-radius: 8px; padding: 4px; outline: none; }}"
             f"QListView::item {{ padding: 4px 8px; border-radius: 5px; }}"
+            f"QListView::item:hover {{ background: {Theme.PANEL_2}; }}"
             f"QListView::item:selected {{ background: {Theme.PANEL_3}; color: {Theme.TEXT}; }}"
+            f"QScrollBar:vertical {{ background: transparent; width: 6px; margin: 2px; border: none; }}"
+            f"QScrollBar::handle:vertical {{ background: {Theme.PANEL_3}; border-radius: 3px;"
+            f" min-height: 20px; border: none; }}"
+            f"QScrollBar::handle:vertical:hover {{ background: {Theme.MUTED_2}; }}"
+            f"QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical,"
+            f" QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical {{ height: 0; background: transparent; }}"
         )
         self._filter_completer.activated.connect(self._insert_filter_completion)
         self._filter.textEdited.connect(self._on_filter_text)
@@ -466,22 +475,23 @@ class DataBrowser(QWidget):
 
     def _save_with_scope(self, fmt: str) -> None:
         """Ask the user whether to export the current page or all rows, then save."""
-        from PyQt6.QtWidgets import QMessageBox
-        dlg = QMessageBox(self)
-        dlg.setWindowTitle(self._t("result.export_scope_title"))
-        dlg.setText(self._t("result.export_scope_title"))
-        page_btn = dlg.addButton(self._t("result.export_current_page"), QMessageBox.ButtonRole.AcceptRole)
-        all_btn = dlg.addButton(self._t("result.export_all_rows"), QMessageBox.ButtonRole.ActionRole)
-        dlg.addButton(QMessageBox.StandardButton.Cancel)
-        dlg.setDefaultButton(page_btn)
-        dlg.exec()
-        clicked = dlg.clickedButton()
-        if clicked is page_btn:
+        from dbaide.desktop.dialogs.message_dialog import choose
+
+        selected = choose(
+            self,
+            self._t("result.export_scope_title"),
+            self._t("result.export_scope_title"),
+            choices=[
+                ("page", self._t("result.export_current_page")),
+                ("all", self._t("result.export_all_rows")),
+            ],
+        )
+        if selected == "page":
             if fmt == "csv":
                 self.grid.save_csv()
             else:
                 self.grid.save_json()
-        elif clicked is all_btn:
+        elif selected == "all":
             self.export_all_requested.emit({
                 "connection_name": self._conn,
                 "database": self._db,

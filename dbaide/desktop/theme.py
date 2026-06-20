@@ -281,7 +281,7 @@ QPushButton[primary="true"]:pressed {{
 QPushButton[primary="true"]:disabled {{
     background: {T.PANEL_2};
     border-color: {T.BORDER_SOFT};
-    color: {T.MUTED_2};
+    color: {T.TEXT_2};
 }}
 QPushButton[danger="true"] {{
     color: {T.RED};

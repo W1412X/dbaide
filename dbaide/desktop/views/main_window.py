@@ -58,6 +58,7 @@ from dbaide.desktop.dialogs.note_editor import NoteEditorDialog
 from dbaide.desktop.views.joins_tab import JoinsTab
 from dbaide.desktop.views.sidebar import Sidebar
 from dbaide.desktop.views.workbench import WorkbenchView
+from dbaide.desktop.dialogs.file_dialogs import get_save_file_name
 from dbaide.desktop.dialogs.message_dialog import alert as dialog_alert, warn as dialog_warn
 from dbaide.desktop.views.query_history import QueryHistoryPanel
 from dbaide.history.query_store import QueryHistoryStore
@@ -524,6 +525,7 @@ class MainWindow(QMainWindow):
 
         self.setCentralWidget(root)
         self.statusbar = QStatusBar()
+        self.statusbar.setSizeGripEnabled(False)
         self.setStatusBar(self.statusbar)
         self._ensure_ui_state().statusbar_message("Ready")
         self._on_tab_changed(self.tabbar.currentIndex())
@@ -1647,9 +1649,8 @@ class MainWindow(QMainWindow):
     # ── import / export ─────────────────────────────────────────────────────--
 
     def _settings_export_connection(self, dialog: SettingsDialog, name: str) -> None:
-        from PyQt6.QtWidgets import QFileDialog
         default_name = f"dbaide-{name}.json"
-        path, _ = QFileDialog.getSaveFileName(
+        path, _ = get_save_file_name(
             dialog, _i18n_t("settings.export_conn"), default_name,
             _i18n_t("import.file_filter"),
         )
@@ -1717,8 +1718,7 @@ class MainWindow(QMainWindow):
         self._run_background("import_connection", {"data": data}, on_done, on_error=on_error)
 
     def _settings_export_all(self, dialog: SettingsDialog) -> None:
-        from PyQt6.QtWidgets import QFileDialog
-        path, _ = QFileDialog.getSaveFileName(
+        path, _ = get_save_file_name(
             dialog, _i18n_t("settings.export_all"), "dbaide-config.json",
             _i18n_t("import.file_filter"),
         )
@@ -1783,7 +1783,6 @@ class MainWindow(QMainWindow):
                 self.toast(_i18n_t("data.no_rows"))
                 return
             from dbaide.rendering.table import export_csv, export_json
-            from PyQt6.QtWidgets import QFileDialog
             table_name = str(payload.get("table") or "table")
             if fmt == "json":
                 content = export_json(rows, columns)
@@ -1791,7 +1790,7 @@ class MainWindow(QMainWindow):
             else:
                 content = export_csv(rows, columns)
                 ext, filt = "csv", "CSV (*.csv)"
-            path, _ = QFileDialog.getSaveFileName(
+            path, _ = get_save_file_name(
                 self, _i18n_t("result.export_title"), f"{table_name}.{ext}", filt,
             )
             if path:

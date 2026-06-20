@@ -9,6 +9,7 @@ from dbaide.agent.progressive_schema import ModelRequiredError
 from dbaide.i18n import answer_language_directive
 from dbaide.llm import LLMClient, LLMMessage, NullLLMClient
 from dbaide.models import ColumnInfo
+from dbaide.rendering.sql_dialect import normalize_dialect
 
 logger = logging.getLogger("dbaide.sql_writer")
 
@@ -43,7 +44,7 @@ class SQLWriter:
     def __init__(self, llm: LLMClient | None = None, *, dialect: str = "generic",
                  server_version: str = "", session_timezone: str = "UTC") -> None:
         self.llm = llm or NullLLMClient()
-        self.dialect = dialect
+        self.dialect = normalize_dialect(dialect)
         self.server_version = str(server_version or "")
         self.session_timezone = str(session_timezone or "UTC")
 

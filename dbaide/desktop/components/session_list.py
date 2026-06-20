@@ -13,7 +13,6 @@ from PyQt6.QtCore import QSize, Qt, pyqtSignal
 from PyQt6.QtGui import QAction, QFont, QFontMetrics
 from PyQt6.QtWidgets import (
     QHBoxLayout,
-    QInputDialog,
     QLabel,
     QListWidget,
     QListWidgetItem,
@@ -26,6 +25,7 @@ from PyQt6.QtWidgets import (
 from dbaide.desktop.components.base import SectionLabel
 from dbaide.desktop.components.icon_button import IconToolButton
 from dbaide.desktop.components.icons import plus_icon
+from dbaide.desktop.dialogs.text_input import get_text
 from dbaide.desktop.theme import Theme
 from dbaide.i18n import t
 
@@ -375,6 +375,6 @@ class SessionList(QWidget):
                 w = self.list.itemWidget(it)
                 current = w.title() if isinstance(w, _SessionRow) else ""
                 break
-        title, ok = QInputDialog.getText(self, t("session.rename_title"), t("session.title_label"), text=current)
+        title, ok = get_text(self, t("session.rename_title"), t("session.title_label"), text=current)
         if ok and title.strip():
             self.rename_requested.emit(session_id, title.strip())

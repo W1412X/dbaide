@@ -9,6 +9,7 @@ from typing import TYPE_CHECKING, Any, Callable
 from dbaide.adapters.base import quote_identifier
 from dbaide.agent.schema_context import normalize_db_table
 from dbaide.models import ColumnInfo
+from dbaide.rendering.sql_dialect import normalize_dialect
 
 if TYPE_CHECKING:
     from dbaide.agent.orchestrator import AskOrchestrator
@@ -406,6 +407,6 @@ def _column_type_index(disclosed: list[DisclosedSchema]) -> dict[tuple[str, str]
 
 
 def _qualified_sample_table(database: str, table: str, dialect: str) -> str:
-    if dialect == "mysql" and database and "." not in table:
+    if normalize_dialect(dialect) == "mysql" and database and "." not in table:
         return f"{database}.{table}"
     return table

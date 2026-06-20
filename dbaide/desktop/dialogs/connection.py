@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from PyQt6.QtCore import Qt
 from PyQt6.QtWidgets import (
-    QFileDialog,
     QFormLayout,
     QFrame,
     QHBoxLayout,
@@ -15,6 +14,7 @@ from PyQt6.QtWidgets import (
 
 from dbaide.desktop.components.base import compact_button
 from dbaide.desktop.components.inputs import FORM_INNER_LABEL_RULES, Combo, configure_form, form_label
+from dbaide.desktop.dialogs.file_dialogs import get_open_file_name
 from dbaide.desktop.theme import Theme
 
 
@@ -170,7 +170,7 @@ class ConnectionForm(QWidget):
 
     def _browse(self) -> None:
         from dbaide.i18n import t
-        path, _ = QFileDialog.getOpenFileName(self, t("conn.browse_title"))
+        path, _ = get_open_file_name(self, t("conn.browse_title"))
         if path:
             self.path.setText(path)
             if not self.name.text().strip():

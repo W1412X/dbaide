@@ -187,7 +187,11 @@ class Sidebar(QWidget):
         header.setSectionResizeMode(1, QHeaderView.ResizeMode.Fixed)
         header.resizeSection(1, 26)
         self.tree.setIndentation(16)
-        self.tree.setAnimated(True)
+        # Qt's native expand/collapse animation + per-row item widgets (the overflow
+        # button in column 1) causes paint ghosts on macOS during open/close. Keep
+        # the tree stable and repaint deterministically instead of animating rows.
+        self.tree.setAnimated(False)
+        self.tree.setUniformRowHeights(True)
         # Borderless tree that blends into the sidebar — interactivity comes from the
         # row hover/selection (global style), not a boxed frame.
         self.tree.setStyleSheet("QTreeWidget { background: transparent; border: none; }")

@@ -59,6 +59,59 @@ def test_mcp_execute_sql_returns_bounded_row_preview(monkeypatch):
     assert payload["row_preview"]["cell_truncated"] is True
 
 
+def test_preview_rows_truncates_long_text_with_tail_preserved():
+    from dbaide.agent.toolkit.result_preview import preview_rows
+
+    value = "prefix-" + ("x" * 300) + "-tail-marker"
+    rows, meta = preview_rows([{"body": value}], columns=["body"], max_rows=1, max_cell_chars=80)
+    body = rows[0]["body"]
+
+    assert "cell truncated" in body
+    assert "prefix-" in body
+    assert "tail-marker" in body
+    assert meta["cell_truncated"] is True
+
+
+def test_preview_rows_truncates_json_text_structurally():
+    from dbaide.agent.toolkit.result_preview import preview_rows
+
+    payload = json.dumps({
+        "summary": "x" * 220,
+        "items": [{"id": i, "note": f"note-{i}"} for i in range(8)],
+        "meta": {"source": "orders", "status": "ok"},
+    }, ensure_ascii=False)
+
+    rows, meta = preview_rows([{"payload": payload}], columns=["payload"], max_rows=1, max_cell_chars=180)
+    text = rows[0]["payload"]
+
+    assert text.startswith("{")
+    assert '"summary"' in text
+    assert '"meta"' in text
+    assert "more item(s)" in text or "cell truncated" in text
+    assert meta["cell_truncated"] is True
+
+
+def test_preview_rows_truncates_native_dict_structurally():
+    from dbaide.agent.toolkit.result_preview import preview_rows
+
+    rows, meta = preview_rows([{
+        "payload": {
+            "message": "y" * 180,
+            "items": list(range(10)),
+            "nested": {"k1": "v1", "k2": "v2", "k3": "v3", "k4": "v4", "k5": "v5"},
+        }
+    }], columns=["payload"], max_rows=1, max_cell_chars=160)
+
+    payload = rows[0]["payload"]
+    assert meta["cell_truncated"] is True
+    if isinstance(payload, dict):
+        assert "message" in payload
+        assert "items" in payload
+    else:
+        assert '"message"' in payload
+        assert '"items"' in payload
+
+
 def test_column_stats_formatter_uses_columns_payload():
     text = _fmt_profile({
         "table": "orders",

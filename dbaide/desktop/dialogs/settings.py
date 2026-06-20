@@ -36,6 +36,7 @@ from dbaide.desktop.components.icons import more_icon, svg_icon
 from dbaide.desktop.components.inputs import Combo, FORM_INNER_LABEL_RULES, configure_form, form_label
 from dbaide.desktop.components.menu import MenuButton
 from dbaide.desktop.dialogs.connection import ConnectionForm
+from dbaide.desktop.dialogs.file_dialogs import get_open_file_name
 from dbaide.desktop.theme import app_style, Theme
 from dbaide.i18n import t as _pt
 
@@ -1300,8 +1301,7 @@ class SettingsDialog(ChromeDialog):
         self.export_connection.emit(key)
 
     def _import_connection(self) -> None:
-        from PyQt6.QtWidgets import QFileDialog
-        path, _ = QFileDialog.getOpenFileName(
+        path, _ = get_open_file_name(
             self, _pt("import.confirm_title"), "",
             _pt("import.file_filter"),
         )

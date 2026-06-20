@@ -97,14 +97,13 @@ def test_write_file(qapp, tmp_path):
 
 def test_save_to_file_warns_on_write_failure(qapp, monkeypatch):
     """A failed export (write returns False) must alert the user, not fail silently."""
-    from PyQt6.QtWidgets import QFileDialog, QMessageBox
+    from dbaide.desktop.components import table as table_mod
     w = ResultTableWidget()
     w.load(columns=["id"], rows=[{"id": 1}], row_count=1)
-    monkeypatch.setattr(QFileDialog, "getSaveFileName",
-                        staticmethod(lambda *a, **k: ("/nonexistent-dir-xyz/out.csv", "")))
+    monkeypatch.setattr(table_mod, "get_save_file_name",
+                        lambda *a, **k: ("/nonexistent-dir-xyz/out.csv", ""))
     warned = []
-    monkeypatch.setattr(QMessageBox, "warning",
-                        staticmethod(lambda *a, **k: warned.append(a)))
+    monkeypatch.setattr(table_mod, "dialog_warn", lambda *a, **k: warned.append((a, k)))
     w.save_csv()
     assert warned, "expected a warning dialog when the file write fails"
 
@@ -112,8 +111,8 @@ def test_save_to_file_warns_on_write_failure(qapp, monkeypatch):
     warned.clear()
     import tempfile, os
     good = os.path.join(tempfile.mkdtemp(), "ok.csv")
-    monkeypatch.setattr(QFileDialog, "getSaveFileName",
-                        staticmethod(lambda *a, **k: (good, "")))
+    monkeypatch.setattr(table_mod, "get_save_file_name",
+                        lambda *a, **k: (good, ""))
     w.save_csv()
     assert not warned and os.path.exists(good)
 

@@ -342,6 +342,14 @@ def test_sidebar_filter_updates_visibility_without_rebuild(qapp, monkeypatch):
     assert not table.child(0).isHidden()
 
 
+def test_sidebar_tree_uses_stable_nonanimated_rows(qapp):
+    from dbaide.desktop.views.sidebar import Sidebar
+
+    sidebar = Sidebar()
+    assert sidebar.tree.isAnimated() is False
+    assert sidebar.tree.uniformRowHeights() is True
+
+
 def test_empty_schema_projection_uses_inline_progress(qapp):
     import dbaide.desktop.views.main_window as mw
 

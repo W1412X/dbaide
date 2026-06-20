@@ -10,6 +10,7 @@ import sqlite3
 
 from dbaide.adapters import build_adapter
 from dbaide.agent.orchestrator import AskOrchestrator
+from dbaide.agent.join_validation import _qualified_sample_table
 from dbaide.agent.schema_context import collect_relations
 from dbaide.agent.sql_writer import SQLWriter
 from dbaide.assets import AssetStore
@@ -42,6 +43,16 @@ def test_sql_writer_qualifies_only_across_databases():
 def test_system_prompt_forbids_db_prefix():
     sys = SQLWriter(NullLLMClient())._system_prompt()
     assert "BARE name" in sys and "more than one database" in sys.lower()
+
+
+def test_sql_writer_normalizes_dialect_aliases():
+    writer = SQLWriter(NullLLMClient(), dialect="postgresql")
+    assert writer.dialect == "postgres"
+    assert "PostgreSQL" in writer._system_prompt()
+
+
+def test_join_sampler_qualifies_mariadb_like_mysql():
+    assert _qualified_sample_table("order_data", "orders", "mariadb") == "order_data.orders"
 
 
 # ── Flaw 1: semantic inference is on-demand ────────────────────────────────--

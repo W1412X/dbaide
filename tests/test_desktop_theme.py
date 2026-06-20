@@ -67,3 +67,13 @@ def test_tooltip_and_splitter_rules_follow_theme_tokens():
         assert "margin: 1px 0;" in split_v
     finally:
         set_theme("dark")
+
+
+def test_primary_disabled_button_text_uses_contrasting_theme_color():
+    try:
+        set_theme("light")
+        style = app_style()
+        primary_disabled = _rule(style, 'QPushButton[primary="true"]:disabled {', until='QPushButton[danger="true"] {')
+        assert f"color: {Theme.TEXT_2};" in primary_disabled
+    finally:
+        set_theme("dark")

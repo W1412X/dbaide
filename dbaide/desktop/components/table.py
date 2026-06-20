@@ -22,6 +22,8 @@ from PyQt6.QtWidgets import (
 from dbaide.desktop.components.base import compact_button
 from dbaide.desktop.components.icons import svg_icon
 from dbaide.desktop.components.menu import MenuButton
+from dbaide.desktop.dialogs.file_dialogs import get_save_file_name
+from dbaide.desktop.dialogs.message_dialog import warn as dialog_warn
 from dbaide.desktop.theme import Theme
 from dbaide.rendering.table import export_csv, export_insert, export_json, export_markdown_table
 
@@ -265,16 +267,14 @@ class ResultTableWidget(QWidget):
         self._save_to_file(export_json(self._rows, self._columns), "json", "JSON (*.json)")
 
     def _save_to_file(self, content: str, ext: str, file_filter: str) -> None:
-        from PyQt6.QtWidgets import QFileDialog, QMessageBox
         suggested = f"{self._table_name}.{ext}"
-        path, _ = QFileDialog.getSaveFileName(self, self._t("result.export_title"), suggested, file_filter)
+        path, _ = get_save_file_name(self, self._t("result.export_title"), suggested, file_filter)
         if not path:
             return
         # Surface write failures (permission denied, disk full, bad path) — otherwise
         # the user believes the export succeeded when no file was written.
         if not self._write_file(path, content):
-            QMessageBox.warning(self, self._t("result.export_title"),
-                                self._t("result.export_failed", path=path))
+            dialog_warn(self, self._t("result.export_title"), self._t("result.export_failed", path=path))
 
     @staticmethod
     def _write_file(path: str, content: str) -> bool:

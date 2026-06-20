@@ -6,7 +6,7 @@ from PyQt6.QtWidgets import QFrame, QLabel, QPushButton, QSizePolicy
 
 
 from dbaide.desktop.theme import Theme
-from dbaide.desktop.components.icons import svg_icon
+from dbaide.desktop.components.icons import svg_icon, svg_pixmap
 
 
 def button_icon_color(*, primary: bool = False, danger: bool = False, muted: bool = False) -> str:
@@ -93,7 +93,23 @@ def _button_icon_for_text(text: str, *, primary: bool = False) -> QIcon | None:
     if not icon_name:
         return None
     color = button_icon_color(primary=primary)
-    return svg_icon(icon_name, color=color, size=14)
+    disabled_color = Theme.TEXT_2 if primary else Theme.MUTED
+    return _stateful_svg_icon(icon_name, color=color, disabled_color=disabled_color, size=14)
+
+
+def _stateful_svg_icon(
+    name: str,
+    *,
+    color: str,
+    disabled_color: str,
+    size: int,
+    width: float = 2.0,
+) -> QIcon:
+    icon = QIcon()
+    icon.addPixmap(svg_pixmap(name, color=color, size=size, width=width), QIcon.Mode.Normal, QIcon.State.Off)
+    icon.addPixmap(svg_pixmap(name, color=color, size=size, width=width), QIcon.Mode.Active, QIcon.State.Off)
+    icon.addPixmap(svg_pixmap(name, color=disabled_color, size=size, width=width), QIcon.Mode.Disabled, QIcon.State.Off)
+    return icon
 
 
 def compact_button(
@@ -114,7 +130,7 @@ def compact_button(
     lower = str(text or "").strip().lower()
     danger = any(token in lower for token in ("删除", "移除", "危险", "delete", "remove", "danger"))
     if danger:
-        icon = svg_icon("trash", color=Theme.RED, size=14)
+        icon = _stateful_svg_icon("trash", color=Theme.RED, disabled_color=Theme.MUTED, size=14)
         btn.setProperty("danger", True)
     elif icon is None:
         icon = _button_icon_for_text(text, primary=primary)
