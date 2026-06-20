@@ -53,7 +53,15 @@ def theme_payload_from_palette(
             str(palette.get("RED") or "#ff6b6b"),
             "#f97316",
         ],
+        "chartInteractive": bool(palette.get("chartInteractive", False)),
     }
+
+
+def with_chart_interactive(theme: Mapping[str, Any], *, interactive: bool) -> dict[str, Any]:
+    """Return a theme copy with chart zoom/pan controls enabled or disabled."""
+    out = dict(theme)
+    out["chartInteractive"] = bool(interactive)
+    return out
 
 
 DEFAULT_EMBEDDED_PADDING = "0 2px 0 0"

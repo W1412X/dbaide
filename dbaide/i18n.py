@@ -1010,6 +1010,15 @@ _STRINGS: dict[str, dict[str, str]] = {
     "ask.export_copy_html": {"en": "Copy", "zh": "复制"},
     "ask.export_save_html": {"en": "Save…", "zh": "保存…"},
     "ask.export_copied": {"en": "Copied", "zh": "已复制"},
+    "ask.interactive_charts": {"en": "Chart tools…", "zh": "图表交互…"},
+    "ask.interactive_charts_hint": {
+        "en": "Zoom and pan charts here without affecting the conversation scroll.",
+        "zh": "在此缩放、拖动图表，不会影响对话区域的上下滚动。",
+    },
+    "ask.interactive_charts_empty": {
+        "en": "This answer has no charts to interact with.",
+        "zh": "这条回复里没有可交互的图表。",
+    },
     "ask.copy_sql": {"en": "Copy SQL", "zh": "复制 SQL"},
     "ask.copy_cli": {"en": "Copy CLI", "zh": "复制 CLI"},
     "ask.more_actions": {"en": "More", "zh": "更多"},

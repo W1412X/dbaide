@@ -43,6 +43,8 @@ def chart_spec_to_echarts_option(spec_dict: dict[str, Any], *, theme: Mapping[st
     raw_categories = list(spec.categories)
     show_legend = len(spec.series) > 1
     cat_display, cat_angle, cat_bottom = category_axis_layout(raw_categories)
+    interactive = bool(theme.get("chartInteractive"))
+    dense_categories = len(raw_categories) >= 10
 
     option: dict[str, Any] = {
         "backgroundColor": "transparent",
@@ -146,7 +148,7 @@ def chart_spec_to_echarts_option(spec_dict: dict[str, Any], *, theme: Mapping[st
         dual_axis=uses_right,
         y_name=y_left,
         x_name=spec.x_label,
-        dense_zoom=len(raw_categories) >= 10,
+        dense_zoom=interactive and dense_categories,
     )
     option["xAxis"] = _category_axis(
         cat_display,
@@ -161,7 +163,7 @@ def chart_spec_to_echarts_option(spec_dict: dict[str, Any], *, theme: Mapping[st
         y_axes.append(_value_axis(y_right or " ", muted, border, spec, "right", compact=True))
     option["yAxis"] = y_axes
 
-    if len(raw_categories) >= 10:
+    if interactive and dense_categories:
         option["dataZoom"] = _data_zoom(len(raw_categories), cat_bottom, show_legend)
 
     if chart_type == "stacked_bar":
@@ -420,11 +422,18 @@ def _value_axis(
 
 
 def _data_zoom(count: int, bottom_extra: int, show_legend: bool) -> list[dict[str, Any]]:
+    """Interactive zoom controls — only used outside the conversation scroll surface."""
     window = min(14, count)
     start = max(0, 100 - int(100 * window / max(count, 1)))
     bottom = 8 + (28 if show_legend else 0)
     return [
-        {"type": "inside", "start": start, "end": 100, "zoomOnMouseWheel": True, "moveOnMouseMove": True},
+        {
+            "type": "inside",
+            "start": start,
+            "end": 100,
+            "zoomOnMouseWheel": True,
+            "moveOnMouseMove": True,
+        },
         {
             "type": "slider",
             "start": start,

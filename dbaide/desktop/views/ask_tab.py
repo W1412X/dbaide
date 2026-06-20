@@ -316,6 +316,14 @@ class AskTab(QWidget):
         export_theme = answer_theme_payload()
         if answer:
             menu_items.append(("copy", _t("ask.copy_answer"), answer))
+            if chart_list:
+                menu_items.append((
+                    "chart",
+                    _t("ask.interactive_charts"),
+                    lambda: self._open_chart_interaction_dialog(
+                        raw_answer, chart_list, export_title, export_theme,
+                    ),
+                ))
             menu_items.append((
                 "download",
                 _t("ask.export_answer_html"),
@@ -340,7 +348,10 @@ class AskTab(QWidget):
             menu = QMenu(btn)
             _style_menu(menu)
             for kind, label, payload in menu_items:
-                icon_name = "download" if kind == "download" else "copy"
+                icon_name = {
+                    "download": "download",
+                    "chart": "columns",
+                }.get(kind, "copy")
                 action = menu.addAction(svg_icon(icon_name, color=Theme.TEXT_2, size=13), label)
                 if callable(payload):
                     action.triggered.connect(lambda _checked=False, fn=payload: fn())
@@ -352,6 +363,23 @@ class AskTab(QWidget):
 
         btn.clicked.connect(_show_menu)
         return btn
+
+    def _open_chart_interaction_dialog(
+        self,
+        answer: str,
+        charts: list[dict[str, Any]] | None,
+        export_title: str,
+        theme: dict[str, Any],
+    ) -> None:
+        from dbaide.desktop.dialogs.chart_interaction import open_chart_interaction_dialog
+
+        open_chart_interaction_dialog(
+            self.window(),
+            answer=answer,
+            charts=charts,
+            title=export_title,
+            theme=theme,
+        )
 
     def _open_answer_export_dialog(
         self,

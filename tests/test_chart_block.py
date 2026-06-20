@@ -240,7 +240,10 @@ def test_echarts_option_dense_dates_rotate_and_compact_labels():
     assert len(option["yAxis"]) == 2
     assert option["grid"]["containLabel"] is True
     assert option["grid"]["top"] >= 40
-    assert "dataZoom" in option
+    assert "dataZoom" not in option
+
+    interactive = chart_spec_to_echarts_option(spec, theme={"chartInteractive": True})
+    assert "dataZoom" in interactive
     assert {s["yAxisIndex"] for s in option["series"]} == {0, 1}
     assert sum(1 for s in option["series"] if s["yAxisIndex"] == 1) == 1
     assert option["series"][2]["yAxisIndex"] == 1
