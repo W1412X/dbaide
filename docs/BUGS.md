@@ -188,6 +188,33 @@ Drawer 未打开时点击 step，中央或右侧弹出独立 detail 滑层。
 
 ---
 
+## GUI-005 · 对话内 ECharts 缩放与滚动冲突
+
+| 字段 | 内容 |
+|------|------|
+| **状态** | 已修复 |
+| **严重度** | 中 |
+| **平台** | 全平台 |
+
+### 现象
+
+回答含图表时，在对话区域滚轮或拖拽易被 ECharts `dataZoom` 滑块/内置缩放捕获，无法正常滚动消息列表。
+
+### 根因
+
+WebEngine 内嵌图表默认启用交互式 `dataZoom`；事件在图表层消费，外层 `QScrollArea` 收不到滚轮。
+
+### 修复
+
+- 对话与导出 HTML 默认 `chartInteractive: false`（无滑块/滚轮缩放，保留 tooltip）。
+- **更多 → 图表交互…** 在独立对话框中以 `chartInteractive: true` 打开同一回答；`setHtml(html, base_url)` 加载本地 vendor。
+
+### 回归测试
+
+`tests/test_chart_block.py` — `dataZoom` 仅在 `chartInteractive: true` 时出现。
+
+---
+
 ## 模板（复制后填写）
 
 ```markdown

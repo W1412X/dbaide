@@ -583,6 +583,18 @@ are converted into `schema_scope` on `WorkflowRequest` (so `discover_schema` pri
 them) and persisted as `ui_attachments` on the session turn for display when reloading.
 Chips appear above the toolbar and can be individually removed.
 
+### Answer rendering & HTML export
+
+Assistant answers share one compose → HTML pipeline (`dbaide/rendering/`):
+
+| Surface | Module | Notes |
+|---------|--------|-------|
+| In-app chat | `AnswerDocumentWidget` | Local vendor scripts; `chartInteractive: false` so wheel/drag scrolls the thread |
+| Export dialog | `answer_export.py` | CDN scripts, configurable root padding, live preview |
+| Chart tools | `chart_interaction.py` | Same HTML with `chartInteractive: true`; WebEngine needs `base_url` for bundled scripts |
+
+Persistence stores only `answer_markdown` + `charts[]`; HTML is rebuilt on load/export.
+
 ---
 
 ## Connection Import / Export

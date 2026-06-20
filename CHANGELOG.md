@@ -6,6 +6,31 @@ All notable changes to DBAide are documented here. The format is loosely based o
 
 ## [Unreleased]
 
+## [0.8.0] — 2026-06-12
+
+### Added
+
+- **Chart tools dialog** — turn footer **More → Chart tools…** opens an interactive
+  viewer (zoom slider + wheel) without hijacking conversation scroll.
+- **Themed file dialogs** — save/export paths use app-styled `QFileDialog` wrappers
+  for consistent light/dark chrome.
+
+### Changed
+
+- **In-chat charts** — default to read-only (`chartInteractive: false`): no
+  `dataZoom` sliders or wheel zoom in the message list; tooltips still work.
+- **Exported HTML** — same read-only chart mode as the chat (portable CDN bundle,
+  optional padding via the export dialog).
+- **Run / UI state** — background work and conversation run state refactored
+  (`ui_state.py`, `service_payloads.py`) for clearer slot sync while switching
+  sessions.
+
+### Fixed
+
+- **Chart interaction dialog** — WebEngine now passes `base_url` so bundled
+  ECharts/marked scripts load (fixes “ECharts failed to load”).
+- **Export preview** — aligned with the shared `build_answer_document_html` path.
+
 ## [0.7.0] — 2026-06-12
 
 ### Added
@@ -693,7 +718,8 @@ and a PyQt6 desktop app, sharing one Python core.
   drag-to-Applications)**, **Windows (`.msi` wizard)**, and **Linux (`.tar.gz`)** —
   pushing a `v*` tag cuts a GitHub Release automatically.
 
-[Unreleased]: https://github.com/W1412X/dbaide/compare/v0.7.0...HEAD
+[Unreleased]: https://github.com/W1412X/dbaide/compare/v0.8.0...HEAD
+[0.8.0]: https://github.com/W1412X/dbaide/compare/v0.7.0...v0.8.0
 [0.7.0]: https://github.com/W1412X/dbaide/compare/v0.6.0...v0.7.0
 [0.6.0]: https://github.com/W1412X/dbaide/compare/v0.3.0...v0.6.0
 [0.3.0]: https://github.com/W1412X/dbaide/compare/v0.2.18...v0.3.0

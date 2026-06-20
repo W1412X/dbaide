@@ -113,6 +113,9 @@ number. DBAide is built on the opposite principle:
   tables as schema context — discovery prioritises what you pin.
 - 💬 **Run many conversations at once.** Each session runs in its own thread; start a
   query in one and switch to another while it works (concurrency is configurable).
+- 📊 **Inline charts & HTML export.** Answers render Markdown + ECharts in one view;
+  **More → Export HTML…** sets padding with live preview; use **Chart tools…** when
+  you need zoom without stealing scroll from the chat.
 - 🧰 **A real database client, too.** Switch to the **Workbench** for a DBeaver-style
   workspace: multiple SQL editors and table viewers, a data browser, structure & DDL,
   query history — all read-only and safe (see below).
