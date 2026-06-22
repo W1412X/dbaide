@@ -16,6 +16,8 @@ All notable changes to DBAide are documented here. The format is loosely based o
   (guarded so they can never get stuck transparent). The 对话/工作台 mode switch now
   slides an animated selection pill between tabs, and switching tabs fades the incoming
   page in (skipped for WebEngine-hosting pages, which an opacity effect would black out).
+  Dropdown menus fade in on open, and the main window fades in on launch (window-level
+  opacity, safe over WebEngine).
 
 ## [0.9.1] — 2026-06-22
 

@@ -143,12 +143,33 @@ class MainWindow(QMainWindow):
             from dbaide.desktop.window_chrome import install_top_level_chrome
 
             install_top_level_chrome(self, topbar=self.topbar)
+        if not getattr(self, "_open_fade_played", False):
+            self._open_fade_played = True
+            self._play_open_fade()
         if not getattr(self, "_ssl_check_scheduled", False):
             self._ssl_check_scheduled = True
             QTimer.singleShot(400, self._check_https_certificates_at_startup)
         if not getattr(self, "_release_check_scheduled", False):
             self._release_check_scheduled = True
             QTimer.singleShot(800, self._check_for_updates_at_startup)
+
+    def _play_open_fade(self) -> None:
+        """Fade the whole window in on first show. windowOpacity is window-level
+        compositing (unlike a QGraphicsOpacityEffect), so it is safe over the WebEngine
+        answer view. Guarded so the window can never get stuck transparent."""
+        try:
+            self.setWindowOpacity(0.0)
+            anim = QPropertyAnimation(self, b"windowOpacity", self)
+            anim.setDuration(200)
+            anim.setStartValue(0.0)
+            anim.setEndValue(1.0)
+            anim.setEasingCurve(QEasingCurve.Type.OutCubic)
+            anim.finished.connect(lambda: self.setWindowOpacity(1.0))
+            self._open_fade = anim  # keep a reference so it isn't GC'd mid-flight
+            anim.start()
+            QTimer.singleShot(320, lambda: self.setWindowOpacity(1.0))
+        except Exception:
+            self.setWindowOpacity(1.0)
 
     def _check_for_updates_at_startup(self) -> None:
         self._start_release_check()
