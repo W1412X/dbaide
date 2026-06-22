@@ -87,6 +87,18 @@ def _run_window_scenario(name: str) -> list[str]:
         paths = [promo.show_developer_dependency_tree(app, win)]
     elif name == "audit":
         paths = [promo.show_developer_consistency_audit(app, win)]
+    elif name == "showcase-a1":
+        paths = [promo.show_analytics_showcase(app, win)[0]]
+    elif name == "showcase-a2":
+        paths = [promo.show_analytics_showcase(app, win)[1]]
+    elif name == "showcase-a3":
+        paths = [promo.show_analytics_showcase(app, win)[2]]
+    elif name == "showcase-b1":
+        paths = [promo.show_insight_showcase(app, win)[0]]
+    elif name == "showcase-b2":
+        paths = [promo.show_insight_showcase(app, win)[1]]
+    elif name == "showcase-b3":
+        paths = [promo.show_insight_showcase(app, win)[2]]
     elif name == "settings-connections":
         paths = [promo.show_settings_page(app, service, page="connections", name="10-settings-connections")]
     elif name == "settings-models":

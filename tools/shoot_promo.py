@@ -70,6 +70,12 @@ DOC_SCENARIOS = [
     "field",
     "dep-tree",
     "audit",
+    "showcase-a1",
+    "showcase-a2",
+    "showcase-a3",
+    "showcase-b1",
+    "showcase-b2",
+    "showcase-b3",
     "settings-connections",
     "settings-models",
     "settings-resources",
@@ -1333,6 +1339,183 @@ def show_developer_dependency_tree(app: QApplication, win: MainWindow) -> Path:
     return _grab(app, win.ask_tab, "18-developer-dependency-tree")
 
 
+def _promo_analytics_showcase_payload() -> dict[str, Any]:
+    months = ["2026-03", "2026-04", "2026-05"]
+    answer = (
+        "## 经营全景复盘\n\n"
+        "一次问清 5 月经营：用 **渠道质量雷达** 横向比，从 **净收入桥** 看钱去哪了，再用 "
+        "**分月对比 + 多轴趋势** 看走势——多种图表自动按问题匹配。\n\n"
+        "### 渠道综合质量\n{{chart:2}}\n\n"
+        "### 净收入桥\n{{chart:1}}\n\n"
+        "### 各渠道分月净收入\n{{chart:3}}\n\n"
+        "### 退款金额构成（堆叠）\n{{chart:4}}\n\n"
+        "### GMV 与退款率（多轴）\n{{chart:5}}\n\n"
+        "### 净收入趋势\n{{chart:6}}\n\n"
+        "### 流量来源占比\n{{chart:7}}\n"
+    )
+    charts = [
+        {"chart_id": "chart:1", "chart_type": "waterfall", "title": "净收入桥：从 GMV 到净收入（万元）",
+         "categories": ["GMV", "退款", "平台优惠", "履约损耗"],
+         "series": [{"name": "金额(万元)", "values": [204.8, -28.6, -11.4, -6.0]}], "row_count": 4},
+        {"chart_id": "chart:2", "chart_type": "radar", "title": "渠道综合质量雷达",
+         "data": {
+             "indicators": [
+                 {"name": "ROI", "max": 5}, {"name": "复购率", "max": 60}, {"name": "履约准时", "max": 100},
+                 {"name": "客单价", "max": 400}, {"name": "NPS", "max": 80}, {"name": "低退款", "max": 100},
+             ],
+             "radar_series": [
+                 {"name": "搜索广告", "value": [4.2, 42, 96, 320, 68, 92]},
+                 {"name": "直播", "value": [3.1, 55, 82, 210, 45, 73]},
+                 {"name": "内容种草", "value": [3.6, 38, 90, 260, 60, 85]},
+             ],
+         }, "row_count": 3},
+        {"chart_id": "chart:3", "chart_type": "grouped_bar", "title": "各渠道分月净收入（万元）",
+         "categories": months, "series": [
+             {"name": "搜索广告", "values": [38.2, 41.0, 42.5]},
+             {"name": "直播", "values": [36.8, 34.5, 31.2]},
+             {"name": "内容种草", "values": [24.1, 25.6, 26.8]},
+         ], "row_count": 3},
+        {"chart_id": "chart:4", "chart_type": "stacked_bar", "title": "退款金额构成（堆叠，万元）",
+         "categories": months, "series": [
+             {"name": "未按时送达", "values": [4.1, 6.8, 10.2]},
+             {"name": "质量问题", "values": [2.3, 3.1, 4.6]},
+             {"name": "七天无理由", "values": [3.0, 3.4, 3.9]},
+         ], "row_count": 3},
+        {"chart_id": "chart:5", "chart_type": "multi_axis_line", "title": "GMV 与退款率（多轴）",
+         "categories": months, "series": [
+             {"name": "GMV(万元)", "values": [188.4, 204.8, 203.1], "axis": "left"},
+             {"name": "退款率(%)", "values": [5.8, 8.4, 12.7], "axis": "right"},
+         ], "axes": {"left": {"label": "GMV", "format": "number"}, "right": {"label": "退款率", "format": "percent"}},
+         "row_count": 3},
+        {"chart_id": "chart:6", "chart_type": "area", "title": "净收入趋势（万元）",
+         "categories": months, "series": [{"name": "净收入", "values": [169.2, 177.5, 158.8]}], "row_count": 3},
+        {"chart_id": "chart:7", "chart_type": "pie", "title": "流量来源占比",
+         "categories": ["搜索", "直播", "内容种草", "自然", "私域"],
+         "series": [{"name": "占比(%)", "values": [32, 26, 18, 14, 10]}], "row_count": 5},
+    ]
+    return {
+        "question": "给我一份 5 月经营全景：净收入桥、渠道综合质量、分月对比、退款构成和多指标趋势，配图说明。",
+        "attachments": [
+            {"kind": "database", "name": "main", "path": "omni_shop.main"},
+            {"kind": "table", "name": "orders", "path": "omni_shop.main.orders"},
+        ],
+        "answer_markdown": answer, "charts": charts,
+    }
+
+
+def _promo_insight_showcase_payload() -> dict[str, Any]:
+    answer = (
+        "## 结构 · 关联 · 分布透视\n\n"
+        "换个维度看：用 **气泡/散点** 找投放与复购的关联，用 **矩形树/旭日图** 拆类目层级，"
+        "再用 **箱线图/K 线** 看分布与波动——同一份数据，多种视角。\n\n"
+        "### 投放花费 vs ROI（气泡=花费规模）\n{{chart:1}}\n\n"
+        "### 客单价 vs 复购率\n{{chart:2}}\n\n"
+        "### 各类目 GMV 占比（矩形树）\n{{chart:3}}\n\n"
+        "### 类目 → 子类目 层级（旭日）\n{{chart:4}}\n\n"
+        "### 各品类客单价分布（箱线）\n{{chart:5}}\n\n"
+        "### TOP SKU 周价格波动（K 线）\n{{chart:6}}\n"
+    )
+    charts = [
+        {"chart_id": "chart:1", "chart_type": "bubble", "title": "投放花费 vs ROI（气泡=花费规模）",
+         "data": {"points": [
+             {"name": "搜索广告", "x": 32.0, "y": 4.2, "size": 32},
+             {"name": "直播", "x": 41.0, "y": 3.1, "size": 41},
+             {"name": "内容种草", "x": 18.0, "y": 3.6, "size": 18},
+             {"name": "私域", "x": 8.0, "y": 5.1, "size": 8},
+             {"name": "联盟", "x": 12.0, "y": 2.4, "size": 12},
+         ]}, "x_label": "花费(万元)", "y_label": "ROI", "row_count": 5},
+        {"chart_id": "chart:2", "chart_type": "scatter", "title": "客单价 vs 复购率",
+         "data": {"points": [
+             {"name": "美妆", "x": 268, "y": 41}, {"name": "数码", "x": 392, "y": 22},
+             {"name": "服饰", "x": 175, "y": 35}, {"name": "食品", "x": 96, "y": 52},
+             {"name": "家居", "x": 244, "y": 28}, {"name": "母婴", "x": 210, "y": 47},
+         ]}, "x_label": "客单价(元)", "y_label": "复购率(%)", "row_count": 6},
+        {"chart_id": "chart:3", "chart_type": "treemap", "title": "各类目 GMV 占比",
+         "data": {"tree": [
+             {"name": "美妆", "value": 62, "children": [{"name": "护肤", "value": 38}, {"name": "彩妆", "value": 24}]},
+             {"name": "数码", "value": 48, "children": [{"name": "手机", "value": 30}, {"name": "配件", "value": 18}]},
+             {"name": "服饰", "value": 35}, {"name": "食品", "value": 28}, {"name": "家居", "value": 21},
+         ]}, "row_count": 5},
+        {"chart_id": "chart:4", "chart_type": "sunburst", "title": "类目 → 子类目层级",
+         "data": {"tree": [
+             {"name": "美妆", "children": [{"name": "护肤", "value": 38}, {"name": "彩妆", "value": 24}]},
+             {"name": "数码", "children": [{"name": "手机", "value": 30}, {"name": "配件", "value": 18}]},
+             {"name": "服饰", "children": [{"name": "男装", "value": 16}, {"name": "女装", "value": 19}]},
+         ]}, "row_count": 3},
+        {"chart_id": "chart:5", "chart_type": "boxplot", "title": "各品类客单价分布（元）",
+         "categories": ["美妆", "数码", "服饰", "食品", "家居"],
+         "data": {"boxes": [
+             [80, 180, 260, 340, 520], [160, 300, 390, 520, 880],
+             [60, 120, 170, 240, 410], [20, 60, 95, 140, 260], [90, 170, 240, 330, 560],
+         ]}, "row_count": 5},
+        {"chart_id": "chart:6", "chart_type": "candlestick", "title": "TOP SKU 周价格波动",
+         "categories": ["W1", "W2", "W3", "W4", "W5", "W6"],
+         "data": {"ohlc": [
+             [199, 219, 188, 232], [219, 205, 196, 226], [205, 241, 201, 248],
+             [241, 233, 222, 255], [233, 258, 228, 269], [258, 249, 240, 271],
+         ]}, "row_count": 6},
+    ]
+    return {
+        "question": "再换结构和分布视角：投放与复购关联、类目层级占比、各品类客单价分布、TOP SKU 价格波动。",
+        "attachments": [
+            {"kind": "database", "name": "main", "path": "omni_shop.main"},
+            {"kind": "table", "name": "ad_spend_daily", "path": "omni_shop.main.ad_spend_daily"},
+        ],
+        "answer_markdown": answer, "charts": charts,
+    }
+
+
+def _show_showcase(app: QApplication, win: MainWindow, *, key: str, payload: dict[str, Any],
+                   workflow_id: str, frames: list[tuple[str, float]]) -> list[Path]:
+    _ensure_chat_visible(win)
+    win._active_key = key
+    win.ask_tab.set_active(key)
+    win.ask_tab.begin_turn(
+        key, str(payload["question"]),
+        connection="omni_shop", database="main", attachments=payload["attachments"],
+    )
+    win.ask_tab.append_result(key, {
+        "status": "completed",
+        "answer_markdown": payload["answer_markdown"],
+        "charts": payload["charts"],
+        "trace": _trace_events(final=True),
+        "workflow_id": workflow_id,
+    })
+    view = win.ask_tab.view(key)
+    _wait_for_answer_charts(app, win, key, chart_count=len(payload["charts"]))
+    out: list[Path] = []
+    for name, ratio in frames:
+        if view is not None:
+            out.append(_grab_scrolled(app, view, win.ask_tab, name, ratio))
+        else:
+            out.append(_grab(app, win.ask_tab, name))
+    return out
+
+
+def show_analytics_showcase(app: QApplication, win: MainWindow) -> list[Path]:
+    return _show_showcase(
+        app, win, key="promo-showcase-a", payload=_promo_analytics_showcase_payload(),
+        workflow_id="wf_promo_showcase_analytics",
+        frames=[
+            ("19-showcase-bridge-radar", 0.04),
+            ("20-showcase-bars", 0.30),
+            ("21-showcase-trends", 0.66),
+        ],
+    )
+
+
+def show_insight_showcase(app: QApplication, win: MainWindow) -> list[Path]:
+    return _show_showcase(
+        app, win, key="promo-showcase-b", payload=_promo_insight_showcase_payload(),
+        workflow_id="wf_promo_showcase_insight",
+        frames=[
+            ("22-showcase-correlation", 0.04),
+            ("23-showcase-hierarchy", 0.45),
+            ("24-showcase-distribution", 0.85),
+        ],
+    )
+
+
 def show_developer_consistency_audit(app: QApplication, win: MainWindow) -> Path:
     _ensure_chat_visible(win)
     key = "promo-dev-audit"
@@ -1630,43 +1813,61 @@ def write_copy(paths: list[Path]) -> Path:
             "5. `04-chart-answer-breakdown.png`",
             "   回答连续展示多种图表类型：堆叠面积、柱状、环形图、漏斗、仪表盘、热力图与库存风险条。",
             "",
-            "6. `05-clarification.png`",
+            "6. `19-showcase-bridge-radar.png`",
+            "   图表能力（一）：渠道综合质量雷达，六维横向对比各渠道。",
+            "",
+            "7. `20-showcase-bars.png`",
+            "   图表能力（二）：净收入桥（瀑布图）从 GMV 一步步扣到净收入，分组柱状看分月。",
+            "",
+            "8. `21-showcase-trends.png`",
+            "   图表能力（三）：多轴趋势、堆叠柱、面积与饼图——常用分析图表一应俱全。",
+            "",
+            "9. `05-clarification.png`",
             "   当口径不唯一时先澄清：避免 AI 擅自假设财务归属、取消订单和差异阈值。",
             "",
-            "7. `06-database-client-sql.png`",
-            "   内置数据库客户端：多标签 SQL 编辑、结果表格、导出、历史和结构树在同一界面，SQL 证据可继续复核。",
+            "10. `06-database-client-sql.png`",
+            "    内置数据库客户端：多标签 SQL 编辑、结果表格、导出、历史和结构树在同一界面，SQL 证据可继续复核。",
             "",
-            "8. `07-database-client-table.png`",
-            "   表数据浏览与结构查看一体化：适合开发排障，也适合业务同学快速核对明细。",
+            "11. `07-database-client-table.png`",
+            "    表数据浏览与结构查看一体化：适合开发排障，也适合业务同学快速核对明细。",
             "",
-            "9. `08-developer-field-exploration.png`",
-            "   开发者专项：当字段名不存在时，Agent 会先查字段、读表结构、验证关联路径，再自动改写成可执行 SQL。",
+            "12. `08-developer-field-exploration.png`",
+            "    开发者专项：当字段名不存在时，Agent 会先查字段、读表结构、验证关联路径，再自动改写成可执行 SQL。",
             "",
-            "10. `18-developer-dependency-tree.png`",
-            "   开发者专项：自动遍历 24 张表 / 37 条外键，以 orders 为根重建外键依赖树（节点-连线树状图），上下游维度与资金链路一张图看清。",
+            "13. `18-developer-dependency-tree.png`",
+            "    开发者专项：自动遍历 24 张表 / 37 条外键，以 orders 为根重建外键依赖树（节点-连线树状图），上下游维度与资金链路一张图看清。",
             "",
-            "11. `09-developer-consistency-audit.png`",
-            "   开发者专项：跨 orders/payments/refunds/ledger_entries 自动对账，表格结论配合柱状、环形与桑基图展示异常分布与资金链路。",
+            "14. `09-developer-consistency-audit.png`",
+            "    开发者专项：跨 orders/payments/refunds/ledger_entries 自动对账，表格结论配合柱状、环形与桑基图展示异常分布与资金链路。",
             "",
-            "12. `10-settings-connections.png`",
+            "15. `22-showcase-correlation.png`",
+            "    图表能力（四）：气泡图看投放花费 vs ROI（气泡=规模），散点图看客单价 vs 复购率关联。",
+            "",
+            "16. `23-showcase-hierarchy.png`",
+            "    图表能力（五）：矩形树看类目 GMV 占比，旭日图按类目→子类目层层下钻。",
+            "",
+            "17. `24-showcase-distribution.png`",
+            "    图表能力（六）：箱线图看各品类客单价分布，K 线图看 TOP SKU 周价格波动。",
+            "",
+            "18. `10-settings-connections.png`",
             "    连接管理、导入导出、默认连接切换都在一个面板里完成，便于团队迁移与环境管理。",
             "",
-            "13. `11-settings-models.png`",
+            "19. `11-settings-models.png`",
             "    模型配置与超时、上下文长度、API 凭据分离管理；桌面与 CLI 共享同一套模型配置。",
             "",
-            "14. `12-settings-resources.png`",
+            "20. `12-settings-resources.png`",
             "    所有关键资源限制都可配置：SQL 超时、行数上限、Agent 步数、压缩阈值、结果截断长度与并发运行数。",
             "",
-            "15. `13-settings-integrations.png`",
+            "21. `13-settings-integrations.png`",
             "    MCP / coding tool 集成页可直接安装到 Claude、Codex、Cursor 等工具，并支持 full / ask / tools 三种模式。",
             "",
-            "16. `14-backup-manager.png`",
+            "22. `14-backup-manager.png`",
             "    备份管理器统一查看历史备份、格式、行数、大小和文件位置，适合做本地快照与审计留存。",
             "",
-            "17. `15-build-assets-dialog.png`",
+            "23. `15-build-assets-dialog.png`",
             "    构建资产支持按库选择、并发与时间预算设置，不必每次重扫整实例。",
             "",
-            "18. `16-connection-dialog.png`",
+            "24. `16-connection-dialog.png`",
             "    连接表单内置只读负载配置、会话时区和 SSL 选项，便于安全地接入生产或分析库。",
             "",
             "## 面向技术人员",

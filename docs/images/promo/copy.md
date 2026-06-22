@@ -23,40 +23,61 @@ DBAide：面向真实数据库的 AI 数据分析与开发工作台
 5. `04-chart-answer-breakdown.png`
    回答连续展示多种图表类型：堆叠面积、柱状、环形图、漏斗、仪表盘、热力图与库存风险条。
 
-6. `05-clarification.png`
+6. `19-showcase-bridge-radar.png`
+   图表能力（一）：渠道综合质量雷达，六维横向对比各渠道。
+
+7. `20-showcase-bars.png`
+   图表能力（二）：净收入桥（瀑布图）从 GMV 一步步扣到净收入，分组柱状看分月。
+
+8. `21-showcase-trends.png`
+   图表能力（三）：多轴趋势、堆叠柱、面积与饼图——常用分析图表一应俱全。
+
+9. `05-clarification.png`
    当口径不唯一时先澄清：避免 AI 擅自假设财务归属、取消订单和差异阈值。
 
-7. `06-database-client-sql.png`
-   内置数据库客户端：多标签 SQL 编辑、结果表格、导出、历史和结构树在同一界面，SQL 证据可继续复核。
+10. `06-database-client-sql.png`
+    内置数据库客户端：多标签 SQL 编辑、结果表格、导出、历史和结构树在同一界面，SQL 证据可继续复核。
 
-8. `07-database-client-table.png`
-   表数据浏览与结构查看一体化：适合开发排障，也适合业务同学快速核对明细。
+11. `07-database-client-table.png`
+    表数据浏览与结构查看一体化：适合开发排障，也适合业务同学快速核对明细。
 
-9. `08-developer-field-exploration.png`
-   开发者专项：当字段名不存在时，Agent 会先查字段、读表结构、验证关联路径，再自动改写成可执行 SQL。
+12. `08-developer-field-exploration.png`
+    开发者专项：当字段名不存在时，Agent 会先查字段、读表结构、验证关联路径，再自动改写成可执行 SQL。
 
-10. `09-developer-consistency-audit.png`
-   开发者专项：跨 orders/payments/refunds/ledger_entries 自动对账，表格结论配合柱状、环形与桑基图展示异常分布与资金链路。
+13. `18-developer-dependency-tree.png`
+    开发者专项：自动遍历 24 张表 / 37 条外键，以 orders 为根重建外键依赖树（节点-连线树状图），上下游维度与资金链路一张图看清。
 
-11. `10-settings-connections.png`
+14. `09-developer-consistency-audit.png`
+    开发者专项：跨 orders/payments/refunds/ledger_entries 自动对账，表格结论配合柱状、环形与桑基图展示异常分布与资金链路。
+
+15. `22-showcase-correlation.png`
+    图表能力（四）：气泡图看投放花费 vs ROI（气泡=规模），散点图看客单价 vs 复购率关联。
+
+16. `23-showcase-hierarchy.png`
+    图表能力（五）：矩形树看类目 GMV 占比，旭日图按类目→子类目层层下钻。
+
+17. `24-showcase-distribution.png`
+    图表能力（六）：箱线图看各品类客单价分布，K 线图看 TOP SKU 周价格波动。
+
+18. `10-settings-connections.png`
     连接管理、导入导出、默认连接切换都在一个面板里完成，便于团队迁移与环境管理。
 
-12. `11-settings-models.png`
+19. `11-settings-models.png`
     模型配置与超时、上下文长度、API 凭据分离管理；桌面与 CLI 共享同一套模型配置。
 
-13. `12-settings-resources.png`
+20. `12-settings-resources.png`
     所有关键资源限制都可配置：SQL 超时、行数上限、Agent 步数、压缩阈值、结果截断长度与并发运行数。
 
-14. `13-settings-integrations.png`
+21. `13-settings-integrations.png`
     MCP / coding tool 集成页可直接安装到 Claude、Codex、Cursor 等工具，并支持 full / ask / tools 三种模式。
 
-15. `14-backup-manager.png`
+22. `14-backup-manager.png`
     备份管理器统一查看历史备份、格式、行数、大小和文件位置，适合做本地快照与审计留存。
 
-16. `15-build-assets-dialog.png`
+23. `15-build-assets-dialog.png`
     构建资产支持按库选择、并发与时间预算设置，不必每次重扫整实例。
 
-17. `16-connection-dialog.png`
+24. `16-connection-dialog.png`
     连接表单内置只读负载配置、会话时区和 SSL 选项，便于安全地接入生产或分析库。
 
 ## 面向技术人员
@@ -73,7 +94,6 @@ DBAide：面向真实数据库的 AI 数据分析与开发工作台
 ## 生成的文件
 - `01-assets-initializing.png`
 - `02-runtime-thinking.png`
-- `17-agent-trace.png`
 - `03-chart-answer-analysis.png`
 - `04-chart-answer-breakdown.png`
 - `05-clarification.png`
@@ -88,3 +108,11 @@ DBAide：面向真实数据库的 AI 数据分析与开发工作台
 - `14-backup-manager.png`
 - `15-build-assets-dialog.png`
 - `16-connection-dialog.png`
+- `17-agent-trace.png`
+- `18-developer-dependency-tree.png`
+- `19-showcase-bridge-radar.png`
+- `20-showcase-bars.png`
+- `21-showcase-trends.png`
+- `22-showcase-correlation.png`
+- `23-showcase-hierarchy.png`
+- `24-showcase-distribution.png`
