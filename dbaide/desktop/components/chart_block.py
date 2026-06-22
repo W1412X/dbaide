@@ -110,7 +110,7 @@ def _has_chart_payload(spec) -> bool:
         return spec.data.get("value") is not None
     if chart_type == "sankey":
         return bool(spec.data.get("nodes")) and bool(spec.data.get("links"))
-    if chart_type in {"treemap", "sunburst"}:
+    if chart_type in {"treemap", "sunburst", "tree"}:
         return bool(spec.data.get("tree"))
     if chart_type == "candlestick":
         return bool(spec.categories) and bool(spec.data.get("ohlc"))

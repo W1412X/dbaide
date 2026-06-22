@@ -26,6 +26,7 @@ CHART_TYPES = frozenset({
     "sankey",
     "treemap",
     "sunburst",
+    "tree",
     "waterfall",
     "candlestick",
     "boxplot",
@@ -198,7 +199,7 @@ class ChartSpec:
         }
         self.data = dict(self.data or {})
 
-        if self.chart_type in {"scatter", "bubble", "heatmap", "sankey", "treemap", "sunburst", "candlestick", "boxplot", "gauge", "radar"}:
+        if self.chart_type in {"scatter", "bubble", "heatmap", "sankey", "treemap", "sunburst", "tree", "candlestick", "boxplot", "gauge", "radar"}:
             self._validate_special_payload()
         elif self.chart_type in {"bar", "horizontal_bar", "grouped_bar", "stacked_bar", "line", "area", "stacked_area", "multi_axis_line", "combo", "pie", "donut", "funnel", "waterfall"}:
             self._validate_series_categories()
@@ -212,7 +213,7 @@ class ChartSpec:
             self._require_data_keys("value")
         elif self.chart_type == "sankey":
             self._require_data_keys("nodes", "links")
-        elif self.chart_type in {"treemap", "sunburst"}:
+        elif self.chart_type in {"treemap", "sunburst", "tree"}:
             self._require_data_keys("tree")
         elif self.chart_type == "candlestick":
             self._require_data_keys("ohlc")

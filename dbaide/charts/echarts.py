@@ -74,6 +74,9 @@ def chart_spec_to_echarts_option(spec_dict: dict[str, Any], *, theme: Mapping[st
     if chart_type in _TREE_TYPES:
         option.update(_build_tree_option(spec, text_color))
         return option
+    if chart_type == "tree":
+        option.update(_build_tree_graph_option(spec, text_color, muted, border))
+        return option
     if chart_type == "candlestick":
         option.update(_build_candlestick_option(spec, muted, border, interactive))
         return option
@@ -569,6 +572,63 @@ def _build_tree_option(spec: Any, text_color: str) -> dict[str, Any]:
             "sort": None,
             "label": {"rotate": "radial", "color": text_color},
             "data": data,
+        }],
+    }
+
+
+def _build_tree_graph_option(spec: Any, text_color: str, muted: str, border: str) -> dict[str, Any]:
+    """Node-link tree (ECharts `tree` series) — a classic hierarchy diagram.
+
+    ``data.tree`` is the same hierarchical ``{name, value?, children?}`` shape as
+    treemap/sunburst, but rendered as an orthogonal left-to-right tree. A single root
+    is expected; if several top-level nodes are supplied they are hung under a
+    synthetic root so the diagram stays a valid tree.
+    """
+    nodes = [dict(item) for item in (spec.data.get("tree") or []) if isinstance(item, dict)]
+    if len(nodes) == 1:
+        root = nodes[0]
+    else:
+        root = {"name": spec.title or "root", "children": nodes}
+    orient = "LR"
+    opts = getattr(spec, "options", None)
+    if opts is not None and str(getattr(opts, "orientation", "") or "").lower() in {"tb", "vertical"}:
+        orient = "TB"
+    return {
+        "tooltip": {"trigger": "item", "triggerOn": "mousemove", "confine": True, "appendToBody": True},
+        "series": [{
+            "type": "tree",
+            "data": [root],
+            "top": "2%",
+            "bottom": "2%",
+            "left": "7%",
+            "right": "16%",
+            "orient": orient,
+            "symbol": "circle",
+            "symbolSize": 9,
+            "roam": False,
+            "expandAndCollapse": False,
+            "initialTreeDepth": -1,
+            "lineStyle": {"color": border, "width": 1.2, "curveness": 0.5},
+            "itemStyle": {"color": "#3b82f6", "borderColor": "#3b82f6"},
+            "label": {
+                "position": "right" if orient == "LR" else "top",
+                "verticalAlign": "middle",
+                "align": "left" if orient == "LR" else "center",
+                "color": text_color,
+                "fontSize": 12,
+                "distance": 7,
+            },
+            "leaves": {
+                "label": {
+                    "position": "right" if orient == "LR" else "bottom",
+                    "verticalAlign": "middle",
+                    "align": "left" if orient == "LR" else "center",
+                    "color": muted,
+                },
+            },
+            "emphasis": {"focus": "descendant"},
+            "animationDuration": 450,
+            "animationDurationUpdate": 600,
         }],
     }
 

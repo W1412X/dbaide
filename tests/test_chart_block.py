@@ -304,6 +304,30 @@ def test_echarts_option_sankey_and_tree_types_render():
     treemap_option = chart_spec_to_echarts_option(treemap)
     assert treemap_option["series"][0]["type"] == "treemap"
 
+    # Node-link tree: single supplied root is used directly; multiple roots are hung
+    # under a synthetic root so the series stays a valid tree.
+    tree = {
+        "chart_id": "chart:nodetree",
+        "chart_type": "tree",
+        "title": "orders 依赖树",
+        "data": {"tree": [{"name": "orders", "children": [
+            {"name": "payments", "children": [{"name": "ledger_entries"}]},
+            {"name": "refunds"},
+        ]}]},
+    }
+    tree_option = chart_spec_to_echarts_option(tree)
+    series = tree_option["series"][0]
+    assert series["type"] == "tree"
+    assert series["data"][0]["name"] == "orders"
+    assert {c["name"] for c in series["data"][0]["children"]} == {"payments", "refunds"}
+
+    multi_root = chart_spec_to_echarts_option({
+        "chart_id": "chart:mr", "chart_type": "tree", "title": "lineage",
+        "data": {"tree": [{"name": "a"}, {"name": "b"}]},
+    })
+    assert multi_root["series"][0]["data"][0]["name"] == "lineage"
+    assert len(multi_root["series"][0]["data"][0]["children"]) == 2
+
 
 def test_echarts_option_candlestick_boxplot_and_waterfall_render():
     candlestick = {

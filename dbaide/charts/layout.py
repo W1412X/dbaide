@@ -25,6 +25,8 @@ def estimate_chart_height(
         return 420
     if chart_type in {"heatmap", "treemap", "sankey"}:
         return 440
+    if chart_type == "tree":
+        return 520
     if chart_type in {"funnel"}:
         return 400
     if chart_type in {"candlestick", "boxplot", "waterfall"}:

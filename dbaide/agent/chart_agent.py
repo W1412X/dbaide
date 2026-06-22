@@ -307,12 +307,13 @@ def _validate_plan_fields(
         require_field("target_field", target_field)
         if not value_fields:
             raise ValueError("chart agent must return non-empty value_fields")
-    if chart_type in {"treemap", "sunburst"}:
+    if chart_type in {"treemap", "sunburst", "tree"}:
         if not path_fields:
             raise ValueError("chart agent must return path_fields")
         for field in path_fields:
             require_field("path_fields", field)
-        if not value_fields:
+        # treemap/sunburst size nodes by value; a node-link tree may be purely structural.
+        if chart_type != "tree" and not value_fields:
             raise ValueError("chart agent must return non-empty value_fields")
     if chart_type == "candlestick":
         require_field("open_field", open_field)
@@ -324,7 +325,7 @@ def _validate_plan_fields(
 
 
 def _materialize(plan: ChartPlan, rows: list[dict[str, Any]]) -> dict[str, Any]:
-    if plan.chart_type in {"scatter", "bubble", "heatmap", "sankey", "treemap", "sunburst", "candlestick", "boxplot", "gauge", "radar"}:
+    if plan.chart_type in {"scatter", "bubble", "heatmap", "sankey", "treemap", "sunburst", "tree", "candlestick", "boxplot", "gauge", "radar"}:
         return _materialize_special(plan, rows)
     categories, series = _materialize_common(plan, rows)
     return {"categories": categories, "series": series, "data": {}}
@@ -372,7 +373,7 @@ def _materialize_special(plan: ChartPlan, rows: list[dict[str, Any]]) -> dict[st
         return _materialize_heatmap(plan, rows)
     if plan.chart_type == "sankey":
         return _materialize_sankey(plan, rows)
-    if plan.chart_type in {"treemap", "sunburst"}:
+    if plan.chart_type in {"treemap", "sunburst", "tree"}:
         return _materialize_tree(plan, rows)
     if plan.chart_type == "candlestick":
         return _materialize_candlestick(plan, rows)
@@ -449,7 +450,9 @@ def _materialize_sankey(plan: ChartPlan, rows: list[dict[str, Any]]) -> dict[str
 
 
 def _materialize_tree(plan: ChartPlan, rows: list[dict[str, Any]]) -> dict[str, Any]:
-    value_field = plan.value_fields[0]
+    # A node-link tree may be purely structural (no value column); treemap/sunburst
+    # always carry a value to size nodes.
+    value_field = plan.value_fields[0] if plan.value_fields else None
     root: dict[str, Any] = {"name": plan.title or "root", "children": []}
     for row in rows[: plan.limit]:
         pointer = root
@@ -461,8 +464,9 @@ def _materialize_tree(plan: ChartPlan, rows: list[dict[str, Any]]) -> dict[str, 
                 child = {"name": label, "children": []}
                 children.append(child)
             pointer = child
-        value = _as_float(row.get(value_field))
-        pointer["value"] = _as_float(pointer.get("value")) + value
+        if value_field is not None:
+            value = _as_float(row.get(value_field))
+            pointer["value"] = _as_float(pointer.get("value")) + value
         if not pointer.get("children"):
             pointer.pop("children", None)
     return {"categories": [], "series": [], "data": {"tree": root.get("children") or []}}
