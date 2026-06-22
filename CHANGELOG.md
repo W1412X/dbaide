@@ -6,18 +6,24 @@ All notable changes to DBAide are documented here. The format is loosely based o
 
 ## [Unreleased]
 
+## [0.9.2] — 2026-06-22
+
 ### Changed
 
-- **UI polish** — color/state/motion refinements with no layout changes: selection now
-  uses an accent tint (new `SELECT` tokens) across trees, lists, tables, menus and text
-  selection instead of a flat gray; keyboard focus is visible again (buttons'
-  `:focus-visible` and the "soft" combo now use the accent instead of a near-invisible
-  border; checkbox/radio gained an accent focus border); dialogs fade in on open
-  (guarded so they can never get stuck transparent). The 对话/工作台 mode switch now
-  slides an animated selection pill between tabs, and switching tabs fades the incoming
-  page in (skipped for WebEngine-hosting pages, which an opacity effect would black out).
-  Dropdown menus fade in on open, and the main window fades in on launch (window-level
-  opacity, safe over WebEngine).
+- **UI polish** — motion + state refinements with no layout changes. Keyboard focus is
+  visible again (buttons' `:focus-visible` and the "soft" combo use the accent; checkbox
+  /radio gained an accent focus border). The 对话/工作台 mode switch slides an animated
+  selection pill between tabs; switching tabs fades the incoming page in (skipped for
+  WebEngine-hosting pages, which an opacity effect would black out); dropdown menus fade
+  in on open; the main window fades in on launch (window-level opacity, safe over
+  WebEngine); dialogs fade in on open (guarded so they can never get stuck transparent).
+  The SQL editor brightens the current line's number in the gutter.
+
+### Fixed
+
+- **Settings** — the Connections "Import" action was clipped to "Impor" by a fixed button
+  width sized for the shorter "New" label; it now auto-fits its label (found in a live
+  UI walkthrough).
 
 ## [0.9.1] — 2026-06-22
 
