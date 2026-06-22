@@ -5,7 +5,7 @@ from __future__ import annotations
 import sys
 from typing import TYPE_CHECKING
 
-from PyQt6.QtCore import QMargins, QMarginsF, Qt, QTimer
+from PyQt6.QtCore import QEasingCurve, QMargins, QMarginsF, QPropertyAnimation, Qt, QTimer
 from PyQt6.QtGui import QColor, QPalette
 from PyQt6.QtWidgets import QDialog, QLayout, QWidget
 
@@ -226,3 +226,23 @@ class ChromeDialog(QDialog):
             self._chrome_installed = True
             apply_window_background(self)
             install_top_level_chrome(self, layout=self.layout())
+            self._play_open_fade()
+
+    def _play_open_fade(self) -> None:
+        """Subtle fade-in on first open. Guarded so the dialog can never get stuck
+        transparent: a fallback timer (and the animation's finished signal) always
+        restore full opacity even if the animation is interrupted."""
+        try:
+            self.setWindowOpacity(0.0)
+            anim = QPropertyAnimation(self, b"windowOpacity", self)
+            anim.setDuration(130)
+            anim.setStartValue(0.0)
+            anim.setEndValue(1.0)
+            anim.setEasingCurve(QEasingCurve.Type.OutCubic)
+            anim.finished.connect(lambda: self.setWindowOpacity(1.0))
+            self._open_fade = anim  # keep a reference so it isn't GC'd mid-flight
+            anim.start()
+            # Belt-and-suspenders: force full opacity shortly after, regardless.
+            QTimer.singleShot(220, lambda: self.setWindowOpacity(1.0))
+        except Exception:
+            self.setWindowOpacity(1.0)

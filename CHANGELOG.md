@@ -6,6 +6,15 @@ All notable changes to DBAide are documented here. The format is loosely based o
 
 ## [Unreleased]
 
+### Changed
+
+- **UI polish** — color/state/motion refinements with no layout changes: selection now
+  uses an accent tint (new `SELECT` tokens) across trees, lists, tables, menus and text
+  selection instead of a flat gray; keyboard focus is visible again (buttons'
+  `:focus-visible` and the "soft" combo now use the accent instead of a near-invisible
+  border; checkbox/radio gained an accent focus border); dialogs fade in on open
+  (guarded so they can never get stuck transparent).
+
 ## [0.9.1] — 2026-06-22
 
 ### Security

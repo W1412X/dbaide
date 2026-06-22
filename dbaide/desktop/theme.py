@@ -365,7 +365,7 @@ QComboBox[soft="true"]:hover {{
 }}
 QComboBox[soft="true"]:focus {{
     background: {T.PANEL_2};
-    border: 1px solid {T.BORDER};
+    border: 1px solid {T.FOCUS};
     outline: none;
 }}
 QComboBox[soft="true"]::drop-down {{
