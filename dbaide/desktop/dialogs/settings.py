@@ -326,7 +326,8 @@ class SettingsDialog(ChromeDialog):
         list_actions.setSpacing(6)
         self.add_conn_btn = compact_button(_pt("btn.new"), width=72)
         self.add_conn_btn.clicked.connect(self._add_connection)
-        self.import_conn_btn = compact_button(_pt("settings.import"), width=72)
+        # Auto-fit width: "Import" (and longer localized labels) clip at a fixed 72px.
+        self.import_conn_btn = compact_button(_pt("settings.import"))
         self.import_conn_btn.setToolTip(_pt("settings.import_conn_tooltip"))
         self.import_conn_btn.clicked.connect(self._import_connection)
         list_actions.addWidget(self.add_conn_btn)
