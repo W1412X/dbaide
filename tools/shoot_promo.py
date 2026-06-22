@@ -68,6 +68,7 @@ DOC_SCENARIOS = [
     "sql",
     "table",
     "field",
+    "dep-tree",
     "audit",
     "settings-connections",
     "settings-models",
@@ -1241,6 +1242,97 @@ def _promo_consistency_audit_payload() -> dict[str, Any]:
     }
 
 
+def _dependency_tree_trace() -> list[dict[str, Any]]:
+    return [
+        {"stage": "loop", "title": "解析依赖意图", "status": "completed", "kind": "phase", "step": 1,
+         "thought": "目标是以 orders 为根，重建外键依赖树（上游维度 + 下游事实）。", "duration_ms": 160},
+        {"stage": "discover_schema", "title": "遍历外键图", "status": "completed", "kind": "tool", "step": 2,
+         "detail": "扫描 24 张表 / 37 条外键，定位 orders 的入边与出边", "duration_ms": 540},
+        {"stage": "retrieve_join_context", "title": "重建层级", "status": "completed", "kind": "tool", "step": 3,
+         "detail": "orders→order_items→products→categories/brands；orders→payments/refunds→ledger_entries", "duration_ms": 610},
+        {"stage": "generate_sql", "title": "标注关键节点", "status": "completed", "kind": "llm", "step": 4,
+         "thought": "ledger_entries 同时被 payments 与 refunds 引用，标为资金核验汇聚点。", "duration_ms": 430},
+    ]
+
+
+def _promo_dependency_tree_payload() -> dict[str, Any]:
+    answer = (
+        "## 依赖树重建完成\n\n"
+        "已自动遍历 **24 张表 / 37 条外键**，以 `orders` 为根重建依赖树：上游维度、下游事实与资金链路"
+        "一张图看清——不用手翻 DDL。\n\n"
+        "**关键发现**\n"
+        "- `orders` 是 **6 条关联路径** 的交汇点，是整个 schema 的事实中枢。\n"
+        "- `ledger_entries` 同时挂在 `payments` 与 `refunds` 之下，是对账与资金核验的关键汇聚点。\n"
+        "- `products → categories / brands` 构成商品维度子树，按类目/品牌下钻就走这条路径。\n\n"
+        "{{chart:1}}\n\n"
+        "## 工程提示\n\n"
+        "- 改 `orders` 结构前，先评估这 6 条下游链路的影响面。\n"
+        "- 资金相关查询务必经过 `ledger_entries`，只查 `payments` 会漏掉退款侧。"
+    )
+    charts = [{
+        "chart_id": "chart:1",
+        "chart_type": "tree",
+        "title": "orders 外键依赖树",
+        "data": {"tree": [{
+            "name": "orders",
+            "children": [
+                {"name": "order_items", "children": [
+                    {"name": "products", "children": [
+                        {"name": "categories"},
+                        {"name": "brands"},
+                    ]},
+                ]},
+                {"name": "payments", "children": [{"name": "ledger_entries"}]},
+                {"name": "refunds", "children": [{"name": "ledger_entries"}]},
+                {"name": "shipments", "children": [{"name": "warehouses"}]},
+                {"name": "users", "children": [{"name": "addresses"}]},
+                {"name": "coupons"},
+            ],
+        }]},
+        "row_count": 11,
+    }]
+    return {
+        "question": (
+            "开发：把核心事实表 orders 的外键依赖梳理成一棵依赖树——上游依赖哪些维度表、"
+            "下游又被哪些表引用，并标出资金链路的关键节点。"
+        ),
+        "attachments": [
+            {"kind": "table", "name": "orders", "path": "omni_shop.main.orders"},
+            {"kind": "table", "name": "payments", "path": "omni_shop.main.payments"},
+            {"kind": "table", "name": "ledger_entries", "path": "omni_shop.main.ledger_entries"},
+        ],
+        "answer_markdown": answer,
+        "charts": charts,
+    }
+
+
+def show_developer_dependency_tree(app: QApplication, win: MainWindow) -> Path:
+    _ensure_chat_visible(win)
+    key = "promo-dev-tree"
+    win._active_key = key
+    win.ask_tab.set_active(key)
+    payload = _promo_dependency_tree_payload()
+    win.ask_tab.begin_turn(
+        key,
+        str(payload["question"]),
+        connection="omni_shop",
+        database="main",
+        attachments=payload["attachments"],
+    )
+    win.ask_tab.append_result(key, {
+        "status": "completed",
+        "answer_markdown": payload["answer_markdown"],
+        "charts": payload["charts"],
+        "trace": _dependency_tree_trace(),
+        "workflow_id": "wf_promo_dependency_tree",
+    })
+    view = win.ask_tab.view(key)
+    _wait_for_answer_charts(app, win, key, chart_count=len(payload["charts"]))
+    if view is not None:
+        return _grab_scrolled(app, view, win.ask_tab, "18-developer-dependency-tree", 0.34)
+    return _grab(app, win.ask_tab, "18-developer-dependency-tree")
+
+
 def show_developer_consistency_audit(app: QApplication, win: MainWindow) -> Path:
     _ensure_chat_visible(win)
     key = "promo-dev-audit"
@@ -1550,28 +1642,31 @@ def write_copy(paths: list[Path]) -> Path:
             "9. `08-developer-field-exploration.png`",
             "   开发者专项：当字段名不存在时，Agent 会先查字段、读表结构、验证关联路径，再自动改写成可执行 SQL。",
             "",
-            "10. `09-developer-consistency-audit.png`",
+            "10. `18-developer-dependency-tree.png`",
+            "   开发者专项：自动遍历 24 张表 / 37 条外键，以 orders 为根重建外键依赖树（节点-连线树状图），上下游维度与资金链路一张图看清。",
+            "",
+            "11. `09-developer-consistency-audit.png`",
             "   开发者专项：跨 orders/payments/refunds/ledger_entries 自动对账，表格结论配合柱状、环形与桑基图展示异常分布与资金链路。",
             "",
-            "11. `10-settings-connections.png`",
+            "12. `10-settings-connections.png`",
             "    连接管理、导入导出、默认连接切换都在一个面板里完成，便于团队迁移与环境管理。",
             "",
-            "12. `11-settings-models.png`",
+            "13. `11-settings-models.png`",
             "    模型配置与超时、上下文长度、API 凭据分离管理；桌面与 CLI 共享同一套模型配置。",
             "",
-            "13. `12-settings-resources.png`",
+            "14. `12-settings-resources.png`",
             "    所有关键资源限制都可配置：SQL 超时、行数上限、Agent 步数、压缩阈值、结果截断长度与并发运行数。",
             "",
-            "14. `13-settings-integrations.png`",
+            "15. `13-settings-integrations.png`",
             "    MCP / coding tool 集成页可直接安装到 Claude、Codex、Cursor 等工具，并支持 full / ask / tools 三种模式。",
             "",
-            "15. `14-backup-manager.png`",
+            "16. `14-backup-manager.png`",
             "    备份管理器统一查看历史备份、格式、行数、大小和文件位置，适合做本地快照与审计留存。",
             "",
-            "16. `15-build-assets-dialog.png`",
+            "17. `15-build-assets-dialog.png`",
             "    构建资产支持按库选择、并发与时间预算设置，不必每次重扫整实例。",
             "",
-            "17. `16-connection-dialog.png`",
+            "18. `16-connection-dialog.png`",
             "    连接表单内置只读负载配置、会话时区和 SSL 选项，便于安全地接入生产或分析库。",
             "",
             "## 面向技术人员",

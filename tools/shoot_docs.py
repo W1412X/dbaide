@@ -83,6 +83,8 @@ def _run_window_scenario(name: str) -> list[str]:
         paths = [promo.show_database_client(app, win)[1]]
     elif name == "field":
         paths = [promo.show_developer_field_exploration(app, win)]
+    elif name == "dep-tree":
+        paths = [promo.show_developer_dependency_tree(app, win)]
     elif name == "audit":
         paths = [promo.show_developer_consistency_audit(app, win)]
     elif name == "settings-connections":

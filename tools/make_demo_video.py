@@ -55,6 +55,8 @@ SCENES: list[tuple[str, str, str]] = [
      "表数据浏览与结构查看一体化：适合开发排障，也适合业务同学快速核对明细。"),
     ("08-developer-field-exploration", "字段探索（开发者）",
      "字段名不存在时，Agent 会先查字段、读表结构、验证关联路径，再改写成可执行 SQL。"),
+    ("18-developer-dependency-tree", "外键依赖树（开发者）",
+     "自动遍历 24 张表 / 37 条外键，以 orders 为根重建依赖树——上下游与资金链路一张图看清。"),
     ("09-developer-consistency-audit", "跨表一致性对账",
      "跨 orders/payments/refunds/ledger 自动对账，表格结论配柱状、环形与桑基图展示资金链路。"),
     ("10-settings-connections", "连接管理",
