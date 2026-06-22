@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from PyQt6.QtCore import Qt, pyqtSignal, QSize
+from PyQt6.QtCore import QEasingCurve, QPropertyAnimation, Qt, pyqtSignal, QSize
 from PyQt6.QtGui import QFontMetrics, QIcon
 from PyQt6.QtWidgets import QMenu, QSizePolicy, QToolButton
 
@@ -19,12 +19,31 @@ def _apply_menu_style(menu: QMenu) -> None:
     menu.update()
 
 
+def _fade_menu_in(menu: QMenu) -> None:
+    """Fade a menu in via window-level opacity. A no-op where the platform ignores
+    popup opacity (the menu then just appears instantly). The animation is parented to
+    the menu so it never outlives it — a module-level filter would get its C++ object
+    deleted across QApplication lifecycles."""
+    menu.setWindowOpacity(0.0)
+    anim = QPropertyAnimation(menu, b"windowOpacity", menu)
+    anim.setDuration(120)
+    anim.setStartValue(0.0)
+    anim.setEndValue(1.0)
+    anim.setEasingCurve(QEasingCurve.Type.OutCubic)
+    menu._dbaide_fade_anim = anim  # keep a reference for the menu's lifetime
+    anim.start()
+
+
 def _style_menu(menu: QMenu) -> None:
     _apply_menu_style(menu)
     if menu.property("_dbaide_menu_hook"):
         return
     menu.setProperty("_dbaide_menu_hook", True)
-    menu.aboutToShow.connect(lambda: _apply_menu_style(menu))
+
+    def _on_about_to_show() -> None:
+        _apply_menu_style(menu)
+        _fade_menu_in(menu)
+    menu.aboutToShow.connect(_on_about_to_show)
 
 
 class MenuButton(QToolButton):
