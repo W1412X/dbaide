@@ -36,6 +36,10 @@ class _DarkTheme:
     RED = "#ff6b6b"
     CODE_BG = "#090b0f"
     NULL = "#515865"
+    # Accent-tinted selection / active highlight — clearer "what's selected" than a flat
+    # gray, used consistently across trees, lists, tables, menus and text selection.
+    SELECT = "rgba(59, 130, 246, 0.22)"
+    SELECT_SOFT = "rgba(59, 130, 246, 0.13)"
     RADIUS_SM = 6
     RADIUS_MD = 8
     RADIUS_LG = 10
@@ -65,6 +69,8 @@ class _LightTheme:
     RED = "#ef4444"
     CODE_BG = "#f1f3f5"
     NULL = "#adb5bd"
+    SELECT = "rgba(59, 130, 246, 0.16)"
+    SELECT_SOFT = "rgba(59, 130, 246, 0.09)"
     RADIUS_SM = 6
     RADIUS_MD = 8
     RADIUS_LG = 10
@@ -207,7 +213,7 @@ def app_style() -> str:
         border-radius: 8px;
         min-height: 28px;
         max-height: 28px;
-        selection-background-color: {T.PANEL_3};
+        selection-background-color: {T.SELECT};
     """
 
     return f"""
@@ -296,7 +302,7 @@ QPushButton[danger="true"]:pressed {{
     background: rgba(255, 107, 107, 0.18);
 }}
 QPushButton:focus-visible, QToolButton:focus-visible {{
-    border: 1px solid {T.BORDER_SOFT};
+    border: 1px solid {T.FOCUS};
 }}
 QToolButton#modeSwitchButton:focus-visible {{
     border: 1px solid {T.FOCUS};
@@ -370,7 +376,7 @@ QComboBox[soft="true"]::drop-down {{
 QComboBox QAbstractItemView {{
     background: {T.PANEL};
     color: {T.TEXT};
-    selection-background-color: {T.PANEL_3};
+    selection-background-color: {T.SELECT};
     border: 1px solid {T.BORDER};
     border-radius: 8px;
     padding: 4px;
@@ -420,7 +426,7 @@ QTextEdit, QTextBrowser, QPlainTextEdit, QListWidget, QTreeWidget, QTableWidget 
     color: {T.TEXT};
     border: 1px solid {T.BORDER_SOFT};
     border-radius: 8px;
-    selection-background-color: {T.PANEL_3};
+    selection-background-color: {T.SELECT};
     outline: none;  /* no native focus ring/box on item views */
 }}
 QListView, QTreeView, QTableView, QAbstractItemView {{
@@ -512,7 +518,7 @@ QTreeWidget::item:hover {{
     background: {T.PANEL_2};
 }}
 QTreeWidget::item:selected {{
-    background: {T.PANEL_3};
+    background: {T.SELECT};
     color: {T.TEXT};
 }}
 /* Lists are always single-column, so a rounded hover/selection reads cleanly
@@ -525,7 +531,7 @@ QListWidget::item:hover {{
     background: {T.PANEL_2};
 }}
 QListWidget::item:selected {{
-    background: {T.PANEL_3};
+    background: {T.SELECT};
     color: {T.TEXT};
 }}
 /* Slim, floating scrollbars: transparent track, rounded handle that brightens on
@@ -730,6 +736,12 @@ QRadioButton::indicator {{
 QCheckBox::indicator:hover, QRadioButton::indicator:hover {{
     border-color: {T.MUTED};
 }}
+QCheckBox:focus-visible, QRadioButton:focus-visible {{
+    /* keyboard focus on the row -- tint the indicator border without shifting layout */
+}}
+QCheckBox::indicator:focus, QRadioButton::indicator:focus {{
+    border-color: {T.FOCUS};
+}}
 QCheckBox::indicator:checked, QRadioButton::indicator:checked {{
     background: {T.ACCENT};
     border-color: {T.ACCENT};
@@ -749,7 +761,7 @@ def combo_popup_stylesheet() -> str:
     QAbstractItemView {{
         background-color: {T.PANEL};
         color: {T.TEXT};
-        selection-background-color: {T.PANEL_3};
+        selection-background-color: {T.SELECT};
         border: 1px solid {T.BORDER};
         border-radius: {T.RADIUS_MD}px;
         padding: 4px;
@@ -782,7 +794,7 @@ def menu_stylesheet() -> str:
         min-height: 20px;
     }}
     QMenu::item:selected {{
-        background: {T.PANEL_3};
+        background: {T.SELECT};
         color: {T.TEXT};
     }}
     QMenu::item:disabled {{
