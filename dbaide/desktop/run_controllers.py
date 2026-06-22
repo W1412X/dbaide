@@ -269,7 +269,10 @@ class ConversationRunController:
         run_connection = win.run_state.connection_for(key) or win.current_connection()
         win._runs.pop(key, None)
         server_id = str(result.get("session_id") or win.run_state.session_for(key) or "")
-        if server_id and server_id != key and not win.ask_tab.has_slot(server_id):
+        # Always rebind the temp slot to its server session_id. bind_slot_to_session is
+        # collision-safe (the live slot/view win), so we no longer skip on collision —
+        # skipping left the conversation orphaned under its temporary "new:N" key.
+        if server_id and server_id != key:
             self.bind_slot_to_session(key, server_id)
             key = server_id
         win.run_state.set_session(key, server_id)
@@ -333,6 +336,13 @@ class ConversationRunController:
             key, payload = win._run_queue.pop(0)
             if not win.ask_tab.has_slot(key):
                 continue
+            # The payload may have captured an empty session_id at enqueue time (a brand
+            # new slot whose id was assigned only after the run active back then finished
+            # and remapped). Refresh from the slot's now-current session so a queued
+            # clarification resume can be correlated to its conversation.
+            current_sid = win.run_state.session_for(key)
+            if current_sid and payload.get("session_id") != current_sid:
+                payload = {**payload, "session_id": current_sid}
             self.launch_ask(key, payload)
 
     def stop_task(self) -> None:

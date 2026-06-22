@@ -57,6 +57,28 @@ def test_conversation_run_state_remap_moves_unified_slot_state():
     assert state.trace_for("sess") == [{"stage": "execute_sql"}]
 
 
+def test_conversation_run_state_remap_collision_keeps_live_slot():
+    """If the target session_id already has a (stale) slot, remapping the live temp
+    slot onto it must keep the LIVE state, not discard it (orphaned conversation)."""
+    state = ConversationRunState()
+    # A stale slot already sits under the server id (e.g. previously loaded session).
+    state.set_question("sess", "stale question")
+    state.set_trace("sess", [{"stage": "old"}])
+    # The live temp slot has the fresh run state.
+    state.active_key = "new:1"
+    state.set_question("new:1", "live question")
+    state.set_trace("new:1", [{"stage": "live"}])
+    state.set_pending_resume("new:1", {"resume": True})
+
+    state.remap("new:1", "sess")
+
+    assert state.active_key == "sess"
+    assert "new:1" not in state.slots
+    assert state.question_for("sess") == "live question"          # live won
+    assert state.trace_for("sess") == [{"stage": "live"}]
+    assert state.pending_resume_for("sess") == {"resume": True}
+
+
 def test_conversation_run_state_debug_context_uses_active_slot():
     state = ConversationRunState()
     state.activate("sess-1")

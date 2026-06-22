@@ -111,6 +111,36 @@ def test_runs_over_cap_are_queued(qapp, tmp_path):
     win.deleteLater(); qapp.processEvents()
 
 
+def test_queued_run_refreshes_session_id_at_drain(qapp, tmp_path):
+    """A run queued with an empty session_id (brand-new slot) must pick up the slot's
+    real session_id when it finally launches from the queue — not resume with ''."""
+    win = _make_window(tmp_path)
+    _drain(qapp)
+    win._max_runs = 1
+    win._runs["A"] = _FakeWorker()  # occupy the only slot
+
+    key = "C"
+    win.ask_tab.ensure_slot(key)
+    win._active_key = key
+    win.ask_tab.set_active(key)
+    win.conversation_controller.start_ask(
+        key, {"connection_name": "local", "question": "q", "session_id": ""})
+    assert any(k == key for k, _ in win._run_queue)   # queued (cap reached)
+
+    # The slot's session id becomes known after enqueue (prior run assigned/remapped it).
+    win.run_state.set_session(key, "server-123")
+
+    captured: dict = {}
+    win.tasks.start = lambda action, payload, **kw: (captured.update(payload=payload), _FakeWorker())[1]
+
+    win._runs.pop("A", None)
+    win.conversation_controller.drain_queue()
+    assert captured["payload"]["session_id"] == "server-123"   # refreshed, not ""
+
+    win._runs.clear(); win._run_queue.clear()
+    win.deleteLater(); qapp.processEvents()
+
+
 def test_oneoff_sql_result_routes_to_originating_editor(monkeypatch):
     """A SQL run must clear/write the editor that launched it, not the editor active
     when the worker finishes."""

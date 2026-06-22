@@ -191,11 +191,13 @@ class ConversationRunState:
 
     @staticmethod
     def _move_key(mapping: dict[str, Any], old: str, new: str) -> None:
+        # On collision the *old* entry is the live one being renamed (e.g. a new chat's
+        # temp slot whose server session_id turns out to already have a stale slot), so
+        # it wins — the previous code popped `old` but kept `new`, silently discarding
+        # the live slot's accumulated state (orphaned conversation).
         if old not in mapping:
             return
-        value = mapping.pop(old)
-        if new not in mapping:
-            mapping[new] = value
+        mapping[new] = mapping.pop(old)
 
     @property
     def pending_resume(self) -> MutableMapping[str, dict[str, Any]]:
