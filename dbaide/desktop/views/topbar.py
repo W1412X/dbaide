@@ -2,7 +2,16 @@ from __future__ import annotations
 
 from typing import Any
 
-from PyQt6.QtCore import QSize, Qt, pyqtSignal
+from PyQt6.QtCore import (
+    QEasingCurve,
+    QPropertyAnimation,
+    QRect,
+    QSize,
+    Qt,
+    pyqtProperty,
+    pyqtSignal,
+)
+from PyQt6.QtGui import QColor, QPainter
 from PyQt6.QtWidgets import (
     QHBoxLayout,
     QLabel,
@@ -34,11 +43,53 @@ class ModeSwitch(QWidget):
         self.setFixedHeight(_MODE_CHROME_H)
         self._buttons: list[QToolButton] = []
         self._current = -1
+        self._indicator = QRect()
+        self._anim: QPropertyAnimation | None = None
         row = QHBoxLayout(self)
         row.setContentsMargins(_MODE_PAD, _MODE_PAD, _MODE_PAD, _MODE_PAD)
         row.setSpacing(2)
         self._row = row
         self._apply_style()
+
+    # ── animated selection pill ──────────────────────────────────────────────
+    def _get_indicator(self) -> QRect:
+        return self._indicator
+
+    def _set_indicator(self, rect: QRect) -> None:
+        self._indicator = rect
+        self.update()
+
+    indicatorGeometry = pyqtProperty(QRect, _get_indicator, _set_indicator)
+
+    def _button_rect(self, index: int) -> QRect:
+        if 0 <= index < len(self._buttons):
+            return self._buttons[index].geometry()
+        return QRect()
+
+    def _snap_indicator(self) -> None:
+        """Place the pill under the current button with no animation (after layout)."""
+        target = self._button_rect(self._current)
+        if not target.isNull():
+            self._set_indicator(target)
+
+    def paintEvent(self, event) -> None:  # noqa: N802
+        super().paintEvent(event)
+        if self._indicator.isNull():
+            return
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.setBrush(QColor(Theme.PANEL_2))
+        radius = float(Theme.RADIUS_MD)
+        painter.drawRoundedRect(self._indicator.adjusted(0, 0, 0, 0), radius, radius)
+
+    def resizeEvent(self, event) -> None:  # noqa: N802
+        super().resizeEvent(event)
+        self._snap_indicator()
+
+    def showEvent(self, event) -> None:  # noqa: N802
+        super().showEvent(event)
+        self._snap_indicator()
 
     def addTab(self, icon, text: str = "") -> int:  # noqa: N802 - QTabBar-compatible API
         index = len(self._buttons)
@@ -92,6 +143,18 @@ class ModeSwitch(QWidget):
         self._current = index
         for i, btn in enumerate(self._buttons):
             btn.setChecked(i == index)
+        target = self._button_rect(index)
+        if not target.isNull() and not self._indicator.isNull() and self.isVisible():
+            # Slide the pill from its current spot to the new button.
+            anim = QPropertyAnimation(self, b"indicatorGeometry", self)
+            anim.setDuration(200)
+            anim.setStartValue(QRect(self._indicator))
+            anim.setEndValue(target)
+            anim.setEasingCurve(QEasingCurve.Type.OutCubic)
+            self._anim = anim
+            anim.start()
+        else:
+            self._set_indicator(target)
         if emit:
             self.currentChanged.emit(index)
 
@@ -115,11 +178,11 @@ class ModeSwitch(QWidget):
                 font-size: 11px;
                 font-weight: 600;
             }}
-            QToolButton#modeSwitchButton:hover {{
-                background: {Theme.PANEL_2};
+            QToolButton#modeSwitchButton:hover:!checked {{
+                color: {Theme.TEXT};
             }}
             QToolButton#modeSwitchButton:checked {{
-                background: {Theme.PANEL_2};
+                background: transparent;
                 border: 1px solid transparent;
                 color: {Theme.TEXT};
             }}
