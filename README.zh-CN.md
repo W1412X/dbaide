@@ -18,6 +18,12 @@ DBAide 连接你的数据库，渐进式发现 schema，拒绝臆测含糊的业
 
 <img src="docs/images/social-preview.png" alt="DBAide — 用自然语言向数据库提问" width="900">
 
+### 演示
+
+<img src="docs/images/demo.gif" alt="DBAide 能力演示" width="900">
+
+*能力速览 —— 资产初始化、运行时 trace、图表化回答、SQL 工作台与设置。高清版本：[MP4](docs/images/demo.mp4)。*
+
 </div>
 
 ---

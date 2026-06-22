@@ -19,6 +19,13 @@ a CLI **and** a polished desktop app that share the same Python core.
 
 <img src="docs/images/social-preview.png" alt="DBAide — ask your database in plain language" width="900">
 
+### Demo
+
+<img src="docs/images/demo.gif" alt="DBAide capability walkthrough" width="900">
+
+*A capability walkthrough — assets, runtime trace, charted answers, the SQL workbench,
+and settings. Higher-quality [MP4](docs/images/demo.mp4).*
+
 </div>
 
 ---
@@ -300,24 +307,29 @@ dbaide/
   i18n.py             en / zh strings + answer-language policy
   llm.py              LLM client (OpenAI-compatible API, streaming support)
   models.py           query result / column / profile data models
-  agent/              tool loop, clarifier, SQL writer, controllers, orchestrator
+  agent/              tool loop, SQL writer, chart agent, controllers, orchestrator
     loop.py           AskAgentLoop — the single tool-calling loop
     orchestrator.py   AskOrchestrator — sets up and runs the loop
     run_state.py      per-run state (schemas, relations, SQL, memory)
-    toolkit/          tool implementations (schema, SQL, profile, catalog, memory)
+    agenda.py         the agent's working task list (planned / done steps)
+    chart_agent.py    plans charts from results → ChartSpec
+    toolkit/          tool implementations (schema, SQL, profile, catalog, memory, agenda)
   adapters/           SQLite / MySQL / PostgreSQL
   assets/             offline schema assets (instance → db → table → column)
+  charts/             ChartSpec model + ECharts option builder
   core/               result types, events, errors
   db/                 connection pool, resource policy, query budget
-  validation/         deterministic SQL guards (SchemaGuard, CTE parser)
-  rendering/          safe Markdown (mistune) + sanitization
+  validation/         deterministic SQL guards (SQLGuard, TableScopeGuard, CTE parser)
+  rendering/          safe Markdown (mistune) + WebEngine answer/markdown HTML pages
   annotations/        schema annotations (business notes)
   joins/              join catalog (user-saved + agent-discovered edges)
   history/            chat sessions, query history, debug bundles
   desktop/            PyQt6 app
     views/            main window, sidebar, topbar, workbench, ask tab, SQL tab
-    components/       composer, conversation, session list, table, trace, editor
-    dialogs/          settings, connection, joins, build assets, note editor
+    components/       composer, conversation, table, trace, editor, markdown WebView
+    trace/            live trace overlay / session / helpers
+    dialogs/          settings, connection, joins, build assets, HTML export, chart viewer
+    ui_state.py       unified per-slot run state + state→widget binder
 ```
 
 The deep design — assets → agent loop → execution, and the safety model — is documented

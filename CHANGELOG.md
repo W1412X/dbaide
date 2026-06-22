@@ -6,6 +6,42 @@ All notable changes to DBAide are documented here. The format is loosely based o
 
 ## [Unreleased]
 
+### Security
+
+- **WebEngine answer/markdown pages** — untrusted content (model markdown + DB-derived
+  chart data) was embedded into an inline `<script>` via `json.dumps`, which does not
+  escape `/`; a value containing `</script>` could break out and execute arbitrary JS
+  in the page. All such payloads now go through a `<script>`-safe encoder
+  (`<`, `>`, `&`, U+2028/U+2029 → `\uXXXX`).
+
+### Fixed
+
+- **Streaming** — the final answer no longer duplicates when a decision retries
+  (the answer field was re-streamed by a fresh streamer each attempt); a mid-stream
+  transport failure no longer re-emits the full text on top of partial chunks.
+- **Trace UI** — fixed a use-after-delete crash in the deferred scroll callback
+  (target card/panel could be rebuilt before it fired); a full rebuild (e.g. a step
+  gaining its first sub-step) now preserves the reader's scroll position; the timeline
+  connector to newly appended steps is no longer dropped; `ingest` tolerates a
+  non-numeric step/timestamp/duration in a corrupted persisted trace.
+- **Multi-run sessions** — a new chat whose server `session_id` collided with an
+  already-open slot no longer orphans the conversation (slot remap is collision-safe,
+  live state wins); a clarification reply queued at capacity now resumes with the
+  correct `session_id` instead of an empty one.
+- **Export / dialogs** — a failed export file write now alerts the user instead of
+  failing silently; the "copied" reset and the HTML-export dialog no longer touch a
+  deleted widget after close; the save dialog pre-fills an extension-less filename
+  instead of treating it as a directory; non-native file dialogs are released after use.
+- **Icons** — an unknown/typo icon name falls back to a blank glyph instead of
+  crashing the SVG render.
+
+### Changed
+
+- **Conversation state layer** — unified per-slot state (one `ConversationSlotState`
+  per slot in `ConversationRunState`) with single rename/discard entry points that keep
+  the run-state and the ask-tab view in lockstep; removed the now-dead per-field
+  mapping facades and window-level slot aliases.
+
 ## [0.9.0] — 2026-06-12
 
 ### Added
