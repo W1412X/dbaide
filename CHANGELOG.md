@@ -6,6 +6,8 @@ All notable changes to DBAide are documented here. The format is loosely based o
 
 ## [Unreleased]
 
+## [0.9.1] — 2026-06-22
+
 ### Security
 
 - **WebEngine answer/markdown pages** — untrusted content (model markdown + DB-derived
@@ -783,7 +785,8 @@ and a PyQt6 desktop app, sharing one Python core.
   drag-to-Applications)**, **Windows (`.msi` wizard)**, and **Linux (`.tar.gz`)** —
   pushing a `v*` tag cuts a GitHub Release automatically.
 
-[Unreleased]: https://github.com/W1412X/dbaide/compare/v0.9.0...HEAD
+[Unreleased]: https://github.com/W1412X/dbaide/compare/v0.9.1...HEAD
+[0.9.1]: https://github.com/W1412X/dbaide/compare/v0.9.0...v0.9.1
 [0.9.0]: https://github.com/W1412X/dbaide/compare/v0.8.0...v0.9.0
 [0.8.0]: https://github.com/W1412X/dbaide/compare/v0.7.0...v0.8.0
 [0.7.0]: https://github.com/W1412X/dbaide/compare/v0.6.0...v0.7.0
