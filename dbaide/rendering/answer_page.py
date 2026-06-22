@@ -61,7 +61,6 @@ def render_answer_page_html(
       font-size: 13px; line-height: 1.55;
       overflow: {body_overflow};
     }}
-    ::selection {{ background: rgba(59, 130, 246, 0.32); }}
     #root {{ padding: {root_pad}; }}
     #root > :first-child {{ margin-top: 0; }}
     #root > :last-child {{ margin-bottom: 0; }}

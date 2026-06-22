@@ -53,7 +53,6 @@ def render_markdown_html(
       font-size: 13px; line-height: 1.55;
       overflow: hidden;
     }}
-    ::selection {{ background: rgba(59, 130, 246, 0.32); }}
     #root {{ padding: 0 2px 0 0; }}
     #root > :first-child {{ margin-top: 0; }}
     #root > :last-child {{ margin-bottom: 0; }}

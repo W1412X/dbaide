@@ -36,10 +36,9 @@ class _DarkTheme:
     RED = "#ff6b6b"
     CODE_BG = "#090b0f"
     NULL = "#515865"
-    # Accent-tinted selection / active highlight — clearer "what's selected" than a flat
-    # gray, used consistently across trees, lists, tables, menus and text selection.
-    SELECT = "rgba(59, 130, 246, 0.22)"
-    SELECT_SOFT = "rgba(59, 130, 246, 0.13)"
+    # Selection / active highlight — neutral panel gray (the central token every tree,
+    # list, table, menu and text selection routes through).
+    SELECT = PANEL_3
     RADIUS_SM = 6
     RADIUS_MD = 8
     RADIUS_LG = 10
@@ -69,8 +68,7 @@ class _LightTheme:
     RED = "#ef4444"
     CODE_BG = "#f1f3f5"
     NULL = "#adb5bd"
-    SELECT = "rgba(59, 130, 246, 0.16)"
-    SELECT_SOFT = "rgba(59, 130, 246, 0.09)"
+    SELECT = PANEL_3  # selection highlight = neutral panel gray
     RADIUS_SM = 6
     RADIUS_MD = 8
     RADIUS_LG = 10
