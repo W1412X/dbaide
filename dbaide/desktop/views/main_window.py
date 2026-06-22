@@ -295,55 +295,10 @@ class MainWindow(QMainWindow):
     def _run_queue(self, value: list[tuple[str, dict[str, Any]]]) -> None:
         self._ensure_run_state().queue = value
 
-    @property
-    def _pending_resume(self) -> dict[str, dict[str, Any]]:
-        return self._ensure_run_state().pending_resume  # type: ignore[return-value]
-
-    @_pending_resume.setter
-    def _pending_resume(self, value: dict[str, dict[str, Any]]) -> None:
-        view = self._ensure_run_state().pending_resume
-        view.clear()
-        view.update(value or {})
-
-    @property
-    def _slot_trace(self) -> dict[str, list[dict[str, Any]]]:
-        return self._ensure_run_state().slot_trace  # type: ignore[return-value]
-
-    @_slot_trace.setter
-    def _slot_trace(self, value: dict[str, list[dict[str, Any]]]) -> None:
-        view = self._ensure_run_state().slot_trace
-        view.clear()
-        view.update(value or {})
-
-    @property
-    def _slot_question(self) -> dict[str, str]:
-        return self._ensure_run_state().slot_question  # type: ignore[return-value]
-
-    @_slot_question.setter
-    def _slot_question(self, value: dict[str, str]) -> None:
-        view = self._ensure_run_state().slot_question
-        view.clear()
-        view.update(value or {})
-
-    @property
-    def _slot_session(self) -> dict[str, str]:
-        return self._ensure_run_state().slot_session  # type: ignore[return-value]
-
-    @_slot_session.setter
-    def _slot_session(self, value: dict[str, str]) -> None:
-        view = self._ensure_run_state().slot_session
-        view.clear()
-        view.update(value or {})
-
-    @property
-    def _slot_connection(self) -> dict[str, str]:
-        return self._ensure_run_state().slot_connection  # type: ignore[return-value]
-
-    @_slot_connection.setter
-    def _slot_connection(self, value: dict[str, str]) -> None:
-        view = self._ensure_run_state().slot_connection
-        view.clear()
-        view.update(value or {})
+    # Per-slot state (question / trace / session_id / connection / pending_resume) lives
+    # in ConversationRunState.slots and is accessed via its typed methods
+    # (set_session/session_for, set_trace/trace_for, …). The old window-level dict
+    # aliases were removed — go through run_state directly.
 
     @property
     def _new_counter(self) -> int:
@@ -2301,14 +2256,11 @@ class MainWindow(QMainWindow):
             return
 
         def on_done(_result: object) -> None:
-            # Drop the slot for the deleted session (cancel its run if any).
+            # Drop the slot for the deleted session (cancel its run if any) — one call
+            # keeps run-state and the ask-tab view in lockstep.
             if self.ask_tab.has_slot(session_id):
-                worker = self._runs.pop(session_id, None)
-                if worker and not worker.is_cancelled:
-                    worker.cancel()
                 was_active = session_id == self.run_state.active_key
-                self.run_state.discard_slot(session_id)
-                self.ask_tab.discard_slot(session_id)
+                self.conversation_controller.discard_slot(session_id)
                 if was_active:
                     self.current_session_id = ""
                     self.ask_tab.set_has_connection(bool(conn))

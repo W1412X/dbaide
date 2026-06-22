@@ -327,8 +327,19 @@ class ConversationRunController:
         return _i18n_t("error.turn.error", message=self._user_error_message(exc))
 
     def bind_slot_to_session(self, temporary_key: str, session_id: str) -> None:
+        """Rename a slot across BOTH registries at once (run-state + ask-tab view)."""
         self.win.ask_tab.remap(temporary_key, session_id)
         self.win.run_state.remap(temporary_key, session_id)
+
+    def discard_slot(self, key: str) -> None:
+        """Drop a slot from BOTH registries at once, cancelling any in-flight run.
+        Single entry point so run-state and the ask-tab view never drift apart."""
+        win = self.win
+        worker = win._runs.pop(key, None)
+        if worker is not None and not worker.is_cancelled:
+            worker.cancel()
+        win.run_state.discard_slot(key)
+        win.ask_tab.discard_slot(key)
 
     def drain_queue(self) -> None:
         win = self.win

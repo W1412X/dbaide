@@ -92,7 +92,8 @@ def test_runs_over_cap_are_queued(qapp, tmp_path):
     # Occupy both slots with fake in-flight runs (so a real launch isn't needed).
     win._runs["A"] = _FakeWorker()
     win._runs["B"] = _FakeWorker()
-    win._slot_session.update({"A": "A", "B": "B"})
+    win.run_state.set_session("A", "A")
+    win.run_state.set_session("B", "B")
 
     # A third session asks → must queue.
     key = "C"

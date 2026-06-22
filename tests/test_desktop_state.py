@@ -8,9 +8,9 @@ def test_conversation_run_state_tracks_queue_and_remaps_slots():
     state = ConversationRunState(max_runs=2)
     state.active_key = "new:1"
     state.runs["new:1"] = object()
-    state.slot_question["new:1"] = "count paid orders"
-    state.slot_trace["new:1"] = [{"stage": "execute_sql"}]
-    state.slot_connection["new:1"] = "local"
+    state.set_question("new:1", "count paid orders")
+    state.set_trace("new:1", [{"stage": "execute_sql"}])
+    state.set_connection("new:1", "local")
     state.queue_run("new:2", {"question": "queued"})
 
     assert state.is_active_running() is True
@@ -25,9 +25,9 @@ def test_conversation_run_state_tracks_queue_and_remaps_slots():
 
     assert state.active_key == "sess-1"
     assert "sess-1" in state.runs
-    assert state.slot_question["sess-1"] == "count paid orders"
-    assert state.slot_trace["sess-1"] == [{"stage": "execute_sql"}]
-    assert state.slot_connection["sess-1"] == "local"
+    assert state.question_for("sess-1") == "count paid orders"
+    assert state.trace_for("sess-1") == [{"stage": "execute_sql"}]
+    assert state.connection_for("sess-1") == "local"
 
 
 def test_thinking_state_transitions_do_not_keep_stale_running_flags():

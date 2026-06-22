@@ -19,25 +19,6 @@ def test_conversation_run_state_stores_slot_data_per_session():
     assert state.pending_resume_for("new:1") == {"question": "count paid orders"}
 
 
-def test_conversation_run_state_compat_mapping_views_roundtrip():
-    state = ConversationRunState()
-
-    state.slot_question["new:1"] = "q"
-    state.slot_session.update({"new:1": "s1"})
-    state.slot_connection["new:1"] = "shop"
-    state.slot_trace["new:1"] = [{"stage": "loop"}]
-    state.pending_resume["new:1"] = {"question": "q"}
-
-    assert state.question_for("new:1") == "q"
-    assert state.session_for("new:1") == "s1"
-    assert state.connection_for("new:1") == "shop"
-    assert state.trace_for("new:1") == [{"stage": "loop"}]
-    assert state.pending_resume_for("new:1") == {"question": "q"}
-
-    del state.slot_connection["new:1"]
-    assert state.connection_for("new:1") == ""
-
-
 def test_conversation_run_state_remap_moves_unified_slot_state():
     state = ConversationRunState()
     state.active_key = "new:1"

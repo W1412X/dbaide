@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from collections.abc import Iterator, MutableMapping
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -50,47 +49,6 @@ class ConversationSlotState:
         )
 
 
-class _SlotFieldView(MutableMapping[str, Any]):
-    """Mutable mapping facade over one field of ``ConversationSlotState``.
-
-    This keeps old dict-shaped call sites and tests working while the underlying
-    state is stored per-slot instead of spread across parallel dictionaries.
-    """
-
-    def __init__(self, owner: "ConversationRunState", field_name: str) -> None:
-        self._owner = owner
-        self._field_name = field_name
-
-    def __getitem__(self, key: str) -> Any:
-        slot = self._owner.slots.get(str(key))
-        if slot is None:
-            raise KeyError(key)
-        value = getattr(slot, self._field_name)
-        if self._owner._field_is_empty(value):
-            raise KeyError(key)
-        return value
-
-    def __setitem__(self, key: str, value: Any) -> None:
-        self._owner._set_slot_field(str(key), self._field_name, value)
-
-    def __delitem__(self, key: str) -> None:
-        slot_key = str(key)
-        slot = self._owner.slots.get(slot_key)
-        if slot is None:
-            raise KeyError(key)
-        setattr(slot, self._field_name, self._owner._field_default(self._field_name))
-        self._owner._prune_slot(slot_key)
-
-    def __iter__(self) -> Iterator[str]:
-        for key, slot in self._owner.slots.items():
-            value = getattr(slot, self._field_name)
-            if not self._owner._field_is_empty(value):
-                yield key
-
-    def __len__(self) -> int:
-        return sum(1 for _ in self.__iter__())
-
-
 @dataclass
 class OneOffState:
     action: str = ""
@@ -129,7 +87,6 @@ class ConversationRunState:
     slots: dict[str, ConversationSlotState] = field(default_factory=dict)
     new_counter: int = 0
     active_key: str = ""
-    _field_views: dict[str, _SlotFieldView] = field(default_factory=dict, init=False, repr=False)
 
     def reset(self) -> None:
         self.runs.clear()
@@ -198,26 +155,6 @@ class ConversationRunState:
         if old not in mapping:
             return
         mapping[new] = mapping.pop(old)
-
-    @property
-    def pending_resume(self) -> MutableMapping[str, dict[str, Any]]:
-        return self._field_view("pending_resume")
-
-    @property
-    def slot_trace(self) -> MutableMapping[str, list[dict[str, Any]]]:
-        return self._field_view("trace")
-
-    @property
-    def slot_question(self) -> MutableMapping[str, str]:
-        return self._field_view("question")
-
-    @property
-    def slot_session(self) -> MutableMapping[str, str]:
-        return self._field_view("session_id")
-
-    @property
-    def slot_connection(self) -> MutableMapping[str, str]:
-        return self._field_view("connection")
 
     def slot(self, key: str) -> ConversationSlotState | None:
         return self.slots.get(str(key))
@@ -309,39 +246,6 @@ class ConversationRunState:
             "trace": self.trace_for(key) if key else [],
             "question": self.question_for(key) if key else "",
         }
-
-    def _field_view(self, field_name: str) -> _SlotFieldView:
-        view = self._field_views.get(field_name)
-        if view is None:
-            view = _SlotFieldView(self, field_name)
-            self._field_views[field_name] = view
-        return view
-
-    def _set_slot_field(self, key: str, field_name: str, value: Any) -> None:
-        slot = self.ensure_slot(key)
-        if field_name in {"question", "session_id", "connection"}:
-            setattr(slot, field_name, str(value or ""))
-        elif field_name == "trace":
-            slot.trace = [dict(item) for item in (value or []) if isinstance(item, dict)]
-        elif field_name == "pending_resume":
-            slot.pending_resume = dict(value or {}) if value else None
-        else:
-            setattr(slot, field_name, value)
-        self._prune_slot(key)
-
-    @staticmethod
-    def _field_default(field_name: str) -> Any:
-        if field_name in {"question", "session_id", "connection"}:
-            return ""
-        if field_name == "trace":
-            return []
-        if field_name == "pending_resume":
-            return None
-        return None
-
-    @staticmethod
-    def _field_is_empty(value: Any) -> bool:
-        return value in (None, "", [], {})
 
     def _prune_slot(self, key: str) -> None:
         slot = self.slots.get(key)
