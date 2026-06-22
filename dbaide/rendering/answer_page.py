@@ -42,7 +42,8 @@ def render_answer_page_html(
     root_pad = str(root_padding if root_padding is not None else "0 2px 0 0")
     title_text = str(document_title or "").strip()
     title_tag = f"  <title>{_html_escape(title_text)}</title>\n" if title_text else ""
-    blocks_json = json.dumps(list(blocks or []), ensure_ascii=False)
+    # blocks carry untrusted markdown + DB-derived chart data → must be <script>-safe.
+    blocks_json = script_json(list(blocks or []))
     marked_json = json.dumps(marked, ensure_ascii=False)
     hljs_json = json.dumps(hljs, ensure_ascii=False)
     echarts_json = json.dumps(echarts, ensure_ascii=False)
@@ -277,4 +278,19 @@ def _html_escape(text: str) -> str:
         .replace("<", "&lt;")
         .replace(">", "&gt;")
         .replace('"', "&quot;")
+    )
+
+
+def script_json(obj: Any) -> str:
+    """json.dumps for embedding inside an inline <script>. json.dumps does NOT escape
+    '/', so a value containing '</script>' (from untrusted DB content or model output)
+    would close the script tag and let injected HTML/JS execute. Escape '<','>','&' and
+    the JS line separators U+2028/U+2029 to \\uXXXX — still valid JSON, no break-out."""
+    return (
+        json.dumps(obj, ensure_ascii=False)
+        .replace("<", "\\u003c")
+        .replace(">", "\\u003e")
+        .replace("&", "\\u0026")
+        .replace(" ", "\\u2028")
+        .replace(" ", "\\u2029")
     )

@@ -231,10 +231,16 @@ class AnswerExportDialog(ChromeDialog):
         self._preview.setHtml(html)
 
     def _copy_html(self) -> None:
+        from PyQt6 import sip
         QApplication.clipboard().setText(self._build_html())
         copied = t("ask.export_copied")
         self._copy_btn.setText(copied)
-        QTimer.singleShot(1600, lambda: self._copy_btn.setText(t("ask.export_copy_html")))
+        # The 1.6s reset can fire after the dialog is closed/destroyed — touching the
+        # deleted button would raise RuntimeError. Guard with sip.isdeleted.
+        def _reset() -> None:
+            if not sip.isdeleted(self._copy_btn):
+                self._copy_btn.setText(t("ask.export_copy_html"))
+        QTimer.singleShot(1600, _reset)
 
     def _save_html(self) -> None:
         default_name = suggest_export_filename(self._title)

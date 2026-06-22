@@ -364,14 +364,20 @@ class InlineTrace(QFrame):
         clear_layout_widgets(self._body_layout)
 
     def _scroll_to_widget(self, widget: QWidget | None) -> None:
-        if widget is None:
+        # Deferred via QTimer.singleShot(0, …): by the time it fires a later render may
+        # have rebuilt (deleted) the target card, or this whole trace may have been torn
+        # down. Touching a deleted C++ object raises RuntimeError — guard both.
+        if widget is None or sip.isdeleted(widget) or sip.isdeleted(self):
             return
-        bar = self._scroll.verticalScrollBar()
-        bar.blockSignals(True)
         try:
-            self._scroll.ensureWidgetVisible(widget, 0, 16)
-        finally:
-            bar.blockSignals(False)
+            bar = self._scroll.verticalScrollBar()
+            bar.blockSignals(True)
+            try:
+                self._scroll.ensureWidgetVisible(widget, 0, 16)
+            finally:
+                bar.blockSignals(False)
+        except RuntimeError:
+            pass
 
 
 

@@ -12,6 +12,7 @@ import json
 from collections.abc import Mapping
 from typing import Any
 
+from dbaide.rendering.answer_page import script_json
 from dbaide.rendering.vendor_scripts import hljs_script_src, marked_script_src
 
 
@@ -34,7 +35,8 @@ def render_markdown_html(
     panel2 = str(theme.get("panel2") or "#151922")
     link = str(theme.get("link") or "#67a7ff")
     bg = str(theme.get("bg") or "transparent")
-    md_json = json.dumps(str(markdown or ""), ensure_ascii=False)
+    # markdown is untrusted (model output / DB values) → must be <script>-safe.
+    md_json = script_json(str(markdown or ""))
     marked_json = json.dumps(marked, ensure_ascii=False)
     hljs_json = json.dumps(hljs, ensure_ascii=False)
     return f"""<!doctype html>
