@@ -70,10 +70,13 @@ def get_open_file_name(
     dialog = _prepare_dialog(parent, caption, directory, file_filter)
     dialog.setAcceptMode(QFileDialog.AcceptMode.AcceptOpen)
     dialog.setFileMode(QFileDialog.FileMode.ExistingFile)
-    if dialog.exec() != QFileDialog.DialogCode.Accepted:
-        return "", dialog.selectedNameFilter()
-    files = dialog.selectedFiles()
-    return (files[0] if files else "", dialog.selectedNameFilter())
+    try:
+        accepted = dialog.exec() == QFileDialog.DialogCode.Accepted
+        files = dialog.selectedFiles()
+        name_filter = dialog.selectedNameFilter()
+    finally:
+        dialog.deleteLater()  # don't accumulate hidden non-native dialogs across a session
+    return ((files[0] if files else "") if accepted else "", name_filter)
 
 
 def get_save_file_name(
@@ -85,7 +88,10 @@ def get_save_file_name(
     dialog = _prepare_dialog(parent, caption, directory, file_filter)
     dialog.setAcceptMode(QFileDialog.AcceptMode.AcceptSave)
     dialog.setFileMode(QFileDialog.FileMode.AnyFile)
-    if dialog.exec() != QFileDialog.DialogCode.Accepted:
-        return "", dialog.selectedNameFilter()
-    files = dialog.selectedFiles()
-    return (files[0] if files else "", dialog.selectedNameFilter())
+    try:
+        accepted = dialog.exec() == QFileDialog.DialogCode.Accepted
+        files = dialog.selectedFiles()
+        name_filter = dialog.selectedNameFilter()
+    finally:
+        dialog.deleteLater()  # don't accumulate hidden non-native dialogs across a session
+    return ((files[0] if files else "") if accepted else "", name_filter)

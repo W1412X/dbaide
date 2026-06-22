@@ -1568,3 +1568,42 @@ def test_full_rebuild_preserves_scroll_when_not_following(qapp):
     assert abs(trace._scroll.verticalScrollBar().value() - target) <= 40
     host.deleteLater()
     qapp.processEvents()
+
+
+def test_prefix_append_updates_previous_last_card_connector(qapp):
+    """When new steps stream in via the prefix fast-path, the previously-last card must
+    lose its is_last flag so the timeline connector to the new cards isn't dropped."""
+    from PyQt6.QtWidgets import QVBoxLayout, QWidget
+    from dbaide.desktop.components.trace import InlineTrace
+
+    host = QWidget()
+    host.resize(420, 600)
+    host.show()
+    trace = InlineTrace(host, show_header=False)
+    lay = QVBoxLayout(host)
+    lay.addWidget(trace)
+    trace.show()
+
+    def flush():
+        trace._render_timer.stop()
+        trace._render()
+        qapp.processEvents()
+
+    events = [
+        progress_event(stage="loop", title="started", status="running", kind="agent"),
+        progress_event(stage="s1", title="step 1", status="completed", kind="tool", step=1, duration_ms=2),
+    ]
+    trace.set_events(events, live=True)
+    flush()
+    assert trace._cards[-1]._marker._is_last is True   # only card → is_last
+
+    # Append a second top-level step via the prefix fast-path.
+    events.append(progress_event(stage="s2", title="step 2", status="completed", kind="tool", step=2, duration_ms=2))
+    trace.set_events(events, live=True)
+    flush()
+
+    assert len(trace._cards) == 2
+    assert trace._cards[0]._marker._is_last is False   # old last no longer last (connector kept)
+    assert trace._cards[-1]._marker._is_last is True
+    host.deleteLater()
+    qapp.processEvents()

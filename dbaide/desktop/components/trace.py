@@ -250,7 +250,7 @@ class InlineTrace(QFrame):
             )
             if can_sync_prefix:
                 self._running_glyphs = []
-                if self._sync_existing_cards(timeline[: len(self._cards)]):
+                if self._sync_existing_cards(timeline[: len(self._cards)], total=total):
                     if total > len(self._cards):
                         last_widget = self._append_cards(timeline, start=len(self._cards))
                     else:
@@ -333,15 +333,18 @@ class InlineTrace(QFrame):
             last_widget = card
         return last_widget
 
-    def _sync_existing_cards(self, timeline: list[TraceTimelineEntry]) -> bool:
+    def _sync_existing_cards(self, timeline: list[TraceTimelineEntry], *, total: int | None = None) -> bool:
         self._running_glyphs = []
-        total = len(timeline)
+        # `total` is the FULL timeline length. When syncing only a prefix (more cards
+        # will be appended below), pass it so the last *synced* card isn't marked
+        # is_last — otherwise its timeline connector is dropped and the rail shows a gap.
+        count = total if total is not None else len(timeline)
         for index, (card, entry) in enumerate(zip(self._cards, timeline, strict=False)):
             if not card.apply_entry(
                 entry,
                 depth=entry.depth,
                 is_first=index == 0,
-                is_last=index == total - 1,
+                is_last=index == count - 1,
                 running_glyphs=self._running_glyphs,
             ):
                 return False
