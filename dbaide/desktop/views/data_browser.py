@@ -181,7 +181,7 @@ class DataBrowser(QWidget):
             f" border: 1px solid {Theme.BORDER}; border-radius: 8px; padding: 4px; outline: none; }}"
             f"QListView::item {{ padding: 4px 8px; border-radius: 5px; }}"
             f"QListView::item:hover {{ background: {Theme.PANEL_2}; }}"
-            f"QListView::item:selected {{ background: {Theme.PANEL_3}; color: {Theme.TEXT}; }}"
+            f"QListView::item:selected {{ background: {Theme.SELECT}; color: {Theme.TEXT}; }}"
             f"QScrollBar:vertical {{ background: transparent; width: 6px; margin: 2px; border: none; }}"
             f"QScrollBar::handle:vertical {{ background: {Theme.PANEL_3}; border-radius: 3px;"
             f" min-height: 20px; border: none; }}"

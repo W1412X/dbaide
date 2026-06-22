@@ -610,7 +610,7 @@ class _CodeBlock(QFrame):
                 color: {Theme.TEXT};
                 border: none;
                 padding: 0;
-                selection-background-color: {Theme.PANEL_3};
+                selection-background-color: {Theme.SELECT};
                 font-family: Menlo, Monaco, Consolas, monospace;
                 font-size: 12px;
             }}

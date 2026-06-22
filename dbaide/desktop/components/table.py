@@ -115,7 +115,7 @@ class ResultTableWidget(QWidget):
                 padding: 4px 10px;
             }}
             QTableWidget::item:selected {{
-                background: {Theme.PANEL_3};
+                background: {Theme.SELECT};
                 color: {Theme.TEXT};
             }}
             QHeaderView {{

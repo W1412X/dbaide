@@ -264,7 +264,7 @@ class SettingsDialog(ChromeDialog):
             QListWidget {{ background: transparent; border: none; outline: none; }}
             QListWidget::item {{ padding: 9px 12px; margin: 1px 0; border: none; border-radius: 8px; }}
             QListWidget::item:hover {{ background: {Theme.PANEL_2}; }}
-            QListWidget::item:selected {{ background: {Theme.PANEL_3}; color: {Theme.TEXT}; }}
+            QListWidget::item:selected {{ background: {Theme.SELECT}; color: {Theme.TEXT}; }}
             """
         )
         from dbaide.i18n import t as _t
@@ -992,7 +992,7 @@ class SettingsDialog(ChromeDialog):
             }}
             QListWidget::item {{ padding: 10px 12px; }}
             QListWidget::item:hover {{ background: {Theme.PANEL_2}; }}
-            QListWidget::item:selected {{ background: {Theme.PANEL_3}; }}
+            QListWidget::item:selected {{ background: {Theme.SELECT}; }}
             """
         )
         return widget
