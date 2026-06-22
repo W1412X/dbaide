@@ -13,7 +13,9 @@ All notable changes to DBAide are documented here. The format is loosely based o
   selection instead of a flat gray; keyboard focus is visible again (buttons'
   `:focus-visible` and the "soft" combo now use the accent instead of a near-invisible
   border; checkbox/radio gained an accent focus border); dialogs fade in on open
-  (guarded so they can never get stuck transparent).
+  (guarded so they can never get stuck transparent). The 对话/工作台 mode switch now
+  slides an animated selection pill between tabs, and switching tabs fades the incoming
+  page in (skipped for WebEngine-hosting pages, which an opacity effect would black out).
 
 ## [0.9.1] — 2026-06-22
 

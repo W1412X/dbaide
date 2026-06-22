@@ -319,6 +319,9 @@ class UiStateBinder:
         win = self.window
         if self._usable(getattr(win, "stack", None)) and win.stack.currentIndex() != state.index:
             win.stack.setCurrentIndex(state.index)
+            animate = getattr(win, "animate_page_in", None)
+            if callable(animate):
+                animate(state.index)
         if self._usable(getattr(win, "composer", None)):
             win.composer.setVisible(state.mode == "Assistant")
         if self._usable(getattr(win, "sidebar", None)):

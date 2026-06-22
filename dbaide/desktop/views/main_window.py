@@ -4,7 +4,7 @@ import sys
 from typing import Any, Callable
 
 from PyQt6 import sip
-from PyQt6.QtCore import QObject, Qt, QSettings, QTimer, QEvent, pyqtSignal
+from PyQt6.QtCore import QEasingCurve, QObject, QPropertyAnimation, Qt, QSettings, QTimer, QEvent, pyqtSignal
 from PyQt6.QtGui import QIcon, QKeySequence, QShortcut
 from PyQt6.QtWidgets import (
     QApplication,
@@ -724,6 +724,39 @@ class MainWindow(QMainWindow):
     def _on_tab_changed(self, index: int) -> None:
         if 0 <= index < self.stack.count():
             self._ensure_ui_state().apply_mode(ModeUiState(index=index, mode=self._tab_names[index]))
+
+    def animate_page_in(self, index: int) -> None:
+        """Subtle fade-in for the page that just became current. Skipped for pages that
+        host a QWebEngineView — a QGraphicsOpacityEffect blacks out WebEngine surfaces —
+        and always cleaned up so the effect never lingers (perf) or leaves a page dim."""
+        from PyQt6.QtWidgets import QGraphicsOpacityEffect
+        page = self.stack.widget(index) if hasattr(self, "stack") else None
+        if page is None:
+            return
+        try:
+            from PyQt6.QtWebEngineWidgets import QWebEngineView
+            if page.findChild(QWebEngineView) is not None:
+                return
+        except Exception:
+            pass
+        try:
+            effect = QGraphicsOpacityEffect(page)
+            page.setGraphicsEffect(effect)
+            anim = QPropertyAnimation(effect, b"opacity", page)
+            anim.setDuration(170)
+            anim.setStartValue(0.0)
+            anim.setEndValue(1.0)
+            anim.setEasingCurve(QEasingCurve.Type.OutCubic)
+
+            def _clear() -> None:
+                if page.graphicsEffect() is effect:
+                    page.setGraphicsEffect(None)
+            anim.finished.connect(_clear)
+            self._page_anim = anim  # keep alive
+            anim.start()
+            QTimer.singleShot(300, _clear)  # safety: never leave the page dimmed
+        except Exception:
+            page.setGraphicsEffect(None)
 
     def switch_tab(self, name: str) -> None:
         if name == "Chat":
