@@ -694,6 +694,30 @@ def _grab(app: QApplication, widget, name: str) -> Path:
     return path
 
 
+def _grab_trimmed(app: QApplication, widget, name: str, *, pad: int = 18) -> Path:
+    """Grab a widget and trim the empty top/bottom background bands (keeping full width),
+    so a drawer panel that is taller than its content has no large empty band."""
+    _process(app, 6)
+    path = OUT / f"{name}.png"
+    widget.grab().save(str(path))
+    from PIL import Image
+    import numpy as np
+
+    img = Image.open(path).convert("RGB")
+    arr = np.asarray(img).astype("int16")
+    # Background = the panel's empty bottom-center strip (always blank).
+    bg = arr[-3:, arr.shape[1] // 3 : 2 * arr.shape[1] // 3].reshape(-1, 3).mean(0)
+    # A row counts as "content" if enough pixels differ meaningfully from the background.
+    delta = np.abs(arr - bg).sum(axis=2)  # H x W
+    row_content = (delta > 30).sum(axis=1)  # non-bg pixels per row
+    rows = np.where(row_content > 4)[0]
+    if rows.size:
+        top = max(0, int(rows[0]) - pad)
+        bottom = min(img.height, int(rows[-1]) + pad)
+        img.crop((0, top, img.width, bottom)).save(path)
+    return path
+
+
 def _grab_scrolled(app: QApplication, view, widget, name: str, ratio: float) -> Path:
     _process(app, 6)
     bar = view.verticalScrollBar()
@@ -802,18 +826,18 @@ def show_runtime_thinking(app: QApplication, win: MainWindow) -> Path:
             {"kind": "table", "name": "refunds", "path": "omni_shop.main.refunds"},
         ],
     )
-    for event in _trace_events(final=False):
-        win.ask_tab.append_activity_event(key, event)
     win.ask_tab.append_result(key, {
         "status": "completed",
         "answer_markdown": "已把问题拆成四个可验证链路：收入口径、退款口径、履约口径、库存可售口径。下一步会逐条执行 SQL 并汇总证据。",
-        "trace": _trace_events(final=True),
+        "trace": _trace_events(final=False),  # last step still running → live-looking timeline
         "workflow_id": "wf_promo_thinking",
     })
     _expand_latest_trace(app, win, key)
-    _wait_for_answer_document(app, win, key)
-    _process(app, 8)
-    return _grab(app, win.ask_tab, "02-runtime-thinking")
+    _process(app, 12)
+    panel = getattr(win, "_trace_drawer_panel", None)
+    if panel is None or not panel.isVisible():
+        raise RuntimeError("trace drawer did not open for 02-runtime-thinking")
+    return _grab_trimmed(app, panel, "02-runtime-thinking")
 
 
 def show_trace_timeline(app: QApplication, win: MainWindow) -> Path:
@@ -842,7 +866,10 @@ def show_trace_timeline(app: QApplication, win: MainWindow) -> Path:
     })
     _expand_latest_trace(app, win, key)
     _process(app, 12)
-    return _grab(app, win.ask_tab, "17-agent-trace")
+    panel = getattr(win, "_trace_drawer_panel", None)
+    if panel is None or not panel.isVisible():
+        raise RuntimeError("trace drawer did not open for 17-agent-trace")
+    return _grab_trimmed(app, panel, "17-agent-trace")
 
 
 def _promo_chart_answer_payload() -> dict[str, Any]:
