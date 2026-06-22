@@ -28,6 +28,23 @@ ROOT_ID = "__root__"
 _ACTIVE = "running"
 _TERMINAL = {"completed", "failed", "waiting"}
 
+
+def _as_float(value: Any, default: float = 0.0) -> float:
+    """Coerce a progress-event numeric field to float. Events are normally produced
+    with real numbers, but a corrupted/hand-edited persisted trace could carry a
+    non-numeric string — never let that crash ingest()."""
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return default
+
+
+def _as_int(value: Any, default: int = 0) -> int:
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return default
+
 # Workflow envelope / post-hoc summaries — not real execution steps. The agent loop
 # already records generate_sql, validate_sql, execute_sql, substeps, and decide
 # events as they happen. These stages are kept in persisted trace for older runs
@@ -148,7 +165,7 @@ class TraceModel:
         meta = event.get("metadata")
         if isinstance(meta, dict) and meta:
             event = {**meta, **{k: v for k, v in event.items() if k != "metadata"}}
-        ts = float(event.get("timestamp") or 0.0) or (now if now is not None else time.time())
+        ts = _as_float(event.get("timestamp")) or (now if now is not None else time.time())
         if self._first_ts == 0.0:
             self._first_ts = ts
         self._last_ts = ts
@@ -173,7 +190,7 @@ class TraceModel:
             return
 
         # A thought precedes the tool it justifies — hold it for the next step.
-        if stage == "decision" or (kind == "decision" and not phase_for(stage) and int(event.get("step") or 0) == 0):
+        if stage == "decision" or (kind == "decision" and not phase_for(stage) and _as_int(event.get("step")) == 0):
             if title:
                 self._pending_thought = title
             pt = event.get("prompt_tokens")
@@ -188,7 +205,7 @@ class TraceModel:
 
         node_id, parent_id, is_tool = self._identify(event, stage, kind, status, title)
         detail = str(event.get("detail") or event.get("summary") or "").strip()
-        duration = float(event.get("duration_ms") or 0.0)
+        duration = _as_float(event.get("duration_ms"))
 
         node = self._index.get(node_id)
         if node is None:
@@ -199,7 +216,7 @@ class TraceModel:
                 agent=str(event.get("agent") or "").strip(),
                 kind=kind, node_type=step_type(event, is_tool=is_tool),
                 status=status, title=title, detail=detail,
-                duration_ms=duration, step=int(event.get("step") or 0),
+                duration_ms=duration, step=_as_int(event.get("step")),
                 started_at=self._last_ts, raw=dict(event),
             )
             if is_tool:
@@ -266,7 +283,7 @@ class TraceModel:
                     status="completed",
                     title=title,
                     detail=str(call.get("method") or ""),
-                    duration_ms=float(call.get("ms") or 0.0),
+                    duration_ms=_as_float(call.get("ms")),
                     started_at=self._last_ts,
                     raw=child_raw,
                 )
@@ -277,14 +294,14 @@ class TraceModel:
                 child.phase = child_raw["stage"]
                 child.title = title
                 child.detail = str(call.get("method") or "")
-                child.duration_ms = float(call.get("ms") or 0.0)
+                child.duration_ms = _as_float(call.get("ms"))
                 child.raw = child_raw
 
     def _identify(self, event: dict, stage: str, kind: str, status: str, title: str) -> tuple[str, str, bool]:
         explicit_id = str(event.get("node_id") or "").strip()
         explicit_parent = str(event.get("parent_id") or "").strip()
         is_substep = kind == "substep" or status == "info"
-        step = int(event.get("step") or 0)
+        step = _as_int(event.get("step"))
 
         if is_substep and not (step > 0):
             parent_id = explicit_parent or self._stage_index.get(str(event.get("parent") or "").strip()) or self._last_tool_id

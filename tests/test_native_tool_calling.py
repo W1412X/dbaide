@@ -215,3 +215,55 @@ def test_decide_downgrades_on_tools_unsupported(tmp_path):
     decision = loop._decide([LLMMessage("user", "q")])
     assert decision == {"action": "finish", "answer": "via json"}
     assert loop._tools_downgraded is True
+
+
+def test_decide_streams_answer_only_on_first_attempt(tmp_path):
+    """A retry must NOT re-stream the answer: only the first attempt streams (a fresh
+    streamer on each retry would re-emit the answer field, duplicating shown text)."""
+    orch = _orch(tmp_path)
+    orch.stream_answers = True
+
+    emitted: list[str] = []
+    orch.progress = lambda ev: (
+        emitted.append(ev["text"]) if isinstance(ev, dict) and ev.get("kind") == "answer_chunk" else None
+    )
+
+    class _StreamLLM(LLMClient):
+        def __init__(self):
+            self.stream_calls = 0
+            self.json_calls = 0
+        def supports_tool_calling(self):
+            return False
+        def supports_streaming(self):
+            return True
+        def complete_json_stream(self, messages, *, schema_hint="", on_text_chunk=None):
+            self.stream_calls += 1
+            if on_text_chunk:
+                on_text_chunk('{"answer":"DUP"}')   # streams the answer field live
+            return {"answer": "DUP"}                 # ...but no action → invalid → retry
+        def complete_json(self, messages, *, schema_hint=""):
+            self.json_calls += 1
+            return {"action": "finish", "answer": "DUP"}
+
+    orch.llm = _StreamLLM()
+    loop = AskAgentLoop(orch, progress=orch.progress)
+    decision = loop._decide([LLMMessage("user", "q")])
+
+    assert decision == {"action": "finish", "answer": "DUP"}
+    assert orch.llm.stream_calls == 1        # first attempt streamed
+    assert orch.llm.json_calls == 1          # retry used the non-streaming path
+    assert "".join(emitted).count("DUP") == 1  # answer shown exactly once, not duplicated
+
+
+def test_trace_model_tolerates_nonnumeric_event_fields():
+    """A corrupted/hand-edited persisted trace with non-numeric step/timestamp/duration
+    must not crash ingest()."""
+    from dbaide.agent.trace_model import TraceModel
+    m = TraceModel()
+    m.ingest({
+        "stage": "execute_sql", "step": "oops", "timestamp": "bad", "duration_ms": "x",
+        "title": "t", "status": "completed",
+        "llm_calls": [{"stage": "llm", "ms": "nope", "method": "POST"}],
+    })
+    m.finalize()
+    assert len(m.steps) == 1

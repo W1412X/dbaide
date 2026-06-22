@@ -780,6 +780,7 @@ class AskAgentLoop:
 
         last_error = ""
         last_raw = ""
+        streamed = False
         for attempt in range(DECISION_RETRIES):
             call_messages = list(messages)
             if last_error:
@@ -787,7 +788,13 @@ class AskAgentLoop:
             try:
                 if orch.cancel_check:
                     orch.cancel_check()
-                if getattr(orch, "stream_answers", False) and orch.llm.supports_streaming():
+                # Stream the answer field live ONLY on the first attempt. A retry builds a
+                # fresh streamer (_emitted=0) and would re-emit the answer from scratch,
+                # duplicating text already shown (an invalid first response can still carry
+                # an "answer" field that streams before validation fails). Retries are rare
+                # and their answer still renders at finish via the authoritative payload.
+                if getattr(orch, "stream_answers", False) and orch.llm.supports_streaming() and not streamed:
+                    streamed = True
                     streamer = JsonFieldStreamer(self._emit_answer_chunk, field="answer")
                     def on_chunk(chunk: str) -> None:
                         if orch.cancel_check:
