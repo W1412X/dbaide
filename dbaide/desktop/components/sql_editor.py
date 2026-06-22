@@ -200,9 +200,12 @@ class SqlEditor(QPlainTextEdit):
         number = block.blockNumber()
         top = round(self.blockBoundingGeometry(block).translated(self.contentOffset()).top())
         bottom = top + round(self.blockBoundingRect(block).height())
-        painter.setPen(QColor(Theme.MUTED_2))
+        current = self.textCursor().blockNumber()
+        muted = QColor(Theme.MUTED_2)
+        active = QColor(Theme.TEXT_2)  # the line the cursor is on reads brighter
         while block.isValid() and top <= event.rect().bottom():
             if block.isVisible() and bottom >= event.rect().top():
+                painter.setPen(active if number == current else muted)
                 painter.drawText(0, top, self._line_area.width() - 6,
                                  self.fontMetrics().height(),
                                  int(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter),
@@ -223,6 +226,7 @@ class SqlEditor(QPlainTextEdit):
             sel.cursor = cursor
             selections.append(sel)
         self.setExtraSelections(selections)
+        self._line_area.update()  # repaint the gutter so the active line number follows
 
     # ── comment toggle ──────────────────────────────────────────────────────--
 
