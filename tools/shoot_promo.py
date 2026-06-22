@@ -705,8 +705,10 @@ def _grab_trimmed(app: QApplication, widget, name: str, *, pad: int = 18) -> Pat
 
     img = Image.open(path).convert("RGB")
     arr = np.asarray(img).astype("int16")
-    # Background = the panel's empty bottom-center strip (always blank).
-    bg = arr[-3:, arr.shape[1] // 3 : 2 * arr.shape[1] // 3].reshape(-1, 3).mean(0)
+    # Background = the image's dominant colour (these dark screenshots are mostly empty
+    # canvas), robust whether the empty band is at the top (conversation views) or the
+    # bottom (a drawer panel taller than its content).
+    bg = np.median(arr.reshape(-1, 3), axis=0)
     # A row counts as "content" if enough pixels differ meaningfully from the background.
     delta = np.abs(arr - bg).sum(axis=2)  # H x W
     row_content = (delta > 30).sum(axis=1)  # non-bg pixels per row
@@ -1117,7 +1119,7 @@ def show_developer_field_exploration(app: QApplication, win: MainWindow) -> Path
     _expand_latest_trace(app, win, key)
     _wait_for_answer_document(app, win, key)
     _process(app, 8)
-    return _grab(app, win.ask_tab, "08-developer-field-exploration")
+    return _grab_trimmed(app, win.ask_tab, "08-developer-field-exploration")
 
 
 def _developer_consistency_trace() -> list[dict[str, Any]]:
@@ -1291,7 +1293,7 @@ def show_clarification(app: QApplication, win: MainWindow) -> Path:
         ],
     })
     _process(app, 8)
-    return _grab(app, win.ask_tab, "05-clarification")
+    return _grab_trimmed(app, win.ask_tab, "05-clarification")
 
 
 def show_database_client(app: QApplication, win: MainWindow) -> tuple[Path, Path]:
