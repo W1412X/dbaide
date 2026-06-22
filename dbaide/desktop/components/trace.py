@@ -221,6 +221,12 @@ class InlineTrace(QFrame):
     def _render(self) -> None:
         self.setUpdatesEnabled(False)
         last_widget: QWidget | None = None
+        # Preserve the user's scroll position across a full rebuild. Some live
+        # transitions (a step gaining its first sub-step, a subtitle appearing) can't
+        # be applied incrementally and fall back to _full_rebuild, which would otherwise
+        # snap the view to the top. When following the tail we re-scroll to the newest
+        # card below instead, so only capture when not following.
+        prev_scroll = None if self._state.follow_live else self._scroll.verticalScrollBar().value()
         try:
             model = self._state.model
             if model is None:
@@ -269,6 +275,16 @@ class InlineTrace(QFrame):
             self.setUpdatesEnabled(True)
         if self._state.follow_live and last_widget is not None:
             QTimer.singleShot(0, lambda w=last_widget: self._scroll_to_widget(w))
+        elif prev_scroll is not None:
+            # Restore the pre-render offset (clamped to the new content height) so a
+            # full rebuild doesn't lose the reader's place. Block signals so this
+            # programmatic scroll doesn't flip follow_live via _on_user_scroll.
+            bar = self._scroll.verticalScrollBar()
+            bar.blockSignals(True)
+            try:
+                bar.setValue(min(prev_scroll, bar.maximum()))
+            finally:
+                bar.blockSignals(False)
 
     def _card_ids_match(self, timeline: list[TraceTimelineEntry], count: int) -> bool:
         if count > len(self._cards) or count > len(timeline):

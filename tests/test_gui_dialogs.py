@@ -106,3 +106,25 @@ def test_themed_file_dialog_forces_non_native_mode(qapp):
 
     dialog = ThemedFileDialog()
     assert dialog.testOption(QFileDialog.Option.DontUseNativeDialog)
+
+
+def test_prepare_dialog_prefills_extensionless_save_name(qapp, tmp_path):
+    """An extension-less save filename must pre-fill the name box, not be treated as a
+    directory (regression: the old `path.suffix` heuristic dropped it)."""
+    from dbaide.desktop.dialogs.file_dialogs import _prepare_dialog
+
+    d = _prepare_dialog(None, "Save", str(tmp_path / "report"), "HTML (*.html)")
+    sel = d.selectedFiles()
+    assert sel and sel[0].endswith("report")           # name pre-filled
+    d.deleteLater()
+
+    d2 = _prepare_dialog(None, "Save", str(tmp_path / "report.html"), "HTML (*.html)")
+    sel2 = d2.selectedFiles()
+    assert sel2 and sel2[0].endswith("report.html")    # name with extension still works
+    d2.deleteLater()
+
+    # An existing directory is used as the starting folder (not selected as a file).
+    d3 = _prepare_dialog(None, "Open", str(tmp_path), "")
+    import os
+    assert os.path.realpath(d3.directory().absolutePath()) == os.path.realpath(str(tmp_path))
+    d3.deleteLater()

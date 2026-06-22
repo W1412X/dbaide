@@ -1517,3 +1517,54 @@ def test_svg_glyph_bytes_cached_renderer_fresh(qapp):
     # Renderers are fresh instances (not the cached-QObject pitfall).
     assert _renderer(name, "#fff", 2.0) is not _renderer(name, "#fff", 2.0)
     assert not svg_icon(name, color="#abcdef", size=16).isNull()
+
+
+def test_full_rebuild_preserves_scroll_when_not_following(qapp):
+    """A full rebuild (e.g. a step gaining its first sub-step) must not snap the view
+    to the top when the user has scrolled up (follow_live off)."""
+    from PyQt6.QtWidgets import QVBoxLayout, QWidget
+    from dbaide.desktop.components.trace import InlineTrace
+
+    host = QWidget()
+    host.resize(420, 300)
+    host.show()
+    trace = InlineTrace(host, show_header=False)
+    lay = QVBoxLayout(host)
+    lay.addWidget(trace)
+    trace.show()
+    qapp.processEvents()
+
+    def flush():
+        trace._render_timer.stop()
+        trace._render()
+        qapp.processEvents()
+
+    # Tall content so the scroll area actually has range.
+    events = [progress_event(stage="loop", title="started", status="running", kind="agent")]
+    for i in range(20):
+        events.append(progress_event(stage=f"s{i}", title=f"step {i} " + "x" * 40,
+                                     status="completed", kind="tool", step=i + 1, duration_ms=3))
+    trace.set_events(events, live=True)
+    flush()
+
+    bar = trace._scroll.verticalScrollBar()
+    if bar.maximum() <= 0:
+        import pytest
+        pytest.skip("offscreen env produced no scroll range")
+
+    trace._state.follow_live = False
+    target = bar.maximum() // 2
+    bar.setValue(target)
+    qapp.processEvents()
+
+    # Force a full rebuild by giving an existing childless step its first sub-step.
+    events.append(subagent_event(agent="risk", title="auto", parent="s5",
+                                 node_id="risk:x", status="completed"))
+    trace.set_events(events, live=True)
+    flush()
+
+    # Scroll should be near where the user left it — NOT reset to the top.
+    assert trace._scroll.verticalScrollBar().value() > 0
+    assert abs(trace._scroll.verticalScrollBar().value() - target) <= 40
+    host.deleteLater()
+    qapp.processEvents()

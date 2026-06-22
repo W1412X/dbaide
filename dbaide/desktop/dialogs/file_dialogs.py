@@ -47,12 +47,17 @@ def _prepare_dialog(
     target = str(directory or "").strip()
     if target:
         path = Path(target).expanduser()
-        if path.name and path.suffix:
-            dialog.setDirectory(str(path.parent))
+        # Treat the target as a filename to pre-fill whenever it has a name component
+        # and is not an existing directory — extension-less save names (e.g. "report")
+        # must still pre-fill the name box, not be mistaken for a directory. Only a real
+        # existing directory (or a bare dir path) sets the starting folder.
+        if path.name and not path.is_dir():
+            parent_dir = str(path.parent)
+            if parent_dir not in ("", "."):
+                dialog.setDirectory(parent_dir)
             dialog.selectFile(path.name)
         else:
             dialog.setDirectory(str(path))
-            dialog.selectFile(str(path))
     return dialog
 
 
