@@ -6,6 +6,8 @@ All notable changes to DBAide are documented here. The format is loosely based o
 
 ## [Unreleased]
 
+## [0.9.3] — 2026-06-22
+
 ### Added
 
 - **Copy whole-turn trace** — the trace drawer header now has a copy button that copies the
