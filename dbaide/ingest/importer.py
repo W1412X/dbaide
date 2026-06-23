@@ -29,7 +29,8 @@ class ImportSpec:
     file stem) is the editable identity of the workbook and drives its table name(s)."""
     path: Path
     name: str = ""
-    header_rows: dict[str, int] | None = None   # sheet name → user-chosen 0-based header row
+    # sheet name → user-chosen (header_row, start_col) anchor, 0-based
+    header_anchors: dict[str, tuple[int, int]] | None = None
 
     @property
     def logical_name(self) -> str:
@@ -108,6 +109,7 @@ def import_workbooks(
 
     stamp = now or datetime.now(timezone.utc).isoformat(timespec="seconds")
     new_workbooks: list[WorkbookInfo] = []
+    warnings: list[str] = []
     try:
         with _writer(db_path) as conn:
             if overwrite:
@@ -119,7 +121,8 @@ def import_workbooks(
             used_tables = {s.table for w in manifest.workbooks for s in w.sheets}
             for index, spec in enumerate(specs):
                 path = Path(spec.path)
-                workbook = read_workbook(path, header_overrides=spec.header_rows)
+                workbook = read_workbook(path, header_overrides=spec.header_anchors)
+                warnings.extend(f"{path.name} · {w}" for w in workbook.warnings)
                 logical = spec.logical_name
                 file_hash = _file_hash(path)
                 single = len(workbook.sheets) == 1
@@ -154,7 +157,7 @@ def import_workbooks(
 
     manifest.workbooks.extend(new_workbooks)
     manifest.save(manifest_path)
-    return ImportResult(db_path=db_path, manifest=manifest)
+    return ImportResult(db_path=db_path, manifest=manifest, warnings=warnings)
 
 
 def rename_workbook(dest_dir: Path | str, workbook_id: str, new_name: str) -> ImportManifest:

@@ -304,12 +304,56 @@ def test_user_selected_header_row_matches_columns_below(tmp_path):
     # auto-detect would pick row 1; force the user's choice of row 0 instead.
     csv.write_text("region,q1,q2\ncode,jan,feb\nN,10,20\nS,30,40\n", encoding="utf-8")
     res = import_workbooks(
-        [ImportSpec(csv, name="report", header_rows={"report": 0})], dest_dir=tmp_path / "imports"
+        [ImportSpec(csv, name="report", header_anchors={"report": (0, 0)})], dest_dir=tmp_path / "imports"
     )
     sheet = res.manifest.workbooks[0].sheets[0]
     assert sheet.header_row == 0
     assert [c.name for c in sheet.columns] == ["region", "q1", "q2"]
     assert sheet.row_count == 3                         # the row the auto-detector saw as header is now data
+
+
+def test_user_selected_start_column_excludes_left_columns(tmp_path):
+    from dbaide.ingest import ImportSpec
+
+    csv = tmp_path / "x.csv"
+    # a junk column on the left the user wants excluded; pick start column 2.
+    csv.write_text("备注,,订单号,数量\n忽略,,1001,3\n忽略,,1002,5\n", encoding="utf-8")
+    res = import_workbooks(
+        [ImportSpec(csv, name="x", header_anchors={"x": (0, 2)})], dest_dir=tmp_path / "imports"
+    )
+    sheet = res.manifest.workbooks[0].sheets[0]
+    assert [c.name for c in sheet.columns] == ["订单号", "数量"]    # 备注 + blank col dropped
+    assert list(sheet.data_bbox) == [0, 2, 2, 3]
+
+
+def test_bad_sheet_skipped_others_imported(tmp_path):
+    pytest.importorskip("openpyxl")
+    from openpyxl import Workbook
+
+    wb = Workbook()
+    good = wb.active
+    good.title = "good"
+    good.append(["a", "b"]); good.append([1, 2])
+    wb.create_sheet("blank")            # empty sheet → no table → skipped, not fatal
+    path = tmp_path / "mixed.xlsx"
+    wb.save(path)
+
+    res = import_workbooks([path], dest_dir=tmp_path / "imports")
+    sheets = res.manifest.workbooks[0].sheets
+    assert [s.sheet_name for s in sheets] == ["good"]
+    assert any("blank" in w for w in res.warnings)
+
+
+def test_all_sheets_unusable_raises(tmp_path):
+    pytest.importorskip("openpyxl")
+    from openpyxl import Workbook
+
+    wb = Workbook()
+    wb.active.title = "empty"          # only an empty sheet
+    path = tmp_path / "empty.xlsx"
+    wb.save(path)
+    with pytest.raises(ValueError):
+        import_workbooks([path], dest_dir=tmp_path / "imports")
 
 
 def test_vertical_merges_fill_groups_but_keep_real_blanks(tmp_path):

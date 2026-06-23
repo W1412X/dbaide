@@ -1396,6 +1396,7 @@ class SettingsDialog(ChromeDialog):
             return
         finally:
             QApplication.restoreOverrideCursor()
+        self._note_skipped(result)
         # Register it through the normal save path; once the list reloads and re-selects
         # this connection, _on_connection_selected detects the collection and shows the panel.
         self._selected_conn = name
@@ -1422,14 +1423,21 @@ class SettingsDialog(ChromeDialog):
             return                       # decline → don't create same-name duplicates
         try:
             QApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)
-            collection.add(specs, overwrite=bool(clashes))
+            result = collection.add(specs, overwrite=bool(clashes))
         except Exception as exc:  # noqa: BLE001
             dialog_warn(self, _pt("settings.title"), _pt("excel.err.import_failed", error=str(exc)))
             return
         finally:
             QApplication.restoreOverrideCursor()
+        self._note_skipped(result)
         self.workbook_panel.load(self._selected_conn, collection.workbooks())
         self.excel_collection_changed.emit(self._selected_conn)
+
+    def _note_skipped(self, result) -> None:
+        if getattr(result, "warnings", None):
+            dialog_warn(self, _pt("settings.title"),
+                        _pt("excel.skipped_sheets", n=len(result.warnings),
+                            detail="\n".join(result.warnings)))
 
     def _excel_rename_workbook(self, workbook_id: str) -> None:
         from dbaide.desktop.dialogs.text_input import get_text

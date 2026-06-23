@@ -223,9 +223,9 @@ def test_header_preview_auto_detects_then_accepts_manual(qapp, tmp_path):
     f = tmp_path / "sales.csv"
     f.write_text("title\n\nmeta,note\norder,city,amt\n1,BJ,10\n2,SH,20\n", encoding="utf-8")
     d = HeaderPreviewDialog(None, f)
-    assert d.result_value() == {"sales": 3}     # preamble skipped automatically
-    d._on_cell(0, 0)                             # user clicks row 0
-    assert d.result_value() == {"sales": 0}
+    assert d.result_value() == {"sales": (3, 0)}    # preamble skipped automatically (row 3, col 0)
+    d._on_cell(0, 1)                                # user clicks row 0, col 1
+    assert d.result_value() == {"sales": (0, 1)}
     d.deleteLater()
 
 
@@ -240,11 +240,11 @@ def test_staged_row_header_choice_flows_into_spec(qapp, tmp_path):
     d._rows.append(row)
     d._rows_layout.insertWidget(d._rows_layout.count() - 1, row)
     d._empty.setVisible(False)
-    row.header_rows = {"a": 2}                    # as if chosen via the picker
+    row.header_anchors = {"a": (2, 1)}            # as if chosen via the picker
 
     name, specs = d.result_value()
     assert name == "c"
-    assert specs[0].header_rows == {"a": 2}
+    assert specs[0].header_anchors == {"a": (2, 1)}
     d.deleteLater()
 
 

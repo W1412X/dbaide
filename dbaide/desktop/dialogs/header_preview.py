@@ -35,9 +35,9 @@ class HeaderPreviewDialog(ChromeDialog):
         from dbaide.ingest import read_sheet_grids
 
         self._grids = read_sheet_grids(path)
-        self._choice: dict[str, int] = {}
+        self._choice: dict[str, tuple[int, int]] = {}
         for g in self._grids:
-            self._choice[g.name] = (current or {}).get(g.name, g.auto_header_row)
+            self._choice[g.name] = (current or {}).get(g.name, (g.auto_header_row, g.auto_header_col))
 
         self.setWindowTitle(_pt("excel.header_title"))
         self.setModal(True)
@@ -124,7 +124,7 @@ class HeaderPreviewDialog(ChromeDialog):
         grid = self._current()
         if grid is None:
             return
-        chosen = self._choice.get(grid.name, grid.auto_header_row)
+        hr, hc = self._choice.get(grid.name, (grid.auto_header_row, grid.auto_header_col))
         header_bg = QBrush(QColor(Theme.ACCENT))
         header_fg = QBrush(QColor(Theme.ACCENT_TEXT))
         skipped_fg = QBrush(QColor(Theme.MUTED))
@@ -135,22 +135,25 @@ class HeaderPreviewDialog(ChromeDialog):
                 item = self._table.item(r, c)
                 if item is None:
                     continue
-                if r == chosen:
+                if r == hr and c >= hc:                 # the header span
                     item.setBackground(header_bg)
                     item.setForeground(header_fg)
-                else:
+                elif r < hr or c < hc:                  # above the header, or left of the table
                     item.setBackground(clear_bg)
-                    item.setForeground(skipped_fg if r < chosen else normal_fg)
-        auto = " · " + _pt("excel.header_auto") if chosen == grid.auto_header_row else ""
-        self._status.setText(_pt("excel.header_current", n=chosen + 1) + auto)
+                    item.setForeground(skipped_fg)
+                else:                                   # data
+                    item.setBackground(clear_bg)
+                    item.setForeground(normal_fg)
+        auto = " · " + _pt("excel.header_auto") if (hr, hc) == (grid.auto_header_row, grid.auto_header_col) else ""
+        self._status.setText(_pt("excel.header_current", r=hr + 1, c=hc + 1) + auto)
 
-    def _on_cell(self, row: int, _col: int) -> None:
+    def _on_cell(self, row: int, col: int) -> None:
         grid = self._current()
         if grid is not None:
-            self._choice[grid.name] = row
+            self._choice[grid.name] = (row, col)
             self._restyle()
 
-    def result_value(self) -> dict[str, int]:
+    def result_value(self) -> dict[str, tuple[int, int]]:
         return dict(self._choice)
 
 
