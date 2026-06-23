@@ -432,10 +432,22 @@ UPDATE_AGENDA = ToolSpec(
     ),
     input_schema={
         "explanation": {"type": "string", "description": "why the task list is needed or what changed"},
-        "items": {"type": "list[object]", "required": True, "description": (
-            "full ordered task list; each item is {id?, title, status=pending|in_progress|done|dropped, "
-            "kind=schema|join|sql|verify|answer|other, acceptance?, evidence_refs?}"
-        )},
+        "items": {
+            "type": "list[object]",
+            "required": True,
+            "description": "full ordered task list (replaces the prior one); keep it short",
+            "items_schema": {
+                "type": "object",
+                "properties": {
+                    "id": {"type": "string", "description": "stable id from a prior call; omit for a new task"},
+                    "title": {"type": "string", "description": "the task, one short line"},
+                    "status": {"type": "string", "enum": ["pending", "in_progress", "done", "dropped"]},
+                    "kind": {"type": "string", "enum": ["schema", "join", "sql", "verify", "answer", "other"]},
+                    "acceptance": {"type": "string", "description": "optional: how this task is verified done"},
+                },
+                "required": ["title", "status"],
+            },
+        },
     },
     output_schema={
         "summary": "string",

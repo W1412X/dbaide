@@ -21,7 +21,11 @@ All notable changes to DBAide are documented here. The format is loosely based o
   read `title` with English statuses — so every item was silently dropped, the tool returned
   an empty agenda ("no tasks"), and the panel stayed hidden. The parser now accepts title
   synonyms (`task`/`name`/`text`/…) and a much wider set of status aliases including Chinese
-  (`待开始`→pending, `进行中`→in_progress, `已完成`→done, `已取消`→dropped).
+  (`待开始`→pending, `进行中`→in_progress, `已完成`→done, `已取消`→dropped). The deeper
+  cause is fixed too: `update_agenda`'s `items` were advertised to the model as a bare
+  `array of object` with the field names only in a prose description, so weaker models
+  guessed `task`; the native tool schema now carries a structured item schema (`title`
+  required, `status`/`kind` enums) via a new `items_schema` on the tool spec.
 - **Agent task list (agenda)** — the conversation's agenda panel showed during a live run
   but vanished once the turn finalized or the chat was reopened. The tool layer flattened
   the tool result to a 200-char `output_preview` string in the persisted trace, so the

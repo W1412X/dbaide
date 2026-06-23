@@ -1871,6 +1871,12 @@ def _tool_spec_to_function(spec: Any) -> dict[str, Any]:
         desc = meta.get("description")
         if desc:
             prop["description"] = str(desc)
+        # Let a spec advertise the object shape of array items, so a native tool-calling
+        # model gets a machine-readable schema for the fields instead of guessing them
+        # from a prose description (which is why update_agenda items arrived as `task`).
+        item_schema = meta.get("items_schema")
+        if prop.get("type") == "array" and isinstance(item_schema, dict):
+            prop["items"] = item_schema
         properties[key] = prop
         if meta.get("required"):
             required.append(key)

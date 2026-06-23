@@ -76,6 +76,20 @@ def test_latest_agenda_reads_live_and_persisted_shapes():
     assert [i.status for i in latest_agenda_from_events([persisted])] == ["done", "in_progress"]
 
 
+def test_update_agenda_function_schema_advertises_item_fields():
+    """Root cause of the drift: the model only saw `items: array of object` with the field
+    names buried in prose, so it guessed `task`. The native function schema must advertise
+    the item object's properties (title required, status enum)."""
+    from dbaide.agent.loop import _tool_spec_to_function
+    from dbaide.tools.specs import UPDATE_AGENDA
+    fn = _tool_spec_to_function(UPDATE_AGENDA)
+    item = fn["function"]["parameters"]["properties"]["items"]["items"]
+    assert item["type"] == "object"
+    assert "title" in item["properties"]
+    assert item["properties"]["status"]["enum"] == ["pending", "in_progress", "done", "dropped"]
+    assert item["required"] == ["title", "status"]
+
+
 def test_agenda_from_dict_tolerates_model_field_drift():
     """Real model output uses `task` instead of `title` (it confuses the subagent tool's
     field) and localized status words. Previously every item was silently dropped, leaving
