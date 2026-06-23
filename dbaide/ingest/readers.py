@@ -8,6 +8,7 @@ sheet, or raw-grid fallback yet (those are deliberately deferred).
 from __future__ import annotations
 
 import csv
+import io
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -59,7 +60,10 @@ def _read_csv(path: Path) -> RawSheet | None:
         delimiter = csv.Sniffer().sniff(sample, delimiters=",;\t|").delimiter
     except csv.Error:
         delimiter = "\t" if path.suffix.lower() == ".tsv" else ","
-    rows = list(csv.reader(text.splitlines(), delimiter=delimiter))
+    # Normalise line endings, then let csv.reader own line parsing so newlines embedded in
+    # quoted fields survive (splitting on lines first would corrupt them).
+    text = text.replace("\r\n", "\n").replace("\r", "\n")
+    rows = list(csv.reader(io.StringIO(text), delimiter=delimiter))
     return _to_sheet(path.stem, rows)
 
 

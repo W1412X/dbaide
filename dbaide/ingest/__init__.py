@@ -13,6 +13,7 @@ from dbaide.ingest.collection import (
     collection_dir,
     collection_for_connection,
     imports_root,
+    is_valid_collection_name,
 )
 from dbaide.ingest.importer import (
     ImportResult,
@@ -34,6 +35,7 @@ __all__ = [
     "collection_dir",
     "collection_for_connection",
     "imports_root",
+    "is_valid_collection_name",
     "read_workbook",
     "RawWorkbook",
     "RawSheet",

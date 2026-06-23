@@ -9,10 +9,11 @@ read-only SQLite database — register it as a ``sqlite`` connection and everyth
 
 from __future__ import annotations
 
+import contextlib
 import hashlib
 import re
 import sqlite3
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
 from dataclasses import dataclass, field
 from datetime import date, datetime, timezone
 from pathlib import Path
@@ -53,6 +54,26 @@ class ImportResult:
         return sum(s.row_count for w in self.manifest.workbooks for s in w.sheets)
 
 
+@contextlib.contextmanager
+def _writer(db_path: Path) -> Iterator[sqlite3.Connection]:
+    """One explicit transaction spanning DDL + DML, so a failed batch leaves the database
+    untouched. The sqlite3 module's legacy mode auto-commits before DDL (CREATE/DROP/ALTER),
+    which would otherwise leave partial schema changes committed on error; we manage the
+    transaction ourselves (isolation_level=None + explicit BEGIN). SQLite DDL is transactional,
+    so the ROLLBACK undoes table creates/drops/renames too."""
+    conn = sqlite3.connect(db_path, isolation_level=None)
+    try:
+        conn.execute("BEGIN")
+        yield conn
+        conn.execute("COMMIT")
+    except BaseException:
+        with contextlib.suppress(sqlite3.Error):
+            conn.execute("ROLLBACK")
+        raise
+    finally:
+        conn.close()
+
+
 def import_workbooks(
     items: "list[Path | str | ImportSpec]",
     *,
@@ -80,56 +101,53 @@ def import_workbooks(
 
     if append and manifest_path.exists():
         manifest = ImportManifest.load(manifest_path)
-        db_path.touch(exist_ok=True)
     else:
         manifest = ImportManifest()
         db_path.unlink(missing_ok=True)
 
-    conn = sqlite3.connect(db_path)
+    stamp = now or datetime.now(timezone.utc).isoformat(timespec="seconds")
+    new_workbooks: list[WorkbookInfo] = []
     try:
-        if overwrite:
-            incoming = {s.logical_name for s in specs}
-            for wb in [w for w in manifest.workbooks if w.name in incoming]:
-                for sheet in wb.sheets:
-                    conn.execute(f"DROP TABLE IF EXISTS {_q(sheet.table)}")
-                manifest.workbooks.remove(wb)
-        used_tables = {s.table for w in manifest.workbooks for s in w.sheets}
-        stamp = now or datetime.now(timezone.utc).isoformat(timespec="seconds")
-        new_workbooks: list[WorkbookInfo] = []
-        for index, spec in enumerate(specs):
-            path = Path(spec.path)
-            workbook = read_workbook(path)
-            logical = spec.logical_name
-            file_hash = _file_hash(path)
-            wb_info = WorkbookInfo(
-                id=_workbook_id(file_hash, stamp, index),
-                name=logical,
-                source_filename=workbook.filename,
-                file_hash=file_hash,
-                imported_at=stamp,
-            )
-            for sheet in workbook.sheets:
-                table = _unique(_table_name(logical, sheet.name, len(workbook.sheets) == 1), used_tables)
-                columns = _plan_columns(sheet)
-                _write_table(conn, table, columns, sheet.rows)
-                wb_info.sheets.append(SheetInfo(
-                    sheet_name=sheet.name,
-                    table=table,
-                    display_name=_display_name(logical, sheet.name, len(workbook.sheets) == 1),
-                    header_row=sheet.header_row,
-                    row_count=len(sheet.rows),
-                    columns=columns,
-                ))
-                if on_progress:
-                    on_progress(f"{path.name} · {sheet.name} → {table} ({len(sheet.rows)} rows)")
-            new_workbooks.append(wb_info)
-        conn.commit()
+        with _writer(db_path) as conn:
+            if overwrite:
+                incoming = {s.logical_name for s in specs}
+                for wb in [w for w in manifest.workbooks if w.name in incoming]:
+                    for sheet in wb.sheets:
+                        conn.execute(f"DROP TABLE IF EXISTS {_q(sheet.table)}")
+                    manifest.workbooks.remove(wb)
+            used_tables = {s.table for w in manifest.workbooks for s in w.sheets}
+            for index, spec in enumerate(specs):
+                path = Path(spec.path)
+                workbook = read_workbook(path)
+                logical = spec.logical_name
+                file_hash = _file_hash(path)
+                single = len(workbook.sheets) == 1
+                wb_info = WorkbookInfo(
+                    id=_workbook_id(file_hash, stamp, index),
+                    name=logical,
+                    source_filename=workbook.filename,
+                    file_hash=file_hash,
+                    imported_at=stamp,
+                )
+                for sheet in workbook.sheets:
+                    table = _unique(_table_name(logical, sheet.name, single), used_tables)
+                    columns = _plan_columns(sheet)
+                    _write_table(conn, table, columns, sheet.rows)
+                    wb_info.sheets.append(SheetInfo(
+                        sheet_name=sheet.name,
+                        table=table,
+                        display_name=_display_name(logical, sheet.name, single),
+                        header_row=sheet.header_row,
+                        row_count=len(sheet.rows),
+                        columns=columns,
+                    ))
+                    if on_progress:
+                        on_progress(f"{path.name} · {sheet.name} → {table} ({len(sheet.rows)} rows)")
+                new_workbooks.append(wb_info)
     except BaseException:
-        conn.close()
         if not append:
             db_path.unlink(missing_ok=True)   # fresh import failed → no half-written db
         raise
-    conn.close()
 
     manifest.workbooks.extend(new_workbooks)
     manifest.save(manifest_path)
@@ -149,17 +167,13 @@ def rename_workbook(dest_dir: Path | str, workbook_id: str, new_name: str) -> Im
         raise KeyError(workbook_id)
     used = {s.table for w in manifest.workbooks if w.id != workbook_id for s in w.sheets}
     single = len(target.sheets) == 1
-    conn = sqlite3.connect(dest / "data.db")
-    try:
+    with _writer(dest / "data.db") as conn:
         for sheet in target.sheets:
             new_table = _unique(_table_name(new_name, sheet.sheet_name, single), used)
             if new_table != sheet.table:
                 conn.execute(f"ALTER TABLE {_q(sheet.table)} RENAME TO {_q(new_table)}")
                 sheet.table = new_table
             sheet.display_name = _display_name(new_name, sheet.sheet_name, single)
-        conn.commit()
-    finally:
-        conn.close()
     target.name = new_name
     manifest.save(dest / "manifest.json")
     return manifest
@@ -173,13 +187,9 @@ def remove_workbook(dest_dir: Path | str, workbook_id: str) -> ImportManifest:
     target = next((w for w in manifest.workbooks if w.id == workbook_id), None)
     if target is None:
         raise KeyError(workbook_id)
-    conn = sqlite3.connect(dest / "data.db")
-    try:
+    with _writer(dest / "data.db") as conn:
         for sheet in target.sheets:
             conn.execute(f"DROP TABLE IF EXISTS {_q(sheet.table)}")
-        conn.commit()
-    finally:
-        conn.close()
     manifest.workbooks = [w for w in manifest.workbooks if w.id != workbook_id]
     manifest.save(dest / "manifest.json")
     return manifest
@@ -203,6 +213,8 @@ def _infer_affinity(values: list[Any]) -> str:
         return "TEXT"
     if any(_looks_like_code(v) for v in seen):   # preserve leading-zero ids/zips/phones
         return "TEXT"
+    if any(_overflows_int(v) for v in seen):     # big numeric ids: keep exact as TEXT, not lossy REAL
+        return "TEXT"
     if all(_try_int(v) is not None for v in seen):
         return "INTEGER"
     if all(_try_float(v) is not None for v in seen):
@@ -212,6 +224,7 @@ def _infer_affinity(values: list[Any]) -> str:
 
 _INT_RE = re.compile(r"[+-]?\d+$")
 _FLOAT_RE = re.compile(r"[+-]?(\d+\.?\d*|\.\d+)([eE][+-]?\d+)?$")
+_INT64_MIN, _INT64_MAX = -(2 ** 63), 2 ** 63 - 1
 
 
 def _is_blank(v: Any) -> bool:
@@ -222,16 +235,31 @@ def _looks_like_code(v: Any) -> bool:
     return isinstance(v, str) and len(v) > 1 and v[0] == "0" and v.isdigit()
 
 
+def _overflows_int(v: Any) -> bool:
+    """True for an integer-shaped value whose magnitude won't fit in SQLite's signed 64-bit
+    INTEGER — storing it as INTEGER would raise OverflowError, and as REAL would lose digits,
+    so such a column is kept as TEXT."""
+    if isinstance(v, bool):
+        return False
+    if isinstance(v, int):
+        return not (_INT64_MIN <= v <= _INT64_MAX)
+    if isinstance(v, str) and _INT_RE.match(v.strip()):
+        return not (_INT64_MIN <= int(v.strip()) <= _INT64_MAX)
+    return False
+
+
 def _try_int(v: Any) -> int | None:
     if isinstance(v, bool):
         return int(v)
     if isinstance(v, int):
-        return v
-    if isinstance(v, float):
-        return int(v) if float(v).is_integer() else None
-    if isinstance(v, str) and _INT_RE.match(v.strip()):
-        return int(v.strip())
-    return None
+        n = v
+    elif isinstance(v, float):
+        n = int(v) if float(v).is_integer() else None
+    elif isinstance(v, str) and _INT_RE.match(v.strip()):
+        n = int(v.strip())
+    else:
+        n = None
+    return n if (n is not None and _INT64_MIN <= n <= _INT64_MAX) else None
 
 
 def _try_float(v: Any) -> float | None:

@@ -30,7 +30,7 @@ from dbaide.desktop.dialogs.file_dialogs import get_open_file_names
 from dbaide.desktop.dialogs.message_dialog import warn as dialog_warn
 from dbaide.desktop.theme import Theme, app_style
 from dbaide.desktop.window_chrome import ChromeDialog
-from dbaide.ingest import SUPPORTED_EXTS, ImportSpec
+from dbaide.ingest import SUPPORTED_EXTS, ImportSpec, is_valid_collection_name
 from dbaide.i18n import t as _pt
 
 
@@ -150,6 +150,9 @@ class NewCollectionDialog(ChromeDialog):
         name = self._name.text().strip()
         if not name:
             dialog_warn(self, _pt("excel.new_title"), _pt("settings.err.conn_name"))
+            return
+        if not is_valid_collection_name(name):
+            dialog_warn(self, _pt("excel.new_title"), _pt("excel.err.bad_name"))
             return
         if name.lower() in self._existing:
             dialog_warn(self, _pt("excel.new_title"), _pt("excel.err.name_taken", name=name))

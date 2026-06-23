@@ -850,6 +850,10 @@ _STRINGS: dict[str, dict[str, str]] = {
         "zh": "“{file}”是最后一个工作簿，移除它将删除整个连接。是否继续？",
     },
     "excel.err.name_taken": {"en": "A connection named “{name}” already exists.", "zh": "已存在名为“{name}”的连接。"},
+    "excel.err.bad_name": {
+        "en": "The name can’t contain “/” or “\\”.",
+        "zh": "名称不能包含“/”或“\\”。",
+    },
     "excel.err.import_failed": {"en": "Import failed: {error}", "zh": "导入失败：{error}"},
     "toast.excel_created": {
         "en": "Imported {tables} table(s) into “{name}”",

@@ -227,6 +227,83 @@ def test_collection_overwrite_add_replaces_same_name(tmp_path):
         con.close()
 
 
+def test_csv_preserves_newlines_inside_quoted_fields(tmp_path):
+    csv = tmp_path / "notes.csv"
+    csv.write_text('id,note\n1,"line a\nline b"\n2,plain\n', encoding="utf-8")
+    res = import_workbooks([csv], dest_dir=tmp_path / "imports")
+    sheet = res.manifest.workbooks[0].sheets[0]
+    con = sqlite3.connect(res.db_path)
+    try:
+        rows = con.execute(f"SELECT id, note FROM {_q(sheet.table)} ORDER BY id").fetchall()
+    finally:
+        con.close()
+    assert rows == [(1, "line a\nline b"), (2, "plain")]   # embedded newline kept, not corrupted
+
+
+def test_oversized_integers_kept_as_exact_text(tmp_path):
+    csv = tmp_path / "ids.csv"
+    csv.write_text("acct\n99999999999999999999\n12345678901234567890\n", encoding="utf-8")
+    res = import_workbooks([csv], dest_dir=tmp_path / "imports")   # must not raise OverflowError
+    sheet = res.manifest.workbooks[0].sheets[0]
+    assert sheet.columns[0].type == "TEXT"
+    con = sqlite3.connect(res.db_path)
+    try:
+        vals = [r[0] for r in con.execute(f"SELECT acct FROM {_q(sheet.table)}")]
+    finally:
+        con.close()
+    assert vals == ["99999999999999999999", "12345678901234567890"]   # exact, not lossy REAL
+
+
+def test_invalid_collection_name_rejected():
+    from dbaide.ingest import is_valid_collection_name
+
+    assert is_valid_collection_name("sales")
+    assert is_valid_collection_name("销售 2024")
+    assert not is_valid_collection_name("")
+    assert not is_valid_collection_name("   ")
+    assert not is_valid_collection_name("../evil")
+    assert not is_valid_collection_name("a/b")
+    assert not is_valid_collection_name("a\\b")
+    assert not is_valid_collection_name("..")
+
+
+def test_overwrite_add_is_atomic_on_failure(tmp_path, monkeypatch):
+    """A failed multi-file overwrite-add must leave the collection exactly as it was — the
+    existing table keeps its rows and no partial new table appears (regression: sqlite3
+    auto-commits DDL, so a plain close-without-commit left the old table dropped)."""
+    import dbaide.ingest.importer as imp
+    from dbaide.ingest import ExcelCollection, ImportSpec
+
+    v1 = tmp_path / "v1.csv"; v1.write_text("amt\n1\n2\n3\n", encoding="utf-8")
+    v2 = tmp_path / "v2.csv"; v2.write_text("amt\n10\n", encoding="utf-8")
+    good = tmp_path / "good.csv"; good.write_text("k\n9\n", encoding="utf-8")
+    col = ExcelCollection(tmp_path / "imports" / "c")
+    col.add([ImportSpec(v1, name="x")])
+
+    orig = imp._write_table
+    calls = {"n": 0}
+
+    def boom(*a, **k):
+        calls["n"] += 1
+        if calls["n"] >= 2:
+            raise RuntimeError("simulated mid-batch failure")
+        return orig(*a, **k)
+
+    monkeypatch.setattr(imp, "_write_table", boom)
+    with pytest.raises(RuntimeError):
+        col.add([ImportSpec(v2, name="x"), ImportSpec(good, name="good")], overwrite=True)
+    monkeypatch.undo()
+
+    assert [(w.name, w.sheets[0].row_count) for w in col.workbooks()] == [("x", 3)]
+    con = sqlite3.connect(col.db_path)
+    try:
+        tables = {r[0] for r in con.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+        assert tables == {"x"}                                            # no partial "good"
+        assert con.execute("SELECT count(*) FROM x").fetchone()[0] == 3   # old rows intact
+    finally:
+        con.close()
+
+
 def test_collection_for_connection_detects_imports(tmp_path):
     from dbaide.ingest import ExcelCollection, collection_dir, collection_for_connection
 

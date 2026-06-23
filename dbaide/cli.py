@@ -934,7 +934,12 @@ def dispatch_import(args: argparse.Namespace, cfg: ConfigManager) -> int:
 
 
 def dispatch_ingest(args: argparse.Namespace, cfg: ConfigManager) -> int:
-    from dbaide.ingest import SUPPORTED_EXTS, collection_dir, import_workbooks
+    from dbaide.ingest import (
+        SUPPORTED_EXTS,
+        collection_dir,
+        import_workbooks,
+        is_valid_collection_name,
+    )
 
     paths = [Path(f) for f in args.files]
     for p in paths:
@@ -949,6 +954,9 @@ def dispatch_ingest(args: argparse.Namespace, cfg: ConfigManager) -> int:
     name = (args.conn or paths[0].stem).strip()
     if not name:
         print("could not derive a connection name; pass --conn", file=sys.stderr)
+        return 1
+    if not is_valid_collection_name(name):
+        print(f"invalid connection name {name!r}: cannot contain '/' or '\\'", file=sys.stderr)
         return 1
     if name in cfg.connections() and not args.replace:
         print(f"connection {name!r} already exists; use --replace to overwrite", file=sys.stderr)

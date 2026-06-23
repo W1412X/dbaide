@@ -76,6 +76,13 @@ class ExcelCollection:
         return rename_workbook(self.dir, workbook_id, new_name)
 
 
+def is_valid_collection_name(name: str) -> bool:
+    """A collection name is used as a single directory segment under ``imports/``, so it must
+    not be empty, a dot-segment, or contain a path separator (which would escape the root)."""
+    name = (name or "").strip()
+    return bool(name) and name not in (".", "..") and "/" not in name and "\\" not in name
+
+
 def imports_root(config_dir: Path | str) -> Path:
     return Path(config_dir) / IMPORTS_DIRNAME
 

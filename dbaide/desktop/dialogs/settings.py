@@ -1251,6 +1251,9 @@ class SettingsDialog(ChromeDialog):
     def _reload_connection_list(self) -> None:
         self._fill_list(self.conn_list, self._connections, self._default_connection, self._selected_conn)
         if not self._connections:
+            # No selection callback fires for an empty list, so reset the right pane
+            # ourselves — otherwise a just-deleted Excel collection's panel lingers.
+            self._show_conn_form()
             self.conn_form.clear()
             self._set_connection_new_mode(False)
 
