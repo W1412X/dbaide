@@ -20,7 +20,7 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 
-from dbaide.desktop.components.base import compact_button, ghost_action_button
+from dbaide.desktop.components.base import ElidingLabel, compact_button, ghost_action_button
 from dbaide.desktop.components.inputs import (
     STANDARD_FIELD_HEIGHT,
     configure_compact_field,
@@ -49,7 +49,7 @@ class _StagedRow(QFrame):
         self.name_edit.setPlaceholderText(_pt("excel.table_name_ph"))
         configure_compact_field(self.name_edit, height=STANDARD_FIELD_HEIGHT)
         self.name_edit.setMaximumWidth(180)
-        source = QLabel(path.name)
+        source = ElidingLabel(path.name)
         source.setStyleSheet(f"color:{Theme.MUTED}; font-size:11px; background:transparent; border:none;")
         source.setToolTip(str(path))
         lay.addWidget(self.name_edit)

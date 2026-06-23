@@ -31,7 +31,12 @@ from dbaide.app_info import (
     app_version,
     project_links,
 )
-from dbaide.desktop.components.base import button_icon_color, compact_button, ghost_action_button
+from dbaide.desktop.components.base import (
+    ElidingLabel,
+    button_icon_color,
+    compact_button,
+    ghost_action_button,
+)
 from dbaide.desktop.components.icon_button import IconToolButton
 from dbaide.desktop.components.icons import more_icon, svg_icon
 from dbaide.desktop.components.inputs import (
@@ -172,7 +177,7 @@ class _WorkbookPanel(QWidget):
         outer = QVBoxLayout(self)
         outer.setContentsMargins(0, 0, 0, 0)
         outer.setSpacing(10)
-        self._title = QLabel("")
+        self._title = ElidingLabel("")
         self._title.setStyleSheet(f"color:{Theme.TEXT}; font-size:14px; font-weight:600;")
         self._hint = QLabel(_pt("excel.collection_hint"))
         self._hint.setWordWrap(True)
@@ -229,14 +234,13 @@ class _WorkbookPanel(QWidget):
         lay.setSpacing(8)
         text_col = QVBoxLayout()
         text_col.setSpacing(2)
-        name = QLabel(wb.name)            # logical name = the table the user renamed / queries
+        name = ElidingLabel(wb.name)      # logical name = the table the user renamed / queries
         name.setStyleSheet(
             f"color:{Theme.TEXT}; font-size:13px; font-weight:500; background:transparent; border:none;"
         )
         counts = _pt("excel.sheet_rows", sheets=sheet_count, rows=f"{row_count:,}")
-        meta = QLabel(f"{wb.source_filename} · {counts}")
+        meta = ElidingLabel(f"{wb.source_filename} · {counts}")
         meta.setStyleSheet(f"color:{Theme.MUTED}; font-size:11px; background:transparent; border:none;")
-        meta.setToolTip(wb.source_filename)
         text_col.addWidget(name)
         text_col.addWidget(meta)
         lay.addLayout(text_col, 1)

@@ -201,6 +201,22 @@ def test_excel_collection_panel_toggles_and_manages_workbooks(qapp, tmp_path, mo
     dialog.deleteLater()
 
 
+def test_eliding_label_truncates_but_keeps_full_text(qapp):
+    from dbaide.desktop.components.base import ElidingLabel
+
+    full = "a_very_long_workbook_name_that_will_not_fit_in_a_narrow_row"
+    lbl = ElidingLabel(full)
+    lbl.setFixedWidth(60)
+    lbl.show()
+    qapp.processEvents()
+    assert lbl.fullText() == full
+    assert lbl.toolTip() == full          # full text discoverable on hover
+    assert lbl.text() != full             # what's painted is shortened
+    assert "…" in lbl.text()
+    lbl.close()
+    lbl.deleteLater()
+
+
 def test_new_collection_dialog_validates_and_returns_specs(qapp, tmp_path, monkeypatch):
     import dbaide.desktop.dialogs.excel_collection as mod
 

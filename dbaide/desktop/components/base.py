@@ -1,12 +1,42 @@
 from __future__ import annotations
 
 from PyQt6.QtCore import QSize, Qt
-from PyQt6.QtGui import QIcon
+from PyQt6.QtGui import QFontMetrics, QIcon
 from PyQt6.QtWidgets import QFrame, QLabel, QPushButton, QSizePolicy
 
 
 from dbaide.desktop.theme import Theme
 from dbaide.desktop.components.icons import svg_icon, svg_pixmap
+
+
+class ElidingLabel(QLabel):
+    """A single-line label that truncates with an ellipsis to fit its allotted width
+    instead of forcing its parent layout wider (which would push siblings off-screen).
+    The full text is always available as the tooltip."""
+
+    def __init__(self, text: str = "", parent=None, *, mode: Qt.TextElideMode = Qt.TextElideMode.ElideRight) -> None:
+        super().__init__(parent)
+        self._full = ""
+        self._mode = mode
+        # Ignore the natural text width so the layout never grows to fit it.
+        self.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
+        self.setText(text)
+
+    def setText(self, text: str) -> None:  # noqa: N802
+        self._full = str(text or "")
+        self.setToolTip(self._full)
+        self._apply()
+
+    def fullText(self) -> str:  # noqa: N802
+        return self._full
+
+    def _apply(self) -> None:
+        elided = QFontMetrics(self.font()).elidedText(self._full, self._mode, max(16, self.width()))
+        super().setText(elided)
+
+    def resizeEvent(self, event) -> None:  # noqa: N802
+        super().resizeEvent(event)
+        self._apply()
 
 
 def button_icon_color(*, primary: bool = False, danger: bool = False, muted: bool = False) -> str:
