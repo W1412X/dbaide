@@ -27,6 +27,14 @@ All notable changes to DBAide are documented here. The format is loosely based o
   (fast, no LLM) so the schema tree stays current. A collection is an ordinary read-only
   `sqlite` connection under the hood, so the assistant, charts and read-only safety all work
   unchanged.
+- **Smarter sheet reading + header picker** — the importer now finds the real table inside a
+  sheet instead of assuming row 1: it skips title/metadata/blank preamble rows by detecting
+  where the column types stabilize, and fills vertically-merged grouping columns downward
+  (so `GROUP BY` works) while leaving genuinely-missing cells null. When auto-detection is
+  off, the staging dialog's **Header…** button opens a grid preview where you click the
+  header row — rows below are matched automatically. The chosen shape (header row, data
+  range, filled columns) is recorded in the manifest. Plain files (header on row 1) are
+  unchanged.
 
 ## [0.9.3] — 2026-06-22
 

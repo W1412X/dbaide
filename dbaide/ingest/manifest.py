@@ -32,6 +32,8 @@ class SheetInfo:
     header_row: int      # 0-based index of the row used as the header
     row_count: int
     columns: list[ColumnInfo] = field(default_factory=list)
+    data_bbox: list[int] = field(default_factory=list)        # [r0,c0,r1,c1] of the located table
+    filled_columns: list[int] = field(default_factory=list)   # cols filled from vertical merges
 
 
 @dataclass
@@ -63,6 +65,8 @@ class ImportManifest:
                     display_name=str(s.get("display_name") or s.get("sheet_name") or ""),
                     header_row=int(s.get("header_row") or 0),
                     row_count=int(s.get("row_count") or 0),
+                    data_bbox=[int(x) for x in (s.get("data_bbox") or [])],
+                    filled_columns=[int(x) for x in (s.get("filled_columns") or [])],
                     columns=[
                         ColumnInfo(
                             name=str(c.get("name") or ""),

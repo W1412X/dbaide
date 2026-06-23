@@ -217,6 +217,37 @@ def test_eliding_label_truncates_but_keeps_full_text(qapp):
     lbl.deleteLater()
 
 
+def test_header_preview_auto_detects_then_accepts_manual(qapp, tmp_path):
+    from dbaide.desktop.dialogs.header_preview import HeaderPreviewDialog
+
+    f = tmp_path / "sales.csv"
+    f.write_text("title\n\nmeta,note\norder,city,amt\n1,BJ,10\n2,SH,20\n", encoding="utf-8")
+    d = HeaderPreviewDialog(None, f)
+    assert d.result_value() == {"sales": 3}     # preamble skipped automatically
+    d._on_cell(0, 0)                             # user clicks row 0
+    assert d.result_value() == {"sales": 0}
+    d.deleteLater()
+
+
+def test_staged_row_header_choice_flows_into_spec(qapp, tmp_path):
+    from dbaide.desktop.dialogs.excel_collection import NewCollectionDialog, _StagedRow
+
+    f = tmp_path / "a.csv"
+    f.write_text("h\n1\n", encoding="utf-8")
+    d = NewCollectionDialog(None, set())
+    d._name.setText("c")
+    row = _StagedRow(f, d._remove_row)
+    d._rows.append(row)
+    d._rows_layout.insertWidget(d._rows_layout.count() - 1, row)
+    d._empty.setVisible(False)
+    row.header_rows = {"a": 2}                    # as if chosen via the picker
+
+    name, specs = d.result_value()
+    assert name == "c"
+    assert specs[0].header_rows == {"a": 2}
+    d.deleteLater()
+
+
 def test_new_collection_dialog_validates_and_returns_specs(qapp, tmp_path, monkeypatch):
     import dbaide.desktop.dialogs.excel_collection as mod
 

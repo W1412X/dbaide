@@ -267,6 +267,87 @@ def test_invalid_collection_name_rejected():
     assert not is_valid_collection_name("..")
 
 
+def test_skips_preamble_and_finds_real_header(tmp_path):
+    csv = tmp_path / "sales.csv"
+    csv.write_text(
+        "2024年Q4销售汇总\n\n数据来源:ERP,更新:2024-12-31\n"
+        "订单号,城市,销售额,数量\n1001,北京,1200.5,3\n1002,上海,880,5\n",
+        encoding="utf-8",
+    )
+    res = import_workbooks([csv], dest_dir=tmp_path / "imports")
+    sheet = res.manifest.workbooks[0].sheets[0]
+    assert sheet.header_row == 3                       # title + blank + meta skipped
+    assert [c.name for c in sheet.columns] == ["订单号", "城市", "销售额", "数量"]
+    assert sheet.row_count == 2
+
+
+def test_plain_header_row_zero_no_regression(tmp_path):
+    csv = tmp_path / "plain.csv"
+    csv.write_text("a,b\n1,2\n3,4\n", encoding="utf-8")
+    res = import_workbooks([csv], dest_dir=tmp_path / "imports")
+    assert res.manifest.workbooks[0].sheets[0].header_row == 0
+
+
+def test_all_text_table_falls_back_to_first_row(tmp_path):
+    csv = tmp_path / "names.csv"
+    csv.write_text("name,city\nAda,BJ\nBob,SH\n", encoding="utf-8")
+    res = import_workbooks([csv], dest_dir=tmp_path / "imports")
+    sheet = res.manifest.workbooks[0].sheets[0]
+    assert sheet.header_row == 0
+    assert [c.name for c in sheet.columns] == ["name", "city"]
+
+
+def test_user_selected_header_row_matches_columns_below(tmp_path):
+    from dbaide.ingest import ImportSpec
+
+    csv = tmp_path / "report.csv"
+    # auto-detect would pick row 1; force the user's choice of row 0 instead.
+    csv.write_text("region,q1,q2\ncode,jan,feb\nN,10,20\nS,30,40\n", encoding="utf-8")
+    res = import_workbooks(
+        [ImportSpec(csv, name="report", header_rows={"report": 0})], dest_dir=tmp_path / "imports"
+    )
+    sheet = res.manifest.workbooks[0].sheets[0]
+    assert sheet.header_row == 0
+    assert [c.name for c in sheet.columns] == ["region", "q1", "q2"]
+    assert sheet.row_count == 3                         # the row the auto-detector saw as header is now data
+
+
+def test_vertical_merges_fill_groups_but_keep_real_blanks(tmp_path):
+    pytest.importorskip("openpyxl")
+    from openpyxl import Workbook
+
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "区域"
+    ws.append(["大区", "省", "城市", "销售额", "备注"])
+    ws.append(["华北", "河北", "石家庄", 400, None])
+    ws.append([None, None, "唐山", 300, None])
+    ws.append([None, "河南", "郑州", 500, None])
+    ws.append([None, None, "洛阳", 200, "重点"])
+    ws.append(["华南", "广东", "广州", 900, None])
+    ws.merge_cells("A2:A5")
+    ws.merge_cells("B2:B3")
+    ws.merge_cells("B4:B5")
+    path = tmp_path / "region.xlsx"
+    wb.save(path)
+
+    res = import_workbooks([path], dest_dir=tmp_path / "imports")
+    sheet = res.manifest.workbooks[0].sheets[0]
+    assert sheet.filled_columns == [0, 1]              # 大区 / 省 filled; 备注 (no merge) not
+    con = sqlite3.connect(res.db_path)
+    try:
+        rows = con.execute(f'SELECT 大区, 省, 城市, 备注 FROM {_q(sheet.table)}').fetchall()
+    finally:
+        con.close()
+    assert rows == [
+        ("华北", "河北", "石家庄", None),
+        ("华北", "河北", "唐山", None),
+        ("华北", "河南", "郑州", None),
+        ("华北", "河南", "洛阳", "重点"),               # the one genuine value, not forward-filled
+        ("华南", "广东", "广州", None),
+    ]
+
+
 def test_overwrite_add_is_atomic_on_failure(tmp_path, monkeypatch):
     """A failed multi-file overwrite-add must leave the collection exactly as it was — the
     existing table keeps its rows and no partial new table appears (regression: sqlite3

@@ -23,7 +23,14 @@ from dbaide.ingest.importer import (
     rename_workbook,
 )
 from dbaide.ingest.manifest import ColumnInfo, ImportManifest, SheetInfo, WorkbookInfo
-from dbaide.ingest.readers import SUPPORTED_EXTS, RawSheet, RawWorkbook, read_workbook
+from dbaide.ingest.readers import (
+    SUPPORTED_EXTS,
+    RawSheet,
+    RawWorkbook,
+    SheetGrid,
+    read_sheet_grids,
+    read_workbook,
+)
 
 __all__ = [
     "import_workbooks",
@@ -37,8 +44,10 @@ __all__ = [
     "imports_root",
     "is_valid_collection_name",
     "read_workbook",
+    "read_sheet_grids",
     "RawWorkbook",
     "RawSheet",
+    "SheetGrid",
     "SUPPORTED_EXTS",
     "ImportManifest",
     "WorkbookInfo",

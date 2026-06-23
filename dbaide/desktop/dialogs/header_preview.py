@@ -1,0 +1,161 @@
+"""Header-row picker: shows a sheet's grid and lets the user click the header row.
+
+Used from the Excel-collection staging dialog. The chosen header rows (per sheet) flow into
+ImportSpec.header_rows; rows below the chosen header are matched automatically by the reader.
+"""
+
+from __future__ import annotations
+
+from pathlib import Path
+
+from PyQt6.QtCore import Qt
+from PyQt6.QtGui import QBrush, QColor
+from PyQt6.QtWidgets import (
+    QDialog,
+    QHBoxLayout,
+    QLabel,
+    QTableWidget,
+    QTableWidgetItem,
+    QVBoxLayout,
+)
+
+from dbaide.desktop.components.base import compact_button
+from dbaide.desktop.components.inputs import Combo, dialog_action_row
+from dbaide.desktop.theme import Theme, app_style
+from dbaide.desktop.window_chrome import ChromeDialog
+from dbaide.i18n import t as _pt
+
+_MAX_ROWS = 40
+_MAX_COLS = 26
+
+
+class HeaderPreviewDialog(ChromeDialog):
+    def __init__(self, parent, path: Path, current: dict[str, int] | None = None) -> None:
+        super().__init__(parent)
+        from dbaide.ingest import read_sheet_grids
+
+        self._grids = read_sheet_grids(path)
+        self._choice: dict[str, int] = {}
+        for g in self._grids:
+            self._choice[g.name] = (current or {}).get(g.name, g.auto_header_row)
+
+        self.setWindowTitle(_pt("excel.header_title"))
+        self.setModal(True)
+        self.setMinimumSize(620, 460)
+        self.setStyleSheet(app_style())
+
+        root = QVBoxLayout(self)
+        root.setContentsMargins(18, 18, 18, 16)
+        root.setSpacing(10)
+        heading = QLabel(f"{_pt('excel.header_title')} · {path.name}")
+        heading.setStyleSheet(f"color:{Theme.TEXT}; font-size:15px; font-weight:700; background:transparent;")
+        root.addWidget(heading)
+        hint = QLabel(_pt("excel.header_hint"))
+        hint.setWordWrap(True)
+        hint.setStyleSheet(f"color:{Theme.MUTED}; font-size:12px; background:transparent;")
+        root.addWidget(hint)
+
+        top = QHBoxLayout()
+        top.setSpacing(8)
+        self._sheet_combo = Combo()
+        self._sheet_combo.addItems([g.name for g in self._grids])
+        self._sheet_combo.currentIndexChanged.connect(self._on_sheet)
+        self._sheet_combo.setVisible(len(self._grids) > 1)
+        sheet_label = QLabel(_pt("excel.header_sheet"))
+        sheet_label.setStyleSheet(f"color:{Theme.TEXT_2}; font-size:12px; background:transparent;")
+        sheet_label.setVisible(len(self._grids) > 1)
+        self._status = QLabel("")
+        self._status.setStyleSheet(f"color:{Theme.MUTED}; font-size:12px; background:transparent;")
+        top.addWidget(sheet_label)
+        top.addWidget(self._sheet_combo)
+        top.addStretch(1)
+        top.addWidget(self._status)
+        root.addLayout(top)
+
+        self._table = QTableWidget()
+        self._table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
+        self._table.setSelectionMode(QTableWidget.SelectionMode.NoSelection)
+        self._table.cellClicked.connect(self._on_cell)
+        self._table.setStyleSheet("QTableWidget { background: transparent; }")
+        root.addWidget(self._table, 1)
+
+        actions_host, actions = dialog_action_row(top_margin=2)
+        actions.addStretch(1)
+        cancel = compact_button(_pt("dialog.cancel"), width=88)
+        cancel.clicked.connect(self.reject)
+        ok = compact_button(_pt("dialog.ok"), primary=True, width=88)
+        ok.clicked.connect(self.accept)
+        actions.addWidget(cancel)
+        actions.addWidget(ok)
+        root.addWidget(actions_host)
+
+        if self._grids:
+            self._render(0)
+
+    # ── rendering ─────────────────────────────────────────────────────────────
+
+    def _current(self):
+        return self._grids[self._sheet_combo.currentIndex()] if self._grids else None
+
+    def _on_sheet(self, index: int) -> None:
+        if 0 <= index < len(self._grids):
+            self._render(index)
+
+    def _render(self, index: int) -> None:
+        grid = self._grids[index]
+        rows = min(len(grid.cells), _MAX_ROWS)
+        cols = min((max((len(r) for r in grid.cells), default=0)), _MAX_COLS)
+        self._table.clear()
+        self._table.setRowCount(rows)
+        self._table.setColumnCount(cols)
+        self._table.setHorizontalHeaderLabels([str(c + 1) for c in range(cols)])
+        for r in range(rows):
+            for c in range(cols):
+                row = grid.cells[r]
+                val = row[c] if c < len(row) else None
+                text = "" if val is None else str(val)
+                if len(text) > 40:
+                    text = text[:39] + "…"
+                self._table.setItem(r, c, QTableWidgetItem(text))
+        self._table.resizeColumnsToContents()
+        self._restyle()
+
+    def _restyle(self) -> None:
+        grid = self._current()
+        if grid is None:
+            return
+        chosen = self._choice.get(grid.name, grid.auto_header_row)
+        header_bg = QBrush(QColor(Theme.ACCENT))
+        header_fg = QBrush(QColor(Theme.ACCENT_TEXT))
+        skipped_fg = QBrush(QColor(Theme.MUTED))
+        normal_fg = QBrush(QColor(Theme.TEXT))
+        clear_bg = QBrush(Qt.GlobalColor.transparent)
+        for r in range(self._table.rowCount()):
+            for c in range(self._table.columnCount()):
+                item = self._table.item(r, c)
+                if item is None:
+                    continue
+                if r == chosen:
+                    item.setBackground(header_bg)
+                    item.setForeground(header_fg)
+                else:
+                    item.setBackground(clear_bg)
+                    item.setForeground(skipped_fg if r < chosen else normal_fg)
+        auto = " · " + _pt("excel.header_auto") if chosen == grid.auto_header_row else ""
+        self._status.setText(_pt("excel.header_current", n=chosen + 1) + auto)
+
+    def _on_cell(self, row: int, _col: int) -> None:
+        grid = self._current()
+        if grid is not None:
+            self._choice[grid.name] = row
+            self._restyle()
+
+    def result_value(self) -> dict[str, int]:
+        return dict(self._choice)
+
+
+def pick_header_rows(parent, path: Path, current: dict[str, int] | None = None) -> dict[str, int] | None:
+    dialog = HeaderPreviewDialog(parent, path, current)
+    if dialog.exec() != QDialog.DialogCode.Accepted:
+        return None
+    return dialog.result_value()

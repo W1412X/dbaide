@@ -38,6 +38,7 @@ class _StagedRow(QFrame):
     def __init__(self, path: Path, on_remove) -> None:
         super().__init__()
         self.path = path
+        self.header_rows: dict[str, int] = {}     # sheet name → chosen 0-based header row
         self.setStyleSheet(
             f"QFrame {{ background:{Theme.PANEL_2}; border:1px solid {Theme.BORDER_SOFT};"
             f" border-radius:8px; }}"
@@ -54,10 +55,24 @@ class _StagedRow(QFrame):
         source.setToolTip(str(path))
         lay.addWidget(self.name_edit)
         lay.addWidget(source, 1)
+        self._header_btn = ghost_action_button(_pt("excel.header_btn"))
+        self._header_btn.clicked.connect(self._pick_header)
+        lay.addWidget(self._header_btn)
         remove = ghost_action_button("✕")
         remove.setToolTip(_pt("excel.remove_workbook"))
         remove.clicked.connect(lambda: on_remove(self))
         lay.addWidget(remove)
+
+    def _pick_header(self) -> None:
+        from dbaide.desktop.dialogs.header_preview import pick_header_rows
+        try:
+            chosen = pick_header_rows(self.window(), self.path, self.header_rows or None)
+        except Exception as exc:  # noqa: BLE001
+            dialog_warn(self.window(), _pt("excel.header_title"),
+                        _pt("excel.err.import_failed", error=str(exc)))
+            return
+        if chosen is not None:
+            self.header_rows = chosen
 
     def name(self) -> str:
         return self.name_edit.text().strip()
@@ -175,7 +190,8 @@ class NewCollectionDialog(ChromeDialog):
     def result_value(self) -> tuple[str, list[ImportSpec]]:
         return (
             self._name.text().strip(),
-            [ImportSpec(row.path, name=row.name()) for row in self._rows],
+            [ImportSpec(row.path, name=row.name(), header_rows=(row.header_rows or None))
+             for row in self._rows],
         )
 
 

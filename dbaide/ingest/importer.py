@@ -29,6 +29,7 @@ class ImportSpec:
     file stem) is the editable identity of the workbook and drives its table name(s)."""
     path: Path
     name: str = ""
+    header_rows: dict[str, int] | None = None   # sheet name → user-chosen 0-based header row
 
     @property
     def logical_name(self) -> str:
@@ -118,7 +119,7 @@ def import_workbooks(
             used_tables = {s.table for w in manifest.workbooks for s in w.sheets}
             for index, spec in enumerate(specs):
                 path = Path(spec.path)
-                workbook = read_workbook(path)
+                workbook = read_workbook(path, header_overrides=spec.header_rows)
                 logical = spec.logical_name
                 file_hash = _file_hash(path)
                 single = len(workbook.sheets) == 1
@@ -140,6 +141,8 @@ def import_workbooks(
                         header_row=sheet.header_row,
                         row_count=len(sheet.rows),
                         columns=columns,
+                        data_bbox=list(sheet.data_bbox),
+                        filled_columns=list(sheet.filled_columns),
                     ))
                     if on_progress:
                         on_progress(f"{path.name} · {sheet.name} → {table} ({len(sheet.rows)} rows)")
