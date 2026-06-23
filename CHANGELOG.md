@@ -6,6 +6,8 @@ All notable changes to DBAide are documented here. The format is loosely based o
 
 ## [Unreleased]
 
+## [0.9.4] — 2026-06-23
+
 ### Added
 
 - **Two more model API protocols** — besides OpenAI-compatible, you can now pick `anthropic`
