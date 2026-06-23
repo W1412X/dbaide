@@ -31,6 +31,7 @@ class ImportSpec:
     name: str = ""
     # sheet name → user-chosen (header_row, start_col) anchor, 0-based
     header_anchors: dict[str, tuple[int, int]] | None = None
+    sheets: list[str] | None = None             # restrict import to these sheets (None = all)
 
     @property
     def logical_name(self) -> str:
@@ -121,7 +122,7 @@ def import_workbooks(
             used_tables = {s.table for w in manifest.workbooks for s in w.sheets}
             for index, spec in enumerate(specs):
                 path = Path(spec.path)
-                workbook = read_workbook(path, header_overrides=spec.header_anchors)
+                workbook = read_workbook(path, header_overrides=spec.header_anchors, sheets=spec.sheets)
                 warnings.extend(f"{path.name} · {w}" for w in workbook.warnings)
                 logical = spec.logical_name
                 file_hash = _file_hash(path)

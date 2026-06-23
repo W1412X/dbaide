@@ -12,6 +12,7 @@ from pathlib import Path
 from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QBrush, QColor
 from PyQt6.QtWidgets import (
+    QCheckBox,
     QDialog,
     QHBoxLayout,
     QLabel,
@@ -37,8 +38,11 @@ class HeaderPreviewDialog(ChromeDialog):
 
         self._grids = read_sheet_grids(path)
         self._choice: dict[str, tuple[int, int]] = {}
+        self._included: dict[str, bool] = {}
         for g in self._grids:
             self._choice[g.name] = (current or {}).get(g.name, (g.auto_header_row, g.auto_header_col))
+            self._included[g.name] = True
+        self._multi = len(self._grids) > 1
 
         self.setWindowTitle(_pt("excel.header_title"))
         self.setModal(True)
@@ -67,11 +71,15 @@ class HeaderPreviewDialog(ChromeDialog):
         sheet_label.setVisible(len(self._grids) > 1)
         self._status = QLabel("")
         self._status.setStyleSheet(f"color:{Theme.MUTED}; font-size:12px; background:transparent;")
+        self._include = QCheckBox(_pt("excel.header_include"))
+        self._include.setVisible(self._multi)       # single-sheet files always import their one sheet
+        self._include.toggled.connect(self._on_include_toggled)
         self._apply_all = compact_button(_pt("excel.header_apply_all"), width=132)
         self._apply_all.clicked.connect(self._apply_to_all_sheets)
-        self._apply_all.setVisible(len(self._grids) > 1)
+        self._apply_all.setVisible(self._multi)
         top.addWidget(sheet_label)
         top.addWidget(self._sheet_combo)
+        top.addWidget(self._include)
         top.addWidget(self._apply_all)
         top.addStretch(1)
         top.addWidget(self._status)
@@ -125,6 +133,9 @@ class HeaderPreviewDialog(ChromeDialog):
                     text = text[:39] + "…"
                 self._table.setItem(r, c, QTableWidgetItem(text))
         self._table.resizeColumnsToContents()
+        self._include.blockSignals(True)
+        self._include.setChecked(self._included.get(grid.name, True))
+        self._include.blockSignals(False)
         self._restyle()
         anchor = self._table.item(min(hr, rows - 1), min(hc, cols - 1)) if rows and cols else None
         if anchor is not None:
@@ -135,6 +146,7 @@ class HeaderPreviewDialog(ChromeDialog):
         if grid is None:
             return
         hr, hc = self._choice.get(grid.name, (grid.auto_header_row, grid.auto_header_col))
+        excluded = not self._included.get(grid.name, True)
         header_bg = QBrush(QColor(Theme.ACCENT))
         header_fg = QBrush(QColor(Theme.ACCENT_TEXT))
         skipped_fg = QBrush(QColor(Theme.MUTED))
@@ -145,7 +157,10 @@ class HeaderPreviewDialog(ChromeDialog):
                 item = self._table.item(r, c)
                 if item is None:
                     continue
-                if r == hr and c >= hc:                 # the header span
+                if excluded:                            # whole sheet skipped → all muted
+                    item.setBackground(clear_bg)
+                    item.setForeground(skipped_fg)
+                elif r == hr and c >= hc:               # the header span
                     item.setBackground(header_bg)
                     item.setForeground(header_fg)
                 elif r < hr or c < hc:                  # above the header, or left of the table
@@ -154,15 +169,40 @@ class HeaderPreviewDialog(ChromeDialog):
                 else:                                   # data
                     item.setBackground(clear_bg)
                     item.setForeground(normal_fg)
-        ok, warn = self._validate(grid, hr, hc)
-        self._ok.setEnabled(ok)
-        if not ok:
-            self._status.setStyleSheet(f"color:{Theme.RED}; font-size:12px; background:transparent;")
-            self._status.setText(warn)
-        else:
-            auto = " · " + _pt("excel.header_auto") if (hr, hc) == (grid.auto_header_row, grid.auto_header_col) else ""
-            self._status.setStyleSheet(f"color:{Theme.MUTED}; font-size:12px; background:transparent;")
-            self._status.setText(_pt("excel.header_current", r=hr + 1, c=hc + 1) + auto)
+        self._refresh_ok()
+
+    def _set_status(self, text: str, *, bad: bool) -> None:
+        color = Theme.RED if bad else Theme.MUTED
+        self._status.setStyleSheet(f"color:{color}; font-size:12px; background:transparent;")
+        self._status.setText(text)
+
+    def _refresh_ok(self) -> None:
+        included = [g for g in self._grids if self._included.get(g.name, True)]
+        if not included:
+            self._ok.setEnabled(False)
+            self._set_status(_pt("excel.no_sheets_warn"), bad=True)
+            return
+        for g in included:                              # every imported sheet must be valid
+            hr, hc = self._choice.get(g.name, (g.auto_header_row, g.auto_header_col))
+            ok, warn = self._validate(g, hr, hc)
+            if not ok:
+                self._ok.setEnabled(False)
+                self._set_status((f"{g.name}: {warn}" if self._multi else warn), bad=True)
+                return
+        self._ok.setEnabled(True)
+        cur = self._current()
+        if cur is not None and not self._included.get(cur.name, True):
+            self._set_status(_pt("excel.sheet_excluded"), bad=False)
+        elif cur is not None:
+            hr, hc = self._choice.get(cur.name, (cur.auto_header_row, cur.auto_header_col))
+            auto = " · " + _pt("excel.header_auto") if (hr, hc) == (cur.auto_header_row, cur.auto_header_col) else ""
+            self._set_status(_pt("excel.header_current", r=hr + 1, c=hc + 1) + auto, bad=False)
+
+    def _on_include_toggled(self, checked: bool) -> None:
+        grid = self._current()
+        if grid is not None:
+            self._included[grid.name] = bool(checked)
+            self._restyle()
 
     @staticmethod
     def _validate(grid, hr: int, hc: int) -> tuple[bool, str]:
@@ -198,13 +238,15 @@ class HeaderPreviewDialog(ChromeDialog):
             self._choice[g.name] = anchor
         self._restyle()
 
-    def result_value(self) -> dict[str, tuple[int, int]]:
-        return dict(self._choice)
+    def result_value(self) -> tuple[dict[str, tuple[int, int]], list[str]]:
+        included = [g.name for g in self._grids if self._included.get(g.name, True)]
+        return dict(self._choice), included
 
 
 def pick_header_rows(
     parent, path: Path, current: dict[str, tuple[int, int]] | None = None
-) -> dict[str, tuple[int, int]] | None:
+) -> tuple[dict[str, tuple[int, int]], list[str]] | None:
+    """Returns ((sheet → (header_row, start_col)), included_sheet_names) or None if cancelled."""
     dialog = HeaderPreviewDialog(parent, path, current)
     if dialog.exec() != QDialog.DialogCode.Accepted:
         return None

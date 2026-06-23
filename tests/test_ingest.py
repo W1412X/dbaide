@@ -368,6 +368,20 @@ def test_excluded_left_column_does_not_create_junk_rows(tmp_path):
         con.close()
 
 
+def test_import_only_selected_sheets(tmp_path):
+    pytest.importorskip("openpyxl")
+    from openpyxl import Workbook
+    from dbaide.ingest import ImportSpec
+
+    wb = Workbook()
+    a = wb.active; a.title = "keep"; a.append(["x"]); a.append([1])
+    b = wb.create_sheet("drop"); b.append(["y"]); b.append([2])
+    path = tmp_path / "two.xlsx"; wb.save(path)
+
+    res = import_workbooks([ImportSpec(path, name="t", sheets=["keep"])], dest_dir=tmp_path / "imports")
+    assert [s.sheet_name for w in res.manifest.workbooks for s in w.sheets] == ["keep"]
+
+
 def test_bad_sheet_skipped_others_imported(tmp_path):
     pytest.importorskip("openpyxl")
     from openpyxl import Workbook

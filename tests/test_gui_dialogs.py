@@ -226,9 +226,9 @@ def test_header_preview_auto_detects_then_accepts_manual(qapp, tmp_path):
     f = tmp_path / "sales.csv"
     f.write_text("title\n\nmeta,note\norder,city,amt\n1,BJ,10\n2,SH,20\n", encoding="utf-8")
     d = HeaderPreviewDialog(None, f)
-    assert d.result_value() == {"sales": (3, 0)}    # preamble skipped automatically (row 3, col 0)
-    d._on_cell(0, 1)                                # user clicks row 0, col 1
-    assert d.result_value() == {"sales": (0, 1)}
+    assert d.result_value() == ({"sales": (3, 0)}, ["sales"])   # auto header (row 3, col 0), all sheets
+    d._on_cell(0, 1)                                            # user clicks row 0, col 1
+    assert d.result_value() == ({"sales": (0, 1)}, ["sales"])
     d.deleteLater()
 
 
@@ -245,6 +245,29 @@ def test_header_preview_disables_ok_on_bad_anchor(qapp, tmp_path):
     assert not d._ok.isEnabled()
     d._on_cell(2, 0)                         # back to the real header
     assert d._ok.isEnabled()
+    d.deleteLater()
+
+
+def test_header_preview_sheet_selection(qapp, tmp_path):
+    pytest.importorskip("openpyxl")
+    from openpyxl import Workbook
+    from dbaide.desktop.dialogs.header_preview import HeaderPreviewDialog
+
+    wb = Workbook()
+    s1 = wb.active; s1.title = "keep"; s1.append(["a", "b"]); s1.append([1, 2])
+    s2 = wb.create_sheet("drop"); s2.append(["c"]); s2.append([3])
+    path = tmp_path / "two.xlsx"; wb.save(path)
+
+    d = HeaderPreviewDialog(None, path)
+    assert d.result_value()[1] == ["keep", "drop"]      # both included by default
+    d._included["drop"] = False                          # deselect a sheet
+    d._refresh_ok()
+    anchors, included = d.result_value()
+    assert included == ["keep"]
+    assert d._ok.isEnabled()                             # one sheet still selected
+    d._included["keep"] = False                          # none left
+    d._refresh_ok()
+    assert not d._ok.isEnabled()
     d.deleteLater()
 
 

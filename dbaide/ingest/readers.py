@@ -69,15 +69,20 @@ class SheetGrid:
     filled_columns: list[int]
 
 
-def read_workbook(path: Path, *, header_overrides: dict[str, Anchor] | None = None) -> RawWorkbook:
+def read_workbook(path: Path, *, header_overrides: dict[str, Anchor] | None = None,
+                  sheets: list[str] | None = None) -> RawWorkbook:
     """Read a file into shaped sheets, one sheet at a time. ``header_overrides`` maps a sheet
-    name to a user-chosen ``(header_row, start_col)`` anchor (else it's auto-detected). A sheet
-    that errors is skipped and noted in ``warnings``; raises only if no sheet is usable."""
+    name to a user-chosen ``(header_row, start_col)`` anchor (else it's auto-detected);
+    ``sheets``, if given, restricts the import to those sheet names. A sheet that errors is
+    skipped and noted in ``warnings``; raises only if no sheet is usable."""
     path = Path(path)
     overrides = header_overrides or {}
-    sheets: list[RawSheet] = []
+    selected = set(sheets) if sheets is not None else None
+    out_sheets: list[RawSheet] = []
     warnings: list[str] = []
     for name, grid, err in _build_grids(path):
+        if selected is not None and name not in selected:
+            continue                              # user deselected this sheet
         if grid is None:
             warnings.append(f"{name}: {err or 'unreadable'}")
             continue
@@ -87,13 +92,13 @@ def read_workbook(path: Path, *, header_overrides: dict[str, Anchor] | None = No
             if sheet is None:
                 warnings.append(f"{name}: empty / no table found")
             else:
-                sheets.append(sheet)
+                out_sheets.append(sheet)
         except Exception as exc:  # noqa: BLE001 - isolate one sheet's failure
             warnings.append(f"{name}: {exc}")
-    if not sheets:
+    if not out_sheets:
         detail = f" ({'; '.join(warnings)})" if warnings else ""
         raise ValueError(f"no usable sheet in {path.name}{detail}")
-    return RawWorkbook(filename=path.name, sheets=sheets, warnings=warnings)
+    return RawWorkbook(filename=path.name, sheets=out_sheets, warnings=warnings)
 
 
 def read_sheet_grids(path: Path) -> list[SheetGrid]:

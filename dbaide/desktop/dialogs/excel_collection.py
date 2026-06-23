@@ -39,6 +39,7 @@ class _StagedRow(QFrame):
         super().__init__()
         self.path = path
         self.header_anchors: dict[str, tuple[int, int]] = {}   # sheet → (header_row, start_col)
+        self.sheets: list[str] | None = None                   # selected sheets (None = all)
         self.setStyleSheet(
             f"QFrame {{ background:{Theme.PANEL_2}; border:1px solid {Theme.BORDER_SOFT};"
             f" border-radius:8px; }}"
@@ -72,7 +73,9 @@ class _StagedRow(QFrame):
                         _pt("excel.err.import_failed", error=str(exc)))
             return
         if chosen is not None:
-            self.header_anchors = chosen
+            anchors, included = chosen
+            self.header_anchors = anchors
+            self.sheets = included          # restrict import to the picked sheets
             self._header_btn.setText(_pt("excel.header_set"))   # mark the row as customised
 
     def name(self) -> str:
@@ -198,7 +201,8 @@ class NewCollectionDialog(ChromeDialog):
     def result_value(self) -> tuple[str, list[ImportSpec]]:
         return (
             self._name.text().strip(),
-            [ImportSpec(row.path, name=row.name(), header_anchors=(row.header_anchors or None))
+            [ImportSpec(row.path, name=row.name(), header_anchors=(row.header_anchors or None),
+                        sheets=row.sheets)
              for row in self._rows],
         )
 
