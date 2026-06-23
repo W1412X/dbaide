@@ -806,11 +806,16 @@ class _MarkdownBlock(QFrame):
         view = self._stream_view
         if view is None:
             return
+        if view.viewport().width() < 50:
+            # Not laid out yet — measuring now would wrap every word; resize/debounce re-fires.
+            return
         doc = view.document()
-        width = max(view.viewport().width(), self.width() - 32, 320)
-        doc.setTextWidth(width)
-        height = int(doc.size().height()) + 8
-        height = max(height, 24)
+        fm = view.fontMetrics()
+        # QPlainTextEdit's documentSize().height() is a wrapped-LINE COUNT, not pixels (and it
+        # ignores setTextWidth), so convert lines → pixels instead of treating it as a height.
+        lines = max(1.0, doc.documentLayout().documentSize().height())
+        height = int(round(lines * fm.lineSpacing() + 2 * doc.documentMargin())) + 4
+        height = max(height, fm.lineSpacing() + 8)
         if abs(height - self._last_stream_height) < 2:
             return
         self._last_stream_height = height

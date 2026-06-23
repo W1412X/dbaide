@@ -168,6 +168,15 @@ class MarkdownWebWidget(QFrame):
         super().resizeEvent(event)
         self._schedule_height_sync()
 
+    def showEvent(self, event) -> None:  # noqa: N802
+        super().showEvent(event)
+        # A deferred widget measures its height while hidden — often at the wrong width, so
+        # too tall. Re-measure now that it's visible at its real width; the delayed pass
+        # catches the async WebEngine reflow that the immediate measure would miss.
+        self._schedule_height_sync()
+        if not isinstance(self._view, QTextBrowser):
+            QTimer.singleShot(_HEIGHT_SETTLE_MS, self._sync_height)
+
     def _on_load_finished(self, _ok: bool = True) -> None:
         self._page_loaded = True
         self._schedule_height_sync()

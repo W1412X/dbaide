@@ -152,3 +152,29 @@ def test_no_streaming_when_disabled(tmp_path):
     resp = orch.run("how many paid orders", execute=True)
     assert chunks == []                     # non-stream path → no answer_chunk events
     assert ANSWER in resp.answer            # answer still correct
+
+
+def test_stream_view_height_tracks_wrapped_content():
+    """Regression: the streaming QPlainTextEdit height must reflect the wrapped pixel height,
+    not QPlainTextEdit.document().size().height() (which is a line COUNT) — otherwise the view
+    clips to ~one line during streaming."""
+    import os
+    os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+    from PyQt6.QtWidgets import QApplication
+    from dbaide.desktop.components.conversation import _MarkdownBlock
+
+    app = QApplication.instance() or QApplication([])
+    block = _MarkdownBlock("")
+    block.resize(420, 800)
+    block.show()
+    app.processEvents()
+    long = "This is a sentence that will wrap across multiple lines when shown in a narrow block. "
+    block.set_streaming_text((long * 3 + "\n") * 4)   # ~12+ wrapped lines
+    app.processEvents()
+    block._sync_stream_height()
+    view = block._stream_view
+    assert view is not None
+    line_spacing = view.fontMetrics().lineSpacing()
+    # Far more than one or two lines — the old line-count-as-pixels bug capped this near ~24px.
+    assert view.height() > 6 * line_spacing
+    block.deleteLater()
