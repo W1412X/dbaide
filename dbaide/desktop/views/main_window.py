@@ -1637,12 +1637,13 @@ class MainWindow(QMainWindow):
         shutil.rmtree(collection.dir, ignore_errors=True)
 
     def _settings_excel_changed(self, name: str) -> None:
-        """A workbook was added/removed: the collection's tables changed, so re-sync the
-        connection's schema and let open views refresh."""
+        """A workbook was added/removed/renamed: the collection's tables changed. Excel data
+        is tiny and local, so we just rebuild the base catalog projection (cheap, no LLM)
+        rather than a diff-based sync — fast and always correct."""
         def on_done(_result: object) -> None:
             self.bus.emit(CONNECTIONS_CHANGED, {"instance": name})
 
-        self._run_background("refresh_instance", {"name": name}, on_done, on_error=lambda _e: None)
+        self._run_background("project_instance", {"name": name}, on_done, on_error=lambda _e: None)
 
     def _settings_test_connection(self, dialog: SettingsDialog, payload: dict[str, Any]) -> None:
         self._ensure_ui_state().set_settings_busy(dialog, "test", True, target="connection")

@@ -36,7 +36,8 @@ class SheetInfo:
 
 @dataclass
 class WorkbookInfo:
-    id: str              # stable id within the collection (for add/remove targeting)
+    id: str              # stable id within the collection (for add/remove/rename targeting)
+    name: str            # logical name (drives table names); editable, defaults to file stem
     source_filename: str
     file_hash: str       # sha256 of the source file (change detection / re-import match)
     imported_at: str     # ISO-8601 UTC
@@ -74,9 +75,11 @@ class ImportManifest:
                 )
                 for s in (wb.get("sheets") or [])
             ]
+            source_filename = str(wb.get("source_filename") or "")
             workbooks.append(WorkbookInfo(
                 id=str(wb.get("id") or ""),
-                source_filename=str(wb.get("source_filename") or ""),
+                name=str(wb.get("name") or "") or Path(source_filename).stem,
+                source_filename=source_filename,
                 file_hash=str(wb.get("file_hash") or ""),
                 imported_at=str(wb.get("imported_at") or ""),
                 sheets=sheets,

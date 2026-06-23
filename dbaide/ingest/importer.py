@@ -23,6 +23,22 @@ from dbaide.ingest.readers import RawSheet, read_workbook
 
 
 @dataclass
+class ImportSpec:
+    """A file to import, with an optional logical name. The logical name (defaulting to the
+    file stem) is the editable identity of the workbook and drives its table name(s)."""
+    path: Path
+    name: str = ""
+
+    @property
+    def logical_name(self) -> str:
+        return (self.name or "").strip() or Path(self.path).stem
+
+
+def _as_spec(item: "Path | str | ImportSpec") -> ImportSpec:
+    return item if isinstance(item, ImportSpec) else ImportSpec(Path(item))
+
+
+@dataclass
 class ImportResult:
     db_path: Path
     manifest: ImportManifest
@@ -38,22 +54,24 @@ class ImportResult:
 
 
 def import_workbooks(
-    paths: list[Path | str],
+    items: "list[Path | str | ImportSpec]",
     *,
     dest_dir: Path | str,
     append: bool = False,
+    overwrite: bool = False,
     now: str | None = None,
     on_progress: Callable[[str], None] | None = None,
 ) -> ImportResult:
     """Import one or more files into ``dest_dir/data.db`` and write the manifest.
 
-    ``append=False`` (default) rebuilds the collection from scratch. ``append=True`` adds
-    the files to an existing collection, keeping table names unique against what's already
-    there. The new tables are written in a single transaction; on failure the existing
-    collection is left untouched (no partial tables, manifest unchanged).
+    Each item is a path or an :class:`ImportSpec` carrying a logical name. ``append=False``
+    (default) rebuilds the collection from scratch; ``append=True`` adds to an existing one.
+    With ``overwrite=True`` an incoming workbook whose logical name matches an existing one
+    replaces it (a quick delete-then-add); otherwise table names are de-duplicated. The new
+    tables are written in a single transaction; on failure the collection is left untouched.
     """
-    files = [Path(p) for p in paths]
-    if not files:
+    specs = [_as_spec(it) for it in items]
+    if not specs:
         raise ValueError("no files to import")
     dest = Path(dest_dir)
     dest.mkdir(parents=True, exist_ok=True)
@@ -62,38 +80,42 @@ def import_workbooks(
 
     if append and manifest_path.exists():
         manifest = ImportManifest.load(manifest_path)
+        db_path.touch(exist_ok=True)
     else:
         manifest = ImportManifest()
         db_path.unlink(missing_ok=True)
-    used_tables = {s.table for w in manifest.workbooks for s in w.sheets}
-    stamp = now or datetime.now(timezone.utc).isoformat(timespec="seconds")
 
-    new_workbooks: list[WorkbookInfo] = []
     conn = sqlite3.connect(db_path)
     try:
-        for index, path in enumerate(files):
+        if overwrite:
+            incoming = {s.logical_name for s in specs}
+            for wb in [w for w in manifest.workbooks if w.name in incoming]:
+                for sheet in wb.sheets:
+                    conn.execute(f"DROP TABLE IF EXISTS {_q(sheet.table)}")
+                manifest.workbooks.remove(wb)
+        used_tables = {s.table for w in manifest.workbooks for s in w.sheets}
+        stamp = now or datetime.now(timezone.utc).isoformat(timespec="seconds")
+        new_workbooks: list[WorkbookInfo] = []
+        for index, spec in enumerate(specs):
+            path = Path(spec.path)
             workbook = read_workbook(path)
-            file_slug = _slug(path.stem, fallback="data")
+            logical = spec.logical_name
             file_hash = _file_hash(path)
             wb_info = WorkbookInfo(
                 id=_workbook_id(file_hash, stamp, index),
+                name=logical,
                 source_filename=workbook.filename,
                 file_hash=file_hash,
                 imported_at=stamp,
             )
-            single = len(workbook.sheets) == 1
             for sheet in workbook.sheets:
-                table = _unique(_table_name(file_slug, sheet.name), used_tables)
+                table = _unique(_table_name(logical, sheet.name, len(workbook.sheets) == 1), used_tables)
                 columns = _plan_columns(sheet)
                 _write_table(conn, table, columns, sheet.rows)
-                display = (
-                    path.stem if single and _slug(sheet.name, fallback="") == file_slug
-                    else f"{path.stem} · {sheet.name}"
-                )
                 wb_info.sheets.append(SheetInfo(
                     sheet_name=sheet.name,
                     table=table,
-                    display_name=display,
+                    display_name=_display_name(logical, sheet.name, len(workbook.sheets) == 1),
                     header_row=sheet.header_row,
                     row_count=len(sheet.rows),
                     columns=columns,
@@ -112,6 +134,35 @@ def import_workbooks(
     manifest.workbooks.extend(new_workbooks)
     manifest.save(manifest_path)
     return ImportResult(db_path=db_path, manifest=manifest)
+
+
+def rename_workbook(dest_dir: Path | str, workbook_id: str, new_name: str) -> ImportManifest:
+    """Rename a workbook's logical name, renaming its SQLite table(s) and updating the
+    manifest. Raises KeyError for an unknown id, ValueError for an empty name."""
+    new_name = (new_name or "").strip()
+    if not new_name:
+        raise ValueError("name must not be empty")
+    dest = Path(dest_dir)
+    manifest = ImportManifest.load(dest / "manifest.json")
+    target = next((w for w in manifest.workbooks if w.id == workbook_id), None)
+    if target is None:
+        raise KeyError(workbook_id)
+    used = {s.table for w in manifest.workbooks if w.id != workbook_id for s in w.sheets}
+    single = len(target.sheets) == 1
+    conn = sqlite3.connect(dest / "data.db")
+    try:
+        for sheet in target.sheets:
+            new_table = _unique(_table_name(new_name, sheet.sheet_name, single), used)
+            if new_table != sheet.table:
+                conn.execute(f"ALTER TABLE {_q(sheet.table)} RENAME TO {_q(new_table)}")
+                sheet.table = new_table
+            sheet.display_name = _display_name(new_name, sheet.sheet_name, single)
+        conn.commit()
+    finally:
+        conn.close()
+    target.name = new_name
+    manifest.save(dest / "manifest.json")
+    return manifest
 
 
 def remove_workbook(dest_dir: Path | str, workbook_id: str) -> ImportManifest:
@@ -232,11 +283,17 @@ def _column_names(header: list[str]) -> list[str]:
     return out
 
 
-def _table_name(file_slug: str, sheet_name: str) -> str:
-    # Namespace a sheet by its workbook, but collapse the redundant CSV case where the
-    # only sheet is named after the file (sales.csv → "sales", not "sales__sales").
-    sheet_slug = _slug(sheet_name, fallback="sheet")
-    return sheet_slug if sheet_slug == file_slug else f"{file_slug}__{sheet_slug}"
+def _table_name(logical_name: str, sheet_name: str, single: bool) -> str:
+    # A single-sheet workbook becomes one table named after the workbook; a multi-sheet
+    # one namespaces each sheet under the workbook name (name__sheet).
+    name_slug = _slug(logical_name, fallback="data")
+    if single:
+        return name_slug
+    return f"{name_slug}__{_slug(sheet_name, fallback='sheet')}"
+
+
+def _display_name(logical_name: str, sheet_name: str, single: bool) -> str:
+    return logical_name if single else f"{logical_name} · {sheet_name}"
 
 
 def _workbook_id(file_hash: str, stamp: str, index: int) -> str:

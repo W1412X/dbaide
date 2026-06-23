@@ -10,7 +10,6 @@ from PyQt6.QtWidgets import (
     QFormLayout,
     QFrame,
     QHBoxLayout,
-    QInputDialog,
     QLabel,
     QLineEdit,
     QListWidget,
@@ -166,6 +165,7 @@ class _WorkbookPanel(QWidget):
 
     add_requested = pyqtSignal()
     remove_requested = pyqtSignal(str)   # workbook id
+    rename_requested = pyqtSignal(str)   # workbook id
 
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
@@ -229,15 +229,20 @@ class _WorkbookPanel(QWidget):
         lay.setSpacing(8)
         text_col = QVBoxLayout()
         text_col.setSpacing(2)
-        name = QLabel(wb.source_filename)
+        name = QLabel(wb.name)            # logical name = the table the user renamed / queries
         name.setStyleSheet(
             f"color:{Theme.TEXT}; font-size:13px; font-weight:500; background:transparent; border:none;"
         )
-        meta = QLabel(_pt("excel.sheet_rows", sheets=sheet_count, rows=f"{row_count:,}"))
+        counts = _pt("excel.sheet_rows", sheets=sheet_count, rows=f"{row_count:,}")
+        meta = QLabel(f"{wb.source_filename} · {counts}")
         meta.setStyleSheet(f"color:{Theme.MUTED}; font-size:11px; background:transparent; border:none;")
+        meta.setToolTip(wb.source_filename)
         text_col.addWidget(name)
         text_col.addWidget(meta)
         lay.addLayout(text_col, 1)
+        rename = ghost_action_button(_pt("excel.rename"))
+        rename.clicked.connect(lambda _checked=False, wid=wb.id: self.rename_requested.emit(wid))
+        lay.addWidget(rename)
         remove = ghost_action_button(_pt("excel.remove_workbook"))
         remove.setStyleSheet(
             remove.styleSheet().replace(
@@ -451,6 +456,7 @@ class SettingsDialog(ChromeDialog):
         self.workbook_panel = _WorkbookPanel()
         self.workbook_panel.add_requested.connect(self._excel_add_workbook)
         self.workbook_panel.remove_requested.connect(self._excel_remove_workbook)
+        self.workbook_panel.rename_requested.connect(self._excel_rename_workbook)
         self.workbook_panel.hide()
         form_col.addWidget(self._conn_form_area, 1)
         form_col.addWidget(self.workbook_panel, 1)
@@ -1285,27 +1291,19 @@ class SettingsDialog(ChromeDialog):
         return [f for f in files if Path(f).suffix.lower() in SUPPORTED_EXTS]
 
     def _create_excel_collection(self) -> None:
+        from dbaide.desktop.dialogs.excel_collection import new_collection
         from dbaide.ingest import collection_dir, import_workbooks
 
         if self._config_dir is None:
             return
-        files = self._pick_spreadsheets()
-        if not files:
+        chosen = new_collection(self, set(self._connections))
+        if not chosen:
             return
-        suggested = Path(files[0]).stem.strip() or "import"
-        name, ok = QInputDialog.getText(
-            self, _pt("excel.name_title"), _pt("excel.name_prompt"), text=suggested
-        )
-        name = (name or "").strip()
-        if not ok or not name:
-            return
-        if name in self._connections:
-            dialog_warn(self, _pt("settings.title"), _pt("excel.err.name_taken", name=name))
-            return
+        name, specs = chosen
         dest = collection_dir(self._config_dir, name)
         try:
             QApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)
-            result = import_workbooks(files, dest_dir=dest)
+            result = import_workbooks(specs, dest_dir=dest)
         except Exception as exc:  # noqa: BLE001
             dialog_warn(self, _pt("settings.title"), _pt("excel.err.import_failed", error=str(exc)))
             return
@@ -1320,20 +1318,51 @@ class SettingsDialog(ChromeDialog):
         })
 
     def _excel_add_workbook(self) -> None:
+        from dbaide.ingest import ImportSpec
+
         collection = self._current_collection()
         if collection is None:
             return
         files = self._pick_spreadsheets()
         if not files:
             return
+        specs = [ImportSpec(Path(f)) for f in files]
+        existing = {w.name for w in collection.workbooks()}
+        clashes = [s.logical_name for s in specs if s.logical_name in existing]
+        if clashes and not dialog_confirm(
+            self, _pt("settings.title"), _pt("excel.confirm_overwrite", names=", ".join(clashes))
+        ):
+            return                       # decline → don't create same-name duplicates
         try:
             QApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)
-            collection.add(files)
+            collection.add(specs, overwrite=bool(clashes))
         except Exception as exc:  # noqa: BLE001
             dialog_warn(self, _pt("settings.title"), _pt("excel.err.import_failed", error=str(exc)))
             return
         finally:
             QApplication.restoreOverrideCursor()
+        self.workbook_panel.load(self._selected_conn, collection.workbooks())
+        self.excel_collection_changed.emit(self._selected_conn)
+
+    def _excel_rename_workbook(self, workbook_id: str) -> None:
+        from dbaide.desktop.dialogs.text_input import get_text
+
+        collection = self._current_collection()
+        if collection is None:
+            return
+        current = next((w for w in collection.workbooks() if w.id == workbook_id), None)
+        if current is None:
+            return
+        new_name, ok = get_text(
+            self, _pt("excel.rename_title"), _pt("excel.rename_prompt"), text=current.name
+        )
+        if not ok or not new_name.strip() or new_name.strip() == current.name:
+            return
+        try:
+            collection.rename(workbook_id, new_name.strip())
+        except Exception as exc:  # noqa: BLE001
+            dialog_warn(self, _pt("settings.title"), _pt("excel.err.import_failed", error=str(exc)))
+            return
         self.workbook_panel.load(self._selected_conn, collection.workbooks())
         self.excel_collection_changed.emit(self._selected_conn)
 

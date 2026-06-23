@@ -14,7 +14,13 @@ from __future__ import annotations
 from collections.abc import Callable
 from pathlib import Path
 
-from dbaide.ingest.importer import ImportResult, import_workbooks, remove_workbook
+from dbaide.ingest.importer import (
+    ImportResult,
+    ImportSpec,
+    import_workbooks,
+    remove_workbook,
+    rename_workbook,
+)
 from dbaide.ingest.manifest import ImportManifest, WorkbookInfo
 
 IMPORTS_DIRNAME = "imports"
@@ -48,19 +54,26 @@ class ExcelCollection:
 
     def add(
         self,
-        paths: list[Path | str],
+        items: "list[Path | str | ImportSpec]",
         *,
+        overwrite: bool = False,
         on_progress: Callable[[str], None] | None = None,
     ) -> ImportResult:
-        """Add one or more files. Creates the collection if it doesn't exist yet, otherwise
-        appends to it (keeping table names unique)."""
+        """Add one or more files (each a path or :class:`ImportSpec` with a logical name).
+        Creates the collection if it doesn't exist yet, otherwise appends to it. With
+        ``overwrite``, an incoming workbook replaces an existing one of the same name."""
         return import_workbooks(
-            paths, dest_dir=self.dir, append=self.exists(), on_progress=on_progress
+            items, dest_dir=self.dir, append=self.exists(),
+            overwrite=overwrite, on_progress=on_progress,
         )
 
     def remove(self, workbook_id: str) -> ImportManifest:
         """Drop a workbook's tables and forget it. Raises KeyError if the id is unknown."""
         return remove_workbook(self.dir, workbook_id)
+
+    def rename(self, workbook_id: str, new_name: str) -> ImportManifest:
+        """Rename a workbook (and its table(s)). Raises KeyError / ValueError."""
+        return rename_workbook(self.dir, workbook_id, new_name)
 
 
 def imports_root(config_dir: Path | str) -> Path:

@@ -183,10 +183,43 @@ def test_excel_collection_panel_toggles_and_manages_workbooks(qapp, tmp_path, mo
     assert {w.source_filename for w in col.workbooks()} == {"sales.csv", "customers.csv"}
     assert changed == ["shop"]
 
+    # rename a workbook (stub the themed text prompt) → table is renamed
+    import dbaide.desktop.dialogs.text_input as text_input_mod
+    monkeypatch.setattr(text_input_mod, "get_text", lambda *a, **k: ("orders", True))
+    cust_id = next(w.id for w in col.workbooks() if w.source_filename == "customers.csv")
+    dialog._excel_rename_workbook(cust_id)
+    renamed = next(w for w in col.workbooks() if w.id == cust_id)
+    assert renamed.name == "orders" and renamed.sheets[0].table == "orders"
+
     # remove a (non-last) workbook with confirmation stubbed to True
     monkeypatch.setattr(settings_mod, "dialog_confirm", lambda *a, **k: True)
     wid = next(w.id for w in col.workbooks() if w.source_filename == "sales.csv")
     dialog._excel_remove_workbook(wid)
+    # rename changed the logical name only; source_filename stays "customers.csv"
     assert [w.source_filename for w in col.workbooks()] == ["customers.csv"]
 
     dialog.deleteLater()
+
+
+def test_new_collection_dialog_validates_and_returns_specs(qapp, tmp_path, monkeypatch):
+    import dbaide.desktop.dialogs.excel_collection as mod
+
+    monkeypatch.setattr(mod, "dialog_warn", lambda *a, **k: None)  # don't block on validation
+    a = tmp_path / "raw_export.csv"; a.write_text("x\n1\n", encoding="utf-8")
+    d = mod.NewCollectionDialog(None, existing_names={"taken"})
+
+    # no name / no files → submit is refused (not accepted)
+    d._submit()
+    assert d.result() != int(d.DialogCode.Accepted)
+
+    # stage a file, rename it, give the connection a fresh name
+    d._name.setText("shop")
+    row = mod._StagedRow(a, d._remove_row)
+    d._rows.append(row)
+    d._rows_layout.insertWidget(d._rows_layout.count() - 1, row)
+    row.name_edit.setText("products")
+
+    name, specs = d.result_value()
+    assert name == "shop"
+    assert len(specs) == 1 and specs[0].logical_name == "products"
+    d.deleteLater()

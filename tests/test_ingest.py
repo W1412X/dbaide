@@ -169,6 +169,64 @@ def test_collection_add_keeps_table_names_unique(tmp_path):
     assert tables == ["data", "data_2"]
 
 
+def test_import_spec_logical_name_drives_table_name(tmp_path):
+    from dbaide.ingest import ImportSpec
+
+    raw = tmp_path / "客户数据导出_最终版_v2.csv"
+    raw.write_text("name\nAda\n", encoding="utf-8")
+    res = import_workbooks([ImportSpec(raw, name="customers")], dest_dir=tmp_path / "imports")
+    sheet = res.manifest.workbooks[0].sheets[0]
+    assert res.manifest.workbooks[0].name == "customers"
+    assert sheet.table == "customers"
+    assert sheet.display_name == "customers"
+
+
+def test_collection_rename_workbook_renames_table(tmp_path):
+    from dbaide.ingest import ExcelCollection
+
+    f = tmp_path / "messy.csv"; f.write_text("v\n1\n2\n", encoding="utf-8")
+    col = ExcelCollection(tmp_path / "imports" / "c")
+    col.add([f])
+    wid = col.workbooks()[0].id
+
+    col.rename(wid, "sales")
+    wb = col.workbooks()[0]
+    assert wb.name == "sales"
+    assert wb.sheets[0].table == "sales"
+    con = sqlite3.connect(col.db_path)
+    try:
+        tables = {r[0] for r in con.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+        assert tables == {"sales"}
+        assert con.execute("SELECT SUM(v) FROM sales").fetchone()[0] == 3
+    finally:
+        con.close()
+
+    with pytest.raises(ValueError):
+        col.rename(wid, "   ")
+
+
+def test_collection_overwrite_add_replaces_same_name(tmp_path):
+    from dbaide.ingest import ExcelCollection, ImportSpec
+
+    v1 = tmp_path / "v1.csv"; v1.write_text("amt\n1\n2\n3\n", encoding="utf-8")
+    v2 = tmp_path / "v2.csv"; v2.write_text("amt\n10\n", encoding="utf-8")
+    col = ExcelCollection(tmp_path / "imports" / "c")
+    col.add([ImportSpec(v1, name="sales")])
+    assert col.workbooks()[0].sheets[0].row_count == 3
+
+    # overwrite-add: same logical name → quick delete-then-add, no duplicate table
+    col.add([ImportSpec(v2, name="sales")], overwrite=True)
+    books = col.workbooks()
+    assert len(books) == 1
+    assert books[0].sheets[0].row_count == 1
+    con = sqlite3.connect(col.db_path)
+    try:
+        tables = {r[0] for r in con.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+        assert tables == {"sales"}            # not sales + sales_2
+    finally:
+        con.close()
+
+
 def test_collection_for_connection_detects_imports(tmp_path):
     from dbaide.ingest import ExcelCollection, collection_dir, collection_for_connection
 
