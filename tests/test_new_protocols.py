@@ -137,6 +137,16 @@ def test_responses_output_text_convenience(monkeypatch):
     assert _responses().complete_text([LLMMessage("user", "q")]) == "quick"
 
 
+def test_responses_empty_output_text_falls_through_to_items(monkeypatch):
+    # a gateway may emit output_text:"" alongside the real text in output[] — must not return ""
+    _capture(monkeypatch, {
+        "output_text": "",
+        "output": [{"type": "message", "content": [{"type": "output_text", "text": "real"}]}],
+        "usage": {"input_tokens": 1, "output_tokens": 1},
+    })
+    assert _responses().complete_text([LLMMessage("user", "q")]) == "real"
+
+
 def test_responses_complete_with_tools_parses_function_call(monkeypatch):
     cap = _capture(monkeypatch, {
         "output": [{"type": "function_call", "name": "list_tables", "arguments": '{"db":"x"}', "call_id": "c1"}],

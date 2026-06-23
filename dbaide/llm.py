@@ -502,7 +502,8 @@ def _http_post_json(
                 raise ToolsUnsupported(f"endpoint rejected tools (HTTP {exc.code}): {txt[:200]}") from exc
             last_exc = RuntimeError(f"LLM HTTP {exc.code}: {txt[:200]}")
             last_exc.status_code = exc.code  # type: ignore[attr-defined]
-            if exc.code in (429, 500, 502, 503, 504) and attempt < retries - 1:
+            # 529 = Anthropic overloaded_error (retryable); the rest are the usual transient set.
+            if exc.code in (429, 500, 502, 503, 504, 529) and attempt < retries - 1:
                 time.sleep(float(backoff[min(attempt, len(backoff) - 1)]))
                 continue
             raise last_exc from exc
@@ -736,8 +737,11 @@ class OpenAIResponsesClient(LLMClient):
 
     @staticmethod
     def _text(data: dict[str, Any]) -> str:
-        if isinstance(data.get("output_text"), str):
-            return data["output_text"]
+        # Use the convenience field only when non-empty — a proxy that emits output_text:""
+        # for a tool-only/structured response must still fall through to the output[] items.
+        convenience = data.get("output_text")
+        if isinstance(convenience, str) and convenience:
+            return convenience
         parts: list[str] = []
         for item in (data.get("output") or []):
             if isinstance(item, dict) and item.get("type") == "message":
