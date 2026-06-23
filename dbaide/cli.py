@@ -959,9 +959,18 @@ def dispatch_ingest(args: argparse.Namespace, cfg: ConfigManager) -> int:
     if not is_valid_collection_name(name):
         print(f"invalid connection name {name!r}: cannot contain '/' or '\\'", file=sys.stderr)
         return 1
-    if name in cfg.connections() and not args.replace:
-        print(f"connection {name!r} already exists; use --replace to overwrite", file=sys.stderr)
-        return 1
+    existing = cfg.connections().get(name)
+    if existing is not None:
+        if not args.replace:
+            print(f"connection {name!r} already exists; use --replace to overwrite", file=sys.stderr)
+            return 1
+        # --replace only overwrites an existing Excel collection — never silently repoint a
+        # real database connection (or an unrelated sqlite file) at a freshly imported db.
+        from dbaide.ingest import collection_for_connection
+        if collection_for_connection(cfg.path.parent, getattr(existing, "path", "")) is None:
+            print(f"connection {name!r} is not an Excel collection; refusing to replace it",
+                  file=sys.stderr)
+            return 1
 
     dest_dir = collection_dir(cfg.path.parent, name)
     result = import_workbooks(paths, dest_dir=dest_dir, on_progress=lambda m: print(f"  {m}"))

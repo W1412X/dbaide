@@ -839,6 +839,17 @@ _STRINGS: dict[str, dict[str, str]] = {
     "excel.header_sheet": {"en": "Sheet", "zh": "工作表"},
     "excel.header_auto": {"en": "auto-detected", "zh": "自动识别"},
     "excel.header_current": {"en": "Header: row {r}, col {c}", "zh": "表头：第 {r} 行 · 第 {c} 列"},
+    "excel.header_apply_all": {"en": "Apply to all sheets", "zh": "应用到所有表"},
+    "excel.header_empty_warn": {
+        "en": "No header label at/after this cell — pick a header cell.",
+        "zh": "这一格起没有表头文字——请选表头单元格。",
+    },
+    "excel.header_no_data_warn": {
+        "en": "No data rows below this header.",
+        "zh": "该表头下方没有数据行。",
+    },
+    "excel.add_title": {"en": "Add files to this collection", "zh": "向集合添加文件"},
+    "excel.header_set": {"en": "Header ✓", "zh": "表头 ✓"},
     "excel.skipped_sheets": {
         "en": "Imported, but skipped {n} sheet(s):\n{detail}",
         "zh": "已导入，但跳过了 {n} 个工作表：\n{detail}",

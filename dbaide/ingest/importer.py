@@ -127,7 +127,7 @@ def import_workbooks(
                 file_hash = _file_hash(path)
                 single = len(workbook.sheets) == 1
                 wb_info = WorkbookInfo(
-                    id=_workbook_id(file_hash, stamp, index),
+                    id=_workbook_id(file_hash, stamp, index, logical),
                     name=logical,
                     source_filename=workbook.filename,
                     file_hash=file_hash,
@@ -330,8 +330,8 @@ def _display_name(logical_name: str, sheet_name: str, single: bool) -> str:
     return logical_name if single else f"{logical_name} · {sheet_name}"
 
 
-def _workbook_id(file_hash: str, stamp: str, index: int) -> str:
-    return "wb_" + hashlib.sha256(f"{file_hash}|{stamp}|{index}".encode()).hexdigest()[:8]
+def _workbook_id(file_hash: str, stamp: str, index: int, name: str = "") -> str:
+    return "wb_" + hashlib.sha256(f"{file_hash}|{stamp}|{index}|{name}".encode()).hexdigest()[:8]
 
 
 def _unique(name: str, used: set[str]) -> str:

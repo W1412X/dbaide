@@ -149,18 +149,20 @@ def locate_table(grid: RawGrid, *, header_row: int | None = None, header_col: in
     if not nonempty:
         return None
     h = max(0, min(header_row, nrows - 1)) if header_row is not None else _detect_header(cells, nonempty, ncols)
-    body = [r for r in nonempty if r > h]
-    span_rows = [h, *body]
-    nz_cols = [c for r in span_rows for c in range(ncols) if _nonempty(cells[r][c])]
-    if not nz_cols:
+    # Columns come from the HEADER row's non-empty extent — the header labels define the table.
+    # Using the union of all body rows instead would let a stray value in a margin column drag
+    # the table edge out (and an entirely empty chosen row would have no columns at all).
+    header_cols = [c for c in range(ncols) if _nonempty(cells[h][c])]
+    if not header_cols:
         return None
-    c0 = max(0, min(header_col, ncols - 1)) if header_col is not None else min(nz_cols)
-    right = [c for c in nz_cols if c >= c0]
+    c0 = max(0, min(header_col, ncols - 1)) if header_col is not None else min(header_cols)
+    right = [c for c in header_cols if c >= c0]
     if not right:
         return None
     c1 = max(right)
     # Emptiness is judged within the table's column span, so a value in an excluded left
     # column (c < c0) neither emits a junk row nor drags last_row down to a stray footer.
+    body = [r for r in nonempty if r > h]
     in_span = [r for r in body if _slice_nonempty(cells[r], c0, c1)]
     return h, c0, c1, (in_span[-1] if in_span else h)
 

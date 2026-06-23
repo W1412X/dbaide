@@ -67,8 +67,12 @@ class HeaderPreviewDialog(ChromeDialog):
         sheet_label.setVisible(len(self._grids) > 1)
         self._status = QLabel("")
         self._status.setStyleSheet(f"color:{Theme.MUTED}; font-size:12px; background:transparent;")
+        self._apply_all = compact_button(_pt("excel.header_apply_all"), width=132)
+        self._apply_all.clicked.connect(self._apply_to_all_sheets)
+        self._apply_all.setVisible(len(self._grids) > 1)
         top.addWidget(sheet_label)
         top.addWidget(self._sheet_combo)
+        top.addWidget(self._apply_all)
         top.addStretch(1)
         top.addWidget(self._status)
         root.addLayout(top)
@@ -84,10 +88,10 @@ class HeaderPreviewDialog(ChromeDialog):
         actions.addStretch(1)
         cancel = compact_button(_pt("dialog.cancel"), width=88)
         cancel.clicked.connect(self.reject)
-        ok = compact_button(_pt("dialog.ok"), primary=True, width=88)
-        ok.clicked.connect(self.accept)
+        self._ok = compact_button(_pt("dialog.ok"), primary=True, width=88)
+        self._ok.clicked.connect(self.accept)
         actions.addWidget(cancel)
-        actions.addWidget(ok)
+        actions.addWidget(self._ok)
         root.addWidget(actions_host)
 
         if self._grids:
@@ -150,14 +154,49 @@ class HeaderPreviewDialog(ChromeDialog):
                 else:                                   # data
                     item.setBackground(clear_bg)
                     item.setForeground(normal_fg)
-        auto = " · " + _pt("excel.header_auto") if (hr, hc) == (grid.auto_header_row, grid.auto_header_col) else ""
-        self._status.setText(_pt("excel.header_current", r=hr + 1, c=hc + 1) + auto)
+        ok, warn = self._validate(grid, hr, hc)
+        self._ok.setEnabled(ok)
+        if not ok:
+            self._status.setStyleSheet(f"color:{Theme.RED}; font-size:12px; background:transparent;")
+            self._status.setText(warn)
+        else:
+            auto = " · " + _pt("excel.header_auto") if (hr, hc) == (grid.auto_header_row, grid.auto_header_col) else ""
+            self._status.setStyleSheet(f"color:{Theme.MUTED}; font-size:12px; background:transparent;")
+            self._status.setText(_pt("excel.header_current", r=hr + 1, c=hc + 1) + auto)
+
+    @staticmethod
+    def _validate(grid, hr: int, hc: int) -> tuple[bool, str]:
+        """Reject anchors that would yield a garbage table: a header row with no label cell
+        at/after the chosen column, or no data row beneath it."""
+        rows = grid.cells
+
+        def filled(r: int, c: int) -> bool:
+            row = rows[r] if 0 <= r < len(rows) else []
+            v = row[c] if 0 <= c < len(row) else None
+            return v is not None and str(v).strip() != ""
+
+        ncols = max((len(r) for r in rows), default=0)
+        if not any(filled(hr, c) for c in range(hc, ncols)):
+            return False, _pt("excel.header_empty_warn")
+        has_data = any(filled(r, c) for r in range(hr + 1, len(rows)) for c in range(hc, ncols))
+        if not has_data:
+            return False, _pt("excel.header_no_data_warn")
+        return True, ""
 
     def _on_cell(self, row: int, col: int) -> None:
         grid = self._current()
         if grid is not None:
             self._choice[grid.name] = (row, col)
             self._restyle()
+
+    def _apply_to_all_sheets(self) -> None:
+        grid = self._current()
+        if grid is None:
+            return
+        anchor = self._choice.get(grid.name, (grid.auto_header_row, grid.auto_header_col))
+        for g in self._grids:
+            self._choice[g.name] = anchor
+        self._restyle()
 
     def result_value(self) -> dict[str, tuple[int, int]]:
         return dict(self._choice)

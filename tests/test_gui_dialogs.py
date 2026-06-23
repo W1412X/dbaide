@@ -173,10 +173,13 @@ def test_excel_collection_panel_toggles_and_manages_workbooks(qapp, tmp_path, mo
     assert not dialog._conn_form_area.isHidden()
     assert dialog.workbook_panel.isHidden()
 
-    # add a workbook through the panel's flow (stub the file picker)
+    # add a workbook through the panel's flow (stub the staging dialog)
+    from pathlib import Path as _Path
+    from dbaide.ingest import ImportSpec
     dialog.conn_list.setCurrentRow(_find_conn_row(dialog, "shop"))
     qapp.processEvents()
-    monkeypatch.setattr(dialog, "_pick_spreadsheets", lambda: [str(cust)])
+    monkeypatch.setattr("dbaide.desktop.dialogs.excel_collection.add_collection_files",
+                        lambda parent: [ImportSpec(_Path(cust))])
     changed = []
     dialog.excel_collection_changed.connect(changed.append)
     dialog._excel_add_workbook()
@@ -226,6 +229,22 @@ def test_header_preview_auto_detects_then_accepts_manual(qapp, tmp_path):
     assert d.result_value() == {"sales": (3, 0)}    # preamble skipped automatically (row 3, col 0)
     d._on_cell(0, 1)                                # user clicks row 0, col 1
     assert d.result_value() == {"sales": (0, 1)}
+    d.deleteLater()
+
+
+def test_header_preview_disables_ok_on_bad_anchor(qapp, tmp_path):
+    from dbaide.desktop.dialogs.header_preview import HeaderPreviewDialog
+
+    f = tmp_path / "s.csv"
+    f.write_text("title\n\nid,name\n1,a\n2,b\n", encoding="utf-8")   # rows 0..4
+    d = HeaderPreviewDialog(None, f)
+    assert d._ok.isEnabled()                 # auto-detected header (row 2) is valid
+    d._on_cell(4, 0)                         # last row → no data beneath
+    assert not d._ok.isEnabled()
+    d._on_cell(1, 0)                         # blank row → no header label
+    assert not d._ok.isEnabled()
+    d._on_cell(2, 0)                         # back to the real header
+    assert d._ok.isEnabled()
     d.deleteLater()
 
 

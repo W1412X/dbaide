@@ -326,6 +326,28 @@ def test_user_selected_start_column_excludes_left_columns(tmp_path):
     assert list(sheet.data_bbox) == [0, 2, 2, 3]
 
 
+def test_auto_detect_column_span_from_header_not_stray_margin(tmp_path):
+    csv = tmp_path / "s.csv"
+    # header is in cols B/C (col A header blank); a stray note sits in col A of a data row.
+    csv.write_text(",H1,H2\nnote,1,2\n,3,4\n", encoding="utf-8")
+    res = import_workbooks([csv], dest_dir=tmp_path / "imports")
+    sheet = res.manifest.workbooks[0].sheets[0]
+    assert [c.name for c in sheet.columns] == ["H1", "H2"]   # not dragged left to a blank col_1
+    assert list(sheet.data_bbox) == [0, 1, 2, 2]
+
+
+def test_ingest_replace_refuses_non_collection_connection(tmp_path):
+    from dbaide.cli import build_parser, dispatch_ingest
+    from dbaide.config import ConfigManager
+    from dbaide.models import ConnectionConfig
+
+    cfg = ConfigManager(path=tmp_path / "config.toml")
+    cfg.upsert_connection(ConnectionConfig(name="prod", type="mysql", host="h"))
+    csv = tmp_path / "x.csv"; csv.write_text("a\n1\n", encoding="utf-8")
+    args = build_parser().parse_args(["ingest", str(csv), "--conn", "prod", "--replace"])
+    assert dispatch_ingest(args, cfg) == 1                    # prod isn't an Excel collection
+
+
 def test_excluded_left_column_does_not_create_junk_rows(tmp_path):
     from dbaide.ingest import ImportSpec
 

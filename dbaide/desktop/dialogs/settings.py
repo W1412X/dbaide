@@ -49,7 +49,7 @@ from dbaide.desktop.components.inputs import (
 )
 from dbaide.desktop.components.menu import MenuButton
 from dbaide.desktop.dialogs.connection import ConnectionForm
-from dbaide.desktop.dialogs.file_dialogs import get_open_file_name, get_open_file_names
+from dbaide.desktop.dialogs.file_dialogs import get_open_file_name
 from dbaide.desktop.theme import app_style, Theme
 from dbaide.i18n import t as _pt
 
@@ -1372,11 +1372,6 @@ class SettingsDialog(ChromeDialog):
         self.workbook_panel.load(name, collection.workbooks())
         self.workbook_panel.show()
 
-    def _pick_spreadsheets(self) -> list[str]:
-        from dbaide.ingest import SUPPORTED_EXTS
-        files = get_open_file_names(self, _pt("excel.pick_title"), "", _pt("excel.file_filter"))
-        return [f for f in files if Path(f).suffix.lower() in SUPPORTED_EXTS]
-
     def _create_excel_collection(self) -> None:
         from dbaide.desktop.dialogs.excel_collection import new_collection
         from dbaide.ingest import collection_dir, import_workbooks
@@ -1406,15 +1401,14 @@ class SettingsDialog(ChromeDialog):
         })
 
     def _excel_add_workbook(self) -> None:
-        from dbaide.ingest import ImportSpec
+        from dbaide.desktop.dialogs.excel_collection import add_collection_files
 
         collection = self._current_collection()
         if collection is None:
             return
-        files = self._pick_spreadsheets()
-        if not files:
+        specs = add_collection_files(self)   # staging: rename tables + pick headers, like create
+        if not specs:
             return
-        specs = [ImportSpec(Path(f)) for f in files]
         existing = {w.name for w in collection.workbooks()}
         clashes = [s.logical_name for s in specs if s.logical_name in existing]
         if clashes and not dialog_confirm(

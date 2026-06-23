@@ -73,17 +73,20 @@ class _StagedRow(QFrame):
             return
         if chosen is not None:
             self.header_anchors = chosen
+            self._header_btn.setText(_pt("excel.header_set"))   # mark the row as customised
 
     def name(self) -> str:
         return self.name_edit.text().strip()
 
 
 class NewCollectionDialog(ChromeDialog):
-    def __init__(self, parent, existing_names: set[str]) -> None:
+    def __init__(self, parent, existing_names: set[str], *, mode: str = "create") -> None:
         super().__init__(parent)
+        self._mode = mode                       # "create" (with name field) | "add" (files only)
         self._existing = {n.lower() for n in existing_names}
         self._rows: list[_StagedRow] = []
-        self.setWindowTitle(_pt("excel.new_title"))
+        title = _pt("excel.new_title") if mode == "create" else _pt("excel.add_title")
+        self.setWindowTitle(title)
         self.setModal(True)
         self.setMinimumWidth(520)
         self.setStyleSheet(app_style())
@@ -92,7 +95,7 @@ class NewCollectionDialog(ChromeDialog):
         root.setContentsMargins(18, 18, 18, 16)
         root.setSpacing(12)
 
-        heading = QLabel(_pt("excel.new_title"))
+        heading = QLabel(title)
         heading.setStyleSheet(f"color:{Theme.TEXT}; font-size:15px; font-weight:700; background:transparent;")
         root.addWidget(heading)
         hint = QLabel(_pt("excel.new_hint"))
@@ -100,13 +103,14 @@ class NewCollectionDialog(ChromeDialog):
         hint.setStyleSheet(f"color:{Theme.MUTED}; font-size:12px; background:transparent;")
         root.addWidget(hint)
 
-        name_label = QLabel(_pt("excel.conn_name"))
-        name_label.setStyleSheet(f"color:{Theme.TEXT_2}; font-size:12px; font-weight:500; background:transparent;")
-        root.addWidget(name_label)
         self._name = QLineEdit()
-        self._name.setPlaceholderText(_pt("excel.conn_name_ph"))
-        configure_compact_field(self._name, height=STANDARD_FIELD_HEIGHT)
-        root.addWidget(self._name)
+        if mode == "create":
+            name_label = QLabel(_pt("excel.conn_name"))
+            name_label.setStyleSheet(f"color:{Theme.TEXT_2}; font-size:12px; font-weight:500; background:transparent;")
+            root.addWidget(name_label)
+            self._name.setPlaceholderText(_pt("excel.conn_name_ph"))
+            configure_compact_field(self._name, height=STANDARD_FIELD_HEIGHT)
+            root.addWidget(self._name)
 
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
@@ -137,7 +141,8 @@ class NewCollectionDialog(ChromeDialog):
         actions.addStretch(1)
         cancel = compact_button(_pt("dialog.cancel"), width=88)
         cancel.clicked.connect(self.reject)
-        self._create = compact_button(_pt("excel.create"), primary=True, width=96)
+        self._create = compact_button(
+            _pt("excel.create") if mode == "create" else _pt("dialog.ok"), primary=True, width=96)
         self._create.clicked.connect(self._submit)
         actions.addWidget(cancel)
         actions.addWidget(self._create)
@@ -152,6 +157,8 @@ class NewCollectionDialog(ChromeDialog):
             row = _StagedRow(path, self._remove_row)
             self._rows.append(row)
             self._rows_layout.insertWidget(self._rows_layout.count() - 1, row)
+        if self._mode == "create" and self._rows and not self._name.text().strip():
+            self._name.setText(self._rows[0].path.stem)     # prefill from the first file
         self._empty.setVisible(not self._rows)
 
     def _remove_row(self, row: _StagedRow) -> None:
@@ -162,16 +169,17 @@ class NewCollectionDialog(ChromeDialog):
         self._empty.setVisible(not self._rows)
 
     def _submit(self) -> None:
-        name = self._name.text().strip()
-        if not name:
-            dialog_warn(self, _pt("excel.new_title"), _pt("settings.err.conn_name"))
-            return
-        if not is_valid_collection_name(name):
-            dialog_warn(self, _pt("excel.new_title"), _pt("excel.err.bad_name"))
-            return
-        if name.lower() in self._existing:
-            dialog_warn(self, _pt("excel.new_title"), _pt("excel.err.name_taken", name=name))
-            return
+        if self._mode == "create":
+            name = self._name.text().strip()
+            if not name:
+                dialog_warn(self, _pt("excel.new_title"), _pt("settings.err.conn_name"))
+                return
+            if not is_valid_collection_name(name):
+                dialog_warn(self, _pt("excel.new_title"), _pt("excel.err.bad_name"))
+                return
+            if name.lower() in self._existing:
+                dialog_warn(self, _pt("excel.new_title"), _pt("excel.err.name_taken", name=name))
+                return
         if not self._rows:
             dialog_warn(self, _pt("excel.new_title"), _pt("excel.no_files"))
             return
@@ -200,3 +208,12 @@ def new_collection(parent, existing_names: set[str]) -> tuple[str, list[ImportSp
     if dialog.exec() != QDialog.DialogCode.Accepted:
         return None
     return dialog.result_value()
+
+
+def add_collection_files(parent) -> list[ImportSpec] | None:
+    """Staging dialog for adding files to an existing collection — same rename + header-pick
+    UI as creation, minus the connection-name field."""
+    dialog = NewCollectionDialog(parent, set(), mode="add")
+    if dialog.exec() != QDialog.DialogCode.Accepted:
+        return None
+    return dialog.result_value()[1]
