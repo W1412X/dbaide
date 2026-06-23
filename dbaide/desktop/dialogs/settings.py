@@ -5,10 +5,12 @@ from pathlib import Path
 from PyQt6.QtCore import QSize, Qt, QUrl, pyqtSignal
 from PyQt6.QtGui import QDesktopServices
 from PyQt6.QtWidgets import (
+    QApplication,
     QDialog,
     QFormLayout,
     QFrame,
     QHBoxLayout,
+    QInputDialog,
     QLabel,
     QLineEdit,
     QListWidget,
@@ -43,7 +45,7 @@ from dbaide.desktop.components.inputs import (
 )
 from dbaide.desktop.components.menu import MenuButton
 from dbaide.desktop.dialogs.connection import ConnectionForm
-from dbaide.desktop.dialogs.file_dialogs import get_open_file_name
+from dbaide.desktop.dialogs.file_dialogs import get_open_file_name, get_open_file_names
 from dbaide.desktop.theme import app_style, Theme
 from dbaide.i18n import t as _pt
 
@@ -157,12 +159,104 @@ class ModelForm(QWidget):
         return payload
 
 
+class _WorkbookPanel(QWidget):
+    """Right-pane manager shown when the selected connection is an Excel collection:
+    lists its workbooks and lets the user add or remove them. Pure view — it emits
+    intent signals; the dialog performs the filesystem work and reloads it."""
+
+    add_requested = pyqtSignal()
+    remove_requested = pyqtSignal(str)   # workbook id
+
+    def __init__(self, parent=None) -> None:
+        super().__init__(parent)
+        outer = QVBoxLayout(self)
+        outer.setContentsMargins(0, 0, 0, 0)
+        outer.setSpacing(10)
+        self._title = QLabel("")
+        self._title.setStyleSheet(f"color:{Theme.TEXT}; font-size:14px; font-weight:600;")
+        self._hint = QLabel(_pt("excel.collection_hint"))
+        self._hint.setWordWrap(True)
+        self._hint.setStyleSheet(f"color:{Theme.MUTED}; font-size:12px;")
+        outer.addWidget(self._title)
+        outer.addWidget(self._hint)
+
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.Shape.NoFrame)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        scroll.setStyleSheet("QScrollArea { background: transparent; border: none; }")
+        self._list_host = QWidget()
+        self._list_host.setStyleSheet("background: transparent;")
+        self._list_layout = QVBoxLayout(self._list_host)
+        self._list_layout.setContentsMargins(0, 0, 0, 0)
+        self._list_layout.setSpacing(6)
+        self._list_layout.addStretch(1)
+        scroll.setWidget(self._list_host)
+        outer.addWidget(scroll, 1)
+
+        self._add_btn = compact_button(_pt("excel.add_workbook"), width=124)
+        self._add_btn.clicked.connect(lambda: self.add_requested.emit())
+        add_row = QHBoxLayout()
+        add_row.addWidget(self._add_btn)
+        add_row.addStretch(1)
+        outer.addLayout(add_row)
+
+    def load(self, name: str, workbooks: list) -> None:
+        self._title.setText(_pt("excel.collection_title", name=name))
+        while self._list_layout.count() > 1:          # keep the trailing stretch
+            item = self._list_layout.takeAt(0)
+            widget = item.widget()
+            if widget is not None:
+                widget.deleteLater()
+        if not workbooks:
+            empty = QLabel(_pt("excel.empty"))
+            empty.setStyleSheet(f"color:{Theme.MUTED}; font-size:12px;")
+            self._list_layout.insertWidget(0, empty)
+            return
+        for i, wb in enumerate(workbooks):
+            self._list_layout.insertWidget(i, self._row(wb))
+
+    def _row(self, wb) -> QWidget:
+        sheet_count = len(wb.sheets)
+        row_count = sum(s.row_count for s in wb.sheets)
+        frame = QFrame()
+        frame.setStyleSheet(
+            f"QFrame {{ background:{Theme.PANEL_2}; border:1px solid {Theme.BORDER_SOFT};"
+            f" border-radius:8px; }}"
+        )
+        lay = QHBoxLayout(frame)
+        lay.setContentsMargins(12, 8, 8, 8)
+        lay.setSpacing(8)
+        text_col = QVBoxLayout()
+        text_col.setSpacing(2)
+        name = QLabel(wb.source_filename)
+        name.setStyleSheet(
+            f"color:{Theme.TEXT}; font-size:13px; font-weight:500; background:transparent; border:none;"
+        )
+        meta = QLabel(_pt("excel.sheet_rows", sheets=sheet_count, rows=f"{row_count:,}"))
+        meta.setStyleSheet(f"color:{Theme.MUTED}; font-size:11px; background:transparent; border:none;")
+        text_col.addWidget(name)
+        text_col.addWidget(meta)
+        lay.addLayout(text_col, 1)
+        remove = ghost_action_button(_pt("excel.remove_workbook"))
+        remove.setStyleSheet(
+            remove.styleSheet().replace(
+                "QPushButton:hover { background: " + Theme.PANEL_2 + "; color: " + Theme.TEXT + "; }",
+                "QPushButton:hover { background: " + Theme.PANEL_3 + "; color: " + Theme.RED + "; }",
+            )
+        )
+        remove.clicked.connect(lambda _checked=False, wid=wb.id: self.remove_requested.emit(wid))
+        lay.addWidget(remove)
+        return frame
+
+
 from dbaide.desktop.window_chrome import ChromeDialog
 
 
 class SettingsDialog(ChromeDialog):
     connection_saved = pyqtSignal(dict)
     connection_deleted = pyqtSignal(str)
+    excel_collection_changed = pyqtSignal(str)   # workbooks added/removed → re-sync schema
     connection_test = pyqtSignal(dict)
     model_saved = pyqtSignal(dict)
     model_deleted = pyqtSignal(str)
@@ -212,11 +306,13 @@ class SettingsDialog(ChromeDialog):
         language: str = "en",
         stream_answers: bool = True,
         debug_trace: bool = False,
+        config_dir: str | Path = "",
         parent=None,
         initial_page: str = "connections",
     ) -> None:
         super().__init__(parent)
         from dbaide.i18n import t as _t
+        self._config_dir = Path(config_dir) if config_dir else None
         self._language = language
         self._stream_answers = bool(stream_answers)
         self._debug_trace = bool(debug_trace)
@@ -330,20 +426,34 @@ class SettingsDialog(ChromeDialog):
         self.import_conn_btn = compact_button(_pt("settings.import"))
         self.import_conn_btn.setToolTip(_pt("settings.import_conn_tooltip"))
         self.import_conn_btn.clicked.connect(self._import_connection)
+        self.import_excel_btn = compact_button(_pt("settings.import_excel"), width=128)
+        self.import_excel_btn.setToolTip(_pt("settings.import_excel_tooltip"))
+        self.import_excel_btn.clicked.connect(self._create_excel_collection)
         list_actions.addWidget(self.add_conn_btn)
         list_actions.addWidget(self.import_conn_btn)
+        list_actions.addWidget(self.import_excel_btn)
         list_actions.addStretch(1)
         list_col.addLayout(list_actions)
         row.addLayout(list_col)
-        # Right column: form + status + form-level actions (Save / Test / More).
+        # Right column: either the DB connection form (host/path) or, for an Excel
+        # collection, the workbook manager. Only one is visible at a time.
         form_col = QVBoxLayout()
+        self._conn_form_area = QWidget()
+        form_area = QVBoxLayout(self._conn_form_area)
+        form_area.setContentsMargins(0, 0, 0, 0)
         self.conn_form = ConnectionForm()
-        form_col.addWidget(self.conn_form, 1)
+        form_area.addWidget(self.conn_form, 1)
         self.conn_test_status = QLabel("")
         self.conn_test_status.setWordWrap(True)
         self.conn_test_status.setStyleSheet(f"color:{Theme.MUTED}; font-size:12px;")
-        form_col.addWidget(self.conn_test_status)
-        form_col.addLayout(self._conn_actions())
+        form_area.addWidget(self.conn_test_status)
+        form_area.addLayout(self._conn_actions())
+        self.workbook_panel = _WorkbookPanel()
+        self.workbook_panel.add_requested.connect(self._excel_add_workbook)
+        self.workbook_panel.remove_requested.connect(self._excel_remove_workbook)
+        self.workbook_panel.hide()
+        form_col.addWidget(self._conn_form_area, 1)
+        form_col.addWidget(self.workbook_panel, 1)
         row.addLayout(form_col, 1)
         card_layout.addLayout(row)
         layout.addWidget(card, 1)
@@ -1129,6 +1239,7 @@ class SettingsDialog(ChromeDialog):
             return
         name = str(current.data(Qt.ItemDataRole.UserRole) or "")
         if name == _NEW_CONNECTION_ID:
+            self._show_conn_form()
             self._selected_conn = ""
             self.conn_form.clear()
             self.conn_test_status.setStyleSheet(f"color:{Theme.MUTED}; font-size:12px;")
@@ -1137,9 +1248,118 @@ class SettingsDialog(ChromeDialog):
             return
         self._remove_draft(self.conn_list, _NEW_CONNECTION_ID)
         self._selected_conn = name
+        collection = self._collection_for(name)
+        if collection is not None:
+            self._show_excel_panel(name, collection)
+            return
+        self._show_conn_form()
         self.conn_form.load(self._connections.get(name))
         self.conn_test_status.clear()
         self._set_connection_new_mode(False)
+
+    # ── Excel collections ─────────────────────────────────────────────────────
+
+    def _collection_for(self, name: str):
+        if self._config_dir is None:
+            return None
+        from dbaide.ingest import collection_for_connection
+        path = (self._connections.get(name) or {}).get("path") or ""
+        return collection_for_connection(self._config_dir, path)
+
+    def _current_collection(self):
+        return self._collection_for(self._selected_conn) if self._selected_conn else None
+
+    def _show_conn_form(self) -> None:
+        self.workbook_panel.hide()
+        self._conn_form_area.show()
+
+    def _show_excel_panel(self, name: str, collection) -> None:
+        self._conn_form_area.hide()
+        self.conn_more.setEnabled(False)   # the form-level actions don't apply here
+        self.workbook_panel.load(name, collection.workbooks())
+        self.workbook_panel.show()
+
+    def _pick_spreadsheets(self) -> list[str]:
+        from dbaide.ingest import SUPPORTED_EXTS
+        files = get_open_file_names(self, _pt("excel.pick_title"), "", _pt("excel.file_filter"))
+        return [f for f in files if Path(f).suffix.lower() in SUPPORTED_EXTS]
+
+    def _create_excel_collection(self) -> None:
+        from dbaide.ingest import collection_dir, import_workbooks
+
+        if self._config_dir is None:
+            return
+        files = self._pick_spreadsheets()
+        if not files:
+            return
+        suggested = Path(files[0]).stem.strip() or "import"
+        name, ok = QInputDialog.getText(
+            self, _pt("excel.name_title"), _pt("excel.name_prompt"), text=suggested
+        )
+        name = (name or "").strip()
+        if not ok or not name:
+            return
+        if name in self._connections:
+            dialog_warn(self, _pt("settings.title"), _pt("excel.err.name_taken", name=name))
+            return
+        dest = collection_dir(self._config_dir, name)
+        try:
+            QApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)
+            result = import_workbooks(files, dest_dir=dest)
+        except Exception as exc:  # noqa: BLE001
+            dialog_warn(self, _pt("settings.title"), _pt("excel.err.import_failed", error=str(exc)))
+            return
+        finally:
+            QApplication.restoreOverrideCursor()
+        # Register it through the normal save path; once the list reloads and re-selects
+        # this connection, _on_connection_selected detects the collection and shows the panel.
+        self._selected_conn = name
+        self.connection_saved.emit({
+            "name": name, "type": "sqlite", "path": str(result.db_path),
+            "make_default": not self._connections,
+        })
+
+    def _excel_add_workbook(self) -> None:
+        collection = self._current_collection()
+        if collection is None:
+            return
+        files = self._pick_spreadsheets()
+        if not files:
+            return
+        try:
+            QApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)
+            collection.add(files)
+        except Exception as exc:  # noqa: BLE001
+            dialog_warn(self, _pt("settings.title"), _pt("excel.err.import_failed", error=str(exc)))
+            return
+        finally:
+            QApplication.restoreOverrideCursor()
+        self.workbook_panel.load(self._selected_conn, collection.workbooks())
+        self.excel_collection_changed.emit(self._selected_conn)
+
+    def _excel_remove_workbook(self, workbook_id: str) -> None:
+        collection = self._current_collection()
+        if collection is None:
+            return
+        books = collection.workbooks()
+        target = next((w for w in books if w.id == workbook_id), None)
+        if target is None:
+            return
+        last = len(books) == 1
+        prompt = "excel.confirm_remove_last" if last else "excel.confirm_remove"
+        if not dialog_confirm(self, _pt("settings.title"), _pt(prompt, file=target.source_filename)):
+            return
+        if last:
+            # Empty collection → drop the whole connection (controller cleans up the files).
+            self.connection_deleted.emit(self._selected_conn)
+            return
+        try:
+            collection.remove(workbook_id)
+        except Exception as exc:  # noqa: BLE001
+            dialog_warn(self, _pt("settings.title"), _pt("excel.err.import_failed", error=str(exc)))
+            return
+        self.workbook_panel.load(self._selected_conn, collection.workbooks())
+        self.excel_collection_changed.emit(self._selected_conn)
 
     def _on_model_selected(self, current, _previous) -> None:
         if not current:
@@ -1253,6 +1473,7 @@ class SettingsDialog(ChromeDialog):
             self.test_conn_btn.setEnabled(not busy)
             self.add_conn_btn.setEnabled(not busy)
             self.import_conn_btn.setEnabled(not busy)
+            self.import_excel_btn.setEnabled(not busy)
             key = self._selected_list_key(self.conn_list)
             self.conn_more.setEnabled((not busy) and bool(key) and key != _NEW_CONNECTION_ID)
             if busy:
@@ -1274,6 +1495,7 @@ class SettingsDialog(ChromeDialog):
             self.save_conn_btn.setEnabled(not busy)
             self.add_conn_btn.setEnabled(not busy)
             self.import_conn_btn.setEnabled(not busy)
+            self.import_excel_btn.setEnabled(not busy)
             key = self._selected_list_key(self.conn_list)
             self.conn_more.setEnabled((not busy) and bool(key) and key != _NEW_CONNECTION_ID)
             if busy:

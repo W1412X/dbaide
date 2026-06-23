@@ -79,6 +79,23 @@ def get_open_file_name(
     return ((files[0] if files else "") if accepted else "", name_filter)
 
 
+def get_open_file_names(
+    parent: QWidget | None,
+    caption: str,
+    directory: str = "",
+    file_filter: str = "",
+) -> list[str]:
+    dialog = _prepare_dialog(parent, caption, directory, file_filter)
+    dialog.setAcceptMode(QFileDialog.AcceptMode.AcceptOpen)
+    dialog.setFileMode(QFileDialog.FileMode.ExistingFiles)
+    try:
+        accepted = dialog.exec() == QFileDialog.DialogCode.Accepted
+        files = dialog.selectedFiles()
+    finally:
+        dialog.deleteLater()  # don't accumulate hidden non-native dialogs across a session
+    return list(files) if accepted else []
+
+
 def get_save_file_name(
     parent: QWidget | None,
     caption: str,

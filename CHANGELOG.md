@@ -17,6 +17,12 @@ All notable changes to DBAide are documented here. The format is loosely based o
   skipped, and a `manifest.json` recording provenance. The import runs in one transaction
   and leaves no partial database on failure. `.xlsx` needs the optional `openpyxl`
   (`pip install dbaide[imports]`); CSV needs nothing.
+- **Managed Excel collections in the desktop** — Settings → Connections gains an
+  **Import Excel** button to create a collection, and selecting an existing collection
+  shows a workbook manager (right pane) where you can **add** more files or **remove**
+  individual workbooks (removing the last one deletes the connection). A collection is an
+  ordinary read-only `sqlite` connection under the hood, so the assistant, charts and
+  read-only safety all work unchanged.
 
 ## [0.9.3] — 2026-06-22
 

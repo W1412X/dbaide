@@ -1328,11 +1328,13 @@ class MainWindow(QMainWindow):
             language=get_language(),
             stream_answers=self.service.cfg.stream_answers(),
             debug_trace=self.service.cfg.debug_trace(),
+            config_dir=str(self.service.cfg.path.parent),
             parent=self,
             initial_page=page,
         )
         dialog.connection_saved.connect(lambda payload: self._settings_save_connection(dialog, payload))
         dialog.connection_deleted.connect(lambda name: self._settings_delete_connection(dialog, name))
+        dialog.excel_collection_changed.connect(lambda name: self._settings_excel_changed(name))
         dialog.connection_test.connect(lambda payload: self._settings_test_connection(dialog, payload))
         dialog.model_saved.connect(lambda payload: self._settings_save_model(dialog, payload))
         dialog.model_deleted.connect(lambda name: self._settings_delete_model(dialog, name))
@@ -1613,13 +1615,34 @@ class MainWindow(QMainWindow):
         tabs.setCurrentIndex(idx)
 
     def _settings_delete_connection(self, dialog: SettingsDialog, name: str) -> None:
+        entry = next((c for c in (self.bootstrap.get("connections") or []) if c.get("name") == name), {})
+        db_path = str(entry.get("path") or "")
+
         def on_done(_result: object) -> None:
+            self._cleanup_excel_collection(db_path)
             if not sip.isdeleted(dialog):
                 dialog.remove_connection_entry(name)
             self.bus.emit(CONNECTIONS_CHANGED, {"instance": name})
             self.toast(_i18n_t("toast.conn_removed"))
 
         self._run_background("delete_connection", {"name": name}, on_done)
+
+    def _cleanup_excel_collection(self, db_path: str) -> None:
+        """If the deleted connection was an Excel collection, remove its generated files."""
+        from dbaide.ingest import collection_for_connection
+        collection = collection_for_connection(self.service.cfg.path.parent, db_path)
+        if collection is None:
+            return
+        import shutil
+        shutil.rmtree(collection.dir, ignore_errors=True)
+
+    def _settings_excel_changed(self, name: str) -> None:
+        """A workbook was added/removed: the collection's tables changed, so re-sync the
+        connection's schema and let open views refresh."""
+        def on_done(_result: object) -> None:
+            self.bus.emit(CONNECTIONS_CHANGED, {"instance": name})
+
+        self._run_background("refresh_instance", {"name": name}, on_done, on_error=lambda _e: None)
 
     def _settings_test_connection(self, dialog: SettingsDialog, payload: dict[str, Any]) -> None:
         self._ensure_ui_state().set_settings_busy(dialog, "test", True, target="connection")

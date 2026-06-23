@@ -128,3 +128,65 @@ def test_prepare_dialog_prefills_extensionless_save_name(qapp, tmp_path):
     import os
     assert os.path.realpath(d3.directory().absolutePath()) == os.path.realpath(str(tmp_path))
     d3.deleteLater()
+
+
+def _find_conn_row(dialog, name):
+    from PyQt6.QtCore import Qt
+    for i in range(dialog.conn_list.count()):
+        if dialog.conn_list.item(i).data(Qt.ItemDataRole.UserRole) == name:
+            return i
+    return -1
+
+
+def test_excel_collection_panel_toggles_and_manages_workbooks(qapp, tmp_path, monkeypatch):
+    """Selecting an Excel-collection connection shows the workbook manager (not the host
+    form); adding/removing workbooks updates it."""
+    from dbaide.desktop.dialogs.settings import SettingsDialog
+    from dbaide.desktop.dialogs import settings as settings_mod
+    from dbaide.ingest import ExcelCollection, collection_dir
+
+    cfg_dir = tmp_path / "cfg"
+    cfg_dir.mkdir()
+    # build a real collection on disk
+    sales = tmp_path / "sales.csv"; sales.write_text("amt\n10\n20\n", encoding="utf-8")
+    cust = tmp_path / "customers.csv"; cust.write_text("name\nAda\n", encoding="utf-8")
+    col = ExcelCollection(collection_dir(cfg_dir, "shop"))
+    col.add([sales])
+
+    connections = [
+        {"name": "shop", "type": "sqlite", "path": str(col.db_path)},
+        {"name": "prod", "type": "mysql", "host": "localhost"},
+    ]
+    dialog = SettingsDialog(
+        connections=connections, models=[], config_dir=str(cfg_dir), initial_page="connections",
+    )
+
+    # selecting the collection shows the panel, hides the DB form
+    dialog.conn_list.setCurrentRow(_find_conn_row(dialog, "shop"))
+    qapp.processEvents()
+    assert not dialog.workbook_panel.isHidden()
+    assert dialog._conn_form_area.isHidden()
+
+    # selecting a normal connection flips back to the form
+    dialog.conn_list.setCurrentRow(_find_conn_row(dialog, "prod"))
+    qapp.processEvents()
+    assert not dialog._conn_form_area.isHidden()
+    assert dialog.workbook_panel.isHidden()
+
+    # add a workbook through the panel's flow (stub the file picker)
+    dialog.conn_list.setCurrentRow(_find_conn_row(dialog, "shop"))
+    qapp.processEvents()
+    monkeypatch.setattr(dialog, "_pick_spreadsheets", lambda: [str(cust)])
+    changed = []
+    dialog.excel_collection_changed.connect(changed.append)
+    dialog._excel_add_workbook()
+    assert {w.source_filename for w in col.workbooks()} == {"sales.csv", "customers.csv"}
+    assert changed == ["shop"]
+
+    # remove a (non-last) workbook with confirmation stubbed to True
+    monkeypatch.setattr(settings_mod, "dialog_confirm", lambda *a, **k: True)
+    wid = next(w.id for w in col.workbooks() if w.source_filename == "sales.csv")
+    dialog._excel_remove_workbook(wid)
+    assert [w.source_filename for w in col.workbooks()] == ["customers.csv"]
+
+    dialog.deleteLater()
