@@ -76,6 +76,29 @@ def test_latest_agenda_reads_live_and_persisted_shapes():
     assert [i.status for i in latest_agenda_from_events([persisted])] == ["done", "in_progress"]
 
 
+def test_agenda_from_dict_tolerates_model_field_drift():
+    """Real model output uses `task` instead of `title` (it confuses the subagent tool's
+    field) and localized status words. Previously every item was silently dropped, leaving
+    an empty agenda and no panel. The parser now accepts the synonyms."""
+    from dbaide.agent.agenda import agenda_from_dict
+    items = [
+        {"task": "查询公司在职员工数", "status": "待开始"},
+        {"task": "查询公司离职员工数", "status": "未开始"},
+        {"task": "查询是否有离职又回来的员工", "status": "进行中"},
+        {"task": "查询王煦的入职时间", "status": "已完成"},
+    ]
+    parsed = agenda_from_dict(items)
+    assert [i.title for i in parsed] == [it["task"] for it in items]
+    assert [i.status for i in parsed] == ["pending", "pending", "in_progress", "done"]
+    # English synonyms (name/text + todo/doing/finished) also resolve
+    alt = agenda_from_dict([
+        {"name": "scan", "status": "todo"},
+        {"text": "run", "status": "doing"},
+        {"title": "verify", "status": "finished"},
+    ])
+    assert [i.status for i in alt] == ["pending", "in_progress", "done"]
+
+
 class _AgendaLLM(LLMClient):
     def __init__(self) -> None:
         self.calls = 0
