@@ -20,6 +20,7 @@ from PyQt6.QtWidgets import (
     QPlainTextEdit,
     QScrollArea,
     QSizePolicy,
+    QTextEdit,
     QVBoxLayout,
     QWidget,
 )
@@ -728,7 +729,7 @@ class _MarkdownBlock(QFrame):
                 t.setToolTip(title_tooltip)
             layout.addWidget(t)
         self._content_layout = layout
-        self._stream_view: QPlainTextEdit | None = None
+        self._stream_view: QTextEdit | None = None
         self._stream_shown_len = 0
         self._rendered: MarkdownWebWidget | None = None
         self._pending_rendered: MarkdownWebWidget | None = None
@@ -773,16 +774,21 @@ class _MarkdownBlock(QFrame):
     def _ensure_stream_view(self) -> None:
         if self._stream_view is not None:
             return
-        view = QPlainTextEdit()
+        # QTextEdit (not QPlainTextEdit): its layout sizes the whole document, so
+        # documentLayout().documentSize() gives the true pixel height immediately — even while
+        # the view is clipped with scrollbars off. QPlainTextEdit reports a lazy line *count*,
+        # which left the streamed answer clipped to ~one line.
+        view = QTextEdit()
         view.setReadOnly(True)
         view.setFrameShape(QFrame.Shape.NoFrame)
         view.setFont(QFont("Inter", 13))
-        view.setLineWrapMode(QPlainTextEdit.LineWrapMode.WidgetWidth)
+        view.setLineWrapMode(QTextEdit.LineWrapMode.WidgetWidth)
         view.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         view.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         view.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        view.document().setDocumentMargin(0)
         view.setStyleSheet(
-            f"QPlainTextEdit {{ background: transparent; border: none; color: {Theme.TEXT}; padding: 0; }}"
+            f"QTextEdit {{ background: transparent; border: none; color: {Theme.TEXT}; padding: 0; }}"
         )
         view.document().contentsChanged.connect(self._sync_stream_height)
         self._content_layout.addWidget(view)
@@ -806,16 +812,14 @@ class _MarkdownBlock(QFrame):
         view = self._stream_view
         if view is None:
             return
-        if view.viewport().width() < 50:
-            # Not laid out yet — measuring now would wrap every word; resize/debounce re-fires.
+        width = view.viewport().width()
+        if width < 50:
+            # Not laid out yet — measuring now would wrap every word; resize/contentsChanged re-fires.
             return
         doc = view.document()
-        fm = view.fontMetrics()
-        # QPlainTextEdit's documentSize().height() is a wrapped-LINE COUNT, not pixels (and it
-        # ignores setTextWidth), so convert lines → pixels instead of treating it as a height.
-        lines = max(1.0, doc.documentLayout().documentSize().height())
-        height = int(round(lines * fm.lineSpacing() + 2 * doc.documentMargin())) + 4
-        height = max(height, fm.lineSpacing() + 8)
+        doc.setTextWidth(width)                       # QTextDocumentLayout → full pixel height
+        height = int(doc.documentLayout().documentSize().height()) + 4
+        height = max(height, view.fontMetrics().lineSpacing() + 8)
         if abs(height - self._last_stream_height) < 2:
             return
         self._last_stream_height = height

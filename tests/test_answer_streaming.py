@@ -178,3 +178,33 @@ def test_stream_view_height_tracks_wrapped_content():
     # Far more than one or two lines — the old line-count-as-pixels bug capped this near ~24px.
     assert view.height() > 6 * line_spacing
     block.deleteLater()
+
+
+def test_stream_height_grows_during_incremental_streaming():
+    """Real scenario: as chunks arrive the view height must keep up with content, not stay
+    clipped (the timer-debounce starved during continuous streaming, and QPlainTextEdit
+    reported a stale line count — both fixed by QTextEdit + per-chunk pixel measure)."""
+    import os
+    os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+    from PyQt6.QtWidgets import QApplication
+    from dbaide.desktop.components.conversation import _MarkdownBlock
+
+    app = QApplication.instance() or QApplication([])
+    block = _MarkdownBlock("")
+    block.resize(420, 800)
+    block.show()
+    app.processEvents()
+
+    para = "This is a chunk of streamed answer text that wraps over a couple of lines. "
+    heights = []
+    acc = ""
+    for _ in range(8):
+        acc += para * 2 + "\n\n"
+        block.set_streaming_text(acc)        # contentsChanged → _sync_stream_height per chunk
+        app.processEvents()
+        heights.append(block._stream_view.height())
+
+    ls = block._stream_view.fontMetrics().lineSpacing()
+    assert heights == sorted(heights)        # monotonic growth, never clipped back to one line
+    assert heights[-1] > heights[0] + 8 * ls  # grew by many lines over the stream
+    block.deleteLater()
