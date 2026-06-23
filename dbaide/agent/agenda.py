@@ -118,7 +118,12 @@ def latest_agenda_from_events(events: list[dict[str, Any]]) -> list[AgendaItem]:
             continue
         if str(event.get("stage") or "").strip() != "update_agenda":
             continue
-        payload = event.get("result_data") if isinstance(event.get("result_data"), dict) else event
+        # Live events carry the structured agenda under `result_data`; the persisted /
+        # reloaded trace carries it under `metadata` (result_data is flattened to a preview
+        # string). Fall back to the event itself for the oldest top-level shape.
+        payload = event.get("result_data") if isinstance(event.get("result_data"), dict) else None
+        if payload is None:
+            payload = event.get("metadata") if isinstance(event.get("metadata"), dict) else event
         agenda_payload = payload.get("agenda") if isinstance(payload, dict) else None
         if isinstance(agenda_payload, dict):
             agenda = agenda_from_dict(agenda_payload.get("items"), previous=agenda)

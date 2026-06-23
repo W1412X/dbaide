@@ -51,6 +51,29 @@ def test_update_agenda_tool_normalizes_and_reuses_ids(tmp_path):
     assert [item.id for item in orch.run_state.agenda] == ids
     assert orch.run_state.agenda[0].status == "done"
     assert orch.run_state.agenda[1].status == "in_progress"
+    # The tool carries the structured agenda in meta → trace metadata → persisted trace,
+    # so the conversation's agenda panel can rebuild after finalize/reload.
+    assert isinstance(second.meta, dict) and "agenda" in second.meta
+    assert second.meta["agenda"]["items"][0]["title"] == "Inspect schema"
+
+
+def test_latest_agenda_reads_live_and_persisted_shapes():
+    """The agenda panel parser must handle the live event (structured under result_data)
+    AND the persisted/reloaded event (structured under metadata; result_data is flattened
+    to a preview string). The metadata path regressed the panel after a turn finalized."""
+    from dbaide.agent.agenda import latest_agenda_from_events
+    items = [
+        {"id": "t1", "title": "Inspect schema", "status": "done"},
+        {"id": "t2", "title": "Write query", "status": "in_progress"},
+    ]
+    live = {"stage": "update_agenda", "result_data": {"agenda": {"items": items}}}
+    persisted = {
+        "stage": "update_agenda",
+        "output_preview": "{'agenda': {'items': [...]}}",  # truncated string, structure lost
+        "metadata": {"agenda": {"items": items}},
+    }
+    assert [i.title for i in latest_agenda_from_events([live])] == ["Inspect schema", "Write query"]
+    assert [i.status for i in latest_agenda_from_events([persisted])] == ["done", "in_progress"]
 
 
 class _AgendaLLM(LLMClient):

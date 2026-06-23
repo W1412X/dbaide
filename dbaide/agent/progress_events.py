@@ -209,7 +209,7 @@ def subagent_event(
 def from_trace_event(event: TraceEvent) -> dict[str, Any]:
     detail_parts = [event.summary, event.input_preview, event.output_preview]
     detail = " · ".join(part.strip() for part in detail_parts if part and part.strip())
-    return progress_event(
+    out = progress_event(
         stage=event.stage or event.actor or "agent",
         title=event.title or event.stage or "step",
         status=event.status or "running",
@@ -217,6 +217,11 @@ def from_trace_event(event: TraceEvent) -> dict[str, Any]:
         detail=detail[:500],
         duration_ms=float(event.duration_ms or 0.0),
     )
+    # Structured payload (e.g. the agenda task list) is carried in metadata so it survives
+    # the trace's preview-string flattening; re-expose it so the UI can rebuild from it.
+    if isinstance(event.metadata, dict) and event.metadata:
+        out["result_data"] = dict(event.metadata)
+    return out
 
 
 def progress_label(payload: str | dict[str, Any]) -> str:

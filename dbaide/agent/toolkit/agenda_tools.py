@@ -18,14 +18,18 @@ def register(registry: ToolRegistry, orchestrator) -> None:
         agenda = agenda_from_dict(items, previous=orchestrator.run_state.agenda)
         orchestrator.run_state.agenda = agenda
         explanation = " ".join(str(args.get("explanation") or "").split()).strip()
+        agenda_payload = {
+            "items": agenda_to_dict(agenda),
+            "explanation": explanation,
+        }
         data = {
             "updated": True,
             "summary": agenda_summary(agenda),
-            "agenda": {
-                "items": agenda_to_dict(agenda),
-                "explanation": explanation,
-            },
+            "agenda": agenda_payload,
         }
-        return ToolResult(ok=True, data=data)
+        # Carry the structured agenda into the trace event's metadata so it survives
+        # persistence/reload (the generic output_preview is a truncated string); the
+        # conversation's agenda panel rebuilds from this.
+        return ToolResult(ok=True, data=data, meta={"agenda": agenda_payload})
 
     registry.register(UPDATE_AGENDA, _update_agenda)

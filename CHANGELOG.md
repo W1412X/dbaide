@@ -6,6 +6,16 @@ All notable changes to DBAide are documented here. The format is loosely based o
 
 ## [Unreleased]
 
+### Fixed
+
+- **Agent task list (agenda)** — the conversation's agenda panel showed during a live run
+  but vanished once the turn finalized or the chat was reopened. The tool layer flattened
+  the tool result to a 200-char `output_preview` string in the persisted trace, so the
+  structured task list was lost and the panel's parser found nothing. The agenda now rides
+  in the trace event's `metadata` (carried via a new opt-in `ToolResult.meta`), survives
+  persistence/reload, and the parser reads it from `result_data` (live) or `metadata`
+  (persisted).
+
 ## [0.9.2] — 2026-06-22
 
 ### Changed

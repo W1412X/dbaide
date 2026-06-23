@@ -17,7 +17,7 @@ logger = logging.getLogger("dbaide.tools.registry")
 class ToolResult:
     """Result of a tool invocation."""
 
-    __slots__ = ("ok", "data", "error", "duration_ms")
+    __slots__ = ("ok", "data", "error", "duration_ms", "meta")
 
     def __init__(
         self,
@@ -26,11 +26,16 @@ class ToolResult:
         data: Any = None,
         error: DBAideError | None = None,
         duration_ms: float = 0.0,
+        meta: dict[str, Any] | None = None,
     ) -> None:
         self.ok = ok
         self.data = data
         self.error = error
         self.duration_ms = duration_ms
+        # Small, structured payload to carry into the trace event's `metadata` (and thus
+        # into the persisted trace) when a one-line `output_preview` would lose structure
+        # the UI needs — e.g. the agenda task list. Opt-in: most tools leave it None.
+        self.meta = meta
 
     def to_dict(self) -> dict[str, Any]:
         result = {"ok": self.ok, "duration_ms": self.duration_ms}
@@ -167,6 +172,7 @@ class ToolRegistry:
                 output_preview=str(result.data)[:200] if result.data else "",
                 duration_ms=elapsed,
                 status="completed" if result.ok else "failed",
+                metadata=getattr(result, "meta", None) or {},
             ))
 
             # Cache result
