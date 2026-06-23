@@ -6,6 +6,13 @@ All notable changes to DBAide are documented here. The format is loosely based o
 
 ## [Unreleased]
 
+### Added
+
+- **Copy whole-turn trace** — the trace drawer header now has a copy button that copies the
+  entire turn's trace (every step + SQL), filling the gap between copying a single step
+  (the detail tray) and the whole session. The capability existed on the inline timeline
+  but its header was hidden in the drawer.
+
 ### Fixed
 
 - **Agent task list (agenda)** — the conversation's agenda panel showed during a live run

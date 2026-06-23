@@ -1015,6 +1015,23 @@ class TraceDrawerPanel(QFrame):
         finally:
             self.setUpdatesEnabled(True)
 
+    def _copy_trace(self) -> None:
+        """Copy the entire turn's trace (every step + SQL) to the clipboard."""
+        text = self._timeline.copy_text()
+        if not text:
+            return
+        QApplication.clipboard().setText(text)
+        self._copy_btn.setIcon(svg_icon("check", color=Theme.GREEN, size=15))
+
+        def _restore() -> None:
+            try:
+                from PyQt6 import sip
+                if not sip.isdeleted(self._copy_btn):
+                    self._copy_btn.setIcon(svg_icon("copy", color=Theme.TEXT_2, size=15))
+            except RuntimeError:
+                pass
+        QTimer.singleShot(1200, _restore)
+
     def relayout(self, *, animate: bool = False, raise_panel: bool = False) -> None:
         self._relayout(animate=animate, raise_panel=raise_panel)
 
@@ -1146,6 +1163,20 @@ class TraceDrawerPanel(QFrame):
         self._title = QLabel("", self)
         self._title.setStyleSheet(f"color: {Theme.TEXT}; font-size: 13px; font-weight: 700; background: transparent;")
         top.addWidget(self._title, 1)
+        # Copy the WHOLE turn's trace (all steps + SQL) — the per-step tray only copies one
+        # step, and the inline timeline's own header is hidden in the drawer (show_header=False).
+        self._copy_btn = QToolButton(self)
+        self._copy_btn.setIcon(svg_icon("copy", color=Theme.TEXT_2, size=15))
+        self._copy_btn.setIconSize(QSize(15, 15))
+        self._copy_btn.setToolTip(t("trace.copy"))
+        self._copy_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._copy_btn.setFixedSize(28, 28)
+        self._copy_btn.setStyleSheet(
+            f"QToolButton {{ background: transparent; border: none; border-radius: 7px; }}"
+            f"QToolButton:hover {{ background: {Theme.PANEL_2}; }}"
+        )
+        self._copy_btn.clicked.connect(self._copy_trace)
+        top.addWidget(self._copy_btn)
         close = QToolButton(self)
         close.setIcon(svg_icon("x", color=Theme.TEXT_2, size=16))
         close.setIconSize(QSize(16, 16))
