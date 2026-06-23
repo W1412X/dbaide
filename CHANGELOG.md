@@ -28,6 +28,11 @@ All notable changes to DBAide are documented here. The format is loosely based o
   undocumented object (now carries `{databases, tables}` properties). The tool→function
   converter now passes `enum`, array `items_schema`, and nested object `properties` through
   to the native tool schema.
+- **MCP `column_stats` tool** — the `metrics` array advertised its valid values
+  (`min`/`max`/`null_rate`/…) only in the description, not as an item `enum`, so an MCP
+  client could send unsupported metric names. It now carries a real `enum` kept in sync
+  with the metrics the tool can actually compute. (Audit confirmed every advertised MCP
+  tool maps 1:1 to a handler and all input schemas are well-formed.)
 - **Agent task list (agenda)** — the conversation's agenda panel showed during a live run
   but vanished once the turn finalized or the chat was reopened. The tool layer flattened
   the tool result to a 200-char `output_preview` string in the persisted trace, so the

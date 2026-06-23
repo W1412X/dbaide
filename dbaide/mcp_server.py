@@ -231,8 +231,13 @@ _ATOMIC_TOOLS: list[dict[str, Any]] = [
                     "description": "Columns to analyze (omit for all)",
                 },
                 "metrics": {
-                    "type": "array", "items": {"type": "string"},
-                    "description": "Metrics to compute: min, max, null_rate, distinct_count, min_len, max_len, empty_rate, top_values",
+                    "type": "array",
+                    "items": {
+                        "type": "string",
+                        "enum": ["min", "max", "null_rate", "distinct_count",
+                                 "min_len", "max_len", "empty_rate", "top_values"],
+                    },
+                    "description": "Metrics to compute (omit for type-aware defaults)",
                 },
                 "database": {"type": "string"},
                 "top_k": {"type": "integer", "description": "Top-K values to return (default 10)"},

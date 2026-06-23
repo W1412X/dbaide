@@ -450,6 +450,30 @@ class TestHandlerValidation:
         assert seen["enforce_cost_gate"] is True
 
 
+def test_every_advertised_tool_has_a_handler():
+    advertised = {mcp.ASK_TOOL["name"]} | {t["name"] for t in mcp._ATOMIC_TOOLS}
+    assert advertised == set(mcp._TOOL_HANDLERS)
+
+
+def test_column_stats_metrics_enum_matches_canonical_set():
+    """The MCP schema advertises the metric choices as a real enum (not just prose), and
+    it must stay in sync with the metrics the tool can actually compute."""
+    from dbaide.tools.profile import _ALL_METRICS
+    cs = next(t for t in mcp._ATOMIC_TOOLS if t["name"] == "column_stats")
+    enum = cs["inputSchema"]["properties"]["metrics"]["items"]["enum"]
+    assert set(enum) == set(_ALL_METRICS)
+
+
+def test_advertised_tool_input_schemas_are_wellformed():
+    """Each tool's inputSchema is an object schema and every `required` key exists in
+    `properties` (a stray required key would make compliant clients reject all calls)."""
+    for tool in [mcp.ASK_TOOL, *mcp._ATOMIC_TOOLS]:
+        schema = tool["inputSchema"]
+        assert schema.get("type") == "object", tool["name"]
+        props = set(schema.get("properties", {}))
+        assert set(schema.get("required", [])) <= props, tool["name"]
+
+
 def test_inspect_metadata_reports_more_tables_when_limited(monkeypatch):
     class FakeSchema:
         def list_tables(self, database=""):
