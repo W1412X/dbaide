@@ -456,12 +456,398 @@ def _repair_json_string(text: str) -> str | None:
         return None
 
 
+def _parse_json_object(text: str) -> dict[str, Any]:
+    """Extract and parse a JSON object from model text (tolerant of fences, control
+    characters, and unescaped inner quotes). Shared by all clients."""
+    stripped = _extract_json_block(text)
+    try:
+        result = json.loads(stripped, strict=False)
+    except (json.JSONDecodeError, ValueError):
+        repaired = _repair_json_string(stripped)
+        if repaired is not None:
+            result = json.loads(repaired, strict=False)
+        else:
+            raise
+    if not isinstance(result, dict):
+        raise ValueError(f"Expected JSON object, got {type(result).__name__}")
+    return result
+
+
+def _http_post_json(
+    url: str, payload: dict[str, Any], headers: dict[str, str], timeout: int,
+    *, retries: int = 3, backoff: tuple[int, ...] = (1, 2, 4),
+    tools_unsupported_statuses: tuple[int, ...] = (),
+) -> dict[str, Any]:
+    """POST JSON with the same retry/backoff policy as OpenAICompatibleClient, returning the
+    decoded JSON object. 4xx codes in ``tools_unsupported_statuses`` raise ToolsUnsupported so
+    the agent can fall back to the JSON decision protocol."""
+    body = json.dumps(payload).encode("utf-8")
+    last_exc: Exception | None = None
+    for attempt in range(retries):
+        req = urllib.request.Request(url, data=body, headers=headers, method="POST")
+        try:
+            # url is validated as an absolute http(s) URL by the caller.
+            with urllib.request.urlopen(req, timeout=timeout, context=_ssl_context()) as resp:  # nosec B310
+                raw = resp.read()
+            try:
+                data = json.loads(raw.decode("utf-8"))
+            except (ValueError, UnicodeDecodeError) as exc:
+                raise RuntimeError(f"LLM returned a non-JSON response: {str(exc)[:120]}") from exc
+            if not isinstance(data, dict):
+                raise RuntimeError(f"LLM returned unexpected JSON type: {type(data).__name__}")
+            return data
+        except urllib.error.HTTPError as exc:
+            txt = exc.read().decode("utf-8", errors="replace")
+            if exc.code in tools_unsupported_statuses:
+                raise ToolsUnsupported(f"endpoint rejected tools (HTTP {exc.code}): {txt[:200]}") from exc
+            last_exc = RuntimeError(f"LLM HTTP {exc.code}: {txt[:200]}")
+            last_exc.status_code = exc.code  # type: ignore[attr-defined]
+            if exc.code in (429, 500, 502, 503, 504) and attempt < retries - 1:
+                time.sleep(float(backoff[min(attempt, len(backoff) - 1)]))
+                continue
+            raise last_exc from exc
+        except (urllib.error.URLError, TimeoutError, OSError) as exc:
+            last_exc = RuntimeError(f"LLM connection failed: {exc}")
+            if attempt < retries - 1:
+                time.sleep(float(backoff[min(attempt, len(backoff) - 1)]))
+                continue
+            raise last_exc from exc
+    raise last_exc or RuntimeError("LLM call failed after retries")
+
+
+class AnthropicClient(LLMClient):
+    """Anthropic Messages API (``POST /v1/messages``). Raw HTTP to match this project's
+    SDK-free LLM layer. System messages are hoisted to the top-level ``system`` field; tool
+    calls are read from ``tool_use`` content blocks. No ``temperature`` is sent (removed on
+    Opus 4.7/4.8 and Fable 5); ``thinking`` is left at the model default."""
+
+    DEFAULT_BASE_URL = "https://api.anthropic.com"
+    ANTHROPIC_VERSION = "2023-06-01"
+    MAX_TOKENS = 16000
+
+    def __init__(self, cfg: ModelConfig) -> None:
+        self.cfg = cfg
+        base = _validated_http_base_url(cfg.base_url) or self.DEFAULT_BASE_URL
+        if base.endswith("/v1"):          # tolerate a pasted .../v1 — we append /v1/messages
+            base = base[:-3]
+        self.base_url = base
+        self.api_key = cfg.api_key or (os.environ.get(cfg.api_key_env) if cfg.api_key_env else "")
+        self.last_usage: dict[str, Any] | None = None
+        if not self.api_key or not cfg.model:
+            missing = [n for n, v in (("Model ID", cfg.model), ("API Key (or set api_key_env)", self.api_key)) if not v]
+            raise ValueError(
+                "Anthropic model is incomplete. Missing: " + ", ".join(missing)
+                + ". Fill the fields in Settings → Models."
+            )
+
+    # ── request shaping ───────────────────────────────────────────────────────
+
+    def _headers(self) -> dict[str, str]:
+        return {
+            "content-type": "application/json",
+            "x-api-key": self.api_key,
+            "anthropic-version": self.ANTHROPIC_VERSION,
+        }
+
+    def _base_payload(self, messages: list[LLMMessage]) -> dict[str, Any]:
+        system = "\n\n".join(m.content for m in messages if m.role == "system" and m.content)
+        msgs = [
+            {"role": (m.role if m.role in ("user", "assistant") else "user"), "content": m.content}
+            for m in messages if m.role != "system"
+        ]
+        if not msgs:                      # the API requires ≥1 message and a leading user turn
+            msgs = [{"role": "user", "content": system or "Continue."}]
+            system = ""
+        payload: dict[str, Any] = {"model": self.cfg.model, "max_tokens": self.MAX_TOKENS, "messages": msgs}
+        if system:
+            payload["system"] = system
+        return payload
+
+    def _post(self, payload: dict[str, Any], *, tool_call: bool = False) -> dict[str, Any]:
+        data = _http_post_json(
+            f"{self.base_url}/v1/messages", payload, self._headers(),
+            max(1, int(self.cfg.timeout_seconds)),
+            tools_unsupported_statuses=(400, 404, 422, 501) if tool_call else (),
+        )
+        if data.get("type") == "error" or "error" in data:
+            raise RuntimeError(f"LLM API error: {data.get('error')}")
+        self._record_usage(data.get("usage"))
+        return data
+
+    def _record_usage(self, usage: Any) -> None:
+        if isinstance(usage, dict):
+            it, ot = usage.get("input_tokens") or 0, usage.get("output_tokens") or 0
+            self.last_usage = {"prompt_tokens": it, "completion_tokens": ot, "total_tokens": it + ot}
+        else:
+            self.last_usage = None
+
+    @staticmethod
+    def _text(data: dict[str, Any]) -> str:
+        return "".join(
+            b.get("text", "") for b in (data.get("content") or [])
+            if isinstance(b, dict) and b.get("type") == "text"
+        )
+
+    @staticmethod
+    def _convert_tool(tool: dict[str, Any]) -> dict[str, Any]:
+        fn = tool.get("function") or {}
+        return {
+            "name": fn.get("name", ""),
+            "description": fn.get("description", ""),
+            "input_schema": fn.get("parameters") or {"type": "object", "properties": {}},
+        }
+
+    # ── LLMClient API ──────────────────────────────────────────────────────────
+
+    def complete_text(self, messages: list[LLMMessage], *, json_mode: bool = False) -> str:  # type: ignore[override]
+        return self._text(self._post(self._base_payload(messages)))
+
+    def complete_json(self, messages: list[LLMMessage], *, schema_hint: str = "") -> dict[str, Any]:
+        msgs = messages + ([LLMMessage("system", schema_hint)] if schema_hint else [])
+        return _parse_json_object(self.complete_text(msgs))
+
+    def supports_tool_calling(self) -> bool:
+        return getattr(self.cfg, "tool_calling", "auto") != "off"
+
+    def complete_with_tools(self, messages: list[LLMMessage], tools: list[dict[str, Any]]) -> dict[str, Any]:
+        payload = self._base_payload(messages)
+        payload["tools"] = [self._convert_tool(t) for t in tools]
+        payload["tool_choice"] = {"type": "auto"}
+        data = self._post(payload, tool_call=True)
+        texts, calls = [], []
+        for block in (data.get("content") or []):
+            if not isinstance(block, dict):
+                continue
+            if block.get("type") == "text":
+                texts.append(block.get("text", ""))
+            elif block.get("type") == "tool_use":
+                name = str(block.get("name") or "").strip()
+                if name:
+                    args = block.get("input")
+                    calls.append({"name": name, "arguments": args if isinstance(args, dict) else {}})
+        return {"content": ("".join(texts) or None), "tool_calls": calls, "usage": self.last_usage}
+
+    def supports_streaming(self) -> bool:
+        return True
+
+    def complete_text_stream(self, messages: list[LLMMessage], on_chunk: "Callable[[str], None]",
+                             *, json_mode: bool = False) -> str:
+        payload = self._base_payload(messages)
+        payload["stream"] = True
+        parts: list[str] = []
+        in_tok = out_tok = 0
+        try:
+            req = urllib.request.Request(
+                f"{self.base_url}/v1/messages", data=json.dumps(payload).encode("utf-8"),
+                headers=self._headers(), method="POST",
+            )
+            with urllib.request.urlopen(req, timeout=max(1, int(self.cfg.timeout_seconds)), context=_ssl_context()) as resp:  # nosec B310
+                for raw in resp:
+                    line = raw.decode("utf-8", errors="replace").strip()
+                    if not line.startswith("data:"):
+                        continue
+                    try:
+                        obj = json.loads(line[5:].strip())
+                    except ValueError:
+                        continue
+                    etype = obj.get("type")
+                    if etype == "content_block_delta":
+                        delta = obj.get("delta") or {}
+                        if delta.get("type") == "text_delta":
+                            piece = delta.get("text") or ""
+                            if piece:
+                                parts.append(piece)
+                                on_chunk(piece)               # may raise (cancel) → propagate
+                    elif etype == "message_start":
+                        in_tok = ((obj.get("message") or {}).get("usage") or {}).get("input_tokens") or in_tok
+                    elif etype == "message_delta":
+                        out_tok = (obj.get("usage") or {}).get("output_tokens") or out_tok
+            if parts:
+                self.last_usage = {"prompt_tokens": in_tok, "completion_tokens": out_tok, "total_tokens": in_tok + out_tok}
+                return "".join(parts)
+        except (urllib.error.URLError, urllib.error.HTTPError, TimeoutError, OSError) as exc:
+            logger.warning("llm_stream_failed, falling back to non-stream: %s", exc)
+        text = self.complete_text(messages, json_mode=json_mode)
+        if text and not parts:
+            on_chunk(text)
+        return text or "".join(parts)
+
+    def complete_json_stream(self, messages: list[LLMMessage], *, schema_hint: str = "",
+                             on_text_chunk: "Callable[[str], None] | None" = None) -> dict[str, Any]:
+        msgs = messages + ([LLMMessage("system", schema_hint)] if schema_hint else [])
+        text = self.complete_text_stream(msgs, on_text_chunk or (lambda _d: None))
+        return _parse_json_object(text)
+
+
+class OpenAIResponsesClient(LLMClient):
+    """OpenAI Responses API (``POST /v1/responses``). System messages map to ``instructions``;
+    output text is read from the ``output`` items, tool calls from ``function_call`` items.
+    No ``temperature`` is sent (the reasoning models this API targets reject it)."""
+
+    DEFAULT_BASE_URL = "https://api.openai.com/v1"
+    MAX_RETRIES = 3
+
+    def __init__(self, cfg: ModelConfig) -> None:
+        self.cfg = cfg
+        self.base_url = _validated_http_base_url(cfg.base_url) or self.DEFAULT_BASE_URL
+        self.api_key = cfg.api_key or (os.environ.get(cfg.api_key_env) if cfg.api_key_env else "")
+        self.last_usage: dict[str, Any] | None = None
+        if not self.api_key or not cfg.model:
+            missing = [n for n, v in (("Model ID", cfg.model), ("API Key (or set api_key_env)", self.api_key)) if not v]
+            raise ValueError(
+                "OpenAI Responses model is incomplete. Missing: " + ", ".join(missing)
+                + ". Fill the fields in Settings → Models."
+            )
+
+    def _headers(self) -> dict[str, str]:
+        return {"content-type": "application/json", "authorization": f"Bearer {self.api_key}"}
+
+    def _base_payload(self, messages: list[LLMMessage]) -> dict[str, Any]:
+        instructions = "\n\n".join(m.content for m in messages if m.role == "system" and m.content)
+        items = [
+            {"role": (m.role if m.role in ("user", "assistant") else "user"), "content": m.content}
+            for m in messages if m.role != "system"
+        ]
+        if not items:
+            items = [{"role": "user", "content": instructions or "Continue."}]
+            instructions = ""
+        payload: dict[str, Any] = {"model": self.cfg.model, "input": items}
+        if instructions:
+            payload["instructions"] = instructions
+        return payload
+
+    def _post(self, payload: dict[str, Any], *, tool_call: bool = False) -> dict[str, Any]:
+        data = _http_post_json(
+            f"{self.base_url}/responses", payload, self._headers(),
+            max(1, int(self.cfg.timeout_seconds)),
+            tools_unsupported_statuses=(400, 404, 422, 501) if tool_call else (),
+        )
+        if "error" in data and data.get("error"):
+            raise RuntimeError(f"LLM API error: {data['error']}")
+        self._record_usage(data.get("usage"))
+        return data
+
+    def _record_usage(self, usage: Any) -> None:
+        if isinstance(usage, dict):
+            it, ot = usage.get("input_tokens") or 0, usage.get("output_tokens") or 0
+            self.last_usage = {"prompt_tokens": it, "completion_tokens": ot, "total_tokens": it + ot}
+        else:
+            self.last_usage = None
+
+    @staticmethod
+    def _text(data: dict[str, Any]) -> str:
+        if isinstance(data.get("output_text"), str):
+            return data["output_text"]
+        parts: list[str] = []
+        for item in (data.get("output") or []):
+            if isinstance(item, dict) and item.get("type") == "message":
+                for c in (item.get("content") or []):
+                    if isinstance(c, dict) and c.get("type") == "output_text":
+                        parts.append(c.get("text", ""))
+        return "".join(parts)
+
+    @staticmethod
+    def _convert_tool(tool: dict[str, Any]) -> dict[str, Any]:
+        fn = tool.get("function") or {}
+        return {
+            "type": "function",
+            "name": fn.get("name", ""),
+            "description": fn.get("description", ""),
+            "parameters": fn.get("parameters") or {"type": "object", "properties": {}},
+        }
+
+    def complete_text(self, messages: list[LLMMessage], *, json_mode: bool = False) -> str:  # type: ignore[override]
+        return self._text(self._post(self._base_payload(messages)))
+
+    def complete_json(self, messages: list[LLMMessage], *, schema_hint: str = "") -> dict[str, Any]:
+        msgs = messages + ([LLMMessage("system", schema_hint)] if schema_hint else [])
+        return _parse_json_object(self.complete_text(msgs))
+
+    def supports_tool_calling(self) -> bool:
+        return getattr(self.cfg, "tool_calling", "auto") != "off"
+
+    def complete_with_tools(self, messages: list[LLMMessage], tools: list[dict[str, Any]]) -> dict[str, Any]:
+        payload = self._base_payload(messages)
+        payload["tools"] = [self._convert_tool(t) for t in tools]
+        payload["tool_choice"] = "auto"
+        data = self._post(payload, tool_call=True)
+        calls = []
+        for item in (data.get("output") or []):
+            if isinstance(item, dict) and item.get("type") == "function_call":
+                name = str(item.get("name") or "").strip()
+                if not name:
+                    continue
+                args = item.get("arguments")
+                if isinstance(args, str):
+                    try:
+                        args = json.loads(args) if args.strip() else {}
+                    except (ValueError, TypeError):
+                        args = {}
+                calls.append({"name": name, "arguments": args if isinstance(args, dict) else {}})
+        return {"content": (self._text(data) or None), "tool_calls": calls, "usage": self.last_usage}
+
+    def supports_streaming(self) -> bool:
+        return True
+
+    def complete_text_stream(self, messages: list[LLMMessage], on_chunk: "Callable[[str], None]",
+                             *, json_mode: bool = False) -> str:
+        payload = self._base_payload(messages)
+        payload["stream"] = True
+        parts: list[str] = []
+        try:
+            req = urllib.request.Request(
+                f"{self.base_url}/responses", data=json.dumps(payload).encode("utf-8"),
+                headers=self._headers(), method="POST",
+            )
+            with urllib.request.urlopen(req, timeout=max(1, int(self.cfg.timeout_seconds)), context=_ssl_context()) as resp:  # nosec B310
+                for raw in resp:
+                    line = raw.decode("utf-8", errors="replace").strip()
+                    if not line.startswith("data:"):
+                        continue
+                    payload_str = line[5:].strip()
+                    if payload_str == "[DONE]":
+                        break
+                    try:
+                        obj = json.loads(payload_str)
+                    except ValueError:
+                        continue
+                    etype = obj.get("type")
+                    if etype == "response.output_text.delta":
+                        piece = obj.get("delta") or ""
+                        if piece:
+                            parts.append(str(piece))
+                            on_chunk(str(piece))
+                    elif etype == "response.completed":
+                        self._record_usage(((obj.get("response") or {}).get("usage")))
+            if parts:
+                return "".join(parts)
+        except (urllib.error.URLError, urllib.error.HTTPError, TimeoutError, OSError) as exc:
+            logger.warning("llm_stream_failed, falling back to non-stream: %s", exc)
+        text = self.complete_text(messages, json_mode=json_mode)
+        if text and not parts:
+            on_chunk(text)
+        return text or "".join(parts)
+
+    def complete_json_stream(self, messages: list[LLMMessage], *, schema_hint: str = "",
+                             on_text_chunk: "Callable[[str], None] | None" = None) -> dict[str, Any]:
+        msgs = messages + ([LLMMessage("system", schema_hint)] if schema_hint else [])
+        text = self.complete_text_stream(msgs, on_text_chunk or (lambda _d: None))
+        return _parse_json_object(text)
+
+
 def build_llm_client(cfg: ModelConfig) -> LLMClient:
     if cfg.provider in {"none", ""}:
         return NullLLMClient()
     if cfg.provider == "openai_compatible":
         return OpenAICompatibleClient(cfg)
-    raise ValueError(f"Unknown LLM provider: {cfg.provider!r}. Supported: openai_compatible, none")
+    if cfg.provider == "anthropic":
+        return AnthropicClient(cfg)
+    if cfg.provider == "openai_responses":
+        return OpenAIResponsesClient(cfg)
+    raise ValueError(
+        f"Unknown LLM provider: {cfg.provider!r}. "
+        "Supported: openai_compatible, anthropic, openai_responses, none"
+    )
 
 
 def _validated_http_base_url(base_url: str) -> str:

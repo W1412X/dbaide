@@ -15,7 +15,7 @@ class TaskType(str, Enum):
 
 _VALID_TYPES = {"sqlite", "mysql", "mariadb", "postgres", "postgresql"}
 _VALID_LOAD_PROFILES = {"production", "staging", "dev"}
-_VALID_MODEL_PROVIDERS = {"none", "openai_compatible"}
+_VALID_MODEL_PROVIDERS = {"none", "openai_compatible", "anthropic", "openai_responses"}
 _VALID_SSL_MODES = {"disable", "allow", "prefer", "require", "verify-ca", "verify-full"}
 
 _TOKEN_UNITS = {"k": 1_000, "m": 1_000_000}

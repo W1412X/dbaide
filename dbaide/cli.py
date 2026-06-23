@@ -215,7 +215,8 @@ def build_parser() -> argparse.ArgumentParser:
     msub.add_parser("list", help="List configured models")
     m_add = msub.add_parser("add", help="Add or update a model config")
     m_add.add_argument("name")
-    m_add.add_argument("--provider", default="openai_compatible", choices=["openai_compatible", "none"])
+    m_add.add_argument("--provider", default="openai_compatible",
+                       choices=["openai_compatible", "anthropic", "openai_responses", "none"])
     m_add.add_argument("--base-url", default="", help="API base URL")
     m_add.add_argument("--api-key-env", default="", help="Env var containing the API key")
     m_add.add_argument("--api-key", default="", help="API key (prefer --api-key-env)")

@@ -62,16 +62,17 @@ def model_payload(model: ModelConfig) -> dict[str, Any]:
 def validate_model_config(model: ModelConfig) -> None:
     if model.provider in {"none", ""}:
         return
+    # anthropic / openai_responses default their base URL, so only the model ID and API key
+    # are required there; openai_compatible needs an explicit base URL too.
+    needs_base_url = model.provider == "openai_compatible"
     missing: list[str] = []
-    if not model.base_url.strip():
+    if needs_base_url and not model.base_url.strip():
         missing.append("Base URL")
     if not model.model.strip():
         missing.append("Model ID")
     if not model.api_key.strip() and not model.api_key_env.strip():
         missing.append("API Key")
     if missing:
-        raise ValueError(
-            "Model configuration incomplete. Missing: "
-            + ", ".join(missing)
-            + ". All three are required for openai_compatible."
-        )
+        suffix = (" All three are required for openai_compatible."
+                  if needs_base_url else "")
+        raise ValueError("Model configuration incomplete. Missing: " + ", ".join(missing) + "." + suffix)

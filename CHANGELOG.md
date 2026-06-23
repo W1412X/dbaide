@@ -8,6 +8,16 @@ All notable changes to DBAide are documented here. The format is loosely based o
 
 ### Added
 
+- **Two more model API protocols** — besides OpenAI-compatible, you can now pick `anthropic`
+  (Claude Messages API: `/v1/messages`, `x-api-key` + `anthropic-version`, system hoisted to the
+  top-level field, tool calls via `tool_use` blocks, SSE streaming) and `openai_responses`
+  (OpenAI Responses API: `/v1/responses`, `instructions` + `input`, `function_call` items) in
+  Settings → Models or via `dbaide model add --provider`. Both are raw-HTTP `LLMClient`
+  subclasses — no SDK dependency, consistent with the existing client — and support native
+  tool calling, JSON decisions, and streaming. (DeepSeek, Kimi, Qwen, GLM, Ollama, and Azure
+  already work through the OpenAI-compatible option; `anthropic` and `openai_responses` are the
+  genuinely different wire formats.)
+
 - **Import CSV/Excel** — `dbaide ingest <file…>` imports one or more `.csv`/`.tsv`/`.xlsx`/
   `.xlsm` files into a local SQLite connection you can immediately ask/query, registered
   like any other connection. Phase 1 handles the common case — one clean rectangular table

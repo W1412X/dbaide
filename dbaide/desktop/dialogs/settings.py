@@ -94,7 +94,7 @@ class ModelForm(QWidget):
         configure_form(form)
         self.profile_name = QLineEdit()
         self.provider = Combo()
-        self.provider.addItems(["none", "openai_compatible"])
+        self.provider.addItems(["none", "openai_compatible", "anthropic", "openai_responses"])
         self.base_url = QLineEdit()
         self.api_key = QLineEdit()
         self.api_key.setPlaceholderText(_pt("settings.api_key_placeholder"))
