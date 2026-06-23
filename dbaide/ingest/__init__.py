@@ -8,13 +8,24 @@ Public surface:
 
 from __future__ import annotations
 
-from dbaide.ingest.importer import ImportResult, import_workbooks
+from dbaide.ingest.collection import (
+    ExcelCollection,
+    collection_dir,
+    collection_for_connection,
+    imports_root,
+)
+from dbaide.ingest.importer import ImportResult, import_workbooks, remove_workbook
 from dbaide.ingest.manifest import ColumnInfo, ImportManifest, SheetInfo, WorkbookInfo
 from dbaide.ingest.readers import SUPPORTED_EXTS, RawSheet, RawWorkbook, read_workbook
 
 __all__ = [
     "import_workbooks",
+    "remove_workbook",
     "ImportResult",
+    "ExcelCollection",
+    "collection_dir",
+    "collection_for_connection",
+    "imports_root",
     "read_workbook",
     "RawWorkbook",
     "RawSheet",

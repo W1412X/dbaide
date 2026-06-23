@@ -36,6 +36,7 @@ class SheetInfo:
 
 @dataclass
 class WorkbookInfo:
+    id: str              # stable id within the collection (for add/remove targeting)
     source_filename: str
     file_hash: str       # sha256 of the source file (change detection / re-import match)
     imported_at: str     # ISO-8601 UTC
@@ -74,6 +75,7 @@ class ImportManifest:
                 for s in (wb.get("sheets") or [])
             ]
             workbooks.append(WorkbookInfo(
+                id=str(wb.get("id") or ""),
                 source_filename=str(wb.get("source_filename") or ""),
                 file_hash=str(wb.get("file_hash") or ""),
                 imported_at=str(wb.get("imported_at") or ""),

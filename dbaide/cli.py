@@ -934,7 +934,7 @@ def dispatch_import(args: argparse.Namespace, cfg: ConfigManager) -> int:
 
 
 def dispatch_ingest(args: argparse.Namespace, cfg: ConfigManager) -> int:
-    from dbaide.ingest import SUPPORTED_EXTS, import_workbooks
+    from dbaide.ingest import SUPPORTED_EXTS, collection_dir, import_workbooks
 
     paths = [Path(f) for f in args.files]
     for p in paths:
@@ -954,7 +954,7 @@ def dispatch_ingest(args: argparse.Namespace, cfg: ConfigManager) -> int:
         print(f"connection {name!r} already exists; use --replace to overwrite", file=sys.stderr)
         return 1
 
-    dest_dir = cfg.path.parent / "imports" / name
+    dest_dir = collection_dir(cfg.path.parent, name)
     result = import_workbooks(paths, dest_dir=dest_dir, on_progress=lambda m: print(f"  {m}"))
 
     cfg.upsert_connection(

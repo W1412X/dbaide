@@ -41,13 +41,16 @@ def import_workbooks(
     paths: list[Path | str],
     *,
     dest_dir: Path | str,
+    append: bool = False,
     now: str | None = None,
     on_progress: Callable[[str], None] | None = None,
 ) -> ImportResult:
     """Import one or more files into ``dest_dir/data.db`` and write the manifest.
 
-    The whole import runs in a single SQLite transaction; on any failure the partial
-    ``data.db`` is removed so a connection is never left half-written.
+    ``append=False`` (default) rebuilds the collection from scratch. ``append=True`` adds
+    the files to an existing collection, keeping table names unique against what's already
+    there. The new tables are written in a single transaction; on failure the existing
+    collection is left untouched (no partial tables, manifest unchanged).
     """
     files = [Path(p) for p in paths]
     if not files:
@@ -55,46 +58,80 @@ def import_workbooks(
     dest = Path(dest_dir)
     dest.mkdir(parents=True, exist_ok=True)
     db_path = dest / "data.db"
-    if db_path.exists():
-        db_path.unlink()
+    manifest_path = dest / "manifest.json"
 
-    multi = len(files) > 1
+    if append and manifest_path.exists():
+        manifest = ImportManifest.load(manifest_path)
+    else:
+        manifest = ImportManifest()
+        db_path.unlink(missing_ok=True)
+    used_tables = {s.table for w in manifest.workbooks for s in w.sheets}
     stamp = now or datetime.now(timezone.utc).isoformat(timespec="seconds")
-    manifest = ImportManifest()
-    used_tables: set[str] = set()
 
+    new_workbooks: list[WorkbookInfo] = []
     conn = sqlite3.connect(db_path)
     try:
-        for path in files:
+        for index, path in enumerate(files):
             workbook = read_workbook(path)
             file_slug = _slug(path.stem, fallback="data")
+            file_hash = _file_hash(path)
             wb_info = WorkbookInfo(
-                source_filename=workbook.filename, file_hash=_file_hash(path), imported_at=stamp
+                id=_workbook_id(file_hash, stamp, index),
+                source_filename=workbook.filename,
+                file_hash=file_hash,
+                imported_at=stamp,
             )
+            single = len(workbook.sheets) == 1
             for sheet in workbook.sheets:
-                table = _unique(_table_name(file_slug, sheet.name, multi), used_tables)
+                table = _unique(_table_name(file_slug, sheet.name), used_tables)
                 columns = _plan_columns(sheet)
                 _write_table(conn, table, columns, sheet.rows)
+                display = (
+                    path.stem if single and _slug(sheet.name, fallback="") == file_slug
+                    else f"{path.stem} · {sheet.name}"
+                )
                 wb_info.sheets.append(SheetInfo(
                     sheet_name=sheet.name,
                     table=table,
-                    display_name=f"{path.stem} · {sheet.name}" if multi else sheet.name,
+                    display_name=display,
                     header_row=sheet.header_row,
                     row_count=len(sheet.rows),
                     columns=columns,
                 ))
                 if on_progress:
                     on_progress(f"{path.name} · {sheet.name} → {table} ({len(sheet.rows)} rows)")
-            manifest.workbooks.append(wb_info)
+            new_workbooks.append(wb_info)
         conn.commit()
     except BaseException:
         conn.close()
-        db_path.unlink(missing_ok=True)
+        if not append:
+            db_path.unlink(missing_ok=True)   # fresh import failed → no half-written db
         raise
     conn.close()
 
-    manifest.save(dest / "manifest.json")
+    manifest.workbooks.extend(new_workbooks)
+    manifest.save(manifest_path)
     return ImportResult(db_path=db_path, manifest=manifest)
+
+
+def remove_workbook(dest_dir: Path | str, workbook_id: str) -> ImportManifest:
+    """Drop a workbook's tables and remove it from the manifest. Returns the new manifest.
+    Raises KeyError if the id isn't present."""
+    dest = Path(dest_dir)
+    manifest = ImportManifest.load(dest / "manifest.json")
+    target = next((w for w in manifest.workbooks if w.id == workbook_id), None)
+    if target is None:
+        raise KeyError(workbook_id)
+    conn = sqlite3.connect(dest / "data.db")
+    try:
+        for sheet in target.sheets:
+            conn.execute(f"DROP TABLE IF EXISTS {_q(sheet.table)}")
+        conn.commit()
+    finally:
+        conn.close()
+    manifest.workbooks = [w for w in manifest.workbooks if w.id != workbook_id]
+    manifest.save(dest / "manifest.json")
+    return manifest
 
 
 # ── column planning / type inference ─────────────────────────────────────────
@@ -195,9 +232,15 @@ def _column_names(header: list[str]) -> list[str]:
     return out
 
 
-def _table_name(file_slug: str, sheet_name: str, multi: bool) -> str:
+def _table_name(file_slug: str, sheet_name: str) -> str:
+    # Namespace a sheet by its workbook, but collapse the redundant CSV case where the
+    # only sheet is named after the file (sales.csv → "sales", not "sales__sales").
     sheet_slug = _slug(sheet_name, fallback="sheet")
-    return f"{file_slug}__{sheet_slug}" if multi else sheet_slug
+    return sheet_slug if sheet_slug == file_slug else f"{file_slug}__{sheet_slug}"
+
+
+def _workbook_id(file_hash: str, stamp: str, index: int) -> str:
+    return "wb_" + hashlib.sha256(f"{file_hash}|{stamp}|{index}".encode()).hexdigest()[:8]
 
 
 def _unique(name: str, used: set[str]) -> str:

@@ -97,23 +97,94 @@ def test_xlsx_multi_sheet_skips_hidden_and_handles_dates(tmp_path):
     wb.save(path)
 
     res = import_workbooks([path], dest_dir=tmp_path / "imports")
-    tables = [s.sheet_name for w in res.manifest.workbooks for s in w.sheets]
-    assert tables == ["data", "store"]   # hidden sheet skipped
-    cols = {c.name: c.type for c in res.manifest.workbooks[0].sheets[0].columns}
+    sheets = res.manifest.workbooks[0].sheets
+    assert [s.sheet_name for s in sheets] == ["data", "store"]   # hidden sheet skipped
+    assert sheets[0].table == "book__data"                       # named sheet → namespaced
+    cols = {c.name: c.type for c in sheets[0].columns}
     assert cols == {"product": "TEXT", "price": "REAL", "qty": "INTEGER", "day": "TEXT"}
     con = sqlite3.connect(res.db_path)
     try:
-        assert con.execute('SELECT day FROM "data"').fetchone()[0].startswith("2026-01-05")
+        assert con.execute(f'SELECT day FROM {_q(sheets[0].table)}').fetchone()[0].startswith("2026-01-05")
     finally:
         con.close()
 
 
-def test_multi_file_prefixes_table_names_to_avoid_collision(tmp_path):
+def test_table_name_collapses_single_csv_but_namespaces_named_sheets(tmp_path):
     a = tmp_path / "a.csv"; a.write_text("x\n1\n", encoding="utf-8")
     b = tmp_path / "b.csv"; b.write_text("y\n2\n", encoding="utf-8")
     res = import_workbooks([a, b], dest_dir=tmp_path / "imports")
     tables = sorted(s.table for w in res.manifest.workbooks for s in w.sheets)
-    assert tables == ["a__a", "b__b"]
+    assert tables == ["a", "b"]   # CSV sheet == file stem → no redundant prefix
+
+
+def test_collection_add_and_remove_workbooks(tmp_path):
+    from dbaide.ingest import ExcelCollection
+
+    sales = tmp_path / "sales.csv"; sales.write_text("amt\n10\n20\n", encoding="utf-8")
+    cust = tmp_path / "customers.csv"; cust.write_text("name\nAda\n", encoding="utf-8")
+
+    col = ExcelCollection(tmp_path / "imports" / "shop")
+    assert not col.exists()
+
+    col.add([sales])                       # create
+    col.add([cust])                        # append a second workbook
+    assert col.exists()
+    books = col.workbooks()
+    assert len(books) == 2
+    assert {b.source_filename for b in books} == {"sales.csv", "customers.csv"}
+
+    con = sqlite3.connect(col.db_path)
+    try:
+        assert {r[0] for r in con.execute("SELECT name FROM sqlite_master WHERE type='table'")} == {"sales", "customers"}
+    finally:
+        con.close()
+
+    # remove the sales workbook → its table is dropped, the other survives
+    sales_id = next(b.id for b in books if b.source_filename == "sales.csv")
+    col.remove(sales_id)
+    assert [b.source_filename for b in col.workbooks()] == ["customers.csv"]
+    con = sqlite3.connect(col.db_path)
+    try:
+        tables = {r[0] for r in con.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+        assert tables == {"customers"}
+    finally:
+        con.close()
+
+    with pytest.raises(KeyError):
+        col.remove("wb_does_not_exist")
+
+
+def test_collection_add_keeps_table_names_unique(tmp_path):
+    from dbaide.ingest import ExcelCollection
+
+    # two files that would both want the table name "data"
+    f1 = tmp_path / "data.csv"; f1.write_text("a\n1\n", encoding="utf-8")
+    sub = tmp_path / "sub"; sub.mkdir()
+    f2 = sub / "data.csv"; f2.write_text("b\n2\n", encoding="utf-8")
+
+    col = ExcelCollection(tmp_path / "imports" / "c")
+    col.add([f1])
+    col.add([f2])
+    tables = sorted(s.table for w in col.workbooks() for s in w.sheets)
+    assert tables == ["data", "data_2"]
+
+
+def test_collection_for_connection_detects_imports(tmp_path):
+    from dbaide.ingest import ExcelCollection, collection_dir, collection_for_connection
+
+    cfg_dir = tmp_path / "cfg"
+    col = ExcelCollection(collection_dir(cfg_dir, "shop"))
+    col.add([_write(tmp_path / "s.csv", "a\n1\n")])
+
+    found = collection_for_connection(cfg_dir, col.db_path)
+    assert found is not None and found.dir == col.dir
+    # an ordinary sqlite file elsewhere is not a collection
+    assert collection_for_connection(cfg_dir, tmp_path / "random.db") is None
+
+
+def _write(path: Path, text: str) -> Path:
+    path.write_text(text, encoding="utf-8")
+    return path
 
 
 def test_cli_ingest_registers_sqlite_connection(tmp_path):
