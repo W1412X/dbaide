@@ -368,6 +368,22 @@ def test_excluded_left_column_does_not_create_junk_rows(tmp_path):
         con.close()
 
 
+def test_workbook_records_source_path_and_reimport_updates(tmp_path):
+    from dbaide.ingest import ExcelCollection, ImportSpec
+
+    f = tmp_path / "s.csv"
+    f.write_text("amt\n10\n20\n", encoding="utf-8")
+    col = ExcelCollection(tmp_path / "imports" / "s")
+    col.add([f])
+    wb = col.workbooks()[0]
+    assert wb.source_path == str(f)                          # path stored for re-import
+
+    f.write_text("amt\n1\n2\n3\n", encoding="utf-8")          # file changed
+    col.add([ImportSpec(Path(wb.source_path), name=wb.name)], overwrite=True)   # refresh
+    assert len(col.workbooks()) == 1
+    assert col.workbooks()[0].sheets[0].row_count == 3
+
+
 def test_import_only_selected_sheets(tmp_path):
     pytest.importorskip("openpyxl")
     from openpyxl import Workbook

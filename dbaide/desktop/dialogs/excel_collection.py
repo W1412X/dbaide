@@ -93,6 +93,7 @@ class NewCollectionDialog(ChromeDialog):
         self.setModal(True)
         self.setMinimumWidth(520)
         self.setStyleSheet(app_style())
+        self.setAcceptDrops(True)                  # drop spreadsheet files straight onto the dialog
 
         root = QVBoxLayout(self)
         root.setContentsMargins(18, 18, 18, 16)
@@ -153,16 +154,30 @@ class NewCollectionDialog(ChromeDialog):
 
     def _add_files(self) -> None:
         files = get_open_file_names(self, _pt("excel.pick_title"), "", _pt("excel.file_filter"))
-        for f in files:
-            path = Path(f)
+        self._stage_paths([Path(f) for f in files])
+
+    def _stage_paths(self, paths: list[Path]) -> None:
+        added = 0
+        for path in paths:
             if path.suffix.lower() not in SUPPORTED_EXTS:
                 continue
             row = _StagedRow(path, self._remove_row)
             self._rows.append(row)
             self._rows_layout.insertWidget(self._rows_layout.count() - 1, row)
-        if self._mode == "create" and self._rows and not self._name.text().strip():
+            added += 1
+        if added and self._mode == "create" and not self._name.text().strip():
             self._name.setText(self._rows[0].path.stem)     # prefill from the first file
         self._empty.setVisible(not self._rows)
+
+    def dragEnterEvent(self, event) -> None:  # noqa: N802
+        urls = event.mimeData().urls() if event.mimeData().hasUrls() else []
+        if any(u.isLocalFile() and Path(u.toLocalFile()).suffix.lower() in SUPPORTED_EXTS for u in urls):
+            event.acceptProposedAction()
+
+    def dropEvent(self, event) -> None:  # noqa: N802
+        paths = [Path(u.toLocalFile()) for u in event.mimeData().urls() if u.isLocalFile()]
+        self._stage_paths(paths)
+        event.acceptProposedAction()
 
     def _remove_row(self, row: _StagedRow) -> None:
         if row in self._rows:

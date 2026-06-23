@@ -271,6 +271,38 @@ def test_header_preview_sheet_selection(qapp, tmp_path):
     d.deleteLater()
 
 
+def test_collection_preview_lists_tables_and_sample_rows(qapp, tmp_path):
+    from dbaide.desktop.dialogs.collection_preview import CollectionPreviewDialog
+    from dbaide.ingest import ExcelCollection, collection_dir
+
+    f = tmp_path / "sales.csv"
+    f.write_text("order,amt\n1,100\n2,200\n", encoding="utf-8")
+    col = ExcelCollection(collection_dir(tmp_path / "cfg", "shop"))
+    col.add([f])
+    d = CollectionPreviewDialog(None, col, name="shop")
+    assert [t[0] for t in d._tables] == ["sales"]
+    assert d._table.columnCount() == 2
+    assert d._table.rowCount() == 2
+    d.deleteLater()
+
+
+def test_staging_dialog_accepts_dropped_files(qapp, tmp_path):
+    from PyQt6.QtCore import QMimeData, QPointF, Qt, QUrl
+    from PyQt6.QtGui import QDropEvent
+    from dbaide.desktop.dialogs.excel_collection import NewCollectionDialog
+
+    csv = tmp_path / "data.csv"; csv.write_text("a\n1\n", encoding="utf-8")
+    bad = tmp_path / "x.pdf"; bad.write_text("x", encoding="utf-8")
+    d = NewCollectionDialog(None, set())
+    md = QMimeData()
+    md.setUrls([QUrl.fromLocalFile(str(csv)), QUrl.fromLocalFile(str(bad))])
+    d.dropEvent(QDropEvent(QPointF(5, 5), Qt.DropAction.CopyAction, md,
+                           Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier))
+    assert len(d._rows) == 1                 # .pdf dropped, .csv staged
+    assert d._name.text() == "data"          # name prefilled from the dropped file
+    d.deleteLater()
+
+
 def test_staged_row_header_choice_flows_into_spec(qapp, tmp_path):
     from dbaide.desktop.dialogs.excel_collection import NewCollectionDialog, _StagedRow
 

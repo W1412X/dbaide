@@ -133,6 +133,7 @@ def import_workbooks(
                     source_filename=workbook.filename,
                     file_hash=file_hash,
                     imported_at=stamp,
+                    source_path=str(path),
                 )
                 for sheet in workbook.sheets:
                     table = _unique(_table_name(logical, sheet.name, single), used_tables)

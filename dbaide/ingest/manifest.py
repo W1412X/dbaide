@@ -44,6 +44,7 @@ class WorkbookInfo:
     file_hash: str       # sha256 of the source file (change detection / re-import match)
     imported_at: str     # ISO-8601 UTC
     sheets: list[SheetInfo] = field(default_factory=list)
+    source_path: str = ""    # original file path, for re-importing if it still exists
 
 
 @dataclass
@@ -87,6 +88,7 @@ class ImportManifest:
                 file_hash=str(wb.get("file_hash") or ""),
                 imported_at=str(wb.get("imported_at") or ""),
                 sheets=sheets,
+                source_path=str(wb.get("source_path") or ""),
             ))
         return cls(version=int(data.get("version") or MANIFEST_VERSION), workbooks=workbooks)
 

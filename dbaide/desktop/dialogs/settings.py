@@ -169,8 +169,10 @@ class _WorkbookPanel(QWidget):
     intent signals; the dialog performs the filesystem work and reloads it."""
 
     add_requested = pyqtSignal()
-    remove_requested = pyqtSignal(str)   # workbook id
-    rename_requested = pyqtSignal(str)   # workbook id
+    remove_requested = pyqtSignal(str)     # workbook id
+    rename_requested = pyqtSignal(str)     # workbook id
+    reimport_requested = pyqtSignal(str)   # workbook id
+    preview_requested = pyqtSignal()
 
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
@@ -201,8 +203,11 @@ class _WorkbookPanel(QWidget):
 
         self._add_btn = compact_button(_pt("excel.add_workbook"), width=124)
         self._add_btn.clicked.connect(lambda: self.add_requested.emit())
+        self._preview_btn = compact_button(_pt("excel.preview_btn"), width=110)
+        self._preview_btn.clicked.connect(lambda: self.preview_requested.emit())
         add_row = QHBoxLayout()
         add_row.addWidget(self._add_btn)
+        add_row.addWidget(self._preview_btn)
         add_row.addStretch(1)
         outer.addLayout(add_row)
 
@@ -244,6 +249,9 @@ class _WorkbookPanel(QWidget):
         text_col.addWidget(name)
         text_col.addWidget(meta)
         lay.addLayout(text_col, 1)
+        reimport = ghost_action_button(_pt("excel.reimport"))
+        reimport.clicked.connect(lambda _checked=False, wid=wb.id: self.reimport_requested.emit(wid))
+        lay.addWidget(reimport)
         rename = ghost_action_button(_pt("excel.rename"))
         rename.clicked.connect(lambda _checked=False, wid=wb.id: self.rename_requested.emit(wid))
         lay.addWidget(rename)
@@ -541,6 +549,8 @@ class SettingsDialog(ChromeDialog):
         self.workbook_panel.add_requested.connect(self._excel_add_workbook)
         self.workbook_panel.remove_requested.connect(self._excel_remove_workbook)
         self.workbook_panel.rename_requested.connect(self._excel_rename_workbook)
+        self.workbook_panel.reimport_requested.connect(self._excel_reimport_workbook)
+        self.workbook_panel.preview_requested.connect(self._excel_preview)
         self.workbook_panel.hide()
         form_col.addWidget(self._conn_form_area, 1)
         form_col.addWidget(self.workbook_panel, 1)
@@ -1454,6 +1464,43 @@ class SettingsDialog(ChromeDialog):
             return
         self.workbook_panel.load(self._selected_conn, collection.workbooks())
         self.excel_collection_changed.emit(self._selected_conn)
+
+    def _excel_reimport_workbook(self, workbook_id: str) -> None:
+        from dbaide.ingest import ImportSpec
+
+        collection = self._current_collection()
+        if collection is None:
+            return
+        wb = next((w for w in collection.workbooks() if w.id == workbook_id), None)
+        if wb is None:
+            return
+        path = Path(wb.source_path) if wb.source_path else None
+        if path is None or not path.exists():
+            # the original file moved or is unknown → let the user point at it again
+            picked, _ = get_open_file_name(
+                self, _pt("excel.reimport_pick_title"), wb.source_path or "", _pt("excel.file_filter")
+            )
+            if not picked:
+                return
+            path = Path(picked)
+        try:
+            QApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)
+            result = collection.add([ImportSpec(path, name=wb.name)], overwrite=True)  # same name → replace
+        except Exception as exc:  # noqa: BLE001
+            dialog_warn(self, _pt("settings.title"), _pt("excel.err.import_failed", error=str(exc)))
+            return
+        finally:
+            QApplication.restoreOverrideCursor()
+        self._note_skipped(result)
+        self.workbook_panel.load(self._selected_conn, collection.workbooks())
+        self.excel_collection_changed.emit(self._selected_conn)
+
+    def _excel_preview(self) -> None:
+        collection = self._current_collection()
+        if collection is None:
+            return
+        from dbaide.desktop.dialogs.collection_preview import CollectionPreviewDialog
+        CollectionPreviewDialog(self, collection, name=self._selected_conn).exec()
 
     def _excel_remove_workbook(self, workbook_id: str) -> None:
         collection = self._current_collection()
