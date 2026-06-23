@@ -18,6 +18,7 @@ from dbaide.ingest.collection import (
 from dbaide.ingest.importer import (
     ImportResult,
     ImportSpec,
+    default_table_name,
     import_workbooks,
     remove_workbook,
     rename_workbook,
@@ -38,6 +39,7 @@ __all__ = [
     "rename_workbook",
     "ImportResult",
     "ImportSpec",
+    "default_table_name",
     "ExcelCollection",
     "collection_dir",
     "collection_for_connection",

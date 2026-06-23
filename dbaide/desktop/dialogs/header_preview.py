@@ -16,6 +16,7 @@ from PyQt6.QtWidgets import (
     QDialog,
     QHBoxLayout,
     QLabel,
+    QLineEdit,
     QTableWidget,
     QTableWidgetItem,
     QVBoxLayout,
@@ -32,13 +33,16 @@ _MAX_COLS = 26
 
 
 class HeaderPreviewDialog(ChromeDialog):
-    def __init__(self, parent, path: Path, current: dict[str, tuple[int, int]] | None = None) -> None:
+    def __init__(self, parent, path: Path, current: dict[str, tuple[int, int]] | None = None,
+                 *, logical_name: str = "", table_names: dict[str, str] | None = None) -> None:
         super().__init__(parent)
         from dbaide.ingest import read_sheet_grids
 
         self._grids = read_sheet_grids(path)
+        self._logical = logical_name or path.stem
         self._choice: dict[str, tuple[int, int]] = {}
         self._included: dict[str, bool] = {}
+        self._table_names: dict[str, str] = dict(table_names or {})   # sheet → override (only if != default)
         for g in self._grids:
             self._choice[g.name] = (current or {}).get(g.name, (g.auto_header_row, g.auto_header_col))
             self._included[g.name] = True
@@ -84,6 +88,18 @@ class HeaderPreviewDialog(ChromeDialog):
         top.addStretch(1)
         top.addWidget(self._status)
         root.addLayout(top)
+
+        name_row = QHBoxLayout()
+        name_row.setSpacing(8)
+        name_label = QLabel(_pt("excel.header_table_name"))
+        name_label.setStyleSheet(f"color:{Theme.TEXT_2}; font-size:12px; background:transparent;")
+        self._name_edit = QLineEdit()
+        self._name_edit.setMaximumWidth(280)
+        self._name_edit.textEdited.connect(self._on_table_name_edited)
+        name_row.addWidget(name_label)
+        name_row.addWidget(self._name_edit)
+        name_row.addStretch(1)
+        root.addLayout(name_row)
 
         self._table = QTableWidget()
         self._table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
@@ -136,6 +152,9 @@ class HeaderPreviewDialog(ChromeDialog):
         self._include.blockSignals(True)
         self._include.setChecked(self._included.get(grid.name, True))
         self._include.blockSignals(False)
+        self._name_edit.blockSignals(True)
+        self._name_edit.setText(self._table_names.get(grid.name) or self._default_name(grid.name))
+        self._name_edit.blockSignals(False)
         self._restyle()
         anchor = self._table.item(min(hr, rows - 1), min(hc, cols - 1)) if rows and cols else None
         if anchor is not None:
@@ -204,6 +223,20 @@ class HeaderPreviewDialog(ChromeDialog):
             self._included[grid.name] = bool(checked)
             self._restyle()
 
+    def _default_name(self, sheet: str) -> str:
+        from dbaide.ingest import default_table_name
+        return default_table_name(self._logical, sheet, single=len(self._grids) == 1)
+
+    def _on_table_name_edited(self, text: str) -> None:
+        grid = self._current()
+        if grid is None:
+            return
+        text = text.strip()
+        if text and text != self._default_name(grid.name):
+            self._table_names[grid.name] = text     # only store genuine overrides
+        else:
+            self._table_names.pop(grid.name, None)
+
     @staticmethod
     def _validate(grid, hr: int, hc: int) -> tuple[bool, str]:
         """Reject anchors that would yield a garbage table: a header row with no label cell
@@ -238,16 +271,17 @@ class HeaderPreviewDialog(ChromeDialog):
             self._choice[g.name] = anchor
         self._restyle()
 
-    def result_value(self) -> tuple[dict[str, tuple[int, int]], list[str]]:
+    def result_value(self) -> tuple[dict[str, tuple[int, int]], list[str], dict[str, str]]:
         included = [g.name for g in self._grids if self._included.get(g.name, True)]
-        return dict(self._choice), included
+        names = {k: v for k, v in self._table_names.items() if k in included}
+        return dict(self._choice), included, names
 
 
 def pick_header_rows(
-    parent, path: Path, current: dict[str, tuple[int, int]] | None = None
-) -> tuple[dict[str, tuple[int, int]], list[str]] | None:
-    """Returns ((sheet → (header_row, start_col)), included_sheet_names) or None if cancelled."""
-    dialog = HeaderPreviewDialog(parent, path, current)
+    parent, path: Path, current: dict[str, tuple[int, int]] | None = None, *, logical_name: str = "",
+) -> tuple[dict[str, tuple[int, int]], list[str], dict[str, str]] | None:
+    """Returns ((sheet → (header_row, start_col)), included_sheets, (sheet → table name)) or None."""
+    dialog = HeaderPreviewDialog(parent, path, current, logical_name=logical_name)
     if dialog.exec() != QDialog.DialogCode.Accepted:
         return None
     return dialog.result_value()

@@ -226,9 +226,9 @@ def test_header_preview_auto_detects_then_accepts_manual(qapp, tmp_path):
     f = tmp_path / "sales.csv"
     f.write_text("title\n\nmeta,note\norder,city,amt\n1,BJ,10\n2,SH,20\n", encoding="utf-8")
     d = HeaderPreviewDialog(None, f)
-    assert d.result_value() == ({"sales": (3, 0)}, ["sales"])   # auto header (row 3, col 0), all sheets
-    d._on_cell(0, 1)                                            # user clicks row 0, col 1
-    assert d.result_value() == ({"sales": (0, 1)}, ["sales"])
+    assert d.result_value() == ({"sales": (3, 0)}, ["sales"], {})   # auto header, all sheets, no rename
+    d._on_cell(0, 1)                                                # user clicks row 0, col 1
+    assert d.result_value() == ({"sales": (0, 1)}, ["sales"], {})
     d.deleteLater()
 
 
@@ -262,12 +262,28 @@ def test_header_preview_sheet_selection(qapp, tmp_path):
     assert d.result_value()[1] == ["keep", "drop"]      # both included by default
     d._included["drop"] = False                          # deselect a sheet
     d._refresh_ok()
-    anchors, included = d.result_value()
+    anchors, included, names = d.result_value()
     assert included == ["keep"]
     assert d._ok.isEnabled()                             # one sheet still selected
     d._included["keep"] = False                          # none left
     d._refresh_ok()
     assert not d._ok.isEnabled()
+    d.deleteLater()
+
+
+def test_header_preview_table_name_override(qapp, tmp_path):
+    from dbaide.desktop.dialogs.header_preview import HeaderPreviewDialog
+
+    f = tmp_path / "sales.csv"
+    f.write_text("a,b\n1,2\n", encoding="utf-8")
+    d = HeaderPreviewDialog(None, f, logical_name="sales")
+    assert d._name_edit.text() == "sales"          # default = computed table name
+    assert d.result_value()[2] == {}               # unchanged → no override stored
+    d._name_edit.setText("orders")
+    d._on_table_name_edited("orders")
+    assert d.result_value()[2] == {"sales": "orders"}
+    d._on_table_name_edited("sales")               # back to default → override cleared
+    assert d.result_value()[2] == {}
     d.deleteLater()
 
 

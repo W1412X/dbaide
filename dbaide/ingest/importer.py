@@ -32,6 +32,7 @@ class ImportSpec:
     # sheet name → user-chosen (header_row, start_col) anchor, 0-based
     header_anchors: dict[str, tuple[int, int]] | None = None
     sheets: list[str] | None = None             # restrict import to these sheets (None = all)
+    table_names: dict[str, str] | None = None   # sheet name → override SQL table name
 
     @property
     def logical_name(self) -> str:
@@ -136,13 +137,15 @@ def import_workbooks(
                     source_path=str(path),
                 )
                 for sheet in workbook.sheets:
-                    table = _unique(_table_name(logical, sheet.name, single), used_tables)
+                    override = (spec.table_names or {}).get(sheet.name)
+                    base = _slug(override, fallback="table") if override else _table_name(logical, sheet.name, single)
+                    table = _unique(base, used_tables)
                     columns = _plan_columns(sheet)
                     _write_table(conn, table, columns, sheet.rows)
                     wb_info.sheets.append(SheetInfo(
                         sheet_name=sheet.name,
                         table=table,
-                        display_name=_display_name(logical, sheet.name, single),
+                        display_name=(override.strip() if override else _display_name(logical, sheet.name, single)),
                         header_row=sheet.header_row,
                         row_count=len(sheet.rows),
                         columns=columns,
@@ -317,6 +320,12 @@ def _column_names(header: list[str]) -> list[str]:
     for i, h in enumerate(header):
         out.append(_unique(_slug(h, fallback=f"col_{i + 1}"), used))
     return out
+
+
+def default_table_name(logical_name: str, sheet_name: str, single: bool) -> str:
+    """The table name the importer assigns with no override — used by the UI to seed the
+    editable per-sheet name field."""
+    return _table_name(logical_name, sheet_name, single)
 
 
 def _table_name(logical_name: str, sheet_name: str, single: bool) -> str:

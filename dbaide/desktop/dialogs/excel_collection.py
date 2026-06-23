@@ -40,6 +40,7 @@ class _StagedRow(QFrame):
         self.path = path
         self.header_anchors: dict[str, tuple[int, int]] = {}   # sheet → (header_row, start_col)
         self.sheets: list[str] | None = None                   # selected sheets (None = all)
+        self.table_names: dict[str, str] = {}                  # sheet → override table name
         self.setStyleSheet(
             f"QFrame {{ background:{Theme.PANEL_2}; border:1px solid {Theme.BORDER_SOFT};"
             f" border-radius:8px; }}"
@@ -67,15 +68,17 @@ class _StagedRow(QFrame):
     def _pick_header(self) -> None:
         from dbaide.desktop.dialogs.header_preview import pick_header_rows
         try:
-            chosen = pick_header_rows(self.window(), self.path, self.header_anchors or None)
+            chosen = pick_header_rows(self.window(), self.path, self.header_anchors or None,
+                                      logical_name=self.name())
         except Exception as exc:  # noqa: BLE001
             dialog_warn(self.window(), _pt("excel.header_title"),
                         _pt("excel.err.import_failed", error=str(exc)))
             return
         if chosen is not None:
-            anchors, included = chosen
+            anchors, included, names = chosen
             self.header_anchors = anchors
             self.sheets = included          # restrict import to the picked sheets
+            self.table_names = names        # per-sheet table-name overrides
             self._header_btn.setText(_pt("excel.header_set"))   # mark the row as customised
 
     def name(self) -> str:
@@ -217,7 +220,7 @@ class NewCollectionDialog(ChromeDialog):
         return (
             self._name.text().strip(),
             [ImportSpec(row.path, name=row.name(), header_anchors=(row.header_anchors or None),
-                        sheets=row.sheets)
+                        sheets=row.sheets, table_names=(row.table_names or None))
              for row in self._rows],
         )
 

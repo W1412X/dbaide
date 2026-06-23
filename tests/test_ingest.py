@@ -384,6 +384,24 @@ def test_workbook_records_source_path_and_reimport_updates(tmp_path):
     assert col.workbooks()[0].sheets[0].row_count == 3
 
 
+def test_per_sheet_table_name_override(tmp_path):
+    pytest.importorskip("openpyxl")
+    from openpyxl import Workbook
+    from dbaide.ingest import ImportSpec
+
+    wb = Workbook()
+    a = wb.active; a.title = "Sheet1"; a.append(["x"]); a.append([1])
+    b = wb.create_sheet("Sheet2"); b.append(["y"]); b.append([2])
+    path = tmp_path / "w.xlsx"; wb.save(path)
+
+    res = import_workbooks(
+        [ImportSpec(path, name="w", table_names={"Sheet1": "orders", "Sheet2": "返货"})],
+        dest_dir=tmp_path / "imports",
+    )
+    tables = sorted(s.table for w in res.manifest.workbooks for s in w.sheets)
+    assert tables == ["orders", "返货"]                  # overrides used verbatim (CJK kept)
+
+
 def test_import_only_selected_sheets(tmp_path):
     pytest.importorskip("openpyxl")
     from openpyxl import Workbook
