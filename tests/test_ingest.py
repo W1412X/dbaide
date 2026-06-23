@@ -326,6 +326,26 @@ def test_user_selected_start_column_excludes_left_columns(tmp_path):
     assert list(sheet.data_bbox) == [0, 2, 2, 3]
 
 
+def test_excluded_left_column_does_not_create_junk_rows(tmp_path):
+    from dbaide.ingest import ImportSpec
+
+    csv = tmp_path / "r.csv"
+    # an excluded left column has stray cells in otherwise-blank rows, plus a footer note
+    # far below the real table — neither should leak into the table.
+    csv.write_text("note,id,name\na,1,x\nb,2,y\nz,,\n,,\nfooter,,\n", encoding="utf-8")
+    res = import_workbooks(
+        [ImportSpec(csv, name="r", header_anchors={"r": (0, 1)})], dest_dir=tmp_path / "imports"
+    )
+    sheet = res.manifest.workbooks[0].sheets[0]
+    assert list(sheet.data_bbox) == [0, 1, 2, 2]       # last_row = 2, not dragged to the footer
+    assert sheet.row_count == 2
+    con = sqlite3.connect(res.db_path)
+    try:
+        assert con.execute(f'SELECT id, name FROM {_q(sheet.table)}').fetchall() == [(1, "x"), (2, "y")]
+    finally:
+        con.close()
+
+
 def test_bad_sheet_skipped_others_imported(tmp_path):
     pytest.importorskip("openpyxl")
     from openpyxl import Workbook

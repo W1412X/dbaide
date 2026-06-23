@@ -1,7 +1,8 @@
 """Header-row picker: shows a sheet's grid and lets the user click the header row.
 
-Used from the Excel-collection staging dialog. The chosen header rows (per sheet) flow into
-ImportSpec.header_rows; rows below the chosen header are matched automatically by the reader.
+Used from the Excel-collection staging dialog. The chosen anchors (per sheet, as
+(header_row, start_col)) flow into ImportSpec.header_anchors; columns to the right and rows
+below the chosen cell are matched automatically by the reader.
 """
 
 from __future__ import annotations
@@ -30,7 +31,7 @@ _MAX_COLS = 26
 
 
 class HeaderPreviewDialog(ChromeDialog):
-    def __init__(self, parent, path: Path, current: dict[str, int] | None = None) -> None:
+    def __init__(self, parent, path: Path, current: dict[str, tuple[int, int]] | None = None) -> None:
         super().__init__(parent)
         from dbaide.ingest import read_sheet_grids
 
@@ -103,8 +104,10 @@ class HeaderPreviewDialog(ChromeDialog):
 
     def _render(self, index: int) -> None:
         grid = self._grids[index]
-        rows = min(len(grid.cells), _MAX_ROWS)
-        cols = min((max((len(r) for r in grid.cells), default=0)), _MAX_COLS)
+        hr, hc = self._choice.get(grid.name, (grid.auto_header_row, grid.auto_header_col))
+        # always keep the chosen/auto header cell within the previewed window
+        rows = min(len(grid.cells), max(_MAX_ROWS, hr + 6))
+        cols = min(max((len(r) for r in grid.cells), default=0), max(_MAX_COLS, hc + 6))
         self._table.clear()
         self._table.setRowCount(rows)
         self._table.setColumnCount(cols)
@@ -119,6 +122,9 @@ class HeaderPreviewDialog(ChromeDialog):
                 self._table.setItem(r, c, QTableWidgetItem(text))
         self._table.resizeColumnsToContents()
         self._restyle()
+        anchor = self._table.item(min(hr, rows - 1), min(hc, cols - 1)) if rows and cols else None
+        if anchor is not None:
+            self._table.scrollToItem(anchor)
 
     def _restyle(self) -> None:
         grid = self._current()
@@ -157,7 +163,9 @@ class HeaderPreviewDialog(ChromeDialog):
         return dict(self._choice)
 
 
-def pick_header_rows(parent, path: Path, current: dict[str, int] | None = None) -> dict[str, int] | None:
+def pick_header_rows(
+    parent, path: Path, current: dict[str, tuple[int, int]] | None = None
+) -> dict[str, tuple[int, int]] | None:
     dialog = HeaderPreviewDialog(parent, path, current)
     if dialog.exec() != QDialog.DialogCode.Accepted:
         return None

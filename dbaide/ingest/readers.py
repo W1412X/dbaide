@@ -28,6 +28,8 @@ _EMPTY, _NUM, _DATE, _TEXT = "e", "n", "d", "t"
 _NUM_RE = re.compile(r"[+-]?(\d+\.?\d*|\.\d+)([eE][+-]?\d+)?$")
 _DETECT_ROW_CAP = 30
 _BODY_WINDOW = 8
+_MAX_GRID_ROWS = 200_000    # guard against openpyxl reporting an inflated sheet dimension
+_MAX_GRID_COLS = 1024
 
 Anchor = tuple[int, int]   # (header_row, start_col), 0-based
 
@@ -126,7 +128,7 @@ def _shape_sheet(name: str, grid: RawGrid, filled: list[int], *, anchor: Anchor 
     rows = [
         [grid.cells[r][c] for c in range(c0, c1 + 1)]
         for r in range(h + 1, last + 1)
-        if _row_nonempty(grid.cells[r])
+        if _slice_nonempty(grid.cells[r], c0, c1)
     ]
     return RawSheet(
         name=name, header=header, rows=rows, header_row=h,
@@ -156,7 +158,11 @@ def locate_table(grid: RawGrid, *, header_row: int | None = None, header_col: in
     right = [c for c in nz_cols if c >= c0]
     if not right:
         return None
-    return h, c0, max(right), (body[-1] if body else h)
+    c1 = max(right)
+    # Emptiness is judged within the table's column span, so a value in an excluded left
+    # column (c < c0) neither emits a junk row nor drags last_row down to a stray footer.
+    in_span = [r for r in body if _slice_nonempty(cells[r], c0, c1)]
+    return h, c0, c1, (in_span[-1] if in_span else h)
 
 
 def _detect_header(cells: list[list[Any]], nonempty: list[int], ncols: int) -> int:
@@ -205,6 +211,9 @@ def _fill_vertical_merges(grid: RawGrid) -> list[int]:
     for (r0, c0, r1, c1) in grid.merges:
         if c0 != c1 or r1 <= r0:
             continue
+        if c0 >= grid.ncols or r0 >= grid.nrows:     # merge beyond the materialized grid
+            continue
+        r1 = min(r1, grid.nrows - 1)                  # clamp (grid may be capped/trimmed)
         value = grid.cells[r0][c0]
         if value is None or (isinstance(value, str) and value.strip() == ""):
             continue
@@ -261,13 +270,22 @@ def _xlsx_grids(path: Path) -> list[tuple[str, RawGrid | None, str]]:
             if ws.sheet_state != "visible":
                 continue
             try:
-                nrows, ncols = ws.max_row or 0, ws.max_column or 0
-                cells = [[ws.cell(row=r + 1, column=c + 1).value for c in range(ncols)] for r in range(nrows)]
+                # iter_rows (capped) instead of a max_row×max_col cell loop: a stray formatted
+                # cell can inflate the reported dimension to the whole sheet (1M+ rows).
+                raw: list[list[Any]] = []
+                for i, row in enumerate(ws.iter_rows(values_only=True)):
+                    if i >= _MAX_GRID_ROWS:
+                        break
+                    raw.append(list(row[:_MAX_GRID_COLS]))
+                while raw and not _row_nonempty(raw[-1]):
+                    raw.pop()
+                ncols = max((len(r) for r in raw), default=0)
+                cells = [r + [None] * (ncols - len(r)) for r in raw]
                 merges = [
                     (rng.min_row - 1, rng.min_col - 1, rng.max_row - 1, rng.max_col - 1)
                     for rng in ws.merged_cells.ranges
                 ]
-                out.append((ws.title, RawGrid(cells=cells, merges=merges, nrows=nrows, ncols=ncols), ""))
+                out.append((ws.title, RawGrid(cells=cells, merges=merges, nrows=len(cells), ncols=ncols), ""))
             except Exception as exc:  # noqa: BLE001 - isolate one sheet
                 out.append((ws.title, None, str(exc)))
         return out
@@ -286,6 +304,10 @@ def _decode(raw: bytes) -> str:
 
 def _row_nonempty(row: list[Any]) -> bool:
     return any(_nonempty(c) for c in (row or []))
+
+
+def _slice_nonempty(row: list[Any], c0: int, c1: int) -> bool:
+    return any(_nonempty(row[c]) for c in range(c0, min(c1 + 1, len(row))))
 
 
 def _nonempty(cell: Any) -> bool:
