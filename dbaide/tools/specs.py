@@ -267,7 +267,8 @@ ANNOTATE_OBJECT = ToolSpec(
     ),
     input_schema={
         "note": {"type": "string", "required": True},
-        "scope": {"type": "string", "description": "column|table|database; inferred from other params if omitted"},
+        "scope": {"type": "string", "enum": ["column", "table", "database"],
+                  "description": "what the note is about; inferred from the other params if omitted"},
         "database": {"type": "string"},
         "table": {"type": "string"},
         "column": {"type": "string"},
@@ -612,7 +613,14 @@ RETRIEVE_SCHEMA_CONTEXT = ToolSpec(
         "focus_terms": {"type": "list[string]"},
         "need": {"type": "string"},
         "limit": {"type": "integer", "description": "max candidate tables (default 64)"},
-        "scope": {"type": "dict"},
+        "scope": {
+            "type": "dict",
+            "description": "optional working-scope filter; usually omit and let the agent infer it",
+            "properties": {
+                "databases": {"type": "array", "items": {"type": "string"}},
+                "tables": {"type": "array", "items": {"type": "string"}},
+            },
+        },
     },
     output_schema={
         "report_id": "string",

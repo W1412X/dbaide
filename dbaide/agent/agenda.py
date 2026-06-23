@@ -14,27 +14,15 @@ from typing import Any
 _VALID_STATUS = {"pending", "in_progress", "done", "dropped"}
 _VALID_KIND = {"schema", "join", "sql", "verify", "answer", "other"}
 _STATUS_ALIASES = {
-    # done
-    "completed": "done", "complete": "done", "finished": "done", "resolved": "done",
-    "完成": "done", "已完成": "done", "做完": "done",
-    # in_progress
-    "in-progress": "in_progress", "progress": "in_progress", "doing": "in_progress",
-    "active": "in_progress", "wip": "in_progress", "started": "in_progress",
-    "进行中": "in_progress", "处理中": "in_progress", "正在进行": "in_progress", "执行中": "in_progress",
-    # dropped
-    "cancelled": "dropped", "canceled": "dropped", "skip": "dropped", "skipped": "dropped",
-    "取消": "dropped", "已取消": "dropped", "放弃": "dropped", "已放弃": "dropped",
-    "跳过": "dropped", "已跳过": "dropped",
-    # pending
-    "todo": "pending", "to-do": "pending", "to_do": "pending", "open": "pending",
-    "not_started": "pending", "not started": "pending", "queued": "pending",
-    "待开始": "pending", "待办": "pending", "未开始": "pending", "待处理": "pending", "未完成": "pending",
+    "completed": "done",
+    "complete": "done",
+    "in-progress": "in_progress",
+    "progress": "in_progress",
+    "cancelled": "dropped",
+    "canceled": "dropped",
+    "skip": "dropped",
+    "skipped": "dropped",
 }
-
-# The model doesn't always use the exact "title" key (it often sends "task", and in
-# Chinese answers may use other natural keys); accept common synonyms so items aren't
-# silently dropped.
-_TITLE_KEYS = ("title", "task", "name", "text", "description", "desc", "step", "label")
 
 
 @dataclass(slots=True)
@@ -75,12 +63,7 @@ def agenda_from_dict(items: Any, *, previous: list[AgendaItem] | None = None) ->
     for index, raw in enumerate(items if isinstance(items, list) else [], 1):
         if not isinstance(raw, dict):
             continue
-        title = ""
-        for key in _TITLE_KEYS:
-            candidate = " ".join(str(raw.get(key) or "").split()).strip()
-            if candidate:
-                title = candidate
-                break
+        title = " ".join(str(raw.get("title") or "").split()).strip()
         if not title:
             continue
         kind = normalize_kind(raw.get("kind"))

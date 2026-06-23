@@ -90,27 +90,19 @@ def test_update_agenda_function_schema_advertises_item_fields():
     assert item["required"] == ["title", "status"]
 
 
-def test_agenda_from_dict_tolerates_model_field_drift():
-    """Real model output uses `task` instead of `title` (it confuses the subagent tool's
-    field) and localized status words. Previously every item was silently dropped, leaving
-    an empty agenda and no panel. The parser now accepts the synonyms."""
-    from dbaide.agent.agenda import agenda_from_dict
-    items = [
-        {"task": "查询公司在职员工数", "status": "待开始"},
-        {"task": "查询公司离职员工数", "status": "未开始"},
-        {"task": "查询是否有离职又回来的员工", "status": "进行中"},
-        {"task": "查询王煦的入职时间", "status": "已完成"},
-    ]
-    parsed = agenda_from_dict(items)
-    assert [i.title for i in parsed] == [it["task"] for it in items]
-    assert [i.status for i in parsed] == ["pending", "pending", "in_progress", "done"]
-    # English synonyms (name/text + todo/doing/finished) also resolve
-    alt = agenda_from_dict([
-        {"name": "scan", "status": "todo"},
-        {"text": "run", "status": "doing"},
-        {"title": "verify", "status": "finished"},
-    ])
-    assert [i.status for i in alt] == ["pending", "in_progress", "done"]
+def test_tool_function_schema_advertises_enums_and_object_properties():
+    """The same underspecification existed on other model-facing tools: choice fields as
+    prose (annotate_object.scope) and an object field with no shape (retrieve_schema_context
+    .scope). The converter now passes enum + nested properties through to the model."""
+    from dbaide.agent.loop import _tool_spec_to_function
+    from dbaide.tools.specs import ANNOTATE_OBJECT, RETRIEVE_SCHEMA_CONTEXT
+
+    def props(spec):
+        return _tool_spec_to_function(spec)["function"]["parameters"]["properties"]
+
+    assert props(ANNOTATE_OBJECT)["scope"]["enum"] == ["column", "table", "database"]
+    scope = props(RETRIEVE_SCHEMA_CONTEXT)["scope"]
+    assert set(scope["properties"]) == {"databases", "tables"}
 
 
 class _AgendaLLM(LLMClient):

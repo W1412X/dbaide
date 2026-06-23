@@ -15,17 +15,19 @@ All notable changes to DBAide are documented here. The format is loosely based o
 
 ### Fixed
 
-- **Agent task list (agenda) dropped on field drift** — the panel never appeared because
-  the model sends items as `{"task": …, "status": "待开始"}` (it borrows the subagent
-  tool's `task` field and answers with localized status words), but `agenda_from_dict` only
-  read `title` with English statuses — so every item was silently dropped, the tool returned
-  an empty agenda ("no tasks"), and the panel stayed hidden. The parser now accepts title
-  synonyms (`task`/`name`/`text`/…) and a much wider set of status aliases including Chinese
-  (`待开始`→pending, `进行中`→in_progress, `已完成`→done, `已取消`→dropped). The deeper
-  cause is fixed too: `update_agenda`'s `items` were advertised to the model as a bare
-  `array of object` with the field names only in a prose description, so weaker models
-  guessed `task`; the native tool schema now carries a structured item schema (`title`
-  required, `status`/`kind` enums) via a new `items_schema` on the tool spec.
+- **Agent task list (agenda) never appeared** — `update_agenda`'s `items` were advertised
+  to the model as a bare `array of object` with the field names buried in a prose
+  description, so a native tool-calling model guessed them — sending `{"task": …,
+  "status": "待开始"}` instead of `{"title": …, "status": "pending"}`. Those items then
+  failed `agenda_from_dict`'s `title` check, the tool returned an empty agenda ("no
+  tasks"), and the panel stayed hidden. The native tool schema now carries a structured
+  item schema (`title` required, `status`/`kind` enums) via a new `items_schema` on the
+  tool spec, so the model is *told* the fields. An audit fixed the same underspecification
+  on the other model-facing tools: `annotate_object.scope` was a `column|table|database`
+  choice in prose (now a real `enum`), and `retrieve_schema_context.scope` was an
+  undocumented object (now carries `{databases, tables}` properties). The tool→function
+  converter now passes `enum`, array `items_schema`, and nested object `properties` through
+  to the native tool schema.
 - **Agent task list (agenda)** — the conversation's agenda panel showed during a live run
   but vanished once the turn finalized or the chat was reopened. The tool layer flattened
   the tool result to a 200-char `output_preview` string in the persisted trace, so the

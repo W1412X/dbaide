@@ -1871,12 +1871,18 @@ def _tool_spec_to_function(spec: Any) -> dict[str, Any]:
         desc = meta.get("description")
         if desc:
             prop["description"] = str(desc)
-        # Let a spec advertise the object shape of array items, so a native tool-calling
-        # model gets a machine-readable schema for the fields instead of guessing them
-        # from a prose description (which is why update_agenda items arrived as `task`).
+        # Let a spec advertise structure to a native tool-calling model instead of leaving
+        # it in a prose description (which the model may ignore and then guess — why
+        # update_agenda items arrived as `task`/`待开始`). Honor enums, array item schemas,
+        # and nested object properties.
+        if isinstance(meta.get("enum"), list) and meta["enum"]:
+            prop["enum"] = list(meta["enum"])
         item_schema = meta.get("items_schema")
         if prop.get("type") == "array" and isinstance(item_schema, dict):
             prop["items"] = item_schema
+        obj_props = meta.get("properties")
+        if prop.get("type") == "object" and isinstance(obj_props, dict):
+            prop["properties"] = obj_props
         properties[key] = prop
         if meta.get("required"):
             required.append(key)
