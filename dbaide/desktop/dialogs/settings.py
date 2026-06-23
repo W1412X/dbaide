@@ -258,6 +258,90 @@ class _WorkbookPanel(QWidget):
 from dbaide.desktop.window_chrome import ChromeDialog
 
 
+class _OptionCard(QFrame):
+    """A large clickable option (title + description) for the new-connection chooser."""
+
+    clicked = pyqtSignal()
+
+    def __init__(self, title: str, description: str) -> None:
+        super().__init__()
+        self.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.setObjectName("optionCard")
+        self.setStyleSheet(
+            f"""
+            QFrame#optionCard {{ background:{Theme.PANEL_2}; border:1px solid {Theme.BORDER_SOFT};
+                                 border-radius:10px; }}
+            QFrame#optionCard:hover {{ background:{Theme.PANEL_3}; border-color:{Theme.ACCENT}; }}
+            """
+        )
+        lay = QVBoxLayout(self)
+        lay.setContentsMargins(14, 12, 14, 12)
+        lay.setSpacing(3)
+        head = QLabel(title)
+        head.setStyleSheet(f"color:{Theme.TEXT}; font-size:14px; font-weight:600; background:transparent; border:none;")
+        desc = QLabel(description)
+        desc.setWordWrap(True)
+        desc.setStyleSheet(f"color:{Theme.MUTED}; font-size:12px; background:transparent; border:none;")
+        lay.addWidget(head)
+        lay.addWidget(desc)
+
+    def mouseReleaseEvent(self, event) -> None:  # noqa: N802
+        if event.button() == Qt.MouseButton.LeftButton:
+            self.clicked.emit()
+        super().mouseReleaseEvent(event)
+
+
+class _ConnectionKindDialog(ChromeDialog):
+    """Asks whether a new connection is a database or an Excel/CSV collection."""
+
+    def __init__(self, parent) -> None:
+        super().__init__(parent)
+        self._kind = ""
+        self.setWindowTitle(_pt("conn.kind_title"))
+        self.setModal(True)
+        self.setMinimumWidth(440)
+        self.setStyleSheet(app_style())
+
+        root = QVBoxLayout(self)
+        root.setContentsMargins(20, 20, 20, 16)
+        root.setSpacing(12)
+        heading = QLabel(_pt("conn.kind_title"))
+        heading.setStyleSheet(f"color:{Theme.TEXT}; font-size:16px; font-weight:700; background:transparent;")
+        root.addWidget(heading)
+        hint = QLabel(_pt("conn.kind_hint"))
+        hint.setStyleSheet(f"color:{Theme.MUTED}; font-size:12px; background:transparent;")
+        root.addWidget(hint)
+
+        db = _OptionCard(_pt("conn.kind.database"), _pt("conn.kind.database_desc"))
+        db.clicked.connect(lambda: self._pick("database"))
+        excel = _OptionCard(_pt("conn.kind.excel"), _pt("conn.kind.excel_desc"))
+        excel.clicked.connect(lambda: self._pick("excel"))
+        root.addWidget(db)
+        root.addWidget(excel)
+
+        cancel_row = QHBoxLayout()
+        cancel_row.addStretch(1)
+        cancel = compact_button(_pt("dialog.cancel"), width=88)
+        cancel.clicked.connect(self.reject)
+        cancel_row.addWidget(cancel)
+        root.addLayout(cancel_row)
+
+    def _pick(self, kind: str) -> None:
+        self._kind = kind
+        self.accept()
+
+    def kind(self) -> str:
+        return self._kind
+
+
+def choose_connection_kind(parent) -> str:
+    """Return "database", "excel", or "" if cancelled."""
+    dialog = _ConnectionKindDialog(parent)
+    if dialog.exec() != QDialog.DialogCode.Accepted:
+        return ""
+    return dialog.kind()
+
+
 class SettingsDialog(ChromeDialog):
     connection_saved = pyqtSignal(dict)
     connection_deleted = pyqtSignal(str)
@@ -431,12 +515,8 @@ class SettingsDialog(ChromeDialog):
         self.import_conn_btn = compact_button(_pt("settings.import"))
         self.import_conn_btn.setToolTip(_pt("settings.import_conn_tooltip"))
         self.import_conn_btn.clicked.connect(self._import_connection)
-        self.import_excel_btn = compact_button(_pt("settings.import_excel"), width=128)
-        self.import_excel_btn.setToolTip(_pt("settings.import_excel_tooltip"))
-        self.import_excel_btn.clicked.connect(self._create_excel_collection)
         list_actions.addWidget(self.add_conn_btn)
         list_actions.addWidget(self.import_conn_btn)
-        list_actions.addWidget(self.import_excel_btn)
         list_actions.addStretch(1)
         list_col.addLayout(list_actions)
         row.addLayout(list_col)
@@ -1408,6 +1488,14 @@ class SettingsDialog(ChromeDialog):
         self._set_model_new_mode(False)
 
     def _add_connection(self) -> None:
+        # When imports are available, first ask which kind of connection to create.
+        if self._config_dir is not None:
+            kind = choose_connection_kind(self)
+            if not kind:
+                return
+            if kind == "excel":
+                self._create_excel_collection()
+                return
         self._selected_conn = ""
         self._select_draft(self.conn_list, _NEW_CONNECTION_ID, _pt("settings.new_connection"))
 
@@ -1502,7 +1590,6 @@ class SettingsDialog(ChromeDialog):
             self.test_conn_btn.setEnabled(not busy)
             self.add_conn_btn.setEnabled(not busy)
             self.import_conn_btn.setEnabled(not busy)
-            self.import_excel_btn.setEnabled(not busy)
             key = self._selected_list_key(self.conn_list)
             self.conn_more.setEnabled((not busy) and bool(key) and key != _NEW_CONNECTION_ID)
             if busy:
@@ -1524,7 +1611,6 @@ class SettingsDialog(ChromeDialog):
             self.save_conn_btn.setEnabled(not busy)
             self.add_conn_btn.setEnabled(not busy)
             self.import_conn_btn.setEnabled(not busy)
-            self.import_excel_btn.setEnabled(not busy)
             key = self._selected_list_key(self.conn_list)
             self.conn_more.setEnabled((not busy) and bool(key) and key != _NEW_CONNECTION_ID)
             if busy:

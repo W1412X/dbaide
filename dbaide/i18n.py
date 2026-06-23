@@ -795,18 +795,23 @@ _STRINGS: dict[str, dict[str, str]] = {
     "toast.export_ok": {"en": "Exported to {path}", "zh": "已导出到 {path}"},
     "toast.import_ok": {"en": "Imported connection: {name}", "zh": "已导入连接：{name}"},
     # Excel/CSV import — collection management
-    "settings.import_excel": {"en": "Import Excel", "zh": "导入 Excel"},
-    "settings.import_excel_tooltip": {
-        "en": "Create a connection from Excel/CSV files you can query and ask about.",
-        "zh": "从 Excel/CSV 文件创建一个可查询、可提问的连接。",
+    "conn.kind_title": {"en": "New connection", "zh": "新建连接"},
+    "conn.kind_hint": {"en": "What do you want to connect to?", "zh": "你想连接到什么？"},
+    "conn.kind.database": {"en": "Database", "zh": "数据库"},
+    "conn.kind.database_desc": {
+        "en": "Connect to a MySQL, PostgreSQL or SQLite database.",
+        "zh": "连接到 MySQL、PostgreSQL 或 SQLite 数据库。",
+    },
+    "conn.kind.excel": {"en": "Excel / CSV", "zh": "Excel / CSV"},
+    "conn.kind.excel_desc": {
+        "en": "Build a local read-only database from Excel/CSV files — add or remove workbooks anytime.",
+        "zh": "从 Excel/CSV 文件构建一个本地只读数据库，可随时增删工作簿。",
     },
     "excel.file_filter": {
         "en": "Spreadsheets (*.xlsx *.xlsm *.csv *.tsv);;All files (*)",
         "zh": "表格文件 (*.xlsx *.xlsm *.csv *.tsv);;所有文件 (*)",
     },
     "excel.pick_title": {"en": "Choose Excel/CSV files", "zh": "选择 Excel/CSV 文件"},
-    "excel.name_title": {"en": "Name this connection", "zh": "为连接命名"},
-    "excel.name_prompt": {"en": "Connection name:", "zh": "连接名称："},
     "excel.collection_title": {"en": "Excel collection · {name}", "zh": "Excel 集合 · {name}"},
     "excel.collection_hint": {
         "en": "Read-only · generated from imported files. Add or remove workbooks below.",

@@ -17,9 +17,10 @@ All notable changes to DBAide are documented here. The format is loosely based o
   skipped, and a `manifest.json` recording provenance. The import runs in one transaction
   and leaves no partial database on failure. `.xlsx` needs the optional `openpyxl`
   (`pip install dbaide[imports]`); CSV needs nothing.
-- **Managed Excel collections in the desktop** — Settings → Connections gains an
-  **Import Excel** button that opens a staging dialog: name the connection, add one or more
-  files, and rename each resulting table before creating. Selecting an existing collection
+- **Managed Excel collections in the desktop** — Settings → Connections → **New** now asks
+  whether to create a database connection or an Excel/CSV one. Choosing Excel/CSV opens a
+  staging dialog: name the connection, add one or more files, and rename each resulting table
+  before creating. Selecting an existing collection
   shows a workbook manager (right pane) to **add**, **rename**, or **remove** workbooks —
   adding a file whose name matches an existing one offers a quick overwrite (delete-then-add),
   and removing the last workbook deletes the connection. Any change re-projects the catalog
