@@ -6,6 +6,18 @@ All notable changes to DBAide are documented here. The format is loosely based o
 
 ## [Unreleased]
 
+### Added
+
+- **Import CSV/Excel** — `dbaide ingest <file…>` imports one or more `.csv`/`.tsv`/`.xlsx`/
+  `.xlsm` files into a local SQLite connection you can immediately ask/query, registered
+  like any other connection. Phase 1 handles the common case — one clean rectangular table
+  per sheet (header on the first non-empty row): type inference (INTEGER/REAL/TEXT, with
+  leading-zero codes preserved as text), CJK-safe column sanitization + de-duplication,
+  multi-sheet → multiple tables, multi-file with collision-safe table names, hidden sheets
+  skipped, and a `manifest.json` recording provenance. The import runs in one transaction
+  and leaves no partial database on failure. `.xlsx` needs the optional `openpyxl`
+  (`pip install dbaide[imports]`); CSV needs nothing.
+
 ## [0.9.3] — 2026-06-22
 
 ### Added

@@ -299,6 +299,12 @@ def build_parser() -> argparse.ArgumentParser:
     imp = sub.add_parser("import", help="Import from a DBAide export file")
     imp.add_argument("file", help="Path to the export JSON file")
 
+    ing = sub.add_parser("ingest", help="Import CSV/Excel file(s) into a local SQLite connection")
+    ing.add_argument("files", nargs="+", help="One or more .csv/.tsv/.xlsx/.xlsm files")
+    ing.add_argument("--conn", default="", help="Connection name (default: first file's name)")
+    ing.add_argument("--default", action="store_true", help="Set as the default connection")
+    ing.add_argument("--replace", action="store_true", help="Overwrite an existing connection of the same name")
+
     # ── Backup ──────────────────────────────────────────────────────────────
     bk = sub.add_parser("backup", help="Backup tables, databases, or instances to local files")
     bsub = bk.add_subparsers(dest="backup_command", required=True)
@@ -524,6 +530,8 @@ def dispatch(args: argparse.Namespace, cfg: ConfigManager) -> int:
         return dispatch_export(args, cfg)
     if args.command == "import":
         return dispatch_import(args, cfg)
+    if args.command == "ingest":
+        return dispatch_ingest(args, cfg)
     if args.command == "backup":
         return dispatch_backup(args, cfg)
     if args.command == "mcp":
@@ -922,6 +930,40 @@ def dispatch_import(args: argparse.Namespace, cfg: ConfigManager) -> int:
             print(f"  {len(anns)} annotations")
 
     print("import complete.")
+    return 0
+
+
+def dispatch_ingest(args: argparse.Namespace, cfg: ConfigManager) -> int:
+    from dbaide.ingest import SUPPORTED_EXTS, import_workbooks
+
+    paths = [Path(f) for f in args.files]
+    for p in paths:
+        if not p.exists():
+            print(f"file not found: {p}", file=sys.stderr)
+            return 1
+        if p.suffix.lower() not in SUPPORTED_EXTS:
+            print(f"unsupported file type: {p.name} "
+                  f"(supported: {', '.join(sorted(SUPPORTED_EXTS))})", file=sys.stderr)
+            return 1
+
+    name = (args.conn or paths[0].stem).strip()
+    if not name:
+        print("could not derive a connection name; pass --conn", file=sys.stderr)
+        return 1
+    if name in cfg.connections() and not args.replace:
+        print(f"connection {name!r} already exists; use --replace to overwrite", file=sys.stderr)
+        return 1
+
+    dest_dir = cfg.path.parent / "imports" / name
+    result = import_workbooks(paths, dest_dir=dest_dir, on_progress=lambda m: print(f"  {m}"))
+
+    cfg.upsert_connection(
+        ConnectionConfig(name=name, type="sqlite", path=str(result.db_path)),
+        make_default=args.default,
+    )
+    print(f"ingested {result.table_count} table(s), {result.total_rows} row(s) "
+          f"into connection {name!r}.")
+    print(f"  ask it:  dbaide ask \"…\" --conn {name}")
     return 0
 
 
