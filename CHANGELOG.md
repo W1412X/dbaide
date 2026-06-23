@@ -6,6 +6,27 @@ All notable changes to DBAide are documented here. The format is loosely based o
 
 ## [Unreleased]
 
+## [0.9.5] — 2026-06-23
+
+### Added
+
+- **More model API protocols** — `anthropic` (Claude Messages API) and `openai_responses`
+  (OpenAI Responses API) alongside OpenAI-compatible, selectable in Settings → Models and
+  `dbaide model add --provider`.
+- **Excel import — management & shaping** — drag-and-drop files onto the staging dialog;
+  per-sheet selection (import only the sheets you want) and a header-anchor picker (row +
+  start column) with validation; re-import/refresh a workbook from its source file; a
+  read-only data preview of the resulting tables; auto-skip of preamble rows, vertical-merge
+  fill, and per-sheet fault isolation.
+
+### Fixed
+
+- **Streamed answer height** — the live answer now grows with content (was clipped to one
+  line during streaming, with trailing blank space after) by streaming into a QTextEdit and
+  measuring true pixel height.
+- Excel import robustness: atomic writes, bounded grid for inflated dimensions, header-extent
+  column span, big-integer/CSV-newline handling, collection-name safety.
+
 ## [0.9.4] — 2026-06-23
 
 ### Added
