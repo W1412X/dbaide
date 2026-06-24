@@ -72,7 +72,11 @@ _CLIENT_JS = r"""
       if(!res || res.error){ el.classList.add('dbaide-empty'); el.textContent=(res&&res.error)?res.error:'无数据'; return; }
       el.classList.remove('dbaide-empty');
       if(kind==='kpi'){ var v=kpiValue(res); el.textContent=(v==null)?'—':fmtNum(v); return; }
-      if(kind==='table'){ renderTable(el, res); return; }
+      if(kind==='table'){
+        if(!res.rows || !res.rows.length){ el.classList.add('dbaide-empty'); el.textContent='无数据'; }
+        else renderTable(el, res);
+        return;
+      }
       if(!res.echarts_option){ el.classList.add('dbaide-empty'); el.textContent='无数据'; return; }
       if(!window.echarts) return;
       // key the instance by the ELEMENT (getInstanceByDom), not the chart_id — the same

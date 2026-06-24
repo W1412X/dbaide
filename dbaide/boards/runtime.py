@@ -15,7 +15,8 @@ read-only engine + ``validate_sql_report`` remain the hard backstops upstream.
 from __future__ import annotations
 
 import re
-from datetime import date
+from datetime import date, datetime
+from decimal import Decimal
 from typing import Any, Callable
 
 from dbaide.agent.chart_agent import ChartAgent, chart_plan_from_dict
@@ -26,6 +27,17 @@ from dbaide.charts.spec import chart_spec_to_dict
 
 # execute_sql(sql:str) -> {"columns":[...], "rows":[...], "row_count":int}
 ExecuteSql = Callable[[str], dict[str, Any]]
+
+
+def _jsonable(v: Any) -> Any:
+    """Coerce a DB cell so it serializes as a proper JSON type for the page."""
+    if isinstance(v, bool):
+        return v
+    if isinstance(v, Decimal):
+        return float(v)
+    if isinstance(v, (date, datetime)):
+        return v.isoformat()
+    return v
 
 
 def _is_blank(value: Any) -> bool:
@@ -134,9 +146,11 @@ def run_parametric_chart(chart: ParametricChart, param_values: dict[str, Any], e
     if not combined:
         return {"chart_spec": None, "row_count": 0, "columns": [], "rows": []}   # matched nothing → "no data"
     # rows/columns are returned too, so kpi and table tiles can render straight from the
-    # data even when this recipe can't form a chart
+    # data even when this recipe can't form a chart. Coerce so numerics survive the
+    # bridge's JSON as NUMBERS (Decimal/date would otherwise stringify, breaking KPI
+    # numeric detection + formatting on the page).
     columns = list(combined[0].keys())
-    rows = [dict(r) for r in combined[:200]]
+    rows = [{k: _jsonable(v) for k, v in r.items()} for r in combined[:200]]
     plan = chart_plan_from_dict(chart.chart_plan or {})
     try:
         spec = ChartAgent().build_spec(plan, chart_id=chart.chart_id or "chart", rows=combined)

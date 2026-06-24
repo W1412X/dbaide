@@ -131,6 +131,24 @@ def test_run_parametric_chart_empty_rows_is_no_data_not_error():
     assert out["chart_spec"] is None and out["row_count"] == 0   # no rows → "no data", never raises
 
 
+def test_run_parametric_chart_rows_are_json_numeric():
+    # Decimal/date DB cells must come back as JSON-native types so the page's KPI
+    # numeric detection + formatting work (default=str would stringify them).
+    from datetime import date as _date
+    from decimal import Decimal
+    chart = ParametricChart(
+        chart_id="c1", title="t",
+        sources=[QuerySource("s", "SELECT d, total FROM s")],
+        params=[], combine=Combine("single"),
+        chart_plan={"chart_type": "bar", "category_field": "d", "value_fields": ["total"]},
+    )
+    out = run_parametric_chart(chart, {}, lambda _sql: {
+        "columns": ["d", "total"], "rows": [[_date(2024, 6, 1), Decimal("1234.50")]]})
+    row = out["rows"][0]
+    assert row["total"] == 1234.5 and isinstance(row["total"], float)   # Decimal → float
+    assert row["d"] == "2024-06-01"                                      # date → ISO string
+
+
 def test_run_parametric_chart_multi_sql_join():
     chart = ParametricChart(
         chart_id="c2", title="销售 vs 目标",
