@@ -177,6 +177,26 @@ def test_native_decide_content_is_finish(tmp_path):
     assert loop._native_decide([LLMMessage("user", "q")]) == {"action": "finish", "answer": "final answer"}
 
 
+def test_native_decide_unwraps_json_protocol_in_content(tmp_path):
+    # Some models emit the JSON-protocol object as content even on the native path
+    # (content = '{"action":"finish","answer":"…"}', with literal newlines in the
+    # answer). The answer MUST be unwrapped, not shown to the user as raw JSON.
+    import json as _json
+    from dbaide.llm import _extract_json_block
+
+    class _JsonContentLLM(_ToolCallLLM):
+        def _parse_json_object(self, text):
+            return _json.loads(_extract_json_block(text), strict=False)
+
+    orch = _orch(tmp_path)
+    content = '{"action": "finish", "answer": "## 结果\n\n广州最高"}'   # real newlines = the bug
+    orch.llm = _JsonContentLLM([{"content": content, "tool_calls": []}])
+    decision = AskAgentLoop(orch)._native_decide([LLMMessage("user", "q")])
+    assert decision["action"] == "finish"
+    assert decision["answer"].startswith("## 结果") and "广州最高" in decision["answer"]
+    assert not decision["answer"].lstrip().startswith("{")   # JSON wrapper stripped
+
+
 def test_native_decide_unknown_tool_falls_back(tmp_path):
     orch = _orch(tmp_path)
     orch.llm = _ToolCallLLM([{"tool_calls": [{"name": "made_up_tool", "arguments": {}}]}])

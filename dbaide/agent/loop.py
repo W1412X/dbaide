@@ -738,12 +738,43 @@ class AskAgentLoop:
                 return {"action": "call_tool", "tool": calls[0]["tool"], "args": calls[0]["args"], "thought": thought}
             return {"action": "call_tools", "calls": calls, "thought": thought}
         if content and content.strip():
+            # Some models emit the JSON-protocol object even on the native path
+            # (content = '{"action":"finish","answer":"..."}'). Unwrap it so the user
+            # never sees raw JSON; otherwise treat the content itself as the answer.
+            decision = self._unwrap_json_action(content)
+            if decision is not None:
+                return decision
             # No tool call + content = the model is done → finish. Emit as one chunk
             # so the UI still receives the answer when streaming is on.
             if getattr(orch, "stream_answers", False):
                 self._emit_answer_chunk(content)
             return {"action": "finish", "answer": content}
         return None  # neither a tool call nor content → fall back
+
+    def _unwrap_json_action(self, content: str) -> dict[str, Any] | None:
+        """If *content* is a JSON-protocol action object, parse it into a decision.
+
+        Returns the decision dict for a valid finish/call_tool(s) object, else None
+        (so the caller treats the content as a plain answer)."""
+        text = content.strip()
+        if not (text.startswith("{") or text.startswith("```")):
+            return None
+        try:
+            payload = self.orchestrator.llm._parse_json_object(text)
+        except Exception:
+            return None
+        if not isinstance(payload, dict):
+            return None
+        action = str(payload.get("action") or "").lower()
+        if action == "finish":
+            if getattr(self.orchestrator, "stream_answers", False):
+                self._emit_answer_chunk(str(payload.get("answer") or ""))
+            return payload
+        if action == "call_tool" and payload.get("tool") in self.allowed_tool_names:
+            return payload
+        if action == "call_tools" and isinstance(payload.get("calls"), list) and payload.get("calls"):
+            return payload
+        return None
 
     def _decide(self, messages: list[LLMMessage]) -> dict[str, Any]:
         """Send the full conversation to the LLM and parse a JSON decision."""
