@@ -1676,7 +1676,9 @@ class DesktopService:
             except Exception as exc:  # noqa: BLE001
                 return {"ok": False, "issues": [str(exc)[:300]]}
 
-        agent = DashboardBuilderAgent(self._safe_llm())
+        model_name = str(payload.get("model") or "")
+        llm = build_llm_client(self.cfg.model(model_name)) if model_name else self._safe_llm()
+        agent = DashboardBuilderAgent(llm)
         app = agent.build(
             instruction=str(payload.get("instruction") or ""),
             context_charts=context, connection_name=conn_name,

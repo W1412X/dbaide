@@ -13,6 +13,7 @@ from typing import Any
 from PyQt6.QtCore import Qt, QSize, QThread, pyqtSignal
 from PyQt6.QtGui import QFont
 from PyQt6.QtWidgets import (
+    QComboBox,
     QFrame,
     QHBoxLayout,
     QLabel,
@@ -73,6 +74,13 @@ class ParametricDashboardStudio(QWidget):
         titlecol.addWidget(self._title)
         titlecol.addWidget(self._subtitle)
         head.addLayout(titlecol, 1)
+        self._model = QComboBox()
+        self._model.setMinimumWidth(150)
+        self._model.setStyleSheet(
+            f"QComboBox {{ background:{Theme.PANEL_2}; color:{Theme.TEXT}; border:1px solid {Theme.BORDER_SOFT};"
+            f" border-radius:6px; padding:5px 9px; font-size:12px; }}")
+        self._populate_models()
+        head.addWidget(self._model)
         self._chip = QFrame()
         self._chip.setStyleSheet(
             f"QFrame {{ background:{Theme.PANEL_2}; border:1px solid {Theme.BORDER_SOFT}; border-radius:12px; }}")
@@ -187,9 +195,29 @@ class ParametricDashboardStudio(QWidget):
 
     # -- build / refine -------------------------------------------------------
 
+    def _populate_models(self) -> None:
+        try:
+            boot = self._service.dispatch("bootstrap", {})
+        except Exception:  # noqa: BLE001
+            boot = {}
+        models = boot.get("models") or []
+        default = str(boot.get("default_model") or "")
+        for m in models:
+            nm = str(m.get("name") or "")
+            if nm:
+                self._model.addItem(nm, nm)
+        if default:
+            i = self._model.findData(default)
+            if i >= 0:
+                self._model.setCurrentIndex(i)
+
+    def _current_model(self) -> str:
+        return str(self._model.currentData() or "")
+
     def _build(self, payload: dict) -> None:
         if self._worker is not None:
             return
+        payload.setdefault("model", self._current_model())   # generate with the chosen model
         self._set_busy(True)
         worker = _BuildWorker(self._service, payload, self)
         worker.done.connect(self._on_built)

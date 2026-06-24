@@ -77,3 +77,36 @@ def test_refresh_non_refreshable_returns_snapshot(service):
     out = service.dispatch("save_question", {**_chart_payload(sql="", chart_plan=None)})
     res = service.dispatch("refresh_saved_question", {"id": out["question"]["id"]})
     assert res["refreshable"] is False
+
+
+def test_build_dashboard_app_uses_selected_model(tmp_path, monkeypatch):
+    # the dashboard builder must run with the model chosen in the studio
+    monkeypatch.setenv("DBAIDE_BOARDS", str(tmp_path / "boards"))
+    monkeypatch.setenv("DBAIDE_CONFIG", str(tmp_path / "config.toml"))
+    import sqlite3
+    db = tmp_path / "s.db"
+    c = sqlite3.connect(db)
+    c.executescript("CREATE TABLE t(region text, amt real); INSERT INTO t VALUES('A',1),('B',2);")
+    c.commit(); c.close()
+    from dbaide.models import ConnectionConfig, ModelConfig
+    svc = DesktopService()
+    svc.cfg.upsert_connection(ConnectionConfig(name="shop", type="sqlite", path=str(db)))
+    svc.cfg.upsert_model(ModelConfig(name="m1", provider="openai_compatible",
+                                     base_url="http://x/v1", api_key="k", model="a"), make_default=True)
+    svc.cfg.upsert_model(ModelConfig(name="m2", provider="openai_compatible",
+                                     base_url="http://y/v1", api_key="k", model="b"))
+
+    class _Stub:
+        def complete_json(self, messages, *, schema_hint=""):
+            return {"name": "D", "ui": {"type": "page", "children": [{"type": "chart", "chart": "c1"}]},
+                    "charts": [{"chart_id": "c1", "title": "t",
+                                "sources": [{"id": "m", "sql": "SELECT region, sum(amt) AS amt FROM t GROUP BY 1"}],
+                                "params": [], "combine": {"mode": "single"},
+                                "chart_plan": {"chart_type": "bar", "category_field": "region", "value_fields": ["amt"]}}]}
+
+    seen = {}
+    monkeypatch.setattr("dbaide.desktop.service.build_llm_client",
+                        lambda cfg: (seen.__setitem__("name", cfg.name), _Stub())[1])
+    out = svc.dispatch("build_dashboard_app", {"connection_name": "shop", "instruction": "x", "model": "m2"})
+    assert seen["name"] == "m2"                 # routed to the chosen model, not the default
+    assert out["app"]["name"] == "D"
