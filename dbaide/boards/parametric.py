@@ -27,13 +27,20 @@ def _filter_known(cls: type, data: dict[str, Any]) -> dict[str, Any]:
 
 @dataclass
 class ParamSpec:
-    """A control on the dashboard: a typed, optionally-constrained parameter."""
+    """A control on the dashboard: a typed, optionally-constrained parameter.
+
+    ``default`` may be a dynamic token (e.g. ``"@today"``, ``"@month_start"``,
+    ``"@days_ago:30"``) resolved at run time. ``multi=True`` (for ``enum``) makes
+    the value a list that binds as a comma-list for ``IN (:name)``. A range filter
+    is modelled as two single params (start/end) and one range control in the UI.
+    """
 
     name: str                       # placeholder used in SQL as :name
     type: str = "text"              # text | number | date | enum
     label: str = ""
     default: Any = None
     options: list[Any] = field(default_factory=list)   # allowed values for type=enum
+    multi: bool = False             # enum multi-select → IN (...) list
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)

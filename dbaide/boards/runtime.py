@@ -19,6 +19,7 @@ from datetime import date
 from typing import Any, Callable
 
 from dbaide.agent.chart_agent import ChartAgent, chart_plan_from_dict
+from dbaide.boards.dates import resolve_value
 from dbaide.boards.parametric import Combine, ParamSpec, ParametricChart, QuerySource
 from dbaide.boards.refresh import _rows_as_dicts
 from dbaide.charts.spec import chart_spec_to_dict
@@ -27,9 +28,8 @@ from dbaide.charts.spec import chart_spec_to_dict
 ExecuteSql = Callable[[str], dict[str, Any]]
 
 
-def _render_literal(spec: ParamSpec, value: Any) -> str:
-    if value is None:
-        value = spec.default
+def _render_one(spec: ParamSpec, value: Any) -> str:
+    """Render a single scalar value as a type-checked SQL literal."""
     if value is None:
         return "NULL"
     if spec.type == "number":
@@ -54,13 +54,29 @@ def _render_literal(spec: ParamSpec, value: Any) -> str:
     return "'" + str(value).replace("'", "''") + "'"   # text
 
 
-def render_sql(template: str, values: dict[str, Any], params: list[ParamSpec]) -> str:
-    """Replace declared ``:param`` tokens in *template* with type-checked literals."""
+def _render_param(spec: ParamSpec, value: Any, today: date | None) -> str:
+    """Render a param value: resolve dynamic tokens, expand multi-select to a list."""
+    if spec.multi:
+        items = value if isinstance(value, (list, tuple)) else ([] if value is None else [value])
+        rendered = [_render_one(spec, resolve_value(v, today)) for v in items]
+        return ", ".join(rendered) if rendered else "NULL"
+    return _render_one(spec, resolve_value(value if value is not None else spec.default, today))
+
+
+def render_sql(template: str, values: dict[str, Any], params: list[ParamSpec],
+               today: date | None = None) -> str:
+    """Replace declared ``:param`` tokens in *template* with type-checked literals.
+
+    Only declared param names are substituted; dynamic ``@`` defaults are resolved
+    against *today* (defaults to the real date)."""
     if not params:
         return template
     by_name = {p.name: p for p in params}
     pattern = re.compile(r":(" + "|".join(re.escape(p.name) for p in params) + r")\b")
-    return pattern.sub(lambda m: _render_literal(by_name[m.group(1)], values.get(m.group(1), by_name[m.group(1)].default)), template)
+    return pattern.sub(
+        lambda m: _render_param(by_name[m.group(1)], values.get(m.group(1), by_name[m.group(1)].default), today),
+        template,
+    )
 
 
 def combine_rows(result_sets: list[tuple[QuerySource, list[dict[str, Any]]]], combine: Combine) -> list[dict[str, Any]]:
@@ -96,12 +112,13 @@ def combine_rows(result_sets: list[tuple[QuerySource, list[dict[str, Any]]]], co
     return [dict(r) for r in sets[0][1]]
 
 
-def run_parametric_chart(chart: ParametricChart, param_values: dict[str, Any], execute_sql: ExecuteSql) -> dict[str, Any]:
+def run_parametric_chart(chart: ParametricChart, param_values: dict[str, Any], execute_sql: ExecuteSql,
+                         *, today: date | None = None) -> dict[str, Any]:
     """Bind params, run the source SQLs, combine, and materialize the chart spec."""
     values = {**chart.default_params(), **(param_values or {})}
     result_sets: list[tuple[QuerySource, list[dict[str, Any]]]] = []
     for src in chart.sources:
-        sql = render_sql(src.sql, values, chart.params)
+        sql = render_sql(src.sql, values, chart.params, today=today)
         res = execute_sql(sql)
         if res.get("pending_confirmation"):
             raise ValueError("a source query needs confirmation and cannot be auto-run")
