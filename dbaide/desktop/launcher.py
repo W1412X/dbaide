@@ -30,9 +30,16 @@ def main(argv: list[str] | None = None) -> int:
 
     from dbaide.desktop.platform_ui import ensure_webengine_before_qapplication
 
-    ensure_webengine_before_qapplication()
+    webengine_ok = ensure_webengine_before_qapplication()
     from dbaide.observability.app_logging import setup_app_logging
     setup_app_logging()
+    if not webengine_ok:
+        import logging
+        logging.getLogger("dbaide").error(
+            "Qt WebEngine failed to initialize before the QApplication — charts will not "
+            "render (they appear as [title] placeholders) and answers fall back to plain "
+            "text. Check that PyQt6-WebEngine is installed in the running interpreter."
+        )
     from dbaide.i18n import set_language
     from dbaide.desktop.theme import set_theme
     from dbaide.agent.llm_trace import set_tracing

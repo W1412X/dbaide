@@ -861,6 +861,8 @@ _STRINGS: dict[str, dict[str, str]] = {
     "excel.header_set": {"en": "Configured ✓", "zh": "已配置 ✓"},
     "excel.header_include": {"en": "Import this sheet", "zh": "导入此表"},
     "excel.header_table_name": {"en": "Table name", "zh": "表名"},
+    "excel.importing": {"en": "Importing…", "zh": "正在导入…"},
+    "excel.importing_title": {"en": "Importing", "zh": "导入中"},
     "excel.no_sheets_warn": {"en": "Select at least one sheet to import.", "zh": "请至少选择一个要导入的表。"},
     "excel.sheet_excluded": {"en": "This sheet will be skipped.", "zh": "此表将不导入。"},
     "excel.skipped_sheets": {

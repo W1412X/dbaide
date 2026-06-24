@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from typing import Any
 
 from PyQt6.QtCore import QTimer, Qt, pyqtSignal
@@ -50,13 +51,46 @@ def estimate_markdown_height(markdown: str, *, width: int = 640) -> int:
     return max(24, int(doc.size().height()) + 8)
 
 
+_log = logging.getLogger("dbaide")
+_webengine_view_cls: Any = None
+_webengine_warned = False
+_webengine_error = ""
+
+
 def try_create_webengine_view():
+    """Return the ``QWebEngineView`` class, or ``None`` when Qt WebEngine is unavailable.
+
+    When this returns ``None`` every answer falls back to a plain ``QTextBrowser`` and
+    each chart degrades to a ``[title]`` placeholder. That fallback used to be silent —
+    the import error was swallowed — which made "charts won't render" impossible to
+    diagnose. We now log the reason once and expose it via :func:`webengine_unavailable_reason`.
+    Success is cached so the import isn't retried per answer; failure is retried (the
+    import may succeed once init order is fixed) but logged only once.
+    """
+    global _webengine_view_cls, _webengine_warned, _webengine_error
+    if _webengine_view_cls is not None:
+        return _webengine_view_cls
     try:
         from PyQt6.QtWebEngineWidgets import QWebEngineView
 
+        _webengine_view_cls = QWebEngineView
+        _webengine_error = ""
         return QWebEngineView
-    except Exception:
+    except Exception as exc:  # noqa: BLE001
+        _webengine_error = f"{type(exc).__name__}: {exc}"
+        if not _webengine_warned:
+            _webengine_warned = True
+            _log.warning(
+                "Qt WebEngine unavailable — answers fall back to plain text and charts "
+                "render as [title] placeholders. Reason: %s",
+                _webengine_error,
+            )
         return None
+
+
+def webengine_unavailable_reason() -> str:
+    """Reason the WebEngine import failed (empty string when available or not yet probed)."""
+    return _webengine_error
 
 
 def _configure_webengine_view(view) -> None:

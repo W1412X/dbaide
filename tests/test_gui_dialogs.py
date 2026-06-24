@@ -130,6 +130,16 @@ def test_prepare_dialog_prefills_extensionless_save_name(qapp, tmp_path):
     d3.deleteLater()
 
 
+def _wait_import(qapp, dialog, timeout=10.0):
+    """Spin the event loop until the background import worker finishes."""
+    import time
+    deadline = time.monotonic() + timeout
+    while getattr(dialog, "_import_worker", None) is not None and time.monotonic() < deadline:
+        qapp.processEvents()
+        time.sleep(0.005)
+    qapp.processEvents()
+
+
 def _find_conn_row(dialog, name):
     from PyQt6.QtCore import Qt
     for i in range(dialog.conn_list.count()):
@@ -183,6 +193,7 @@ def test_excel_collection_panel_toggles_and_manages_workbooks(qapp, tmp_path, mo
     changed = []
     dialog.excel_collection_changed.connect(changed.append)
     dialog._excel_add_workbook()
+    _wait_import(qapp, dialog)                       # import now runs on a worker thread
     assert {w.source_filename for w in col.workbooks()} == {"sales.csv", "customers.csv"}
     assert changed == ["shop"]
 

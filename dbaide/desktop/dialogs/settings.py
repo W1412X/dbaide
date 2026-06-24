@@ -2,10 +2,9 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from PyQt6.QtCore import QSize, Qt, QUrl, pyqtSignal
+from PyQt6.QtCore import QSize, Qt, QThread, QUrl, pyqtSignal
 from PyQt6.QtGui import QDesktopServices
 from PyQt6.QtWidgets import (
-    QApplication,
     QDialog,
     QFormLayout,
     QFrame,
@@ -14,6 +13,7 @@ from PyQt6.QtWidgets import (
     QLineEdit,
     QListWidget,
     QListWidgetItem,
+    QProgressDialog,
     QScrollArea,
     QSpinBox,
     QStackedWidget,
@@ -352,6 +352,28 @@ def choose_connection_kind(parent) -> str:
     if dialog.exec() != QDialog.DialogCode.Accepted:
         return ""
     return dialog.kind()
+
+
+class _ImportWorker(QThread):
+    """Runs an Excel import off the UI thread. The work callable receives a progress callback;
+    it touches only files/sqlite (its own connection in this thread), never Qt — progress is
+    relayed to the UI via a signal."""
+
+    progress = pyqtSignal(str)
+    done = pyqtSignal(object)
+    failed = pyqtSignal(object)
+
+    def __init__(self, work, parent=None) -> None:
+        super().__init__(parent)
+        self._work = work
+
+    def run(self) -> None:
+        try:
+            result = self._work(lambda msg: self.progress.emit(str(msg)))
+        except BaseException as exc:  # noqa: BLE001 - surfaced to the UI thread
+            self.failed.emit(exc)
+            return
+        self.done.emit(result)
 
 
 class SettingsDialog(ChromeDialog):
@@ -1382,6 +1404,35 @@ class SettingsDialog(ChromeDialog):
         self.workbook_panel.load(name, collection.workbooks())
         self.workbook_panel.show()
 
+    def _run_import(self, work, on_done) -> None:
+        """Run an Excel import on a worker thread behind a modal busy dialog, then call
+        on_done(result) on the UI thread (or surface the error). The modal dialog blocks
+        interaction with Settings until the import finishes, so the worker can't be orphaned."""
+        dlg = QProgressDialog(_pt("excel.importing"), None, 0, 0, self)  # no cancel; indeterminate
+        dlg.setWindowTitle(_pt("excel.importing_title"))
+        dlg.setWindowModality(Qt.WindowModality.ApplicationModal)
+        dlg.setMinimumDuration(0)
+        dlg.setAutoClose(False)
+        dlg.setAutoReset(False)
+        worker = _ImportWorker(work, self)
+        worker.progress.connect(dlg.setLabelText)
+
+        def finish(result=None, exc=None):
+            worker.wait()
+            dlg.close()
+            worker.deleteLater()
+            self._import_worker = None
+            if exc is not None:
+                dialog_warn(self, _pt("settings.title"), _pt("excel.err.import_failed", error=str(exc)))
+            else:
+                on_done(result)
+
+        worker.done.connect(lambda r: finish(result=r))
+        worker.failed.connect(lambda e: finish(exc=e))
+        self._import_worker = worker      # keep a reference so the QThread isn't GC'd
+        dlg.show()
+        worker.start()
+
     def _create_excel_collection(self) -> None:
         from dbaide.desktop.dialogs.excel_collection import new_collection
         from dbaide.ingest import collection_dir, import_workbooks
@@ -1393,22 +1444,18 @@ class SettingsDialog(ChromeDialog):
             return
         name, specs = chosen
         dest = collection_dir(self._config_dir, name)
-        try:
-            QApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)
-            result = import_workbooks(specs, dest_dir=dest)
-        except Exception as exc:  # noqa: BLE001
-            dialog_warn(self, _pt("settings.title"), _pt("excel.err.import_failed", error=str(exc)))
-            return
-        finally:
-            QApplication.restoreOverrideCursor()
-        self._note_skipped(result)
-        # Register it through the normal save path; once the list reloads and re-selects
-        # this connection, _on_connection_selected detects the collection and shows the panel.
-        self._selected_conn = name
-        self.connection_saved.emit({
-            "name": name, "type": "sqlite", "path": str(result.db_path),
-            "make_default": not self._connections,
-        })
+
+        def done(result):
+            self._note_skipped(result)
+            # Register through the normal save path; once the list reloads and re-selects this
+            # connection, _on_connection_selected detects the collection and shows the panel.
+            self._selected_conn = name
+            self.connection_saved.emit({
+                "name": name, "type": "sqlite", "path": str(result.db_path),
+                "make_default": not self._connections,
+            })
+
+        self._run_import(lambda progress: import_workbooks(specs, dest_dir=dest, on_progress=progress), done)
 
     def _excel_add_workbook(self) -> None:
         from dbaide.desktop.dialogs.excel_collection import add_collection_files
@@ -1425,17 +1472,14 @@ class SettingsDialog(ChromeDialog):
             self, _pt("settings.title"), _pt("excel.confirm_overwrite", names=", ".join(clashes))
         ):
             return                       # decline → don't create same-name duplicates
-        try:
-            QApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)
-            result = collection.add(specs, overwrite=bool(clashes))
-        except Exception as exc:  # noqa: BLE001
-            dialog_warn(self, _pt("settings.title"), _pt("excel.err.import_failed", error=str(exc)))
-            return
-        finally:
-            QApplication.restoreOverrideCursor()
-        self._note_skipped(result)
-        self.workbook_panel.load(self._selected_conn, collection.workbooks())
-        self.excel_collection_changed.emit(self._selected_conn)
+        conn_name = self._selected_conn
+
+        def done(result):
+            self._note_skipped(result)
+            self.workbook_panel.load(conn_name, collection.workbooks())
+            self.excel_collection_changed.emit(conn_name)
+
+        self._run_import(lambda progress: collection.add(specs, overwrite=bool(clashes), on_progress=progress), done)
 
     def _note_skipped(self, result) -> None:
         if getattr(result, "warnings", None):
@@ -1483,17 +1527,17 @@ class SettingsDialog(ChromeDialog):
             if not picked:
                 return
             path = Path(picked)
-        try:
-            QApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)
-            result = collection.add([ImportSpec(path, name=wb.name)], overwrite=True)  # same name → replace
-        except Exception as exc:  # noqa: BLE001
-            dialog_warn(self, _pt("settings.title"), _pt("excel.err.import_failed", error=str(exc)))
-            return
-        finally:
-            QApplication.restoreOverrideCursor()
-        self._note_skipped(result)
-        self.workbook_panel.load(self._selected_conn, collection.workbooks())
-        self.excel_collection_changed.emit(self._selected_conn)
+        conn_name = self._selected_conn
+
+        def done(result):
+            self._note_skipped(result)
+            self.workbook_panel.load(conn_name, collection.workbooks())
+            self.excel_collection_changed.emit(conn_name)
+
+        self._run_import(
+            lambda progress: collection.add([ImportSpec(path, name=wb.name)], overwrite=True, on_progress=progress),
+            done,
+        )
 
     def _excel_preview(self) -> None:
         collection = self._current_collection()
