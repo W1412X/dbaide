@@ -96,6 +96,10 @@ class ParametricDashboardStudio(QWidget):
             self._worker.deleteLater()
             self._worker = None
 
+    def closeEvent(self, e) -> None:  # noqa: N802
+        self.shutdown()   # don't let a build QThread be destroyed mid-run on close
+        super().closeEvent(e)
+
     # -- build / refine -------------------------------------------------------
 
     def _build(self, payload: dict) -> None:
