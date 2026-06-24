@@ -28,48 +28,56 @@ class _Registry:
         self.handler = fn
 
 
-class _Orchestrator:
-    def __init__(self, llm, sql: str) -> None:
-        self.llm = llm
-        self.run_state = types.SimpleNamespace(
-            question="各工厂功率",
-            memory=None,
-            query_result=types.SimpleNamespace(sql=sql, rows=[], columns=[]),
-            charts=[],
-            trace_node="node",
-        )
-
-    def progress(self, *_args, **_kwargs) -> None:
-        pass
+def _orch(llm, *, sql: str, rows: list[dict]):
+    return types.SimpleNamespace(
+        llm=llm,
+        run_state=types.SimpleNamespace(
+            question="各工厂功率", memory=None,
+            query_result=types.SimpleNamespace(sql=sql, rows=rows, columns=list(rows[0].keys()) if rows else []),
+            charts=[], trace_node="node",
+        ),
+        progress=lambda *a, **k: None,
+    )
 
 
-def test_render_chart_attaches_plan_and_source_sql():
+_PLAN = {"chart_type": "horizontal_bar", "title": "功率对比",
+         "category_field": "factory", "value_fields": ["power"], "sort_by": "value_desc", "limit": 20}
+
+
+def test_render_chart_from_query_records_its_sql():
     sql = "SELECT factory, power FROM plants ORDER BY power DESC"
-    llm = _ChartMockLLM({
-        "chart_type": "horizontal_bar", "title": "功率对比",
-        "category_field": "factory", "value_fields": ["power"],
-        "sort_by": "value_desc", "limit": 20,
-    })
-    orch = _Orchestrator(llm, sql)
+    rows = [{"factory": "A", "power": 4540.1}, {"factory": "B", "power": 4406.0}]
+    orch = _orch(_ChartMockLLM(_PLAN), sql=sql, rows=rows)
     reg = _Registry()
     register(reg, orch)
-
-    rows = [{"factory": "A", "power": 4540.1}, {"factory": "B", "power": 4406.0}]
-    result = reg.handler({"data": rows, "intent": "对比"}, None)
+    # no inline `data` → rows come from the current query result
+    result = reg.handler({"intent": "对比"}, None)
     assert result.ok, getattr(result, "error", None)
 
-    assert len(orch.run_state.charts) == 1
     payload = orch.run_state.charts[0]
     assert payload["chart_type"] == "horizontal_bar"
-    # the two provenance keys that make this chart a re-runnable tile
     assert isinstance(payload.get("chart_plan"), dict)
     assert payload["chart_plan"]["category_field"] == "factory"
-    assert payload["chart_plan"]["value_fields"] == ["power"]
-    assert payload.get("source_sql") == sql
+    assert payload.get("source_sql") == sql   # 1 chart ↔ the 1 SQL that produced it
 
-    # and the plan round-trips into a fresh spec (the refresh path)
+    # the plan round-trips into a fresh spec (the refresh path)
     from dbaide.agent.chart_agent import ChartAgent, chart_plan_from_dict
     from dbaide.charts.spec import chart_spec_to_dict
     plan = chart_plan_from_dict(payload["chart_plan"])
     spec = ChartAgent().build_spec(plan, chart_id="x", rows=[{"factory": "C", "power": 1.0}])
     assert chart_spec_to_dict(spec)["chart_type"] == "horizontal_bar"
+
+
+def test_render_chart_from_inline_data_has_no_source_sql():
+    # inline/computed data has no re-runnable query — must NOT borrow the last SQL,
+    # or a refresh would redraw the wrong data. The pinned tile stays a static snapshot.
+    sql = "SELECT something ELSE entirely FROM other_table"
+    orch = _orch(_ChartMockLLM(_PLAN), sql=sql, rows=[{"x": 1}])
+    reg = _Registry()
+    register(reg, orch)
+    result = reg.handler({"data": [{"factory": "A", "power": 9}, {"factory": "B", "power": 4}],
+                          "intent": "对比"}, None)
+    assert result.ok, getattr(result, "error", None)
+    payload = orch.run_state.charts[0]
+    assert "source_sql" not in payload   # no SQL borrowed for inline data
+    assert isinstance(payload.get("chart_plan"), dict)   # still has a plan (chart type known)

@@ -212,7 +212,8 @@ class DashboardTab(QWidget):
         self._start_refresh([qid])
 
     def _on_refresh_all(self) -> None:
-        self._start_refresh(list(self._tiles.keys()))
+        # only query-backed tiles can refresh; skip static snapshots
+        self._start_refresh([qid for qid, t in self._tiles.items() if t.question().get("refreshable")])
 
     def _start_refresh(self, qids: list[str]) -> None:
         if self._worker is not None or not qids:

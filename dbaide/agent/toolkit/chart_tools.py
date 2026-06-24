@@ -70,9 +70,14 @@ def register(registry: ToolRegistry, orchestrator) -> None:
         # the field→role mapping + the SQL that produced its rows. The renderer
         # ignores these extra keys (chart_spec_from_dict reads only known fields).
         payload["chart_plan"] = chart_plan_to_dict(plan)
-        source_sql = resolve_chart_source_sql(orchestrator, artifact_id=artifact_id)
-        if source_sql:
-            payload["source_sql"] = source_sql
+        # Only record source_sql when the rows came from a query (artifact or the
+        # current result). For inline/computed data there is no re-runnable query —
+        # pairing it with the run's last SQL would refresh the WRONG data, so we
+        # leave it unset and the pinned tile becomes a static snapshot instead.
+        if not inline:
+            source_sql = resolve_chart_source_sql(orchestrator, artifact_id=artifact_id)
+            if source_sql:
+                payload["source_sql"] = source_sql
         charts = list(getattr(orchestrator.run_state, "charts", []) or [])
         charts.append(payload)
         orchestrator.run_state.charts = charts

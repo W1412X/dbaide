@@ -83,7 +83,10 @@ class DashboardTile(QFrame):
         self._question = dict(question or {})
         self._qid = str(self._question.get("id") or self._qid)
         self._title.setText(str(self._question.get("name") or _t("conversation.chart")))
-        self._refresh_btn.setEnabled(True)
+        # only a query-backed tile (has SQL + plan) can refresh; static snapshots can't
+        refreshable = bool(self._question.get("refreshable", False))
+        self._refresh_btn.setEnabled(refreshable)
+        self._refresh_btn.setVisible(refreshable)
         self._rebuild_chart()
         self._rebuild_footer()
 
