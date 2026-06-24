@@ -43,14 +43,22 @@ class _RefreshWorker(QThread):
         super().__init__(parent)
         self._service = service
         self._ids = list(question_ids)
+        self._cancelled = False
+
+    def cancel(self) -> None:
+        self._cancelled = True
 
     def run(self) -> None:
         for qid in self._ids:
+            if self._cancelled:
+                break
             try:
                 res = self._service.dispatch("refresh_saved_question", {"id": qid})
-                self.tile_done.emit(qid, res)
+                if not self._cancelled:
+                    self.tile_done.emit(qid, res)
             except BaseException as exc:  # noqa: BLE001 — report, never crash the thread
-                self.tile_failed.emit(qid, str(exc))
+                if not self._cancelled:
+                    self.tile_failed.emit(qid, str(exc))
         self.finished_all.emit()
 
 
@@ -111,8 +119,23 @@ class DashboardTab(QWidget):
 
     # -- data loading ---------------------------------------------------------
 
+    def shutdown(self) -> None:
+        """Stop any in-flight refresh (call before the window/tab is destroyed)."""
+        self._stop_worker()
+
+    def _stop_worker(self) -> None:
+        worker = self._worker
+        if worker is None:
+            return
+        self._worker = None              # claim it first so _on_refresh_finished no-ops
+        worker.cancel()
+        worker.wait()                    # bounded by the in-flight query (read-only, short)
+        worker.deleteLater()
+        self._refresh_all.setEnabled(True)
+
     def reload(self) -> None:
         """Refresh the board list (call when shown or after a pin elsewhere)."""
+        self._stop_worker()              # never rebuild tiles out from under a live worker
         try:
             boards = self._service.dispatch("list_dashboards", {}).get("dashboards", [])
         except Exception:
@@ -138,6 +161,7 @@ class DashboardTab(QWidget):
             self._show_empty(_t("board.empty"))
 
     def _load_board(self, board_id: str) -> None:
+        self._stop_worker()   # _on_pick / tile-remove also funnel here
         self._clear_grid()
         if not board_id:
             self._show_empty(_t("board.empty"))
@@ -250,11 +274,12 @@ class DashboardTab(QWidget):
 
     def _on_refresh_finished(self) -> None:
         worker = self._worker
+        if worker is None:
+            return   # already force-stopped by _stop_worker (reload/close)
         self._worker = None
         self._refresh_all.setEnabled(True)
-        if worker is not None:
-            worker.wait()
-            worker.deleteLater()
+        worker.wait()
+        worker.deleteLater()
 
     # -- helpers --------------------------------------------------------------
 

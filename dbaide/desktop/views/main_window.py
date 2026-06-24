@@ -131,6 +131,12 @@ class MainWindow(QMainWindow):
         # Give in-flight pool threads a moment to finish so their callbacks don't
         # fire on already-destroyed widgets.
         self.tasks.pool.waitForDone(2000)
+        # The dashboard refresh runs on its own QThread (not the pool) — stop it too,
+        # or Qt aborts with "QThread destroyed while running" on close.
+        try:
+            self.dashboard_tab.shutdown()
+        except Exception:
+            pass
         super().closeEvent(event)
 
     def showEvent(self, event) -> None:  # noqa: N802
@@ -762,35 +768,40 @@ class MainWindow(QMainWindow):
         chart_list = [c for c in (charts or []) if isinstance(c, dict) and c.get("chart_id")]
         if not chart_list:
             return
-        boards = self.service.dispatch("list_dashboards", {}).get("dashboards", [])
+        try:
+            boards = self.service.dispatch("list_dashboards", {}).get("dashboards", [])
+        except Exception as exc:  # noqa: BLE001
+            self.toast(format_user_error(exc))
+            return
         result = _pin_dialog(self, chart_list, boards)
         if result is None:
             return
         picked, dash_id, dash_name = result
         conn = self.current_connection()
-        pinned = 0
-        for chart in picked:
-            payload: dict[str, Any] = {
-                "name": str(chart.get("title") or _i18n_t("conversation.chart")),
-                "connection_name": conn,
-                "nl_question": str(question or ""),
-                "sql": str(chart.get("source_sql") or ""),
-                "chart_plan": chart.get("chart_plan") if isinstance(chart.get("chart_plan"), dict) else None,
-                "chart_spec": chart,
-                "row_count": int(chart.get("row_count") or 0),
-            }
-            if dash_id:
-                payload["dashboard_id"] = dash_id
-            else:
-                payload["dashboard_name"] = dash_name
-            out = self.service.dispatch("pin_chart", payload)
-            board = out.get("dashboard") if isinstance(out, dict) else None
-            if board and not dash_id:   # reuse the just-created board for the remaining charts
-                dash_id = str(board.get("id") or "")
-            pinned += 1
-        if pinned:
-            self.toast(_i18n_t("toast.pinned", n=pinned))
-            self.dashboard_tab.reload()
+        try:
+            # resolve the target board ONCE so all charts land on the same board
+            # (and a failed first pin can't spawn duplicate same-named boards)
+            if not dash_id and dash_name:
+                created = self.service.dispatch("create_dashboard", {"name": dash_name}).get("dashboard") or {}
+                dash_id = str(created.get("id") or "")
+            if not dash_id:
+                return
+            for chart in picked:
+                self.service.dispatch("pin_chart", {
+                    "name": str(chart.get("title") or _i18n_t("conversation.chart")),
+                    "connection_name": conn,
+                    "nl_question": str(question or ""),
+                    "sql": str(chart.get("source_sql") or ""),
+                    "chart_plan": chart.get("chart_plan") if isinstance(chart.get("chart_plan"), dict) else None,
+                    "chart_spec": chart,
+                    "row_count": int(chart.get("row_count") or 0),
+                    "dashboard_id": dash_id,
+                })
+        except Exception as exc:  # noqa: BLE001
+            self.toast(format_user_error(exc))
+            return
+        self.toast(_i18n_t("toast.pinned", n=len(picked)))
+        self.dashboard_tab.reload()
 
     def animate_page_in(self, index: int) -> None:
         """Subtle fade-in for the page that just became current. Skipped for pages that

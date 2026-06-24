@@ -121,6 +121,17 @@ def test_refresh_rejects_pending_confirmation():
         refresh_question(_question(), lambda **k: {"pending_confirmation": True})
 
 
+def test_refresh_rejects_schema_drift_to_protect_snapshot():
+    # plan maps category=region; if a refreshed query no longer yields `region`
+    # (column renamed/dropped), refuse rather than build a zero-filled wrong chart.
+    from dbaide.boards.refresh import refresh_question
+    import pytest
+    q = _question()  # category_field=region, value_fields=[amount]
+    drifted = lambda **k: {"columns": ["area", "amount"], "rows": [["X", 1]], "row_count": 1}
+    with pytest.raises(ValueError, match="schema changed"):
+        refresh_question(q, drifted)
+
+
 def test_concurrent_upserts_do_not_lose_records(tmp_path):
     import threading
     store = SavedQuestionStore(base_dir=tmp_path)

@@ -1567,7 +1567,12 @@ class DesktopService:
     def delete_saved_question(self, payload: dict[str, Any]) -> dict[str, Any]:
         qid = str(payload.get("id") or "")
         ok = self.boards_questions.delete(qid)
-        removed = self.boards.detach_question(qid) if ok else 0
+        removed = 0
+        if ok:
+            try:
+                removed = self.boards.detach_question(qid)
+            except Exception:  # noqa: BLE001 — the question is gone; a stale tile ref is
+                pass            # tolerated (get_dashboard / the UI skip dangling refs)
         return {"deleted": ok, "tiles_removed": removed}
 
     def refresh_saved_question(self, payload: dict[str, Any]) -> dict[str, Any]:

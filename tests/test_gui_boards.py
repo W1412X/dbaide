@@ -79,6 +79,37 @@ def test_dashboard_refresh_worker_updates_tile(qapp, service, monkeypatch):
     assert tab._tiles[qid].question()["chart_spec"]["categories"] == ["华北", "华东"]
 
 
+def test_shutdown_stops_inflight_refresh_without_crashing(qapp, service, monkeypatch):
+    out = _pin(service)
+    qid = out["question"]["id"]
+
+    def slow_exec(payload):
+        time.sleep(0.3)
+        return {"columns": ["region", "amount"], "rows": [["A", 1]], "row_count": 1}
+
+    monkeypatch.setattr(service, "execute_sql", slow_exec)
+    from dbaide.desktop.views.dashboard_tab import DashboardTab
+    tab = DashboardTab(service)
+    tab._on_tile_refresh(qid)
+    assert tab._worker is not None
+    tab.shutdown()                 # must cancel + wait + clear, never abort
+    assert tab._worker is None
+
+
+def test_reload_during_refresh_is_safe(qapp, service, monkeypatch):
+    out = _pin(service)
+    qid = out["question"]["id"]
+    monkeypatch.setattr(service, "execute_sql",
+                        lambda p: (time.sleep(0.2),
+                                   {"columns": ["region", "amount"], "rows": [["A", 1]], "row_count": 1})[1])
+    from dbaide.desktop.views.dashboard_tab import DashboardTab
+    tab = DashboardTab(service)
+    tab._on_tile_refresh(qid)
+    tab.reload()                   # stops the worker before rebuilding tiles
+    assert tab._worker is None
+    assert len(tab._tiles) == 1
+
+
 def test_remove_tile_keeps_question_in_library(qapp, service):
     out = _pin(service)
     qid, did = out["question"]["id"], out["dashboard"]["id"]

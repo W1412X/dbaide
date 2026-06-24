@@ -17,6 +17,21 @@ from dbaide.charts.spec import chart_spec_to_dict
 ExecuteSql = Callable[..., dict[str, Any]]
 
 
+def _referenced_columns(plan: dict[str, Any]) -> list[str]:
+    """Column names a chart plan maps to roles (category/value/x/y/…)."""
+    refs: list[str] = []
+    for key in ("category_field", "x_field", "y_field", "size_field", "source_field",
+                "target_field", "open_field", "high_field", "low_field", "close_field"):
+        v = plan.get(key)
+        if v:
+            refs.append(str(v))
+    for key in ("value_fields", "path_fields"):
+        for v in (plan.get(key) or []):
+            if v:
+                refs.append(str(v))
+    return refs
+
+
 def _rows_as_dicts(columns: list[str], rows: Any) -> list[dict[str, Any]]:
     """Normalise a result's rows to a list of column-keyed dicts.
 
@@ -47,6 +62,13 @@ def refresh_question(question: SavedQuestion, execute_sql: ExecuteSql) -> dict[s
     if res.get("pending_confirmation"):
         raise ValueError("saved query needs confirmation and cannot be auto-refreshed")
     columns = [str(c) for c in (res.get("columns") or [])]
+    # Schema drift guard: if the refreshed query no longer yields a column the chart
+    # maps to a role, building anyway would silently zero-fill ("—"/0) and then the
+    # caller would overwrite the last-good snapshot with a wrong chart. Refuse instead,
+    # so the tile surfaces an error and keeps its previous snapshot.
+    missing = sorted({f for f in _referenced_columns(question.chart_plan or {}) if f not in set(columns)})
+    if missing:
+        raise ValueError("schema changed — refreshed query is missing column(s): " + ", ".join(missing))
     rows = _rows_as_dicts(columns, res.get("rows"))
     plan = chart_plan_from_dict(question.chart_plan or {})
     spec = ChartAgent().build_spec(plan, chart_id=question.id, rows=rows)
