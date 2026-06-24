@@ -86,6 +86,7 @@ class DashboardGrid(QWidget):
     def _clear(self) -> None:
         for anim in self._anims.values():
             anim.stop()
+            anim.deleteLater()   # parented to the grid — drop the C++ object, not just the ref
         self._anims.clear()
         for tile in self._tiles.values():
             tile.deleteLater()
@@ -147,13 +148,15 @@ class DashboardGrid(QWidget):
 
     def resizeEvent(self, e) -> None:  # noqa: N802
         super().resizeEvent(e)
-        self._relayout(animate=False)   # window resize → reflow instantly, no easing lag
+        # reflow instantly on window resize, but don't yank a tile that's being dragged
+        skip = (self._drag_qid,) if self._drag_qid else ()
+        self._relayout(animate=False, skip=skip)
 
     # -- drag reorder (live reflow) -------------------------------------------
 
     def _on_reorder_drag(self, qid: str, global_pos: QPoint) -> None:
         tile = self._tiles.get(qid)
-        if tile is None:
+        if tile is None or self.width() <= 1:   # not laid out yet → no meaningful geometry
             return
         if self._drag_qid != qid:
             self._drag_qid = qid
@@ -177,9 +180,10 @@ class DashboardGrid(QWidget):
             self.setMinimumHeight(grid_rows(pack(preview)) * self.ROW_PX + 4)
 
     def _on_reorder_drop(self, qid: str) -> None:
-        tile = self._tiles.get(qid)
-        if tile is not None:
-            tile.set_dragging(False)
+        if qid not in self._tiles:           # board was torn down mid-gesture — don't persist
+            self._drag_qid = self._drag_index = self._drag_pos = None
+            return
+        self._tiles[qid].set_dragging(False)
         self._set_grid_visible(False)
         if self._drag_index is not None:
             self._order = move_to_index(self._order, qid, self._drag_index)
@@ -205,6 +209,8 @@ class DashboardGrid(QWidget):
     # -- resize ---------------------------------------------------------------
 
     def _on_resize_drag(self, qid: str, delta: QPoint) -> None:
+        if self.width() <= 1:
+            return
         item = next((t for t in self._order if t["question_id"] == qid), None)
         if item is None:
             return
@@ -222,8 +228,10 @@ class DashboardGrid(QWidget):
                 self._set_instant(qid, rects[qid])
 
     def _on_resize_drop(self, qid: str) -> None:
-        self._resize_base.pop(qid, None)
+        was_resizing = self._resize_base.pop(qid, None) is not None
         self._set_grid_visible(False)
+        if qid not in self._tiles or not was_resizing:   # torn down / no active resize → don't persist
+            return
         self._relayout(animate=True)
         self.layout_changed.emit(self._payload())
 

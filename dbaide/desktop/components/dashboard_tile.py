@@ -66,6 +66,13 @@ class _DragHeader(QWidget):
         self._press = None
         super().mouseReleaseEvent(e)
 
+    def reset(self) -> None:
+        """Drop any pending press (e.g. when the title enters rename mode)."""
+        self._press = None
+        if self._dragging:
+            self._dragging = False
+            self.setCursor(Qt.CursorShape.OpenHandCursor)
+
 
 class _ResizeGrip(QLabel):
     """Bottom-right corner grip that resizes the tile's grid footprint."""
@@ -105,6 +112,19 @@ class _EditableTitle(QLabel):
     def mouseDoubleClickEvent(self, e) -> None:  # noqa: N802
         self.edit_requested.emit()
         e.accept()
+
+
+class _RenameEditor(QLineEdit):
+    """Inline rename field that cancels on Escape (QLineEdit doesn't otherwise)."""
+
+    cancelled = pyqtSignal()
+
+    def keyPressEvent(self, e) -> None:  # noqa: N802
+        if e.key() == Qt.Key.Key_Escape:
+            self.cancelled.emit()
+            e.accept()
+            return
+        super().keyPressEvent(e)
 
 
 class DashboardTile(QFrame):
@@ -155,12 +175,13 @@ class DashboardTile(QFrame):
         self._title.setToolTip(_t("board.tile_rename_hint"))
         self._title.edit_requested.connect(self._begin_rename)
         hl.addWidget(self._title, 1)
-        self._editor = QLineEdit()
+        self._editor = _RenameEditor()
         self._editor.setVisible(False)
         self._editor.setStyleSheet(
             f"QLineEdit {{ background:{Theme.PANEL_2}; border:1px solid {Theme.ACCENT};"
             f" border-radius:4px; color:{Theme.TEXT}; padding:1px 4px; }}")
         self._editor.editingFinished.connect(self._commit_rename)
+        self._editor.cancelled.connect(self._cancel_rename)
         hl.addWidget(self._editor, 1)
         self._editor.hide()
         self._refresh_btn = IconToolButton(svg_icon("refresh", color=Theme.MUTED, size=13), _t("board.tile_refresh"))
@@ -207,6 +228,8 @@ class DashboardTile(QFrame):
     def set_loading(self, loading: bool) -> None:
         self._refresh_btn.setEnabled(not loading)
         if loading:
+            # reset the colour too — a prior set_error left the footer red
+            self._footer.setStyleSheet(f"color:{Theme.MUTED}; font-size:10px; background:transparent;")
             self._footer.setText(_t("board.tile_refreshing"))
 
     def set_error(self, message: str) -> None:
@@ -232,11 +255,17 @@ class DashboardTile(QFrame):
 
     def _begin_rename(self) -> None:
         self._editing = True
+        self._header.reset()        # a press recorded before the double-click must not become a drag
         self._editor.setText(str(self._question.get("name") or ""))
         self._title.setVisible(False)
         self._editor.setVisible(True)
         self._editor.selectAll()
         self._editor.setFocus()
+
+    def _cancel_rename(self) -> None:
+        self._editing = False
+        self._editor.setVisible(False)
+        self._title.setVisible(True)
 
     def _commit_rename(self) -> None:
         if not self._editing:

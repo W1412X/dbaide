@@ -178,6 +178,33 @@ def test_tile_rename_persists(qapp, service):
     assert q["name"] == "季度销售额"
 
 
+def test_rename_cancel_keeps_name(qapp, service):
+    out = _pin(service)
+    qid = out["question"]["id"]
+    from dbaide.desktop.views.dashboard_tab import DashboardTab
+    tab = DashboardTab(service)
+    tile = tab._grid.tile(qid)
+    orig = tile.question()["name"]
+    tile._begin_rename()
+    tile._editor.setText("不要保存这个")
+    tile._cancel_rename()                # Escape path
+    assert tile._editing is False
+    assert service.dispatch("list_saved_questions", {})["questions"][0]["name"] == orig
+
+
+def test_loading_resets_error_footer_color(qapp, service):
+    from dbaide.desktop.theme import Theme
+    out = _pin(service)
+    qid = out["question"]["id"]
+    from dbaide.desktop.views.dashboard_tab import DashboardTab
+    tab = DashboardTab(service)
+    tile = tab._grid.tile(qid)
+    tile.set_error("boom")
+    assert Theme.RED.lower() in tile._footer.styleSheet().lower()
+    tile.set_loading(True)               # a re-refresh after an error must not stay red
+    assert Theme.MUTED.lower() in tile._footer.styleSheet().lower()
+
+
 def test_remove_tile_keeps_question_in_library(qapp, service):
     out = _pin(service)
     qid, did = out["question"]["id"], out["dashboard"]["id"]
