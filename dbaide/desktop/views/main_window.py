@@ -808,18 +808,22 @@ class MainWindow(QMainWindow):
         self.toast(_i18n_t("toast.pinned", n=len(picked)))
         self.dashboard_tab.reload()
 
-    def _on_build_dashboard(self, charts: object, question: str) -> None:
+    def _on_build_dashboard(self, charts: object, question: str, selected_sql: str = "") -> None:
         """Open the AI dashboard studio seeded with this answer's analysis."""
         chart_list = [c for c in (charts or []) if isinstance(c, dict) and c.get("chart_id")]
         conn = self.current_connection()
+        # prefer each chart's own source SQL; fall back to the answer's selected SQL
+        # (older charts predate source-SQL provenance — the agent re-parameterizes anyway)
         context = [
-            {"nl_question": str(question or ""), "sql": str(c.get("source_sql") or ""),
+            {"nl_question": str(question or ""),
+             "sql": str(c.get("source_sql") or selected_sql or ""),
              "chart_plan": c.get("chart_plan") if isinstance(c.get("chart_plan"), dict) else {},
              "title": str(c.get("title") or ""), "connection_name": conn}
-            for c in chart_list if c.get("source_sql")
+            for c in chart_list
+            if c.get("source_sql") or str(selected_sql or "").strip()
         ]
         if not context:
-            self.toast(_i18n_t("app.no_questions"))
+            self.toast(_i18n_t("app.no_source_sql"))
             return
         from dbaide.desktop.views.parametric_dashboard import ParametricDashboardStudio
         studio = ParametricDashboardStudio(self.service)

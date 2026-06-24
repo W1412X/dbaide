@@ -1148,6 +1148,9 @@ _STRINGS: dict[str, dict[str, str]] = {
     "app.compiling": {"en": "Compiling interactive dashboard…", "zh": "正在编译交互看板…"},
     "app.no_questions": {"en": "This board has no re-runnable questions to compile.",
                          "zh": "当前看板没有可重跑的问题可编译。"},
+    "app.no_source_sql": {"en": "These charts have no source SQL to build from. Regenerate them "
+                                "with the current version, then try again.",
+                          "zh": "这些图表没有记录可用的源 SQL（旧版本生成的图表无此信息）。请用当前版本重新生成图表后再试。"},
     "app.window_title": {"en": "Interactive dashboard", "zh": "交互看板"},
     "app.compile_failed": {"en": "Build failed: {error}", "zh": "生成失败：{error}"},
     "app.build_menu": {"en": "Build interactive dashboard…", "zh": "AI 生成交互看板…"},
