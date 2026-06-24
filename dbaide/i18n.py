@@ -1165,6 +1165,16 @@ _STRINGS: dict[str, dict[str, str]] = {
                           "zh": "AI 正在根据这次分析编写图表和筛选控件，稍候。"},
     "app.error_hint": {"en": "Adjust your request in the box below and try again.",
                        "zh": "在下方改一下要求再试一次。"},
+    "dash.gallery_title": {"en": "Interactive dashboards", "zh": "交互看板"},
+    "dash.card_charts": {"en": "{n} charts", "zh": "{n} 个图表"},
+    "dash.open": {"en": "Open", "zh": "打开"},
+    "dash.delete": {"en": "Delete", "zh": "删除"},
+    "dash.back": {"en": "← Boards", "zh": "← 看板"},
+    "dash.delete_confirm": {"en": "Delete dashboard “{name}”? This cannot be undone.",
+                            "zh": "删除看板「{name}」？此操作不可撤销。"},
+    "dash.empty": {"en": "No interactive dashboards yet. Analyze something in Assistant, then use "
+                         "“AI generate dashboard” to create one.",
+                   "zh": "还没有交互看板。先在「助手」里分析，然后用「AI 生成交互看板」创建一个。"},
     "app.default_instruction": {
         "en": "Build an interactive dashboard from this analysis; add sensible filter controls for the data.",
         "zh": "基于以上分析做一个交互看板，根据数据加上合适的筛选控件。"},

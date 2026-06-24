@@ -54,7 +54,7 @@ def _fk_filter_where(ref_column: str, value: object, dialect: str) -> str:
     from dbaide.rendering.table import _sql_literal
     return f"{quote_identifier(ref_column, dialect)} = {_sql_literal(value, dialect=dialect)}"
 from dbaide.desktop.views.ask_tab import AskTab
-from dbaide.desktop.views.dashboard_tab import DashboardTab
+from dbaide.desktop.views.dashboards_view import DashboardsView
 from dbaide.desktop.dialogs.joins import JoinsDialog
 from dbaide.desktop.dialogs.note_editor import NoteEditorDialog
 from dbaide.desktop.views.joins_tab import JoinsTab
@@ -508,7 +508,7 @@ class MainWindow(QMainWindow):
         self.workbench.navigate_table.connect(self._open_table_by_name)
         self.workbench.navigate_fk.connect(self._navigate_fk)
         self.workbench.doc_requested.connect(self._load_table_doc)
-        self.dashboard_tab = DashboardTab(self.service)
+        self.dashboard_tab = DashboardsView(self.service)
         self._dashboard_studios: list[QWidget] = []
         self.ask_tab.pin_charts_requested.connect(self._on_pin_charts)
         self.ask_tab.build_dashboard_requested.connect(self._on_build_dashboard)

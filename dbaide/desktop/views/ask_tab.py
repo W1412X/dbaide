@@ -327,11 +327,6 @@ class AskTab(QWidget):
                     ),
                 ))
                 menu_items.append((
-                    "save",
-                    _t("ask.pin_to_dashboard"),
-                    lambda: self.pin_charts_requested.emit(chart_list, export_title),
-                ))
-                menu_items.append((
                     "sparkles",
                     _t("app.build_menu"),
                     lambda: self.build_dashboard_requested.emit(chart_list, export_title, selected_sql),

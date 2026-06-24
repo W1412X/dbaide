@@ -1607,8 +1607,9 @@ class DesktopService:
     # ── parameterized dashboard apps (AI-compiled, interactive) ─────────────
 
     def list_dashboard_apps(self, payload: dict[str, Any] | None = None) -> dict[str, Any]:
+        apps = sorted(self.boards_apps.list(), key=lambda a: a.updated_at or "", reverse=True)
         return {"apps": [{"id": a.id, "name": a.name, "connection_name": a.connection_name,
-                          "charts": len(a.charts)} for a in self.boards_apps.list()]}
+                          "charts": len(a.charts), "updated_at": a.updated_at} for a in apps]}
 
     def get_dashboard_app(self, payload: dict[str, Any]) -> dict[str, Any]:
         app = self.boards_apps.get(str(payload.get("id") or ""))
