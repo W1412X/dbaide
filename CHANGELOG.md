@@ -6,6 +6,23 @@ All notable changes to DBAide are documented here. The format is loosely based o
 
 ## [Unreleased]
 
+## [0.9.8] — 2026-06-24
+
+### Added
+
+- **Richer dashboard components** — KPI tiles gain number formatting (int/float/percent/
+  currency) and an optional trend mode that shows the latest value, its %-change vs the
+  previous point, and an inline sparkline; tables auto-format and right-align numeric
+  columns and make every header click-to-sort; multi-select filters get one-click
+  "All / Clear" actions. All still system-rendered from the declarative layout.
+
+### Fixed
+
+- CI was silently red since the 0.9.6 dashboard work: GUI tests created real Chromium
+  WebEngine views that abort during teardown under offscreen Linux CI (exit 134), even
+  though every test passed. The test harness now neutralizes all WebEngine-creation
+  paths and exits cleanly on a green run, so CI reflects reality again.
+
 ## [0.9.7] — 2026-06-24
 
 ### Added
