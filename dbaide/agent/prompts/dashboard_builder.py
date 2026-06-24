@@ -32,9 +32,12 @@ HTML rules (you write ONLY the body; the host injects echarts + the data bridge)
   empty <div data-chart="CHART_ID"></div>. Use the SAME chart_id in html and in charts.
 - Controls shared by several charts use the SAME data-param name (one control drives all).
 - Include a button: <button data-apply>应用</button>. (Charts also auto-load on open.)
-- Layout with divs + inline styles or a <style> block. A horizontal control bar on top,
-  a responsive grid of chart cards below. Keep it clean. Give each chart div a height,
-  e.g. style="height:280px". DO NOT write <script>, echarts code, or any data/SQL in JS.
+- PREFER the host's layout classes (already styled, theme-consistent): wrap controls in
+  <div class="dbaide-controls">…<button data-apply>应用</button></div>, each control as
+  <label>名称<input/ or select/></label>; put charts in a <div class="dbaide-grid"> of
+  <div class="dbaide-card"><div class="dbaide-card-title">标题</div>
+  <div data-chart="cN" style="height:280px"></div></div>. You MUST include a container for
+  EVERY chart you declare. DO NOT write <script>, echarts code, or any data/SQL in JS.
 - COLORS: use ONLY these injected CSS variables (the host sets them from the app theme —
   NEVER hardcode hex colors, so the dashboard matches the app and adapts if the theme
   changes): var(--text) var(--text2) var(--muted) var(--bg) var(--panel) var(--panel2)

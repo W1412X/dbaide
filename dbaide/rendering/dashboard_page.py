@@ -95,11 +95,23 @@ def _base_css(theme: dict[str, Any]) -> str:
       border-radius:8px; }}
     [data-chart].dbaide-empty {{ display:flex; align-items:center; justify-content:center;
       color:var(--muted); min-height:200px; }}
-    input, select {{ font:inherit; color:var(--text); background:var(--panel);
-      border:1px solid var(--border); border-radius:6px; padding:5px 8px; }}
+    input, select {{ font:inherit; color:var(--text); background:var(--panel2);
+      border:1px solid var(--border); border-radius:6px; padding:6px 9px; min-width:120px; }}
+    input:focus, select:focus {{ outline:none; border-color:var(--accent); }}
     button {{ font:inherit; color:var(--accent-text); background:var(--accent); border:none;
-      border-radius:6px; padding:6px 12px; cursor:pointer; }}
+      border-radius:6px; padding:7px 16px; cursor:pointer; font-weight:600; }}
+    button:hover {{ filter:brightness(1.08); }}
     label {{ color:var(--text2); font-size:11px; }}
+    /* the layout classes used by the generated body (and recommended to the model) */
+    .dbaide-controls {{ display:flex; flex-wrap:wrap; gap:14px; align-items:flex-end;
+      margin-bottom:16px; padding:14px 16px; background:var(--panel); border:1px solid var(--border);
+      border-radius:10px; }}
+    .dbaide-controls label {{ display:flex; flex-direction:column; gap:5px; }}
+    .dbaide-grid {{ display:grid; grid-template-columns:repeat(auto-fill,minmax(360px,1fr)); gap:14px; }}
+    .dbaide-card {{ background:var(--panel); border:1px solid var(--border); border-radius:10px;
+      padding:14px 16px; }}
+    .dbaide-card-title {{ color:var(--text); font-weight:600; font-size:13px; margin-bottom:10px; }}
+    .dbaide-card [data-chart] {{ background:transparent; border:none; min-height:0; }}
     """
 
 

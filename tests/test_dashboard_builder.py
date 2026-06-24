@@ -71,9 +71,14 @@ def test_builder_requires_llm():
         DashboardBuilderAgent().build(instruction="x")
 
 
-def test_builder_rejects_empty_html_or_charts():
-    with pytest.raises(ValueError):
-        DashboardBuilderAgent(_MockLLM({**_PAYLOAD, "html": ""})).build(instruction="x")
+def test_builder_synthesizes_a_body_when_html_is_empty():
+    # empty/garbled HTML no longer fails — a clean layout is generated from the recipes
+    app = DashboardBuilderAgent(_MockLLM({**_PAYLOAD, "html": ""})).build(instruction="x")
+    from dbaide.rendering.dashboard_body import chart_container_ids
+    assert chart_container_ids(app.html) == {c.chart_id for c in app.charts}
+
+
+def test_builder_still_rejects_no_charts():
     with pytest.raises(ValueError):
         DashboardBuilderAgent(_MockLLM({**_PAYLOAD, "charts": []})).build(instruction="x")
 

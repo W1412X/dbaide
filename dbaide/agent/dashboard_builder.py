@@ -17,6 +17,7 @@ from dbaide.agent.prompts.dashboard_builder import (
 )
 from dbaide.boards.parametric import ParametricChart, ParametricDashboard
 from dbaide.boards.runtime import render_sql
+from dbaide.rendering.dashboard_body import normalize_body
 from dbaide.llm import LLMClient, LLMMessage, NullLLMClient
 
 Validate = Callable[[str], Any]
@@ -56,11 +57,13 @@ class DashboardBuilderAgent:
         charts = [ParametricChart.from_dict(c) for c in (payload.get("charts") or []) if isinstance(c, dict)]
         if not charts:
             raise ValueError("builder returned no charts")
-        html = str(payload.get("html") or "")
-        if not html.strip():
-            raise ValueError("builder returned no HTML")
         if validate is not None:
             self._validate(charts, validate)
+        # The model's HTML is not trusted: scripts are stripped, and if it doesn't
+        # cover every recipe we fall back to a clean generated layout. This makes the
+        # page render well regardless of generation quality (a missing/garbled body
+        # no longer breaks the dashboard).
+        html = normalize_body(str(payload.get("html") or ""), charts)
 
         app = existing or ParametricDashboard(name="", connection_name=connection_name)
         app.name = str(payload.get("name") or app.name or "交互看板")
