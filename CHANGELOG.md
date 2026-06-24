@@ -6,6 +6,25 @@ All notable changes to DBAide are documented here. The format is loosely based o
 
 ## [Unreleased]
 
+## [0.9.6] — 2026-06-23
+
+### Added
+
+- **Dashboards & saved questions** — pin a chart from any answer as a *saved question*: it
+  captures the question, the SQL that produced its rows, and the chart plan (field→role
+  mapping), so it can be re-run later and redrawn from fresh data without another model call.
+  Compose saved questions into multiple dashboards; each board is a 12-column grid where tiles
+  drag to reorder and resize their footprint (live reflow + animation), titles edit inline,
+  and tiles refresh on demand on a background thread. Turns "ask once" into "keep watching".
+- **Background Excel import with progress** — large workbook imports now run off the UI thread
+  behind a progress indicator, so the app stays responsive.
+
+### Fixed
+
+- Chart provenance is recorded only when a chart's rows came from a query (not inline/computed
+  data), so a refreshed tile re-runs the exact SQL that produced it; schema drift is refused
+  rather than silently drawing a zeroed chart over the last good snapshot.
+
 ## [0.9.5] — 2026-06-23
 
 ### Added
