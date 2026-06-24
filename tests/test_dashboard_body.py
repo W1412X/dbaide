@@ -40,10 +40,11 @@ def test_render_body_auto_generates_controls_from_params():
     layout = {"rows": [{"tiles": [{"kind": "chart", "chart": "c1", "span": 6},
                                   {"kind": "chart", "chart": "c2", "span": 6}]}]}
     body = render_body(layout, charts)
-    assert body.count('data-param="region"') == 1            # deduped across charts
+    assert body.count('class="dbaide-chips"') == 1           # region rendered once (deduped)
     assert 'data-param="n"' in body and 'value="5"' in body
-    assert '<option value="A" selected>' in body             # enum default preselected
-    assert "data-apply" in body
+    # multi enum → styled checkbox chips, default preselected (not native multi-select)
+    assert 'type="checkbox" data-param="region" value="A" checked' in body
+    assert 'value="B">' in body and "data-apply" in body
 
 
 def test_render_body_clamps_span_and_defaults():

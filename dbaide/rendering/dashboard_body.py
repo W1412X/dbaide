@@ -46,20 +46,25 @@ def _control(p: Any) -> str:
     if ptype == "enum" and options:
         selected = (set(default) if isinstance(default, (list, tuple))
                     else ({default} if default not in (None, "") else set()))
-        multi = " multiple size=\"3\"" if getattr(p, "multi", False) else ""
+        if getattr(p, "multi", False):
+            # styled checkbox chips (native multi-selects are clunky and ugly)
+            chips = "".join(
+                f'<label class="dbaide-chip"><input type="checkbox" data-param="{name}" '
+                f'value="{escape(str(o))}"{" checked" if o in selected else ""}>{escape(str(o))}</label>'
+                for o in options)
+            return (f'<div class="dbaide-field"><span class="dbaide-flabel">{label}</span>'
+                    f'<div class="dbaide-chips">{chips}</div></div>')
         opts = "".join(
             f'<option value="{escape(str(o))}"{" selected" if o in selected else ""}>{escape(str(o))}</option>'
             for o in options)
-        field = f'<select data-param="{name}"{multi}>{opts}</select>'
-    else:
-        html_type = {"date": "date", "number": "number"}.get(ptype, "text")
-        # @tokens (e.g. @month_start) aren't valid control values; leave the field empty
-        # and let the runtime resolve the default when the value comes back blank
-        val = "" if (isinstance(default, str) and default.startswith("@")) else (
-            "" if default in (None, "") or isinstance(default, (list, tuple)) else escape(str(default)))
-        val_attr = f' value="{val}"' if val else ""
-        field = f'<input type="{html_type}" data-param="{name}"{val_attr}>'
-    return f'<label>{label}{field}</label>'
+        return f'<label>{label}<select data-param="{name}">{opts}</select></label>'
+    html_type = {"date": "date", "number": "number"}.get(ptype, "text")
+    # @tokens (e.g. @month_start) aren't valid control values; leave the field empty
+    # and let the runtime resolve the default when the value comes back blank
+    val = "" if (isinstance(default, str) and default.startswith("@")) else (
+        "" if default in (None, "") or isinstance(default, (list, tuple)) else escape(str(default)))
+    val_attr = f' value="{val}"' if val else ""
+    return f'<label>{label}<input type="{html_type}" data-param="{name}"{val_attr}></label>'
 
 
 def render_controls(charts: list[Any]) -> str:

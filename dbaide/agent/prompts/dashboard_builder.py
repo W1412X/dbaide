@@ -59,6 +59,9 @@ Recipe rules:
   column (e.g. do not assume a numeric "退款率数值" variant exists if the schema only has "退款率").
   Match the exact spelling. If a column is text but you need a number, that's a different chart —
   don't fabricate.
+- CRITICAL — for an enum filter, its "options" MUST be copied from that column's listed
+  values=[…] in the Schema. NEVER invent filter values (guessing them makes every chart return
+  zero rows). If a column has no listed values, don't make it an enum filter.
 - CRITICAL — write plain SQL the target engine supports. NO array or dialect-specific functions
   (no arrayLength, no ClickHouse/Postgres-only funcs). Do NOT write optional-filter logic such as
   ":p IS NULL OR arrayLength(:p)=0 OR ...". Write ONE simple predicate per filter:

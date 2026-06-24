@@ -137,10 +137,17 @@ def _base_css(theme: dict[str, Any]) -> str:
     button:hover {{ filter:brightness(1.08); }}
     label {{ color:var(--text2); font-size:11px; }}
     /* the layout classes used by the generated body (and recommended to the model) */
-    .dbaide-controls {{ display:flex; flex-wrap:wrap; gap:14px; align-items:flex-end;
+    .dbaide-controls {{ display:flex; flex-wrap:wrap; gap:16px; align-items:flex-end;
       margin-bottom:16px; padding:14px 16px; background:var(--panel); border:1px solid var(--border);
       border-radius:10px; }}
-    .dbaide-controls label {{ display:flex; flex-direction:column; gap:5px; }}
+    .dbaide-controls label, .dbaide-field {{ display:flex; flex-direction:column; gap:6px; }}
+    .dbaide-flabel {{ color:var(--text2); font-size:11px; }}
+    .dbaide-chips {{ display:flex; flex-wrap:wrap; gap:6px; max-width:560px; }}
+    .dbaide-chip {{ display:inline-flex; align-items:center; gap:5px; padding:4px 10px;
+      background:var(--panel2); border:1px solid var(--border); border-radius:14px; color:var(--text);
+      font-size:12px; cursor:pointer; user-select:none; }}
+    .dbaide-chip:hover {{ border-color:var(--accent); }}
+    .dbaide-chip input {{ margin:0; accent-color:var(--accent); }}
     .dbaide-grid {{ display:grid; grid-template-columns:repeat(auto-fill,minmax(360px,1fr)); gap:14px; }}
     .dbaide-card {{ background:var(--panel); border:1px solid var(--border); border-radius:10px;
       padding:14px 16px; }}

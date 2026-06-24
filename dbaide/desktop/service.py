@@ -1673,23 +1673,26 @@ class DesktopService:
         app = agent.build(
             instruction=str(payload.get("instruction") or ""),
             context_charts=context, connection_name=conn_name,
-            schema_context=self._dashboard_schema_context(tools),
+            schema_context=self._dashboard_schema_context(tools, conn_name),
             existing=existing, validate=validate, dialect=dialect)
         self.boards_apps.upsert(app)
         return {"app": app.to_dict()}
 
-    @staticmethod
-    def _dashboard_schema_context(tools: Any) -> str:
-        """Compact `table(col type, …)` list so the builder grounds real column names."""
+    def _dashboard_schema_context(self, tools: Any, conn_name: str) -> str:
+        """Compact schema for grounding: `table(col type [v1|v2|…], …)`.
+
+        For low-cardinality text columns we include the REAL distinct values, so the
+        builder uses filter options that actually match the data (guessing them is the
+        top cause of an all-"无数据" dashboard)."""
         adapter = getattr(tools, "adapter", None)
         if adapter is None:
             return ""
-        lines: list[str] = []
         try:
-            tables = adapter.list_tables()
+            tables = list(adapter.list_tables())
         except Exception:  # noqa: BLE001
             return ""
-        for t in list(tables)[:40]:
+        lines: list[str] = []
+        for t in tables[:10]:
             name = getattr(t, "name", None) or (t.get("name") if isinstance(t, dict) else str(t))
             if not name:
                 continue
@@ -1698,14 +1701,34 @@ class DesktopService:
             except Exception:  # noqa: BLE001
                 continue
             parts = []
-            for c in cols:
+            for c in cols[:60]:
                 cn = getattr(c, "name", None) or (c.get("name") if isinstance(c, dict) else "")
                 ct = (getattr(c, "type", None) or getattr(c, "data_type", None)
                       or (c.get("type") if isinstance(c, dict) else "") or "")
-                if cn:
-                    parts.append(f"{cn} {ct}".strip())
+                if not cn:
+                    continue
+                entry = f"{cn} {ct}".strip()
+                if ("char" in ct.lower() or "text" in ct.lower() or ct == ""):
+                    vals = self._distinct_values(conn_name, name, cn)
+                    if vals:
+                        entry += " values=[" + "|".join(vals) + "]"
+                parts.append(entry)
             lines.append(f"{name}({', '.join(parts)})")
         return "\n".join(lines)
+
+    def _distinct_values(self, conn_name: str, table: str, col: str, cap: int = 30) -> list[str] | None:
+        """Distinct values for a column, or None if high-cardinality/empty/unavailable."""
+        try:
+            res = self.execute_sql({"connection_name": conn_name,
+                                    "sql": f'SELECT DISTINCT "{col}" AS v FROM "{table}" LIMIT {cap + 1}'})
+            rows = res.get("rows") or []
+            vals = [str(r.get("v") if isinstance(r, dict) else r[0]) for r in rows]
+            vals = [v for v in vals if v not in ("", "None")]
+            if not vals or len(vals) > cap:
+                return None
+            return vals
+        except Exception:  # noqa: BLE001
+            return None
 
     def run_app_chart(self, payload: dict[str, Any]) -> dict[str, Any]:
         """Bridge backend: re-run one app chart with given params (deterministic, no LLM)."""
