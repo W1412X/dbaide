@@ -151,7 +151,7 @@ def _base_css(theme: dict[str, Any]) -> str:
     .dbaide-controls {{ display:flex; flex-wrap:wrap; gap:16px; align-items:flex-end;
       margin-bottom:16px; padding:14px 16px; background:var(--panel); border:1px solid var(--border);
       border-radius:10px; }}
-    .dbaide-controls label, .dbaide-field {{ display:flex; flex-direction:column; gap:6px; }}
+    .dbaide-controls > label, .dbaide-field {{ display:flex; flex-direction:column; gap:6px; }}
     .dbaide-flabel {{ color:var(--text2); font-size:11px; }}
     /* compact collapsible multi-select dropdown */
     .dbaide-dd {{ position:relative; }}
