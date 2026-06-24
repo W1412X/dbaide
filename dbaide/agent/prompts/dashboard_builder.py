@@ -13,22 +13,27 @@ from typing import Any
 _SYSTEM = """\
 You design an INTERACTIVE DASHBOARD from a prior analysis and a natural-language
 request, and refine it across turns. You do NOT write HTML or CSS — you output a
-declarative LAYOUT plus the data recipes, and the SYSTEM renders it (themed, styled,
-responsive). Output STRICT JSON ONLY:
+declarative COMPONENT TREE (like structured pseudocode) plus the data recipes, and
+the SYSTEM renders it (themed, styled, responsive). Output STRICT JSON ONLY:
 
 {
   "name": "<short dashboard title>",
-  "layout": {
-    "rows": [
-      {"tiles": [
-        {"kind":"kpi","chart":"c_total","span":3,"label":"总销售额"},
-        {"kind":"chart","chart":"c_trend","span":9,"height":300,"title":"销售趋势"}
+  "ui": {
+    "type": "page",
+    "children": [
+      {"type":"row","children":[
+        {"type":"kpi","chart":"c_total","span":3,"label":"总销售额"},
+        {"type":"kpi","chart":"c_orders","span":3,"label":"订单数"},
+        {"type":"chart","chart":"c_trend","span":6,"height":300,"title":"销售趋势"}
       ]},
-      {"tiles": [
-        {"kind":"heading","text":"区域分析","span":12},
-        {"kind":"chart","chart":"c_region","span":6},
-        {"kind":"table","chart":"c_detail","span":6,"title":"明细"}
-      ]}
+      {"type":"section","title":"维度分析","children":[
+        {"type":"tabs","children":[
+          {"type":"tab","label":"按品类","children":[{"type":"chart","chart":"c_cat"}]},
+          {"type":"tab","label":"按城市","children":[{"type":"chart","chart":"c_city"}]}
+        ]}
+      ]},
+      {"type":"markdown","text":"> 说明：数据来自销售明细表"},
+      {"type":"table","chart":"c_detail","title":"明细"}
     ]
   },
   "charts": [
@@ -41,18 +46,19 @@ responsive). Output STRICT JSON ONLY:
   ]
 }
 
-Layout rules (declarative — the system renders and themes everything):
-- The layout is a list of rows; each row holds tiles on a 12-column grid. A tile's
-  "span" (1-12) is its width; tiles in a row should sum to ~12. Use multiple rows.
-- Tile kinds:
-  - "chart": an ECharts chart from the recipe (give an optional "height", default 280).
-  - "kpi": one big metric — use for a recipe that returns a SINGLE aggregate value
-    (e.g. SELECT sum(amt) AS total). Give a short "label". Keep span small (3-4).
-  - "table": the recipe's rows as a table (good for detail/top-N lists).
-  - "heading": a section title; set "text", span 12, no chart.
-- Every tile (except heading) MUST reference a chart_id that exists in "charts".
+Layout rules (the "ui" is a nestable component tree — compose freely):
+- CONTAINERS (have "children"): "page" (root), "row" (lays children across a 12-column
+  grid — give each child a "span" 1-12, summing to ~12), "col"/"stack" (vertical),
+  "grid" ("cols": N), "section" ("title" + children), "card" (a bordered box), and
+  "tabs" whose children are "tab" nodes ({"label","children"}).
+- LEAVES (content): "chart" (an ECharts chart; optional "height", default 280),
+  "kpi" (one big metric — its recipe MUST return a single aggregate value, e.g.
+  SELECT sum(amt) AS total; give a short "label"), "table" (the recipe's rows),
+  "text"/"markdown" (a note; basic markdown), "heading" ("text"), "divider".
+- Every chart/kpi/table node MUST reference a "chart" id that exists in "charts".
+- Nest to taste: rows inside sections, tabs inside cards, etc. Keep it clean and scannable.
 - The filter control bar is generated AUTOMATICALLY from the recipe params (params with
-  the same name across charts share one control) — do NOT put controls in the layout.
+  the same name across charts share one control) — do NOT put controls in the tree.
 
 Recipe rules:
 - CRITICAL — use ONLY table and column names that appear in the Schema below. NEVER invent a

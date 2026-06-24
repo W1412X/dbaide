@@ -42,9 +42,10 @@ def _ok(_sql):
 
 _PAYLOAD = {
     "name": "销售看板",
-    "layout": {"rows": [
-        {"tiles": [{"kind": "kpi", "chart": "c1", "span": 3, "label": "销售额"},
-                   {"kind": "chart", "chart": "c1", "span": 9, "title": "各区域销售额"}]},
+    "ui": {"type": "page", "children": [
+        {"type": "row", "children": [
+            {"type": "kpi", "chart": "c1", "span": 3, "label": "销售额"},
+            {"type": "chart", "chart": "c1", "span": 9, "title": "各区域销售额"}]},
     ]},
     "charts": [{
         "chart_id": "c1", "title": "各区域销售额",
@@ -62,8 +63,8 @@ def test_builder_renders_layout_and_runnable_recipes():
         instruction="做个销售看板", context_charts=[], connection_name="shop",
         validate=lambda sql: (validated.append(sql), _ok(sql))[1])
     assert app.name == "销售看板" and app.connection_name == "shop"
-    assert app.layout and app.layout[0]["tiles"][0]["kind"] == "kpi"   # structured layout kept
-    # the system renders that layout into a themed body (no model HTML)
+    assert app.layout["children"][0]["children"][0]["type"] == "kpi"   # component tree kept
+    # the system renders that tree into a themed body (no model HTML)
     assert 'data-chart="c1"' in app.html and 'data-param="month"' in app.html
     assert 'data-kind="kpi"' in app.html and "dbaide-row" in app.html
     assert "<script" not in app.html.lower()
@@ -81,7 +82,7 @@ def test_builder_refine_feeds_existing_layout_to_the_model():
     app = DashboardBuilderAgent(llm).build(instruction="加个饼图", existing=existing, connection_name="shop")
     assert app.id == existing.id and app.name == "新看板"   # same app, updated in place
     user_msg = llm.seen[-1].content
-    assert "CURRENT dashboard" in user_msg and '"layout"' in user_msg   # existing layout passed for refinement
+    assert "CURRENT dashboard" in user_msg and '"ui"' in user_msg   # existing tree passed for refinement
 
 
 def test_builder_requires_llm():
@@ -90,8 +91,8 @@ def test_builder_requires_llm():
 
 
 def test_builder_falls_back_to_auto_grid_when_layout_missing():
-    # a missing/garbled layout no longer fails — the system renders an auto-grid of recipes
-    app = DashboardBuilderAgent(_MockLLM({**_PAYLOAD, "layout": None})).build(instruction="x")
+    # a missing/garbled tree no longer fails — the system renders an auto-grid of recipes
+    app = DashboardBuilderAgent(_MockLLM({**_PAYLOAD, "ui": None})).build(instruction="x")
     assert 'data-chart="c1"' in app.html and "dbaide-grid" in app.html
 
 

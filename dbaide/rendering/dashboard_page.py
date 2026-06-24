@@ -19,7 +19,7 @@ from typing import Any
 
 _CLIENT_JS = r"""
 (function(){
-  var bridge=null, ready=false, q=[], cache=null;
+  var bridge=null, ready=false, q=[], cache=null, lastParams={};
   function whenReady(fn){ ready?fn():q.push(fn); }
   function init(){
     if(typeof QWebChannel==='undefined' || !window.qt){ return; }
@@ -67,6 +67,7 @@ _CLIENT_JS = r"""
     return cache[k] || (cache[k]=query(cid, params));
   }
   function renderTile(el, params){
+    if(el.closest('.dbaide-tabpanel:not(.active)')) return;   // render lazily when its tab opens
     var cid=el.getAttribute('data-chart'), kind=el.getAttribute('data-kind')||'chart';
     cachedQuery(cid, params).then(function(res){
       if(!res || res.error){ el.classList.add('dbaide-empty'); el.textContent=(res&&res.error)?res.error:'无数据'; return; }
@@ -87,10 +88,19 @@ _CLIENT_JS = r"""
   }
   function refresh(){
     whenReady(function(){
-      var params=collectParams();
+      lastParams=collectParams();
       cache={};   // fresh dedup cache per refresh (params are constant within one)
-      document.querySelectorAll('[data-chart]').forEach(function(el){ renderTile(el, params); });
+      document.querySelectorAll('[data-chart]').forEach(function(el){ renderTile(el, lastParams); });
     });
+  }
+  function activateTab(btn){
+    var key=btn.getAttribute('data-tab'), bar=btn.parentElement, tabs=bar.parentElement;
+    bar.querySelectorAll('.dbaide-tab').forEach(function(b){ b.classList.toggle('active', b===btn); });
+    tabs.querySelectorAll(':scope > .dbaide-tabpanel').forEach(function(p){
+      p.classList.toggle('active', p.getAttribute('data-tabpanel')===key);
+    });
+    var panel=tabs.querySelector('.dbaide-tabpanel.active');
+    if(panel){ panel.querySelectorAll('[data-chart]').forEach(function(el){ renderTile(el, lastParams); }); }
   }
   function updateSummaries(){
     document.querySelectorAll('.dbaide-dd').forEach(function(d){
@@ -110,6 +120,9 @@ _CLIENT_JS = r"""
   function wire(){
     document.querySelectorAll('[data-apply]').forEach(function(b){
       b.addEventListener('click', function(e){ e.preventDefault(); refresh(); });
+    });
+    document.querySelectorAll('.dbaide-tab').forEach(function(b){
+      b.addEventListener('click', function(e){ e.preventDefault(); activateTab(b); });
     });
     document.addEventListener('change', updateSummaries);
     updateSummaries();
@@ -174,9 +187,27 @@ def _base_css(theme: dict[str, Any]) -> str:
       padding:14px 16px; }}
     .dbaide-card-title {{ color:var(--text); font-weight:600; font-size:13px; margin-bottom:10px; }}
     .dbaide-card [data-chart] {{ background:transparent; border:none; min-height:0; }}
-    /* declarative 12-column rows */
-    .dbaide-row {{ display:grid; grid-template-columns:repeat(12,1fr); gap:14px; margin-bottom:14px; }}
-    .dbaide-heading {{ grid-column:span 12; color:var(--text); font-size:15px; font-weight:700; margin:6px 0 0; }}
+    /* declarative component tree */
+    .dbaide-row {{ display:grid; grid-template-columns:repeat(12,1fr); gap:14px; margin-bottom:14px; align-items:stretch; }}
+    .dbaide-cell {{ min-width:0; }}
+    .dbaide-cell > * {{ height:100%; }}
+    .dbaide-grid2 {{ display:grid; gap:14px; margin-bottom:14px; }}
+    .dbaide-section {{ margin-bottom:14px; }}
+    .dbaide-text {{ color:var(--text2); font-size:13px; line-height:1.6; margin:4px 0 14px; }}
+    .dbaide-text h2,.dbaide-text h3,.dbaide-text h4 {{ color:var(--text); margin:6px 0; }}
+    .dbaide-text code {{ background:var(--panel2); padding:1px 5px; border-radius:4px; }}
+    .dbaide-text blockquote {{ margin:4px 0; padding-left:10px; border-left:3px solid var(--border); color:var(--muted); }}
+    .dbaide-divider {{ border:none; border-top:1px solid var(--border); margin:6px 0 16px; }}
+    /* tabs */
+    .dbaide-tabs {{ margin-bottom:14px; }}
+    .dbaide-tabbar {{ display:flex; gap:4px; border-bottom:1px solid var(--border); margin-bottom:12px; }}
+    .dbaide-tab {{ background:transparent; color:var(--text2); border:none; border-bottom:2px solid transparent;
+      border-radius:0; padding:8px 14px; font-weight:600; cursor:pointer; }}
+    .dbaide-tab:hover {{ color:var(--text); filter:none; }}
+    .dbaide-tab.active {{ color:var(--accent); border-bottom-color:var(--accent); }}
+    .dbaide-tabpanel {{ display:none; }}
+    .dbaide-tabpanel.active {{ display:block; }}
+    .dbaide-heading {{ color:var(--text); font-size:15px; font-weight:700; margin:6px 0 10px; }}
     .dbaide-kpi {{ display:flex; flex-direction:column; justify-content:center; gap:4px; }}
     .dbaide-kpi-value {{ color:var(--accent); font-size:26px; font-weight:700; line-height:1.1; }}
     .dbaide-kpi-label {{ color:var(--text2); font-size:12px; }}

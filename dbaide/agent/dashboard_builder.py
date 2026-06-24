@@ -45,7 +45,7 @@ class DashboardBuilderAgent:
             raise ModelRequiredError("An LLM is required to build a dashboard.")
         existing_payload = None
         if existing is not None:
-            existing_payload = {"name": existing.name, "layout": existing.layout,
+            existing_payload = {"name": existing.name, "ui": existing.layout,
                                 "charts": [c.to_dict() for c in existing.charts]}
         messages = [
             LLMMessage("system", dashboard_builder_system_prompt()),
@@ -80,13 +80,20 @@ class DashboardBuilderAgent:
             raise ValueError("recipes still fail against the database after repair attempts: "
                              + " | ".join(errors[:4]))
 
-        # The agent emits a declarative layout, NOT HTML. The system renders it
-        # deterministically (render_body), so generation quality can never break or
-        # uglify the page — a malformed/missing layout just falls back to an auto-grid.
-        raw_layout = payload.get("layout") or payload.get("rows") or []
-        if isinstance(raw_layout, dict):
-            raw_layout = raw_layout.get("rows") or []
-        layout = [r for r in raw_layout if isinstance(r, dict)]
+        # The agent emits a declarative COMPONENT TREE (ui), NOT HTML. The system
+        # renders it deterministically (render_body), so generation quality can never
+        # break or uglify the page — a malformed/missing tree falls back to an auto-grid.
+        raw = payload.get("ui")
+        if raw is None:
+            raw = payload.get("layout")
+        if raw is None:
+            raw = payload.get("rows")
+        if isinstance(raw, dict):
+            layout: Any = raw                                   # component tree
+        elif isinstance(raw, list):
+            layout = [r for r in raw if isinstance(r, dict)]    # list of nodes / legacy rows
+        else:
+            layout = []
 
         app = existing or ParametricDashboard(name="", connection_name=connection_name)
         app.name = str(payload.get("name") or app.name or "交互看板")

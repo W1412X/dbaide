@@ -135,7 +135,7 @@ class ParametricDashboard:
     connection_name: str
     id: str = field(default_factory=new_id)
     charts: list[ParametricChart] = field(default_factory=list)
-    layout: list[dict[str, Any]] = field(default_factory=list)   # declarative rows: [{"tiles":[{kind,chart,span,...}]}]
+    layout: Any = field(default_factory=list)   # declarative component tree (dict) or legacy rows (list)
     html: str = ""                  # deterministically rendered body (cache of layout+charts)
     created_at: str = field(default_factory=utc_now)
     updated_at: str = field(default_factory=utc_now)
@@ -160,7 +160,7 @@ class ParametricDashboard:
         return {
             "id": self.id, "name": self.name, "connection_name": self.connection_name,
             "charts": [c.to_dict() for c in self.charts],
-            "layout": [dict(t) for t in self.layout],
+            "layout": self.layout,
             "html": self.html,
             "created_at": self.created_at, "updated_at": self.updated_at,
         }
@@ -173,7 +173,7 @@ class ParametricDashboard:
             connection_name=str(d.get("connection_name") or ""),
             id=str(d.get("id") or new_id()),
             charts=[ParametricChart.from_dict(c) for c in (d.get("charts") or []) if isinstance(c, dict)],
-            layout=[dict(t) for t in (d.get("layout") or []) if isinstance(t, dict)],
+            layout=d.get("layout") if isinstance(d.get("layout"), (dict, list)) else [],
             html=str(d.get("html") or ""),
             created_at=str(d.get("created_at") or utc_now()),
             updated_at=str(d.get("updated_at") or utc_now()),

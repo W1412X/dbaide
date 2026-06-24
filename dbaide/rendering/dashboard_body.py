@@ -1,29 +1,29 @@
-"""Render an AI dashboard from a declarative layout spec — never from free HTML.
+"""Render an AI dashboard from a declarative COMPONENT TREE — never free HTML.
 
-The builder agent emits a structured spec (rows of tiles) plus the recipes; the
-SYSTEM owns the rendering. This module turns that spec into a themed 12-column
-grid. Tiles reference a recipe ``chart`` and have a ``kind``:
+The builder agent emits a flexible, nestable tree (a kind of structured pseudocode)
+plus the recipes; the SYSTEM renders it. Two component families:
 
-    chart   — an ECharts chart (the default)
-    kpi     — a single big metric value + label
-    table   — the recipe's rows as a compact table
-    heading — a static section title (no data; uses ``text``)
+  containers (nest children): page · row · col/stack · grid · section · card · tabs/tab
+  leaves (content):           chart · kpi · table · text/markdown · heading · divider
 
-A control bar is auto-generated from the de-duplicated recipe params, so the
-filters always match the queries. Anything malformed (missing/garbled spec, a
-tile pointing at an unknown chart) falls back to a clean auto-grid of every
-recipe — generation quality can never break or empty the page.
+Flexibility comes from composition (nest freely) and an extensible component set —
+adding a component is one deterministic renderer here, not model-authored markup.
+Robustness: an unknown container renders its children; an unknown leaf is skipped; a
+tile pointing at a missing recipe is dropped; if nothing renders we fall back to an
+auto-grid of every recipe. A control bar is auto-generated from the recipe params.
 """
 
 from __future__ import annotations
 
+import re
 from html import escape
 from typing import Any, Iterable
 
-_KINDS = {"chart", "kpi", "table", "heading"}
+_LEAVES = {"chart", "kpi", "table", "text", "markdown", "heading", "divider"}
+_STACKERS = {"page", "col", "stack", "section", "card", "group", "tab", "root"}
 
 
-# -- controls ---------------------------------------------------------------
+# -- controls (auto-generated from recipe params) ---------------------------
 
 def _dedup_params(charts: Iterable[Any]) -> list[Any]:
     seen: set[str] = set()
@@ -47,8 +47,6 @@ def _control(p: Any) -> str:
         selected = (set(default) if isinstance(default, (list, tuple))
                     else ({default} if default not in (None, "") else set()))
         if getattr(p, "multi", False):
-            # a COMPACT collapsible dropdown (a chip-per-value wall eats the whole screen
-            # for high-cardinality columns). <details> needs no JS to open/close.
             checks = "".join(
                 f'<label class="dbaide-check"><input type="checkbox" data-param="{name}" '
                 f'value="{escape(str(o))}"{" checked" if o in selected else ""}>{escape(str(o))}</label>'
@@ -60,8 +58,6 @@ def _control(p: Any) -> str:
             for o in options)
         return f'<label>{label}<select data-param="{name}">{opts}</select></label>'
     html_type = {"date": "date", "number": "number"}.get(ptype, "text")
-    # @tokens (e.g. @month_start) aren't valid control values; leave the field empty
-    # and let the runtime resolve the default when the value comes back blank
     val = "" if (isinstance(default, str) and default.startswith("@")) else (
         "" if default in (None, "") or isinstance(default, (list, tuple)) else escape(str(default)))
     val_attr = f' value="{val}"' if val else ""
@@ -76,57 +72,140 @@ def render_controls(charts: list[Any]) -> str:
     return f'<div class="dbaide-controls">{controls}<button data-apply>应用</button></div>'
 
 
-# -- tiles ------------------------------------------------------------------
+# -- helpers ----------------------------------------------------------------
 
-def _clamp_span(span: Any) -> int:
+def _clamp(v: Any, lo: int, hi: int, default: int) -> int:
     try:
-        return max(1, min(12, int(span)))
+        return max(lo, min(hi, int(v)))
     except (TypeError, ValueError):
-        return 12
+        return default
 
 
-def _tile_html(tile: dict[str, Any], valid_ids: set[str]) -> str | None:
-    kind = str(tile.get("kind") or "chart").lower()
-    if kind not in _KINDS:
-        kind = "chart"
-    span = _clamp_span(tile.get("span", 12))
-    style = f"grid-column:span {span};"
+_INLINE_MD = (
+    (re.compile(r"\*\*(.+?)\*\*"), r"<strong>\1</strong>"),
+    (re.compile(r"`(.+?)`"), r"<code>\1</code>"),
+)
 
-    if kind == "heading":
-        text = escape(str(tile.get("text") or tile.get("title") or ""))
-        return f'<div class="dbaide-heading" style="{style}">{text}</div>'
 
-    chart_id = str(tile.get("chart") or tile.get("chart_id") or "")
-    if not chart_id or chart_id not in valid_ids:
-        return None   # tile points at a recipe that doesn't exist — drop it
-    cid = escape(chart_id)
-    title = escape(str(tile.get("title") or ""))
+def _mini_markdown(text: str) -> str:
+    """Tiny, safe markdown for text/markdown leaves (escape first, then a few rules)."""
+    out: list[str] = []
+    for raw in str(text or "").split("\n"):
+        line = escape(raw)
+        for pat, repl in _INLINE_MD:
+            line = pat.sub(repl, line)
+        s = line.strip()
+        if s.startswith("&gt; "):
+            out.append(f'<blockquote>{s[5:]}</blockquote>')
+        elif s.startswith("### "):
+            out.append(f'<h4>{s[4:]}</h4>')
+        elif s.startswith("## "):
+            out.append(f'<h3>{s[3:]}</h3>')
+        elif s.startswith("# "):
+            out.append(f'<h2>{s[2:]}</h2>')
+        elif s.startswith("- ") or s.startswith("* "):
+            out.append(f'<li>{s[2:]}</li>')
+        else:
+            out.append(line)
+    return "<br>".join(out)
+
+
+def _chart_id(node: dict[str, Any]) -> str:
+    return str(node.get("chart") or node.get("chart_id") or "")
+
+
+# -- the recursive renderer -------------------------------------------------
+
+def _render_leaf(node: dict[str, Any], ntype: str, ctx: dict[str, Any]) -> str:
+    if ntype == "divider":
+        return '<hr class="dbaide-divider">'
+    if ntype in ("text", "markdown"):
+        body = _mini_markdown(node.get("text") or node.get("content") or "")
+        return f'<div class="dbaide-text">{body}</div>'
+    if ntype == "heading":
+        return f'<div class="dbaide-heading">{escape(str(node.get("text") or node.get("title") or ""))}</div>'
+
+    cid = _chart_id(node)
+    if not cid or cid not in ctx["valid"]:
+        return ""   # references a recipe that doesn't exist → drop
+    ctx["covered"].add(cid)
+    ecid = escape(cid)
+    title = escape(str(node.get("title") or ""))
     title_html = f'<div class="dbaide-card-title">{title}</div>' if title else ""
-
-    if kind == "kpi":
-        label = escape(str(tile.get("label") or tile.get("title") or ""))
-        return (f'<div class="dbaide-card dbaide-kpi" style="{style}">'
-                f'<div class="dbaide-kpi-value" data-chart="{cid}" data-kind="kpi">…</div>'
+    if ntype == "kpi":
+        label = escape(str(node.get("label") or node.get("title") or ""))
+        return (f'<div class="dbaide-card dbaide-kpi">'
+                f'<div class="dbaide-kpi-value" data-chart="{ecid}" data-kind="kpi">…</div>'
                 f'<div class="dbaide-kpi-label">{label}</div></div>')
-    if kind == "table":
-        return (f'<div class="dbaide-card" style="{style}">{title_html}'
-                f'<div data-chart="{cid}" data-kind="table" class="dbaide-table-wrap"></div></div>')
-    # chart
-    height = tile.get("height")
-    h = 280
-    try:
-        h = max(140, min(640, int(height)))
-    except (TypeError, ValueError):
-        pass
-    return (f'<div class="dbaide-card" style="{style}">{title_html}'
-            f'<div data-chart="{cid}" data-kind="chart" style="height:{h}px"></div></div>')
+    if ntype == "table":
+        return (f'<div class="dbaide-card">{title_html}'
+                f'<div data-chart="{ecid}" data-kind="table" class="dbaide-table-wrap"></div></div>')
+    h = _clamp(node.get("height"), 140, 720, 280)   # chart
+    return (f'<div class="dbaide-card">{title_html}'
+            f'<div data-chart="{ecid}" data-kind="chart" style="height:{h}px"></div></div>')
 
 
-def _rows(spec: Any) -> list[dict[str, Any]]:
-    """Accept either a bare list of rows or {"rows":[...]}."""
-    if isinstance(spec, dict):
-        spec = spec.get("rows")
-    return [r for r in (spec or []) if isinstance(r, dict)]
+def _render_children(children: Any, ctx: dict[str, Any]) -> str:
+    return "".join(render_node(c, ctx) for c in (children or []) if isinstance(c, dict))
+
+
+def _render_row(children: Any, ctx: dict[str, Any]) -> str:
+    kids = [c for c in (children or []) if isinstance(c, dict)]
+    n = max(1, len(kids))
+    cells = []
+    for c in kids:
+        inner = render_node(c, ctx)
+        if not inner:
+            continue
+        span = _clamp(c.get("span"), 1, 12, max(1, 12 // n)) if c.get("span") is not None else max(1, 12 // n)
+        cells.append(f'<div class="dbaide-cell" style="grid-column:span {span}">{inner}</div>')
+    return f'<div class="dbaide-row">{"".join(cells)}</div>' if cells else ""
+
+
+def _render_tabs(children: Any, ctx: dict[str, Any]) -> str:
+    tabs = [c for c in (children or []) if isinstance(c, dict) and str(c.get("type", "")).lower() == "tab"]
+    if not tabs:
+        return _render_children(children, ctx)   # not real tabs → just stack
+    uid = ctx["uid"][0]
+    ctx["uid"][0] += 1
+    heads, panels = [], []
+    for i, t in enumerate(tabs):
+        label = escape(str(t.get("label") or t.get("title") or f"Tab {i + 1}"))
+        on = " active" if i == 0 else ""
+        key = f"{uid}-{i}"
+        heads.append(f'<button class="dbaide-tab{on}" data-tab="{key}">{label}</button>')
+        panels.append(f'<div class="dbaide-tabpanel{on}" data-tabpanel="{key}">'
+                      f'{_render_children(t.get("children"), ctx)}</div>')
+    return (f'<div class="dbaide-tabs"><div class="dbaide-tabbar">{"".join(heads)}</div>'
+            f'{"".join(panels)}</div>')
+
+
+def render_node(node: Any, ctx: dict[str, Any]) -> str:
+    if not isinstance(node, dict):
+        return ""
+    ntype = str(node.get("type") or "").lower()
+    children = node.get("children")
+    if ntype in _LEAVES:
+        return _render_leaf(node, ntype, ctx)
+    if ntype == "row":
+        return _render_row(children, ctx)
+    if ntype == "grid":
+        cols = _clamp(node.get("cols"), 1, 6, 3)
+        cells = "".join(f'<div>{render_node(c, ctx)}</div>'
+                        for c in (children or []) if isinstance(c, dict))
+        return f'<div class="dbaide-grid2" style="grid-template-columns:repeat({cols},1fr)">{cells}</div>'
+    if ntype == "section":
+        title = escape(str(node.get("title") or ""))
+        head = f'<div class="dbaide-heading">{title}</div>' if title else ""
+        return f'<div class="dbaide-section">{head}{_render_children(children, ctx)}</div>'
+    if ntype in ("card", "group"):
+        return f'<div class="dbaide-card">{_render_children(children, ctx)}</div>'
+    if ntype == "tabs":
+        return _render_tabs(children, ctx)
+    if ntype in _STACKERS:
+        return _render_children(children, ctx)
+    # unknown type: passthrough children if any, else skip
+    return _render_children(children, ctx) if children else ""
 
 
 # -- entry points -----------------------------------------------------------
@@ -144,34 +223,42 @@ def auto_grid(charts: list[Any]) -> str:
     return render_controls(charts) + f'<div class="dbaide-grid">{cards}</div>'
 
 
+def _looks_like_legacy_rows(layout: Any) -> bool:
+    return (isinstance(layout, list) and bool(layout)
+            and isinstance(layout[0], dict) and "tiles" in layout[0])
+
+
+def _render_legacy_rows(layout: list[dict[str, Any]], ctx: dict[str, Any]) -> str:
+    """Back-compat for dashboards saved under the old rows/tiles schema (tiles use
+    'kind'; the tree uses 'type')."""
+    out = []
+    for row in layout:
+        if not isinstance(row, dict):
+            continue
+        tiles = [{**t, "type": t.get("kind", "chart")}
+                 for t in (row.get("tiles") or []) if isinstance(t, dict)]
+        out.append(_render_row(tiles, ctx))
+    return "".join(out)
+
+
 def render_body(layout: Any, charts: list[Any]) -> str:
-    """Render the declarative *layout* into a themed body; fall back to auto-grid.
+    """Render the declarative *layout* (component tree, or legacy rows) into a themed,
+    system-owned body; always safe; falls back to an auto-grid when unusable."""
+    valid = {str(getattr(c, "chart_id", "") or "") for c in charts if getattr(c, "chart_id", "")}
+    ctx = {"valid": valid, "covered": set(), "uid": [0]}
 
-    The body is fully system-owned HTML (no model markup), so it is safe and
-    consistent by construction.
-    """
-    valid_ids = {str(getattr(c, "chart_id", "") or "") for c in charts if getattr(c, "chart_id", "")}
-    rows = _rows(layout)
-    rendered_rows: list[str] = []
-    covered: set[str] = set()
-    for row in rows:
-        tiles = [t for t in (row.get("tiles") or []) if isinstance(t, dict)]
-        cells = []
-        for t in tiles:
-            html = _tile_html(t, valid_ids)
-            if html:
-                cells.append(html)
-                cid = str(t.get("chart") or t.get("chart_id") or "")
-                if cid:
-                    covered.add(cid)
-        if cells:
-            rendered_rows.append(f'<div class="dbaide-row">{"".join(cells)}</div>')
+    if isinstance(layout, dict):
+        body = render_node(layout, ctx)
+    elif _looks_like_legacy_rows(layout):
+        body = _render_legacy_rows(layout, ctx)
+    elif isinstance(layout, list):
+        body = _render_children(layout, ctx)
+    else:
+        body = ""
 
-    if not rendered_rows:
-        return auto_grid(charts)   # nothing usable in the spec → safe fallback
-    # the model's layout stands; append any recipe it forgot to place so nothing is lost
-    uncovered = [c for c in charts if getattr(c, "chart_id", "") and str(c.chart_id) not in covered]
-    tail = ""
-    if uncovered:
-        tail = '<div class="dbaide-grid">' + "".join(_chart_card(c) for c in uncovered) + "</div>"
-    return render_controls(charts) + "".join(rendered_rows) + tail
+    if not body.strip():
+        return auto_grid(charts)
+    # the tree stands; append any recipe it forgot to place so nothing is lost
+    uncovered = [c for c in charts if getattr(c, "chart_id", "") and str(c.chart_id) not in ctx["covered"]]
+    tail = ("<div class=\"dbaide-grid\">" + "".join(_chart_card(c) for c in uncovered) + "</div>") if uncovered else ""
+    return render_controls(charts) + body + tail

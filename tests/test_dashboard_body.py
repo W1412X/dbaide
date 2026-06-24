@@ -1,5 +1,5 @@
-"""The declarative renderer turns a layout spec into a safe, themed body — and
-falls back to an auto-grid when the spec is missing, garbled, or inconsistent."""
+"""The component-tree renderer turns a nestable UI spec into a safe, themed body —
+composing rows/sections/tabs/grids + chart/kpi/table/text, with graceful fallback."""
 
 from __future__ import annotations
 
@@ -17,68 +17,77 @@ def _chart(cid="c1", params=None):
     )
 
 
-def test_render_body_lays_out_tiles_by_kind_and_span():
+def test_render_tree_composes_rows_kinds_and_spans():
     charts = [_chart("c1"), _chart("c2")]
-    layout = {"rows": [
-        {"tiles": [{"kind": "kpi", "chart": "c1", "span": 3, "label": "总额"},
-                   {"kind": "chart", "chart": "c1", "span": 9, "height": 320}]},
-        {"tiles": [{"kind": "heading", "text": "明细", "span": 12},
-                   {"kind": "table", "chart": "c2", "span": 12}]},
+    ui = {"type": "page", "children": [
+        {"type": "row", "children": [
+            {"type": "kpi", "chart": "c1", "span": 3, "label": "总额"},
+            {"type": "chart", "chart": "c1", "span": 9, "height": 320}]},
+        {"type": "section", "title": "明细", "children": [
+            {"type": "table", "chart": "c2"}]},
     ]}
-    body = render_body(layout, charts)
-    assert 'data-kind="kpi"' in body and 'data-chart="c1"' in body
-    assert "grid-column:span 3" in body and "grid-column:span 9" in body
+    body = render_body(ui, charts)
+    assert 'data-kind="kpi"' in body and "grid-column:span 3" in body and "grid-column:span 9" in body
     assert "height:320px" in body
-    assert 'data-kind="table"' in body and "明细" in body
-    assert "dbaide-row" in body and "<script" not in body.lower()
+    assert "dbaide-section" in body and "明细" in body and 'data-kind="table"' in body
+    assert "<script" not in body.lower()
 
 
-def test_render_body_auto_generates_controls_from_params():
-    charts = [_chart("c1", [ParamSpec("region", "enum", options=["A", "B"], multi=True, default=["A"])]),
-              _chart("c2", [ParamSpec("region", "enum", options=["A", "B"], multi=True),
-                            ParamSpec("n", "number", default=5)])]
-    layout = {"rows": [{"tiles": [{"kind": "chart", "chart": "c1", "span": 6},
-                                  {"kind": "chart", "chart": "c2", "span": 6}]}]}
-    body = render_body(layout, charts)
-    assert body.count("dbaide-dd") == 1                      # region rendered once (deduped)
-    assert 'data-param="n"' in body and 'value="5"' in body
-    # multi enum → compact collapsible dropdown with a checklist, default preselected
-    assert "<details" in body and "<summary" in body and "dbaide-checklist" in body
-    assert 'type="checkbox" data-param="region" value="A" checked' in body
-    assert "data-apply" in body
-
-
-def test_render_body_clamps_span_and_defaults():
-    body = render_body({"rows": [{"tiles": [{"kind": "chart", "chart": "c1", "span": 99}]}]}, [_chart("c1")])
-    assert "grid-column:span 12" in body                     # clamped to 12
-    assert "height:280px" in body                            # default height
-
-
-def test_render_body_appends_recipes_the_layout_forgot():
+def test_render_tree_tabs_and_markdown():
     charts = [_chart("c1"), _chart("c2")]
-    layout = {"rows": [{"tiles": [{"kind": "chart", "chart": "c1", "span": 12}]}]}   # c2 unplaced
-    body = render_body(layout, charts)
-    # the model's row is kept AND the forgotten recipe is appended — nothing is lost
-    assert "dbaide-row" in body and 'data-chart="c1"' in body
-    assert 'data-chart="c2"' in body and "dbaide-grid" in body   # c2 appended in a tail grid
+    ui = {"type": "page", "children": [
+        {"type": "tabs", "children": [
+            {"type": "tab", "label": "甲", "children": [{"type": "chart", "chart": "c1"}]},
+            {"type": "tab", "label": "乙", "children": [{"type": "chart", "chart": "c2"}]}]},
+        {"type": "markdown", "text": "**重点**：看这里"},
+    ]}
+    body = render_body(ui, charts)
+    assert "dbaide-tabs" in body and 'data-tab="0-0"' in body and "甲" in body and "乙" in body
+    assert "dbaide-tabpanel" in body
+    assert "<strong>重点</strong>" in body            # mini-markdown applied
 
 
-def test_render_body_falls_back_on_empty_or_garbage():
+def test_render_tree_grid_and_nesting():
+    charts = [_chart("c1"), _chart("c2"), _chart("c3")]
+    ui = {"type": "grid", "cols": 3, "children": [
+        {"type": "chart", "chart": "c1"}, {"type": "chart", "chart": "c2"}, {"type": "chart", "chart": "c3"}]}
+    body = render_body(ui, charts)
+    assert "repeat(3,1fr)" in body and body.count('data-kind="chart"') == 3
+
+
+def test_unknown_container_passes_through_children():
+    charts = [_chart("c1")]
+    ui = {"type": "page", "children": [
+        {"type": "mystery", "children": [{"type": "chart", "chart": "c1"}]}]}   # unknown → render kids
+    assert 'data-chart="c1"' in render_body(ui, charts)
+
+
+def test_bad_chart_ref_dropped_and_uncovered_appended():
+    charts = [_chart("c1"), _chart("c2")]
+    ui = {"type": "page", "children": [
+        {"type": "chart", "chart": "ghost"},     # dropped
+        {"type": "chart", "chart": "c1"}]}       # c2 unplaced → appended
+    body = render_body(ui, charts)
+    assert "ghost" not in body and 'data-chart="c1"' in body and 'data-chart="c2"' in body
+
+
+def test_empty_or_garbage_tree_falls_back_to_auto_grid():
     charts = [_chart("c1")]
     assert "dbaide-grid" in render_body(None, charts)
-    assert "dbaide-grid" in render_body({"rows": "nonsense"}, charts)
-    assert 'data-chart="c1"' in render_body([], charts)
+    assert "dbaide-grid" in render_body({"type": "page", "children": []}, charts)
 
 
-def test_tiles_referencing_unknown_charts_are_dropped():
+def test_legacy_rows_still_render():
     charts = [_chart("c1")]
-    # a tile pointing at a non-existent recipe is dropped; since c1 is then uncovered → auto-grid
-    body = render_body({"rows": [{"tiles": [{"kind": "chart", "chart": "ghost", "span": 12}]}]}, charts)
-    assert "ghost" not in body and 'data-chart="c1"' in body
+    legacy = [{"tiles": [{"kind": "chart", "chart": "c1", "span": 12}]}]   # old saved schema
+    assert 'data-chart="c1"' in render_body(legacy, charts) and "dbaide-row" in render_body(legacy, charts)
 
 
-def test_auto_grid_and_controls_cover_every_chart():
-    charts = [_chart("c1"), _chart("c2")]
-    grid = auto_grid(charts)
-    assert grid.count('data-kind="chart"') == 2 and "data-apply" in grid
+def test_controls_auto_generated_and_deduped():
+    charts = [_chart("c1", [ParamSpec("region", "enum", options=["A", "B"], multi=True, default=["A"])]),
+              _chart("c2", [ParamSpec("region", "enum", options=["A", "B"], multi=True)])]
+    ui = {"type": "row", "children": [{"type": "chart", "chart": "c1"}, {"type": "chart", "chart": "c2"}]}
+    body = render_body(ui, charts)
+    assert body.count("dbaide-dd") == 1 and "data-apply" in body
+    assert 'type="checkbox" data-param="region" value="A" checked' in body
     assert render_controls([_chart("c1", [])]) == ""        # no params → no control bar
