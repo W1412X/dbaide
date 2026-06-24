@@ -1163,6 +1163,8 @@ _STRINGS: dict[str, dict[str, str]] = {
     "app.building_title": {"en": "Building your dashboard…", "zh": "正在生成交互看板…"},
     "app.building_hint": {"en": "The AI is writing the charts and filter controls from your analysis.",
                           "zh": "AI 正在根据这次分析编写图表和筛选控件，稍候。"},
+    "app.error_hint": {"en": "Adjust your request in the box below and try again.",
+                       "zh": "在下方改一下要求再试一次。"},
     "app.default_instruction": {
         "en": "Build an interactive dashboard from this analysis; add sensible filter controls for the data.",
         "zh": "基于以上分析做一个交互看板，根据数据加上合适的筛选控件。"},

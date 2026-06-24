@@ -41,8 +41,11 @@ class _DashboardBridge(QObject):
 
 
 def _theme_payload() -> dict[str, str]:
-    return {"text": Theme.TEXT, "muted": Theme.MUTED, "bg": Theme.BG, "panel": Theme.PANEL,
-            "border": Theme.BORDER_SOFT, "accent": Theme.ACCENT}
+    # the live app palette, injected into the page as CSS variables so an AI-authored
+    # dashboard matches the current theme (and re-injects if the theme changes)
+    return {"text": Theme.TEXT, "text2": Theme.TEXT_2, "muted": Theme.MUTED,
+            "bg": Theme.BG, "panel": Theme.PANEL, "panel2": Theme.PANEL_2,
+            "border": Theme.BORDER_SOFT, "accent": Theme.ACCENT, "accent_text": Theme.ACCENT_TEXT}
 
 
 class DashboardWebView(QWidget):

@@ -77,23 +77,29 @@ _CLIENT_JS = r"""
 
 def _base_css(theme: dict[str, Any]) -> str:
     t = theme or {}
+    # every colour comes from the injected app theme (no hardcoded palette) so the page
+    # matches the app and adapts when the theme changes; fallbacks only guard a missing key
     return f"""
     :root {{
-      --text: {t.get('text', '#f4f4f5')}; --muted: {t.get('muted', '#a1a1aa')};
-      --bg: {t.get('bg', '#161618')}; --panel: {t.get('panel', '#1f1f23')};
-      --border: {t.get('border', '#33333a')}; --accent: {t.get('accent', '#6366f1')};
+      --text: {t.get('text', '#f4f4f5')}; --text2: {t.get('text2', '#b7bec9')};
+      --muted: {t.get('muted', '#737b89')}; --bg: {t.get('bg', '#07080a')};
+      --panel: {t.get('panel', '#111419')}; --panel2: {t.get('panel2', '#151922')};
+      --border: {t.get('border', '#1b2026')}; --accent: {t.get('accent', '#3b82f6')};
+      --accent-text: {t.get('accent_text', '#ffffff')};
     }}
     * {{ box-sizing: border-box; }}
     body {{ margin:0; background:var(--bg); color:var(--text);
       font-family:Inter,-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif; font-size:13px; }}
     #dbaide-root {{ padding:16px; }}
-    [data-chart] {{ width:100%; min-height:260px; }}
+    [data-chart] {{ width:100%; min-height:260px; background:var(--panel); border:1px solid var(--border);
+      border-radius:8px; }}
     [data-chart].dbaide-empty {{ display:flex; align-items:center; justify-content:center;
       color:var(--muted); min-height:200px; }}
-    input, select, button {{ font:inherit; color:var(--text); background:var(--panel);
+    input, select {{ font:inherit; color:var(--text); background:var(--panel);
       border:1px solid var(--border); border-radius:6px; padding:5px 8px; }}
-    button {{ cursor:pointer; }}
-    label {{ color:var(--muted); font-size:11px; }}
+    button {{ font:inherit; color:var(--accent-text); background:var(--accent); border:none;
+      border-radius:6px; padding:6px 12px; cursor:pointer; }}
+    label {{ color:var(--text2); font-size:11px; }}
     """
 
 

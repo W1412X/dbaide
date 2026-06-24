@@ -93,6 +93,7 @@ class ParametricDashboardStudio(QWidget):
         self._stack.addWidget(self._build_loading())   # 0
         self._web = DashboardWebView()
         self._stack.addWidget(self._web)                # 1
+        self._stack.addWidget(self._build_error())      # 2
         root.addWidget(self._stack, 1)
 
         # refine composer ---------------------------------------------------------
@@ -134,6 +135,23 @@ class ParametricDashboardStudio(QWidget):
         hint.setMaximumWidth(420)
         hint.setStyleSheet(f"color:{Theme.MUTED}; font-size:12px; background:transparent;")
         lay.addWidget(hint, alignment=Qt.AlignmentFlag.AlignCenter)
+        return w
+
+    def _build_error(self) -> QWidget:
+        w = QWidget()
+        lay = QVBoxLayout(w)
+        lay.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        lay.setSpacing(8)
+        self._error_msg = QLabel("")
+        self._error_msg.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self._error_msg.setWordWrap(True)
+        self._error_msg.setMaximumWidth(460)
+        self._error_msg.setStyleSheet(f"color:{Theme.RED}; font-size:13px; background:transparent;")
+        lay.addWidget(self._error_msg)
+        hint = QLabel(_t("app.error_hint"))
+        hint.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        hint.setStyleSheet(f"color:{Theme.MUTED}; font-size:12px; background:transparent;")
+        lay.addWidget(hint)
         return w
 
     def _tick(self) -> None:
@@ -200,7 +218,12 @@ class ParametricDashboardStudio(QWidget):
     def _on_failed(self, err: str) -> None:
         self._finish_worker()
         self._set_busy(False)
-        dialog_warn(self, _t("app.window_title"), _t("app.compile_failed", error=str(err)[:200]))
+        if self._has_rendered:
+            dialog_warn(self, _t("app.window_title"), _t("app.compile_failed", error=str(err)[:200]))
+        else:
+            # first build failed — show an error state, not a frozen loading spinner
+            self._error_msg.setText(_t("app.compile_failed", error=str(err)[:200]))
+            self._stack.setCurrentIndex(2)
 
     def _finish_worker(self) -> None:
         worker = self._worker

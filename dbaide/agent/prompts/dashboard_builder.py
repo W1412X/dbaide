@@ -35,6 +35,10 @@ HTML rules (you write ONLY the body; the host injects echarts + the data bridge)
 - Layout with divs + inline styles or a <style> block. A horizontal control bar on top,
   a responsive grid of chart cards below. Keep it clean. Give each chart div a height,
   e.g. style="height:280px". DO NOT write <script>, echarts code, or any data/SQL in JS.
+- COLORS: use ONLY these injected CSS variables (the host sets them from the app theme —
+  NEVER hardcode hex colors, so the dashboard matches the app and adapts if the theme
+  changes): var(--text) var(--text2) var(--muted) var(--bg) var(--panel) var(--panel2)
+  var(--border) var(--accent) var(--accent-text).
 
 Recipe rules:
 - Read-only SELECT only. Declare every :param. Keep each SELECT's output columns matching
