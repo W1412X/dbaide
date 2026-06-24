@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import math
-from dataclasses import dataclass, field
+from dataclasses import asdict, dataclass, field, fields
 from typing import Any
 
 from dbaide.agent.progressive_schema import ModelRequiredError
@@ -41,6 +41,31 @@ class ChartPlan:
     high_field: str = ""
     low_field: str = ""
     close_field: str = ""
+
+
+def chart_plan_to_dict(plan: ChartPlan) -> dict[str, Any]:
+    """Serialize a plan (chart type + field→role mapping) for persistence.
+
+    Stored alongside a pinned question so a refresh can rebuild the chart from
+    fresh rows via :meth:`ChartAgent.build_spec` — no model call needed."""
+    return asdict(plan)
+
+
+def chart_plan_from_dict(data: dict[str, Any]) -> ChartPlan:
+    """Rebuild a :class:`ChartPlan` from :func:`chart_plan_to_dict` output.
+
+    Tolerant of unknown/missing keys so a plan saved by a newer or older build
+    still loads."""
+    d = dict(data or {})
+    raw_options = d.pop("options", None)
+    plan_keys = {f.name for f in fields(ChartPlan)}
+    kw = {k: v for k, v in d.items() if k in plan_keys}
+    kw.setdefault("chart_type", "bar")   # required fields — defend against a partial dict
+    kw.setdefault("title", "")
+    if isinstance(raw_options, dict):
+        opt_keys = {f.name for f in fields(ChartOptions)}
+        kw["options"] = ChartOptions(**{k: v for k, v in raw_options.items() if k in opt_keys})
+    return ChartPlan(**kw)
 
 
 class ChartAgent:

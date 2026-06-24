@@ -40,6 +40,27 @@ def resolve_chart_rows(
     return [], []
 
 
+def resolve_chart_source_sql(orchestrator: Any, *, artifact_id: str = "") -> str:
+    """Best-effort SQL that produced the chart's rows.
+
+    Captured at chart time so a pinned tile can re-run the exact query later and
+    redraw deterministically. Prefers the named artifact; falls back to the run's
+    current query result. Empty when the chart was built from inline data."""
+    try:
+        memory = orchestrator.run_state.memory
+    except AttributeError:
+        return ""
+    art_id = str(artifact_id or "").strip()
+    if art_id:
+        artifact = _find_sql_artifact(memory, art_id)
+        if artifact is not None:
+            sql = str(getattr(artifact, "sql", "") or "").strip()
+            if sql:
+                return sql
+    qr = getattr(orchestrator.run_state, "query_result", None)
+    return str(getattr(qr, "sql", "") or "").strip() if qr is not None else ""
+
+
 def _row_dict(row: dict[str, Any]) -> dict[str, Any]:
     return dict(row)
 

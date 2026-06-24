@@ -29,6 +29,8 @@ from dbaide.adapters import build_adapter
 from dbaide.assets import AssetBuilder, AssetSearch, AssetStore
 from dbaide.joins import JoinCatalogStore
 from dbaide.annotations import AnnotationStore
+from dbaide.boards import DashboardStore, SavedQuestion, SavedQuestionStore, Tile
+from dbaide.boards.refresh import refresh_question
 from dbaide.assets.summarizer import (
     render_database_markdown,
     render_instance_markdown,
@@ -67,6 +69,8 @@ class DesktopService:
         self.annotations = AnnotationStore()
         self.history = WorkflowHistoryStore()
         self.sessions = ChatSessionStore()
+        self.boards = DashboardStore()
+        self.boards_questions = SavedQuestionStore()
         self._handlers = build_action_handlers(self)
         import threading
         self._build_lock = threading.Lock()
@@ -1488,6 +1492,96 @@ class DesktopService:
             )
         # Clearing an already-empty note is a no-op, not an error.
         return {"deleted": bool(ok)}
+
+    # ── saved questions & dashboards (pin → board) ──────────────────────────
+
+    def list_dashboards(self, payload: dict[str, Any] | None = None) -> dict[str, Any]:
+        return {"dashboards": [b.to_dict() for b in self.boards.list()]}
+
+    def get_dashboard(self, payload: dict[str, Any]) -> dict[str, Any]:
+        board = self.boards.get(str(payload.get("id") or ""))
+        if board is None:
+            raise ValueError("dashboard not found")
+        want = {t.question_id for t in board.tiles}
+        questions = {q.id: q.to_dict() for q in self.boards_questions.list() if q.id in want}
+        return {"dashboard": board.to_dict(), "questions": questions}
+
+    def create_dashboard(self, payload: dict[str, Any]) -> dict[str, Any]:
+        board = self.boards.create(str(payload.get("name") or "看板"))
+        return {"dashboard": board.to_dict()}
+
+    def rename_dashboard(self, payload: dict[str, Any]) -> dict[str, Any]:
+        board = self.boards.get(str(payload.get("id") or ""))
+        if board is None:
+            raise ValueError("dashboard not found")
+        board.name = str(payload.get("name") or "").strip() or board.name
+        return {"dashboard": self.boards.update(board).to_dict()}
+
+    def delete_dashboard(self, payload: dict[str, Any]) -> dict[str, Any]:
+        return {"deleted": bool(self.boards.delete(str(payload.get("id") or "")))}
+
+    def save_dashboard_layout(self, payload: dict[str, Any]) -> dict[str, Any]:
+        board = self.boards.get(str(payload.get("id") or ""))
+        if board is None:
+            raise ValueError("dashboard not found")
+        board.tiles = [Tile.from_dict(t) for t in (payload.get("tiles") or []) if isinstance(t, dict)]
+        return {"dashboard": self.boards.update(board).to_dict()}
+
+    def list_saved_questions(self, payload: dict[str, Any] | None = None) -> dict[str, Any]:
+        return {"questions": [q.to_dict() for q in self.boards_questions.list()]}
+
+    def save_question(self, payload: dict[str, Any]) -> dict[str, Any]:
+        question = SavedQuestion(
+            name=str(payload.get("name") or "").strip() or "未命名",
+            connection_name=str(payload.get("connection_name") or ""),
+            nl_question=str(payload.get("nl_question") or ""),
+            sql=str(payload.get("sql") or ""),
+            database=str(payload.get("database") or ""),
+            chart_plan=payload.get("chart_plan") if isinstance(payload.get("chart_plan"), dict) else None,
+            chart_spec=payload.get("chart_spec") if isinstance(payload.get("chart_spec"), dict) else None,
+            columns=[str(c) for c in (payload.get("columns") or [])],
+            row_count=int(payload.get("row_count") or 0),
+        )
+        if payload.get("id"):
+            question.id = str(payload["id"])
+        return {"question": self.boards_questions.upsert(question).to_dict()}
+
+    def pin_chart(self, payload: dict[str, Any]) -> dict[str, Any]:
+        """Save a chart as a question, then add it as a tile to a dashboard.
+
+        ``dashboard_id`` targets an existing board; otherwise a non-empty
+        ``dashboard_name`` creates a new one."""
+        saved = SavedQuestion.from_dict(self.save_question(payload)["question"])
+        dash_id = str(payload.get("dashboard_id") or "")
+        if not dash_id and str(payload.get("dashboard_name") or "").strip():
+            dash_id = self.boards.create(str(payload["dashboard_name"]).strip()).id
+        board = self.boards.add_tile(dash_id, saved.id) if dash_id else None
+        return {"question": saved.to_dict(), "dashboard": board.to_dict() if board else None}
+
+    def delete_saved_question(self, payload: dict[str, Any]) -> dict[str, Any]:
+        qid = str(payload.get("id") or "")
+        ok = self.boards_questions.delete(qid)
+        removed = self.boards.detach_question(qid) if ok else 0
+        return {"deleted": ok, "tiles_removed": removed}
+
+    def refresh_saved_question(self, payload: dict[str, Any]) -> dict[str, Any]:
+        """Re-run a tile's SQL and rebuild its chart (deterministic, no model call)."""
+        qid = str(payload.get("id") or "")
+        question = self.boards_questions.get(qid)
+        if question is None:
+            raise ValueError("question not found")
+        if not question.refreshable:
+            return {"refreshable": False, "chart_spec": question.chart_spec,
+                    "columns": question.columns, "row_count": question.row_count}
+
+        def _exec(*, connection_name: str, database: str, sql: str) -> dict[str, Any]:
+            return self.execute_sql({"connection_name": connection_name, "database": database, "sql": sql})
+
+        out = refresh_question(question, _exec)
+        self.boards_questions.save_snapshot(
+            qid, chart_spec=out["chart_spec"], columns=out["columns"], row_count=out["row_count"])
+        out["refreshable"] = True
+        return out
 
     # ── import / export ──────────────────────────────────────────────────--
 

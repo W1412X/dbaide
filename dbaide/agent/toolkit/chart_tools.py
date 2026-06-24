@@ -4,9 +4,9 @@ from __future__ import annotations
 
 from typing import Any
 
-from dbaide.agent.chart_agent import ChartAgent
+from dbaide.agent.chart_agent import ChartAgent, chart_plan_to_dict
 from dbaide.agent.progress_events import subagent_event
-from dbaide.charts.data import resolve_chart_rows
+from dbaide.charts.data import resolve_chart_rows, resolve_chart_source_sql
 from dbaide.charts.embed import chart_embed_markdown
 from dbaide.charts.spec import chart_spec_to_dict
 from dbaide.tools.registry import ToolContext, ToolRegistry, ToolResult
@@ -48,13 +48,13 @@ def register(registry: ToolRegistry, orchestrator) -> None:
         chart_id = _next_chart_id(orchestrator.run_state)
         agent = ChartAgent(orchestrator.llm)
         try:
-            spec = agent.render(
-                chart_id=chart_id,
+            plan = agent.plan(
                 question=str(orchestrator.run_state.question or ""),
                 intent=intent,
                 columns=columns,
                 rows=rows,
             )
+            spec = agent.build_spec(plan, chart_id=chart_id, rows=rows)
         except Exception as exc:
             orchestrator.progress(subagent_event(
                 agent="chart_agent",
@@ -66,6 +66,13 @@ def register(registry: ToolRegistry, orchestrator) -> None:
             return ToolResult(ok=False, error=_err("render_chart", str(exc), retryable=True))
 
         payload = chart_spec_to_dict(spec)
+        # Provenance so this chart can be pinned as a re-runnable dashboard tile:
+        # the field→role mapping + the SQL that produced its rows. The renderer
+        # ignores these extra keys (chart_spec_from_dict reads only known fields).
+        payload["chart_plan"] = chart_plan_to_dict(plan)
+        source_sql = resolve_chart_source_sql(orchestrator, artifact_id=artifact_id)
+        if source_sql:
+            payload["source_sql"] = source_sql
         charts = list(getattr(orchestrator.run_state, "charts", []) or [])
         charts.append(payload)
         orchestrator.run_state.charts = charts
