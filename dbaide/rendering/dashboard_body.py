@@ -47,13 +47,14 @@ def _control(p: Any) -> str:
         selected = (set(default) if isinstance(default, (list, tuple))
                     else ({default} if default not in (None, "") else set()))
         if getattr(p, "multi", False):
-            # styled checkbox chips (native multi-selects are clunky and ugly)
-            chips = "".join(
-                f'<label class="dbaide-chip"><input type="checkbox" data-param="{name}" '
+            # a COMPACT collapsible dropdown (a chip-per-value wall eats the whole screen
+            # for high-cardinality columns). <details> needs no JS to open/close.
+            checks = "".join(
+                f'<label class="dbaide-check"><input type="checkbox" data-param="{name}" '
                 f'value="{escape(str(o))}"{" checked" if o in selected else ""}>{escape(str(o))}</label>'
                 for o in options)
-            return (f'<div class="dbaide-field"><span class="dbaide-flabel">{label}</span>'
-                    f'<div class="dbaide-chips">{chips}</div></div>')
+            return (f'<details class="dbaide-dd"><summary data-ddlabel="{label}">{label}</summary>'
+                    f'<div class="dbaide-checklist">{checks}</div></details>')
         opts = "".join(
             f'<option value="{escape(str(o))}"{" selected" if o in selected else ""}>{escape(str(o))}</option>'
             for o in options)

@@ -1614,7 +1614,13 @@ class DesktopService:
         app = self.boards_apps.get(str(payload.get("id") or ""))
         if app is None:
             raise ValueError("dashboard app not found")
-        return {"app": app.to_dict(),
+        data = app.to_dict()
+        # re-render the body from the (source-of-truth) layout so rendering/UI
+        # improvements apply to already-saved dashboards without a regenerate
+        if app.layout:
+            from dbaide.rendering.dashboard_body import render_body
+            data["html"] = render_body(app.layout, app.charts)
+        return {"app": data,
                 "controls": [c.to_dict() for c in app.controls()],
                 "defaults": app.default_params()}
 

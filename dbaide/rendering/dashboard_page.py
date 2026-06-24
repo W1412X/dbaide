@@ -92,6 +92,15 @@ _CLIENT_JS = r"""
       document.querySelectorAll('[data-chart]').forEach(function(el){ renderTile(el, params); });
     });
   }
+  function updateSummaries(){
+    document.querySelectorAll('.dbaide-dd').forEach(function(d){
+      var s=d.querySelector('summary'); if(!s) return;
+      var lbl=s.getAttribute('data-ddlabel')||'';
+      var boxes=d.querySelectorAll('input[type="checkbox"]'), n=0;
+      boxes.forEach(function(b){ if(b.checked) n++; });
+      s.textContent=lbl+' ('+n+'/'+boxes.length+')';   // ▾ comes from ::after
+    });
+  }
   window.dbaide={query:query, collectParams:collectParams, renderTile:renderTile, refresh:refresh};
   window.addEventListener('resize', function(){
     if(!window.echarts) return;
@@ -102,6 +111,8 @@ _CLIENT_JS = r"""
     document.querySelectorAll('[data-apply]').forEach(function(b){
       b.addEventListener('click', function(e){ e.preventDefault(); refresh(); });
     });
+    document.addEventListener('change', updateSummaries);
+    updateSummaries();
     init();
   }
   if(document.readyState!=='loading') wire(); else document.addEventListener('DOMContentLoaded', wire);
@@ -142,12 +153,22 @@ def _base_css(theme: dict[str, Any]) -> str:
       border-radius:10px; }}
     .dbaide-controls label, .dbaide-field {{ display:flex; flex-direction:column; gap:6px; }}
     .dbaide-flabel {{ color:var(--text2); font-size:11px; }}
-    .dbaide-chips {{ display:flex; flex-wrap:wrap; gap:6px; max-width:560px; }}
-    .dbaide-chip {{ display:inline-flex; align-items:center; gap:5px; padding:4px 10px;
-      background:var(--panel2); border:1px solid var(--border); border-radius:14px; color:var(--text);
-      font-size:12px; cursor:pointer; user-select:none; }}
-    .dbaide-chip:hover {{ border-color:var(--accent); }}
-    .dbaide-chip input {{ margin:0; accent-color:var(--accent); }}
+    /* compact collapsible multi-select dropdown */
+    .dbaide-dd {{ position:relative; }}
+    .dbaide-dd > summary {{ list-style:none; cursor:pointer; padding:7px 12px; min-width:130px;
+      background:var(--panel2); border:1px solid var(--border); border-radius:6px; color:var(--text);
+      font-size:12px; user-select:none; white-space:nowrap; }}
+    .dbaide-dd > summary::-webkit-details-marker {{ display:none; }}
+    .dbaide-dd > summary::after {{ content:" ▾"; color:var(--muted); }}
+    .dbaide-dd[open] > summary {{ border-color:var(--accent); }}
+    .dbaide-checklist {{ position:absolute; z-index:50; top:calc(100% + 4px); left:0; min-width:190px;
+      max-height:280px; overflow:auto; background:var(--panel); border:1px solid var(--border);
+      border-radius:8px; padding:6px; display:flex; flex-direction:column; gap:1px;
+      box-shadow:0 10px 28px rgba(0,0,0,.45); }}
+    .dbaide-check {{ display:flex; align-items:center; gap:8px; padding:5px 8px; border-radius:5px;
+      color:var(--text); font-size:12px; cursor:pointer; white-space:nowrap; }}
+    .dbaide-check:hover {{ background:var(--panel2); }}
+    .dbaide-check input {{ margin:0; accent-color:var(--accent); }}
     .dbaide-grid {{ display:grid; grid-template-columns:repeat(auto-fill,minmax(360px,1fr)); gap:14px; }}
     .dbaide-card {{ background:var(--panel); border:1px solid var(--border); border-radius:10px;
       padding:14px 16px; }}
