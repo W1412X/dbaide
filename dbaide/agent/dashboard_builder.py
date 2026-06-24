@@ -8,6 +8,7 @@ never HTML. The system renders the layout (render_body); the result is a
 
 from __future__ import annotations
 
+import json
 from typing import Any, Callable
 
 from dbaide.agent.progressive_schema import ModelRequiredError
@@ -27,6 +28,8 @@ class DashboardBuilderAgent:
     def __init__(self, llm: LLMClient | None = None) -> None:
         self.llm = llm or NullLLMClient()
 
+    MAX_REPAIR_ROUNDS = 2
+
     def build(
         self,
         *,
@@ -36,6 +39,7 @@ class DashboardBuilderAgent:
         schema_context: str = "",
         existing: ParametricDashboard | None = None,
         validate: Validate | None = None,
+        dialect: str = "",
     ) -> ParametricDashboard:
         if isinstance(self.llm, NullLLMClient):
             raise ModelRequiredError("An LLM is required to build a dashboard.")
@@ -43,22 +47,39 @@ class DashboardBuilderAgent:
         if existing is not None:
             existing_payload = {"name": existing.name, "layout": existing.layout,
                                 "charts": [c.to_dict() for c in existing.charts]}
-        payload = self.llm.complete_json([
+        messages = [
             LLMMessage("system", dashboard_builder_system_prompt()),
             LLMMessage("user", dashboard_builder_user_prompt(
                 instruction=instruction,
                 context_charts=list(context_charts or []),
                 schema_context=schema_context,
                 existing=existing_payload,
+                dialect=dialect,
             )),
-        ])
-        if not isinstance(payload, dict):
-            raise ValueError("builder returned a non-object result")
-        charts = [ParametricChart.from_dict(c) for c in (payload.get("charts") or []) if isinstance(c, dict)]
-        if not charts:
-            raise ValueError("builder returned no charts")
-        if validate is not None:
-            self._validate(charts, validate)
+        ]
+        payload: dict[str, Any] = {}
+        charts: list[ParametricChart] = []
+        errors: list[str] = []
+        # Generate, then VALIDATE each recipe against the real database (the validate
+        # callback EXPLAINs it). Static checks miss invented columns / unsupported
+        # functions, so we feed any DB error back to the model and let it self-correct.
+        for _round in range(self.MAX_REPAIR_ROUNDS + 1):
+            payload = self.llm.complete_json(messages)
+            if not isinstance(payload, dict):
+                raise ValueError("builder returned a non-object result")
+            charts = [ParametricChart.from_dict(c) for c in (payload.get("charts") or []) if isinstance(c, dict)]
+            if not charts:
+                raise ValueError("builder returned no charts")
+            errors = self._validation_errors(charts, validate) if validate is not None else []
+            if not errors:
+                break
+            if _round < self.MAX_REPAIR_ROUNDS:
+                messages.append(LLMMessage("assistant", json.dumps(payload, ensure_ascii=False)))
+                messages.append(LLMMessage("user", self._repair_prompt(errors, dialect)))
+        if errors:
+            raise ValueError("recipes still fail against the database after repair attempts: "
+                             + " | ".join(errors[:4]))
+
         # The agent emits a declarative layout, NOT HTML. The system renders it
         # deterministically (render_body), so generation quality can never break or
         # uglify the page — a malformed/missing layout just falls back to an auto-grid.
@@ -76,7 +97,19 @@ class DashboardBuilderAgent:
         return app
 
     @staticmethod
-    def _validate(charts: list[ParametricChart], validate: Validate) -> None:
+    def _repair_prompt(errors: list[str], dialect: str) -> str:
+        return (
+            "These recipe SQLs FAILED when run against the database:\n"
+            + "\n".join(f"- {e}" for e in errors[:10])
+            + f"\n\nFix them. Use ONLY columns and functions that exist in the schema above; the "
+              f"engine is {dialect or 'SQLite'} — no array/dialect-specific functions, and no "
+              "optional-filter logic (`:p IS NULL OR ...`), just a simple predicate per filter. "
+              "Return the COMPLETE corrected dashboard JSON (same shape)."
+        )
+
+    @staticmethod
+    def _validation_errors(charts: list[ParametricChart], validate: Validate) -> list[str]:
+        errors: list[str] = []
         for chart in charts:
             values = chart.default_params()
             for src in chart.sources:
@@ -89,5 +122,5 @@ class DashboardBuilderAgent:
                     issues = getattr(report, "issues", None)
                     if issues is None and isinstance(report, dict):
                         issues = report.get("issues")
-                    raise ValueError(
-                        f"chart {chart.chart_id!r} source failed validation: " + "; ".join(map(str, issues or [])))
+                    errors.append(f"chart {chart.chart_id!r}: " + "; ".join(map(str, issues or [])))
+        return errors

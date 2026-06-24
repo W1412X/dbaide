@@ -21,6 +21,21 @@ class _MockLLM(LLMClient):
         return dict(self.payload)
 
 
+class _SeqLLM(LLMClient):
+    """Returns a different payload on each call (to exercise the repair loop)."""
+
+    def __init__(self, payloads: list[dict]) -> None:
+        self.payloads = payloads
+        self.calls = 0
+        self.seen: list = []
+
+    def complete_json(self, messages: list[LLMMessage], *, schema_hint: str = "") -> dict:
+        self.seen = messages
+        p = self.payloads[min(self.calls, len(self.payloads) - 1)]
+        self.calls += 1
+        return dict(p)
+
+
 def _ok(_sql):
     return type("R", (), {"ok": True, "issues": []})()
 
@@ -85,9 +100,27 @@ def test_builder_still_rejects_no_charts():
         DashboardBuilderAgent(_MockLLM({**_PAYLOAD, "charts": []})).build(instruction="x")
 
 
-def test_builder_rejects_non_readonly_sql():
+def test_builder_raises_when_recipes_never_validate():
     bad = {**_PAYLOAD, "charts": [{**_PAYLOAD["charts"][0],
                                    "sources": [{"id": "m", "sql": "DROP TABLE sales"}]}]}
-    with pytest.raises(ValueError, match="validation"):
+    with pytest.raises(ValueError, match="fail against the database"):
         DashboardBuilderAgent(_MockLLM(bad)).build(
             instruction="x", validate=lambda sql: type("R", (), {"ok": False, "issues": ["not read-only"]})())
+
+
+def test_builder_self_corrects_using_db_errors():
+    # 1st draft references an invented column; the DB error is fed back and the
+    # 2nd draft (good) validates → build succeeds with the corrected recipe.
+    bad = {**_PAYLOAD, "charts": [{**_PAYLOAD["charts"][0],
+           "sources": [{"id": "m", "sql": "SELECT region, sum(退款率数值) AS amt FROM sales GROUP BY 1"}]}]}
+    llm = _SeqLLM([bad, _PAYLOAD])
+
+    def validate(sql):
+        bad_col = "退款率数值" in sql
+        return {"ok": not bad_col, "issues": ["no such column: 退款率数值"] if bad_col else []}
+
+    app = DashboardBuilderAgent(llm).build(instruction="x", validate=validate)
+    assert llm.calls == 2                                            # one repair round
+    assert "退款率数值" not in app.charts[0].sources[0].sql           # corrected recipe kept
+    repair_msgs = [m.content for m in llm.seen if "FAILED when run against the database" in (m.content or "")]
+    assert repair_msgs and "no such column: 退款率数值" in repair_msgs[0]   # error fed back

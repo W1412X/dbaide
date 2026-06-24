@@ -55,9 +55,19 @@ Layout rules (declarative — the system renders and themes everything):
   the same name across charts share one control) — do NOT put controls in the layout.
 
 Recipe rules:
+- CRITICAL — use ONLY table and column names that appear in the Schema below. NEVER invent a
+  column (e.g. do not assume a numeric "退款率数值" variant exists if the schema only has "退款率").
+  Match the exact spelling. If a column is text but you need a number, that's a different chart —
+  don't fabricate.
+- CRITICAL — write plain SQL the target engine supports. NO array or dialect-specific functions
+  (no arrayLength, no ClickHouse/Postgres-only funcs). Do NOT write optional-filter logic such as
+  ":p IS NULL OR arrayLength(:p)=0 OR ...". Write ONE simple predicate per filter:
+  col = :p  /  col IN (:cats)  /  col LIKE :kw  /  col >= :n. The system handles binding.
+- For enum/multi filters, set "default" to ALL options so the board loads populated.
 - Read-only SELECT only. Declare every :param. Keep each SELECT's output columns matching
   its chart_plan fields (category/value). Reuse chart_plan from the analysis when given.
-- A :param may sit on an expression: YEAR(d)=:y , lower(name) LIKE :kw , amount > :n.
+- A KPI tile needs a recipe returning ONE row, ONE aggregate (e.g. SELECT sum(amt) AS total).
+- A :param may sit on an expression: lower(name) LIKE :kw , amount > :n.
 - Param kinds: range → two params (BETWEEN :start AND :end); enum multi-select → one param
   "multi":true used as col IN (:cats); text match → "text" used as col LIKE :kw; single → col=:p.
 - Dynamic defaults resolved at run time: @today @yesterday @month_start @year_start
@@ -80,8 +90,11 @@ def dashboard_builder_user_prompt(
     context_charts: list[dict[str, Any]],
     schema_context: str = "",
     existing: dict[str, Any] | None = None,
+    dialect: str = "",
 ) -> str:
     parts: list[str] = []
+    if dialect:
+        parts.append(f"Target SQL engine: {dialect}. Use only SQL/functions it supports.")
     if context_charts:
         lines = []
         for c in context_charts:

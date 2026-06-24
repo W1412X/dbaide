@@ -1657,14 +1657,55 @@ class DesktopService:
                         or (context[0].get("connection_name") if context else ""))
         conn = self.cfg.get_connection(conn_name or None)
         tools = self._query_tools(conn)
-        validate = lambda sql: tools.validate_sql_report(sql, add_limit=True)  # noqa: E731
+        dialect = str(getattr(tools.adapter, "dialect", "") or conn.type or "")
+
+        def validate(sql: str) -> dict[str, Any]:
+            # EXPLAIN against the real DB — catches invented columns / unsupported
+            # functions that the static read-only check passes. The builder feeds these
+            # back to the model for self-correction.
+            try:
+                tools.explain_sql(sql)
+                return {"ok": True, "issues": []}
+            except Exception as exc:  # noqa: BLE001
+                return {"ok": False, "issues": [str(exc)[:300]]}
+
         agent = DashboardBuilderAgent(self._safe_llm())
         app = agent.build(
             instruction=str(payload.get("instruction") or ""),
             context_charts=context, connection_name=conn_name,
-            existing=existing, validate=validate)
+            schema_context=self._dashboard_schema_context(tools),
+            existing=existing, validate=validate, dialect=dialect)
         self.boards_apps.upsert(app)
         return {"app": app.to_dict()}
+
+    @staticmethod
+    def _dashboard_schema_context(tools: Any) -> str:
+        """Compact `table(col type, …)` list so the builder grounds real column names."""
+        adapter = getattr(tools, "adapter", None)
+        if adapter is None:
+            return ""
+        lines: list[str] = []
+        try:
+            tables = adapter.list_tables()
+        except Exception:  # noqa: BLE001
+            return ""
+        for t in list(tables)[:40]:
+            name = getattr(t, "name", None) or (t.get("name") if isinstance(t, dict) else str(t))
+            if not name:
+                continue
+            try:
+                cols = adapter.describe_table(name)
+            except Exception:  # noqa: BLE001
+                continue
+            parts = []
+            for c in cols:
+                cn = getattr(c, "name", None) or (c.get("name") if isinstance(c, dict) else "")
+                ct = (getattr(c, "type", None) or getattr(c, "data_type", None)
+                      or (c.get("type") if isinstance(c, dict) else "") or "")
+                if cn:
+                    parts.append(f"{cn} {ct}".strip())
+            lines.append(f"{name}({', '.join(parts)})")
+        return "\n".join(lines)
 
     def run_app_chart(self, payload: dict[str, Any]) -> dict[str, Any]:
         """Bridge backend: re-run one app chart with given params (deterministic, no LLM)."""
