@@ -52,12 +52,13 @@ def test_render_body_clamps_span_and_defaults():
     assert "height:280px" in body                            # default height
 
 
-def test_render_body_falls_back_when_a_recipe_is_uncovered():
+def test_render_body_appends_recipes_the_layout_forgot():
     charts = [_chart("c1"), _chart("c2")]
-    layout = {"rows": [{"tiles": [{"kind": "chart", "chart": "c1", "span": 12}]}]}   # c2 missing
+    layout = {"rows": [{"tiles": [{"kind": "chart", "chart": "c1", "span": 12}]}]}   # c2 unplaced
     body = render_body(layout, charts)
-    assert 'data-chart="c1"' in body and 'data-chart="c2"' in body   # auto-grid covers all
-    assert "dbaide-grid" in body
+    # the model's row is kept AND the forgotten recipe is appended — nothing is lost
+    assert "dbaide-row" in body and 'data-chart="c1"' in body
+    assert 'data-chart="c2"' in body and "dbaide-grid" in body   # c2 appended in a tail grid
 
 
 def test_render_body_falls_back_on_empty_or_garbage():

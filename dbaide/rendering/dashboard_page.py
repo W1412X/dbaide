@@ -19,7 +19,7 @@ from typing import Any
 
 _CLIENT_JS = r"""
 (function(){
-  var bridge=null, ready=false, q=[], insts={};
+  var bridge=null, ready=false, q=[], cache=null;
   function whenReady(fn){ ready?fn():q.push(fn); }
   function init(){
     if(typeof QWebChannel==='undefined' || !window.qt){ return; }
@@ -60,27 +60,40 @@ _CLIENT_JS = r"""
       return '<tr>'+cols.map(function(c){return '<td>'+esc(r[c])+'</td>';}).join('')+'</tr>'; }).join('');
     el.innerHTML='<table class="dbaide-table"><thead>'+head+'</thead><tbody>'+body+'</tbody></table>';
   }
+  function cachedQuery(cid, params){
+    // dedup within a refresh: one recipe feeding kpi+chart+table runs its SQL once
+    if(!cache) return query(cid, params);
+    var k=cid+'|'+JSON.stringify(params||{});
+    return cache[k] || (cache[k]=query(cid, params));
+  }
   function renderTile(el, params){
     var cid=el.getAttribute('data-chart'), kind=el.getAttribute('data-kind')||'chart';
-    query(cid, params).then(function(res){
+    cachedQuery(cid, params).then(function(res){
       if(!res || res.error){ el.classList.add('dbaide-empty'); el.textContent=(res&&res.error)?res.error:'无数据'; return; }
       el.classList.remove('dbaide-empty');
       if(kind==='kpi'){ var v=kpiValue(res); el.textContent=(v==null)?'—':fmtNum(v); return; }
       if(kind==='table'){ renderTable(el, res); return; }
       if(!res.echarts_option){ el.classList.add('dbaide-empty'); el.textContent='无数据'; return; }
       if(!window.echarts) return;
-      var inst=insts[cid]; if(!inst){ inst=echarts.init(el); insts[cid]=inst; }
+      // key the instance by the ELEMENT (getInstanceByDom), not the chart_id — the same
+      // recipe can drive several chart tiles, which would collide on a chart_id map
+      var inst=echarts.getInstanceByDom(el) || echarts.init(el);
       inst.setOption(res.echarts_option, true); inst.resize();
     });
   }
   function refresh(){
     whenReady(function(){
       var params=collectParams();
+      cache={};   // fresh dedup cache per refresh (params are constant within one)
       document.querySelectorAll('[data-chart]').forEach(function(el){ renderTile(el, params); });
     });
   }
   window.dbaide={query:query, collectParams:collectParams, renderTile:renderTile, refresh:refresh};
-  window.addEventListener('resize', function(){ Object.keys(insts).forEach(function(k){ insts[k].resize(); }); });
+  window.addEventListener('resize', function(){
+    if(!window.echarts) return;
+    document.querySelectorAll('[data-kind="chart"]').forEach(function(el){
+      var i=echarts.getInstanceByDom(el); if(i) i.resize(); });
+  });
   function wire(){
     document.querySelectorAll('[data-apply]').forEach(function(b){
       b.addEventListener('click', function(e){ e.preventDefault(); refresh(); });

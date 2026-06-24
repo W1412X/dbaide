@@ -125,15 +125,16 @@ def _rows(spec: Any) -> list[dict[str, Any]]:
 
 # -- entry points -----------------------------------------------------------
 
+def _chart_card(c: Any) -> str:
+    return (f'<div class="dbaide-card">'
+            f'<div class="dbaide-card-title">{escape(str(getattr(c, "title", "") or getattr(c, "chart_id", "")))}</div>'
+            f'<div data-chart="{escape(str(getattr(c, "chart_id", "")))}" data-kind="chart" style="height:280px"></div>'
+            f'</div>')
+
+
 def auto_grid(charts: list[Any]) -> str:
     """The safe fallback: one chart card per recipe in a responsive grid."""
-    cards = "".join(
-        f'<div class="dbaide-card">'
-        f'<div class="dbaide-card-title">{escape(str(getattr(c, "title", "") or getattr(c, "chart_id", "")))}</div>'
-        f'<div data-chart="{escape(str(getattr(c, "chart_id", "")))}" data-kind="chart" style="height:280px"></div>'
-        f'</div>'
-        for c in charts if getattr(c, "chart_id", "")
-    )
+    cards = "".join(_chart_card(c) for c in charts if getattr(c, "chart_id", ""))
     return render_controls(charts) + f'<div class="dbaide-grid">{cards}</div>'
 
 
@@ -160,7 +161,11 @@ def render_body(layout: Any, charts: list[Any]) -> str:
         if cells:
             rendered_rows.append(f'<div class="dbaide-row">{"".join(cells)}</div>')
 
-    # the spec must be present AND cover every recipe, else it isn't trustworthy
-    if not rendered_rows or not valid_ids.issubset(covered):
-        return auto_grid(charts)
-    return render_controls(charts) + "".join(rendered_rows)
+    if not rendered_rows:
+        return auto_grid(charts)   # nothing usable in the spec → safe fallback
+    # the model's layout stands; append any recipe it forgot to place so nothing is lost
+    uncovered = [c for c in charts if getattr(c, "chart_id", "") and str(c.chart_id) not in covered]
+    tail = ""
+    if uncovered:
+        tail = '<div class="dbaide-grid">' + "".join(_chart_card(c) for c in uncovered) + "</div>"
+    return render_controls(charts) + "".join(rendered_rows) + tail
