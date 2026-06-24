@@ -126,10 +126,15 @@ class DashboardTile(QFrame):
         # shares the board background); a hovered tile gets a faint panel, and a tile
         # being dragged lifts with an accent outline. The always-present transparent
         # border keeps the layout from shifting when the drag outline appears.
+        # At rest: transparent, borderless — one cohesive board. While the layout is
+        # being edited (any tile dragged/resized) every tile shows its boundary so the
+        # grid is legible (`gridv`), and the tile under the hand lifts with an accent
+        # outline (`dragging`). Rules are ordered so dragging wins over gridv/hover.
         self.setStyleSheet(
             f"QFrame#dashTile {{ background: transparent; border: 1px solid transparent; border-radius: 6px; }}"
             f"QFrame#dashTile:hover {{ background: {Theme.PANEL}; }}"
-            f'QFrame#dashTile[dragging="true"] {{ background: {Theme.PANEL}; border: 1px solid {Theme.ACCENT}; }}'
+            f'QFrame#dashTile[gridv="true"] {{ background: {Theme.PANEL}; border: 1px solid {Theme.BORDER_SOFT}; }}'
+            f'QFrame#dashTile[dragging="true"] {{ background: {Theme.PANEL_2}; border: 1px solid {Theme.ACCENT}; }}'
         )
         self.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Ignored)
 
@@ -190,6 +195,12 @@ class DashboardTile(QFrame):
     def set_dragging(self, on: bool) -> None:
         """Lift state while being dragged (accent outline + panel fill)."""
         self.setProperty("dragging", bool(on))
+        self.style().unpolish(self)
+        self.style().polish(self)
+
+    def set_grid_visible(self, on: bool) -> None:
+        """Show this tile's boundary while the board layout is being edited."""
+        self.setProperty("gridv", bool(on))
         self.style().unpolish(self)
         self.style().polish(self)
 

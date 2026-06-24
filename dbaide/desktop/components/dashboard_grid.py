@@ -158,6 +158,7 @@ class DashboardGrid(QWidget):
         if self._drag_qid != qid:
             self._drag_qid = qid
             self._drag_index = self._index_of(qid)
+            self._set_grid_visible(True)   # show every tile's boundary while editing
             tile.set_dragging(True)
             tile.raise_()
         local = self.mapFromGlobal(global_pos)
@@ -179,6 +180,7 @@ class DashboardGrid(QWidget):
         tile = self._tiles.get(qid)
         if tile is not None:
             tile.set_dragging(False)
+        self._set_grid_visible(False)
         if self._drag_index is not None:
             self._order = move_to_index(self._order, qid, self._drag_index)
         self._drag_qid = self._drag_index = self._drag_pos = None
@@ -208,6 +210,7 @@ class DashboardGrid(QWidget):
             return
         if qid not in self._resize_base:
             self._resize_base[qid] = (item["w"], item["h"])
+            self._set_grid_visible(True)   # boundaries on for the duration of the resize
         bw, bh = self._resize_base[qid]
         cw = self._col_width()
         new_w, new_h = clamp_size(bw + round(delta.x() / cw), bh + round(delta.y() / self.ROW_PX))
@@ -220,8 +223,13 @@ class DashboardGrid(QWidget):
 
     def _on_resize_drop(self, qid: str) -> None:
         self._resize_base.pop(qid, None)
+        self._set_grid_visible(False)
         self._relayout(animate=True)
         self.layout_changed.emit(self._payload())
+
+    def _set_grid_visible(self, on: bool) -> None:
+        for tile in self._tiles.values():
+            tile.set_grid_visible(on)
 
     def _payload(self) -> list[dict[str, Any]]:
         return [{"question_id": t["question_id"], "w": t["w"], "h": t["h"]} for t in self._order]

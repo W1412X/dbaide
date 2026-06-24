@@ -150,6 +150,21 @@ def test_tile_reorder_persists_order(qapp, service):
     assert [t["question_id"] for t in tiles] == [q2, q1]
 
 
+def test_all_boundaries_shown_while_editing(qapp, service):
+    from PyQt6.QtCore import QPoint
+    bid = service.dispatch("create_dashboard", {"name": "b"})["dashboard"]["id"]
+    q1 = _pin_to(service, bid, "一")
+    q2 = _pin_to(service, bid, "二")
+    from dbaide.desktop.views.dashboard_tab import DashboardTab
+    tab = DashboardTab(service)
+    grid = tab._grid
+    assert not any(grid.tile(q).property("gridv") for q in (q1, q2))   # cohesive at rest
+    grid._on_reorder_drag(q1, grid.mapToGlobal(QPoint(10, 10)))
+    assert all(grid.tile(q).property("gridv") for q in (q1, q2))       # all boundaries on
+    grid._on_reorder_drop(q1)
+    assert not any(grid.tile(q).property("gridv") for q in (q1, q2))   # back to cohesive
+
+
 def test_tile_rename_persists(qapp, service):
     out = _pin(service)
     qid = out["question"]["id"]
