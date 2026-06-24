@@ -16,6 +16,8 @@ from __future__ import annotations
 from dataclasses import asdict, dataclass, field, fields
 from typing import Any
 
+from dbaide.boards.models import new_id, utc_now
+
 PARAM_TYPES = ("text", "number", "date", "enum")
 COMBINE_MODES = ("single", "union", "join")
 
@@ -118,3 +120,58 @@ class ParametricChart:
 
     def default_params(self) -> dict[str, Any]:
         return {p.name: p.default for p in self.params}
+
+
+@dataclass
+class ParametricDashboard:
+    """An AI-compiled interactive dashboard: shared controls drive several charts.
+
+    Controls are the de-duplicated union of every chart's params (same-named
+    params across charts share one control), so changing the top filter bar
+    re-runs all charts together — like a real BI board.
+    """
+
+    name: str
+    connection_name: str
+    id: str = field(default_factory=new_id)
+    charts: list[ParametricChart] = field(default_factory=list)
+    layout: list[dict[str, Any]] = field(default_factory=list)   # [{chart_id, x, y, w, h}]
+    created_at: str = field(default_factory=utc_now)
+    updated_at: str = field(default_factory=utc_now)
+
+    def controls(self) -> list[ParamSpec]:
+        seen: dict[str, ParamSpec] = {}
+        out: list[ParamSpec] = []
+        for chart in self.charts:
+            for p in chart.params:
+                if p.name not in seen:
+                    seen[p.name] = p
+                    out.append(p)
+        return out
+
+    def default_params(self) -> dict[str, Any]:
+        return {p.name: p.default for p in self.controls()}
+
+    def chart(self, chart_id: str) -> ParametricChart | None:
+        return next((c for c in self.charts if c.chart_id == chart_id), None)
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "id": self.id, "name": self.name, "connection_name": self.connection_name,
+            "charts": [c.to_dict() for c in self.charts],
+            "layout": [dict(t) for t in self.layout],
+            "created_at": self.created_at, "updated_at": self.updated_at,
+        }
+
+    @classmethod
+    def from_dict(cls, d: dict[str, Any]) -> "ParametricDashboard":
+        d = d or {}
+        return cls(
+            name=str(d.get("name") or ""),
+            connection_name=str(d.get("connection_name") or ""),
+            id=str(d.get("id") or new_id()),
+            charts=[ParametricChart.from_dict(c) for c in (d.get("charts") or []) if isinstance(c, dict)],
+            layout=[dict(t) for t in (d.get("layout") or []) if isinstance(t, dict)],
+            created_at=str(d.get("created_at") or utc_now()),
+            updated_at=str(d.get("updated_at") or utc_now()),
+        )

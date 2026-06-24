@@ -31,6 +31,10 @@ from dbaide.joins import JoinCatalogStore
 from dbaide.annotations import AnnotationStore
 from dbaide.boards import DashboardStore, SavedQuestion, SavedQuestionStore, Tile
 from dbaide.boards.refresh import refresh_question
+from dbaide.boards.parametric import ParametricDashboard
+from dbaide.boards.runtime import run_parametric_chart
+from dbaide.boards.store import ParametricDashboardStore
+from dbaide.agent.dashboard_compiler import DashboardCompiler
 from dbaide.assets.summarizer import (
     render_database_markdown,
     render_instance_markdown,
@@ -71,6 +75,7 @@ class DesktopService:
         self.sessions = ChatSessionStore()
         self.boards = DashboardStore()
         self.boards_questions = SavedQuestionStore()
+        self.boards_apps = ParametricDashboardStore()
         self._handlers = build_action_handlers(self)
         import threading
         self._build_lock = threading.Lock()
@@ -1597,6 +1602,61 @@ class DesktopService:
             qid, chart_spec=out["chart_spec"], columns=out["columns"], row_count=out["row_count"])
         out["refreshable"] = True
         return out
+
+    # ── parameterized dashboard apps (AI-compiled, interactive) ─────────────
+
+    def list_dashboard_apps(self, payload: dict[str, Any] | None = None) -> dict[str, Any]:
+        return {"apps": [{"id": a.id, "name": a.name, "connection_name": a.connection_name,
+                          "charts": len(a.charts)} for a in self.boards_apps.list()]}
+
+    def get_dashboard_app(self, payload: dict[str, Any]) -> dict[str, Any]:
+        app = self.boards_apps.get(str(payload.get("id") or ""))
+        if app is None:
+            raise ValueError("dashboard app not found")
+        return {"app": app.to_dict(),
+                "controls": [c.to_dict() for c in app.controls()],
+                "defaults": app.default_params()}
+
+    def delete_dashboard_app(self, payload: dict[str, Any]) -> dict[str, Any]:
+        return {"deleted": bool(self.boards_apps.delete(str(payload.get("id") or "")))}
+
+    def compile_dashboard_app(self, payload: dict[str, Any]) -> dict[str, Any]:
+        """Compile saved questions into an interactive parameterized dashboard (one LLM
+        call per chart). Slow — callers should run it on a worker thread."""
+        qids = [str(x) for x in (payload.get("question_ids") or [])]
+        questions = [q for q in (self.boards_questions.get(i) for i in qids)
+                     if q is not None and q.refreshable]
+        if not questions:
+            raise ValueError("no re-runnable saved questions to compile")
+        conn_name = str(payload.get("connection_name") or questions[0].connection_name)
+        conn = self.cfg.get_connection(conn_name or None)
+        tools = self._query_tools(conn)
+        validate = lambda sql: tools.validate_sql_report(sql, add_limit=True)  # noqa: E731
+        compiler = DashboardCompiler(self._safe_llm())
+        charts = []
+        for q in questions:
+            charts.append(compiler.compile_chart(
+                chart_id=q.id, title=q.name, source_sql=q.sql,
+                chart_plan=q.chart_plan or {}, nl_question=q.nl_question, validate=validate))
+        app = ParametricDashboard(
+            name=str(payload.get("name") or "交互看板"), connection_name=conn_name, charts=charts)
+        self.boards_apps.upsert(app)
+        return {"app": app.to_dict()}
+
+    def run_app_chart(self, payload: dict[str, Any]) -> dict[str, Any]:
+        """Bridge backend: re-run one app chart with given params (deterministic, no LLM)."""
+        app = self.boards_apps.get(str(payload.get("app_id") or ""))
+        if app is None:
+            raise ValueError("dashboard app not found")
+        chart = app.chart(str(payload.get("chart_id") or ""))
+        if chart is None:
+            raise ValueError("chart not found")
+        params = payload.get("params") if isinstance(payload.get("params"), dict) else {}
+
+        def _exec(sql: str) -> dict[str, Any]:
+            return self.execute_sql({"connection_name": app.connection_name, "sql": sql})
+
+        return run_parametric_chart(chart, params, _exec)
 
     # ── import / export ──────────────────────────────────────────────────--
 

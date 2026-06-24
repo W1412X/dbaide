@@ -16,6 +16,7 @@ from pathlib import Path
 from typing import Any
 
 from dbaide.boards.models import Dashboard, SavedQuestion, Tile, utc_now
+from dbaide.boards.parametric import ParametricDashboard
 
 logger = logging.getLogger("dbaide.boards")
 
@@ -235,3 +236,43 @@ class DashboardStore(_JsonStore):
             if changed:
                 self._save_raw(records)
             return removed
+
+
+class ParametricDashboardStore(_JsonStore):
+    """CRUD for AI-compiled interactive dashboards (apps.json)."""
+
+    filename = "apps.json"
+    payload_key = "apps"
+
+    def list(self) -> list[ParametricDashboard]:
+        return [ParametricDashboard.from_dict(r) for r in self._load_raw()]
+
+    def get(self, app_id: str) -> ParametricDashboard | None:
+        for r in self._load_raw():
+            if str(r.get("id") or "") == str(app_id):
+                return ParametricDashboard.from_dict(r)
+        return None
+
+    def upsert(self, app: ParametricDashboard) -> ParametricDashboard:
+        with self._lock:
+            records = self._load_raw()
+            app.updated_at = utc_now()
+            out = app.to_dict()
+            for i, r in enumerate(records):
+                if str(r.get("id") or "") == str(app.id):
+                    out["created_at"] = r.get("created_at") or out["created_at"]
+                    records[i] = out
+                    self._save_raw(records)
+                    return app
+            records.append(out)
+            self._save_raw(records)
+            return app
+
+    def delete(self, app_id: str) -> bool:
+        with self._lock:
+            records = self._load_raw()
+            kept = [r for r in records if str(r.get("id") or "") != str(app_id)]
+            if len(kept) == len(records):
+                return False
+            self._save_raw(kept)
+            return True
