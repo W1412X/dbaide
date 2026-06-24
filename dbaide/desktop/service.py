@@ -1645,7 +1645,7 @@ class DesktopService:
         return {"app": app.to_dict()}
 
     def build_dashboard_app(self, payload: dict[str, Any]) -> dict[str, Any]:
-        """Author or refine an interactive HTML dashboard via the builder agent (LLM).
+        """Author or refine an interactive dashboard (declarative layout) via the builder agent (LLM).
 
         ``context`` is the prior analysis ([{nl_question, sql, chart_plan}, …]).
         ``app_id`` refines an existing app; otherwise a new one is created. Slow —
