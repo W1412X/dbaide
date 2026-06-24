@@ -11,6 +11,7 @@ import json
 import logging
 import os
 import tempfile
+import threading
 from pathlib import Path
 from typing import Any
 
@@ -32,6 +33,10 @@ class _JsonStore:
             self.base_dir = Path(base_dir).expanduser()
         else:
             self.base_dir = Path(os.environ.get("DBAIDE_BOARDS", DEFAULT_BOARDS_DIR)).expanduser()
+        # Refreshes write snapshots from a background thread while the UI thread may
+        # pin/delete — serialise read-modify-write so updates aren't lost. Reentrant
+        # so a compound op (add_tile → update) can hold the lock across both steps.
+        self._lock = threading.RLock()
 
     def _path(self) -> Path:
         return self.base_dir / self.filename
@@ -85,18 +90,19 @@ class SavedQuestionStore(_JsonStore):
         return None
 
     def upsert(self, question: SavedQuestion) -> SavedQuestion:
-        records = self._load_raw()
-        question.updated_at = utc_now()
-        out = question.to_dict()
-        for i, r in enumerate(records):
-            if str(r.get("id") or "") == str(question.id):
-                out["created_at"] = r.get("created_at") or out["created_at"]
-                records[i] = out
-                self._save_raw(records)
-                return question
-        records.append(out)
-        self._save_raw(records)
-        return question
+        with self._lock:
+            records = self._load_raw()
+            question.updated_at = utc_now()
+            out = question.to_dict()
+            for i, r in enumerate(records):
+                if str(r.get("id") or "") == str(question.id):
+                    out["created_at"] = r.get("created_at") or out["created_at"]
+                    records[i] = out
+                    self._save_raw(records)
+                    return question
+            records.append(out)
+            self._save_raw(records)
+            return question
 
     def save_snapshot(
         self,
@@ -107,26 +113,28 @@ class SavedQuestionStore(_JsonStore):
         row_count: int,
     ) -> SavedQuestion | None:
         """Persist a fresh result after a tile refresh (keeps the rest intact)."""
-        records = self._load_raw()
-        for i, r in enumerate(records):
-            if str(r.get("id") or "") == str(question_id):
-                r["chart_spec"] = chart_spec
-                r["columns"] = list(columns or [])
-                r["row_count"] = int(row_count or 0)
-                r["last_run_at"] = utc_now()
-                r["updated_at"] = r["last_run_at"]
-                records[i] = r
-                self._save_raw(records)
-                return SavedQuestion.from_dict(r)
-        return None
+        with self._lock:
+            records = self._load_raw()
+            for i, r in enumerate(records):
+                if str(r.get("id") or "") == str(question_id):
+                    r["chart_spec"] = chart_spec
+                    r["columns"] = list(columns or [])
+                    r["row_count"] = int(row_count or 0)
+                    r["last_run_at"] = utc_now()
+                    r["updated_at"] = r["last_run_at"]
+                    records[i] = r
+                    self._save_raw(records)
+                    return SavedQuestion.from_dict(r)
+            return None
 
     def delete(self, question_id: str) -> bool:
-        records = self._load_raw()
-        kept = [r for r in records if str(r.get("id") or "") != str(question_id)]
-        if len(kept) == len(records):
-            return False
-        self._save_raw(kept)
-        return True
+        with self._lock:
+            records = self._load_raw()
+            kept = [r for r in records if str(r.get("id") or "") != str(question_id)]
+            if len(kept) == len(records):
+                return False
+            self._save_raw(kept)
+            return True
 
 
 class DashboardStore(_JsonStore):
@@ -146,54 +154,72 @@ class DashboardStore(_JsonStore):
 
     def create(self, name: str) -> Dashboard:
         board = Dashboard(name=str(name or "").strip() or "Dashboard")
-        records = self._load_raw()
-        records.append(board.to_dict())
-        self._save_raw(records)
+        with self._lock:
+            records = self._load_raw()
+            records.append(board.to_dict())
+            self._save_raw(records)
         return board
 
     def update(self, board: Dashboard) -> Dashboard:
-        records = self._load_raw()
-        board.updated_at = utc_now()
-        out = board.to_dict()
-        for i, r in enumerate(records):
-            if str(r.get("id") or "") == str(board.id):
-                out["created_at"] = r.get("created_at") or out["created_at"]
-                records[i] = out
-                self._save_raw(records)
-                return board
-        records.append(out)
-        self._save_raw(records)
-        return board
+        with self._lock:
+            records = self._load_raw()
+            board.updated_at = utc_now()
+            out = board.to_dict()
+            for i, r in enumerate(records):
+                if str(r.get("id") or "") == str(board.id):
+                    out["created_at"] = r.get("created_at") or out["created_at"]
+                    records[i] = out
+                    self._save_raw(records)
+                    return board
+            records.append(out)
+            self._save_raw(records)
+            return board
 
     def delete(self, dashboard_id: str) -> bool:
-        records = self._load_raw()
-        kept = [r for r in records if str(r.get("id") or "") != str(dashboard_id)]
-        if len(kept) == len(records):
-            return False
-        self._save_raw(kept)
-        return True
+        with self._lock:
+            records = self._load_raw()
+            kept = [r for r in records if str(r.get("id") or "") != str(dashboard_id)]
+            if len(kept) == len(records):
+                return False
+            self._save_raw(kept)
+            return True
 
     def add_tile(self, dashboard_id: str, question_id: str, *, w: int = 6, h: int = 5) -> Dashboard | None:
-        board = self.get(dashboard_id)
-        if board is None:
-            return None
-        x, y = board.next_slot(w=w, h=h)
-        board.tiles.append(Tile(question_id=str(question_id), x=x, y=y, w=w, h=h))
-        return self.update(board)
+        with self._lock:   # held across get → update so the tile add is atomic
+            board = self.get(dashboard_id)
+            if board is None:
+                return None
+            qid = str(question_id)
+            if any(t.question_id == qid for t in board.tiles):
+                return board   # already on this board — don't create a duplicate tile
+            x, y = board.next_slot(w=w, h=h)
+            board.tiles.append(Tile(question_id=qid, x=x, y=y, w=w, h=h))
+            return self.update(board)
+
+    def remove_tile(self, dashboard_id: str, question_id: str) -> Dashboard | None:
+        """Remove one tile from one board (the saved question itself is untouched)."""
+        with self._lock:
+            board = self.get(dashboard_id)
+            if board is None:
+                return None
+            qid = str(question_id)
+            board.tiles = [t for t in board.tiles if t.question_id != qid]
+            return self.update(board)
 
     def detach_question(self, question_id: str) -> int:
         """Drop every tile referencing a (now-deleted) question. Returns tiles removed."""
-        records = self._load_raw()
-        removed = 0
-        changed = False
-        for r in records:
-            tiles = r.get("tiles") or []
-            kept = [t for t in tiles if str((t or {}).get("question_id") or "") != str(question_id)]
-            if len(kept) != len(tiles):
-                removed += len(tiles) - len(kept)
-                r["tiles"] = kept
-                r["updated_at"] = utc_now()
-                changed = True
-        if changed:
-            self._save_raw(records)
-        return removed
+        with self._lock:
+            records = self._load_raw()
+            removed = 0
+            changed = False
+            for r in records:
+                tiles = r.get("tiles") or []
+                kept = [t for t in tiles if str((t or {}).get("question_id") or "") != str(question_id)]
+                if len(kept) != len(tiles):
+                    removed += len(tiles) - len(kept)
+                    r["tiles"] = kept
+                    r["updated_at"] = utc_now()
+                    changed = True
+            if changed:
+                self._save_raw(records)
+            return removed

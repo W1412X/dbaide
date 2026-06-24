@@ -79,7 +79,7 @@ def test_dashboard_refresh_worker_updates_tile(qapp, service, monkeypatch):
     assert tab._tiles[qid].question()["chart_spec"]["categories"] == ["华北", "华东"]
 
 
-def test_remove_tile_detaches_from_board(qapp, service):
+def test_remove_tile_keeps_question_in_library(qapp, service):
     out = _pin(service)
     qid, did = out["question"]["id"], out["dashboard"]["id"]
     from dbaide.desktop.views.dashboard_tab import DashboardTab
@@ -87,3 +87,5 @@ def test_remove_tile_detaches_from_board(qapp, service):
     tab._on_tile_remove(qid)
     assert len(tab._tiles) == 0
     assert service.dispatch("get_dashboard", {"id": did})["dashboard"]["tiles"] == []
+    # the saved question itself must survive (it may be on other boards)
+    assert any(q["id"] == qid for q in service.dispatch("list_saved_questions", {})["questions"])

@@ -203,7 +203,9 @@ class DashboardTab(QWidget):
     # -- tile actions ---------------------------------------------------------
 
     def _on_tile_remove(self, qid: str) -> None:
-        self._service.dispatch("delete_saved_question", {"id": qid})
+        # Remove the tile from this board only — the saved question stays in the
+        # library (it may live on other boards). Deleting the question is separate.
+        self._service.dispatch("remove_tile", {"dashboard_id": self._board_id, "question_id": qid})
         self._load_board(self._board_id)
 
     def _on_tile_refresh(self, qid: str) -> None:

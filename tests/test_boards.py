@@ -119,3 +119,40 @@ def test_refresh_rejects_pending_confirmation():
     import pytest
     with pytest.raises(ValueError):
         refresh_question(_question(), lambda **k: {"pending_confirmation": True})
+
+
+def test_concurrent_upserts_do_not_lose_records(tmp_path):
+    import threading
+    store = SavedQuestionStore(base_dir=tmp_path)
+    n = 24
+
+    def worker(i):
+        store.upsert(_question(name=f"q{i}"))
+
+    threads = [threading.Thread(target=worker, args=(i,)) for i in range(n)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+    # without the store lock, concurrent read-modify-write would drop records
+    assert len(store.list()) == n
+
+
+def test_add_tile_is_idempotent_per_question(tmp_path):
+    dstore = DashboardStore(base_dir=tmp_path)
+    board = dstore.create("b")
+    dstore.add_tile(board.id, "Q")
+    board = dstore.add_tile(board.id, "Q")   # same question again → no duplicate tile
+    assert [t.question_id for t in board.tiles] == ["Q"]
+
+
+def test_remove_tile_only_affects_one_board(tmp_path):
+    dstore = DashboardStore(base_dir=tmp_path)
+    b1 = dstore.create("b1")
+    b2 = dstore.create("b2")
+    dstore.add_tile(b1.id, "Q")
+    dstore.add_tile(b2.id, "Q")
+    dstore.remove_tile(b1.id, "Q")
+    assert [t.question_id for t in dstore.get(b1.id).tiles] == []
+    assert [t.question_id for t in dstore.get(b2.id).tiles] == ["Q"]   # other board untouched
+    assert dstore.remove_tile("nope", "Q") is None

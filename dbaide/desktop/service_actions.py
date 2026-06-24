@@ -59,6 +59,7 @@ ACTION_METHODS: tuple[tuple[str, str], ...] = (
     ("rename_dashboard", "rename_dashboard"),
     ("delete_dashboard", "delete_dashboard"),
     ("save_dashboard_layout", "save_dashboard_layout"),
+    ("remove_tile", "remove_tile"),
     ("list_saved_questions", "list_saved_questions"),
     ("save_question", "save_question"),
     ("pin_chart", "pin_chart"),

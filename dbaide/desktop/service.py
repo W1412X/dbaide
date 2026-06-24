@@ -1520,6 +1520,12 @@ class DesktopService:
     def delete_dashboard(self, payload: dict[str, Any]) -> dict[str, Any]:
         return {"deleted": bool(self.boards.delete(str(payload.get("id") or "")))}
 
+    def remove_tile(self, payload: dict[str, Any]) -> dict[str, Any]:
+        """Remove a tile from a board; the saved question stays in the library."""
+        board = self.boards.remove_tile(
+            str(payload.get("dashboard_id") or ""), str(payload.get("question_id") or ""))
+        return {"dashboard": board.to_dict() if board else None}
+
     def save_dashboard_layout(self, payload: dict[str, Any]) -> dict[str, Any]:
         board = self.boards.get(str(payload.get("id") or ""))
         if board is None:
