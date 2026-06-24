@@ -28,7 +28,7 @@ _STRINGS: dict[str, dict[str, str]] = {
     "tab.data": {"en": "Data", "zh": "数据"},
     "mode.assistant": {"en": "Chat", "zh": "对话"},
     "mode.workbench": {"en": "Workbench", "zh": "工作台"},
-    "mode.dashboards": {"en": "Boards", "zh": "基础看板"},
+    "mode.dashboards": {"en": "Dashboards", "zh": "看板"},
     "data.empty_hint": {
         "en": "Double-click a table in the schema (left) to browse its data.",
         "zh": "双击左侧结构树中的表即可浏览数据。",

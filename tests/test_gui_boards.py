@@ -215,3 +215,35 @@ def test_remove_tile_keeps_question_in_library(qapp, service):
     assert service.dispatch("get_dashboard", {"id": did})["dashboard"]["tiles"] == []
     # the saved question itself must survive (it may be on other boards)
     assert any(q["id"] == qid for q in service.dispatch("list_saved_questions", {})["questions"])
+
+
+def test_dashboards_view_gallery_lists_and_opens_ai_apps(qapp, service):
+    """Stage-2: the Dashboards mode is a gallery of saved AI dashboards (not the basic board)."""
+    from dbaide.boards.parametric import ParametricChart, ParametricDashboard
+    from dbaide.desktop.views.dashboards_view import DashboardsView
+    # seed a saved AI dashboard directly in the apps store
+    chart = ParametricChart.from_dict({
+        "chart_id": "c1", "title": "t",
+        "sources": [{"id": "m", "sql": "SELECT a, b FROM t"}], "params": [],
+        "combine": {"mode": "single"},
+        "chart_plan": {"chart_type": "bar", "category_field": "a", "value_fields": ["b"]}})
+    app = ParametricDashboard(name="我的看板", connection_name="shop", charts=[chart],
+                              layout={"type": "page", "children": [{"type": "chart", "chart": "c1"}]})
+    service.boards_apps.upsert(app)
+
+    view = DashboardsView(service)
+    view.reload()
+    # gallery (stack index 0) shows one card
+    assert view._stack.currentIndex() == 0
+    cards = [view._gallery._list.itemAt(i).widget()
+             for i in range(view._gallery._list.count())
+             if view._gallery._list.itemAt(i).widget() is not None]
+    assert len(cards) == 1
+    # opening switches to the studio page and loads the app
+    view._open(app.id)
+    assert view._stack.currentIndex() == 1
+    assert view._studio._app_id == app.id
+    # back returns to the gallery
+    view._back()
+    assert view._stack.currentIndex() == 0
+    view.shutdown()
