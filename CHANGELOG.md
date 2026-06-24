@@ -6,6 +6,40 @@ All notable changes to DBAide are documented here. The format is loosely based o
 
 ## [Unreleased]
 
+## [0.9.7] — 2026-06-24
+
+### Added
+
+- **AI interactive dashboards** — a dedicated builder agent (separate from the chart agent and
+  the Ask orchestrator) turns a conversation's analysis into an interactive dashboard. It emits
+  a declarative **component tree** — nestable rows / columns / grids / sections / tabs / cards
+  holding chart · KPI · table · text/markdown tiles — and the system renders it deterministically
+  (themed, responsive); the model never writes HTML. Filters are auto-generated from the recipes'
+  parameters as compact, collapsible multi-selects. Refine the board across turns in natural
+  language, and choose which configured model generates it.
+- **Dashboards gallery** — generated dashboards are saved and reopenable: the Dashboards mode is
+  now a gallery of saved AI dashboards (open to view + chat-refine, or delete). The static basic
+  board is retired.
+
+### Changed
+
+- AI-dashboard recipes are grounded in the real database: the builder is given the actual schema,
+  column types, and distinct values for low-cardinality columns, plus the SQL dialect — so filter
+  options match the data instead of being guessed.
+
+### Fixed
+
+- AI-dashboard recipes are validated by EXPLAIN against the real database at build time, and the
+  builder self-corrects (feeds the DB error back to the model) — eliminating dashboards that
+  rendered all "no data" from invented columns/functions or filter values that matched nothing.
+- A filter change can no longer error a tile: empty results render as "no data", parameter binding
+  tolerates empty/edge values, and numeric/date cells survive the bridge as JSON-native types so
+  KPIs format correctly.
+- Dashboard colours are injected from the live app theme (no hardcoded palette), and a recipe
+  shared by several tiles runs its SQL once per refresh.
+- Answers no longer leak the raw `{"action":"finish","answer":…}` JSON object on the native
+  tool-calling path.
+
 ## [0.9.6] — 2026-06-23
 
 ### Added
