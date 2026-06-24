@@ -127,6 +127,18 @@ class SavedQuestionStore(_JsonStore):
                     return SavedQuestion.from_dict(r)
             return None
 
+    def rename(self, question_id: str, name: str) -> SavedQuestion | None:
+        with self._lock:
+            records = self._load_raw()
+            for i, r in enumerate(records):
+                if str(r.get("id") or "") == str(question_id):
+                    r["name"] = str(name or "").strip() or r.get("name") or "未命名"
+                    r["updated_at"] = utc_now()
+                    records[i] = r
+                    self._save_raw(records)
+                    return SavedQuestion.from_dict(r)
+            return None
+
     def delete(self, question_id: str) -> bool:
         with self._lock:
             records = self._load_raw()

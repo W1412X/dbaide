@@ -1564,6 +1564,10 @@ class DesktopService:
         board = self.boards.add_tile(dash_id, saved.id) if dash_id else None
         return {"question": saved.to_dict(), "dashboard": board.to_dict() if board else None}
 
+    def rename_saved_question(self, payload: dict[str, Any]) -> dict[str, Any]:
+        q = self.boards_questions.rename(str(payload.get("id") or ""), str(payload.get("name") or ""))
+        return {"question": q.to_dict() if q else None}
+
     def delete_saved_question(self, payload: dict[str, Any]) -> dict[str, Any]:
         qid = str(payload.get("id") or "")
         ok = self.boards_questions.delete(qid)

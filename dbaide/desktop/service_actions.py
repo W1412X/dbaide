@@ -63,6 +63,7 @@ ACTION_METHODS: tuple[tuple[str, str], ...] = (
     ("list_saved_questions", "list_saved_questions"),
     ("save_question", "save_question"),
     ("pin_chart", "pin_chart"),
+    ("rename_saved_question", "rename_saved_question"),
     ("delete_saved_question", "delete_saved_question"),
     ("refresh_saved_question", "refresh_saved_question"),
     ("resource_defaults", "resource_defaults"),

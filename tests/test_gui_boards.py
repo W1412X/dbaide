@@ -54,7 +54,7 @@ def test_dashboard_tab_loads_pinned_tile(qapp, service):
     from dbaide.desktop.views.dashboard_tab import DashboardTab
     tab = DashboardTab(service)
     assert tab._picker.count() == 1
-    assert len(tab._tiles) == 1
+    assert len(tab._grid.tile_ids()) == 1
 
 
 def test_dashboard_refresh_worker_updates_tile(qapp, service, monkeypatch):
@@ -76,7 +76,7 @@ def test_dashboard_refresh_worker_updates_tile(qapp, service, monkeypatch):
     q = service.dispatch("list_saved_questions", {})["questions"][0]
     assert q["row_count"] == 2 and q["last_run_at"]
     # tile chart updated in place
-    assert tab._tiles[qid].question()["chart_spec"]["categories"] == ["华北", "华东"]
+    assert tab._grid.tile(qid).question()["chart_spec"]["categories"] == ["华北", "华东"]
 
 
 def test_shutdown_stops_inflight_refresh_without_crashing(qapp, service, monkeypatch):
@@ -107,7 +107,60 @@ def test_reload_during_refresh_is_safe(qapp, service, monkeypatch):
     tab._on_tile_refresh(qid)
     tab.reload()                   # stops the worker before rebuilding tiles
     assert tab._worker is None
-    assert len(tab._tiles) == 1
+    assert len(tab._grid.tile_ids()) == 1
+
+
+def _pin_to(service, board_id, title):
+    chart = {"chart_id": "chart:1", "chart_type": "bar", "title": title,
+             "categories": ["A"], "series": [{"name": "v", "values": [1]}], "row_count": 1,
+             "chart_plan": {"chart_type": "bar", "title": title, "category_field": "c", "value_fields": ["v"]},
+             "source_sql": "SELECT 1"}
+    return service.dispatch("pin_chart", {
+        "name": title, "connection_name": "shop", "nl_question": title, "sql": "SELECT 1",
+        "chart_plan": chart["chart_plan"], "chart_spec": chart, "row_count": 1,
+        "dashboard_id": board_id})["question"]["id"]
+
+
+def test_tile_resize_persists_footprint(qapp, service):
+    from PyQt6.QtCore import QPoint
+    bid = service.dispatch("create_dashboard", {"name": "b"})["dashboard"]["id"]
+    q1 = _pin_to(service, bid, "一")
+    from dbaide.desktop.views.dashboard_tab import DashboardTab
+    tab = DashboardTab(service)
+    grid = tab._grid
+    grid._on_resize_drag(q1, QPoint(400, 200))   # drag the grip far → grow
+    grid._on_resize_drop(q1)
+    tiles = service.dispatch("get_dashboard", {"id": bid})["dashboard"]["tiles"]
+    w = next(t["w"] for t in tiles if t["question_id"] == q1)
+    assert w == 12   # clamped to the grid width; persisted via save_dashboard_layout
+
+
+def test_tile_reorder_persists_order(qapp, service):
+    from PyQt6.QtCore import QPoint
+    bid = service.dispatch("create_dashboard", {"name": "b"})["dashboard"]["id"]
+    q1 = _pin_to(service, bid, "一")
+    q2 = _pin_to(service, bid, "二")
+    from dbaide.desktop.views.dashboard_tab import DashboardTab
+    tab = DashboardTab(service)
+    grid = tab._grid
+    assert grid.tile_ids() == [q1, q2]
+    grid._drag_pos = QPoint(0, 100000)           # drop far below everything → append
+    grid._on_reorder_drop(q1)
+    tiles = service.dispatch("get_dashboard", {"id": bid})["dashboard"]["tiles"]
+    assert [t["question_id"] for t in tiles] == [q2, q1]
+
+
+def test_tile_rename_persists(qapp, service):
+    out = _pin(service)
+    qid = out["question"]["id"]
+    from dbaide.desktop.views.dashboard_tab import DashboardTab
+    tab = DashboardTab(service)
+    tile = tab._grid.tile(qid)
+    tile._begin_rename()
+    tile._editor.setText("季度销售额")
+    tile._commit_rename()
+    q = service.dispatch("list_saved_questions", {})["questions"][0]
+    assert q["name"] == "季度销售额"
 
 
 def test_remove_tile_keeps_question_in_library(qapp, service):
@@ -116,7 +169,7 @@ def test_remove_tile_keeps_question_in_library(qapp, service):
     from dbaide.desktop.views.dashboard_tab import DashboardTab
     tab = DashboardTab(service)
     tab._on_tile_remove(qid)
-    assert len(tab._tiles) == 0
+    assert len(tab._grid.tile_ids()) == 0
     assert service.dispatch("get_dashboard", {"id": did})["dashboard"]["tiles"] == []
     # the saved question itself must survive (it may be on other boards)
     assert any(q["id"] == qid for q in service.dispatch("list_saved_questions", {})["questions"])

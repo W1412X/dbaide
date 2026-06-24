@@ -1139,6 +1139,7 @@ _STRINGS: dict[str, dict[str, str]] = {
                     "zh": "还没有看板。在回答里把图表「钉到看板」即可创建。"},
     "board.empty_board": {"en": "This dashboard has no tiles yet.", "zh": "这个看板还没有图块。"},
     "board.tile_refresh": {"en": "Refresh", "zh": "刷新"},
+    "board.tile_rename_hint": {"en": "Double-click to rename", "zh": "双击重命名"},
     "board.tile_remove": {"en": "Remove from dashboard", "zh": "从看板移除"},
     "board.tile_refreshing": {"en": "Refreshing…", "zh": "刷新中…"},
     "board.tile_error": {"en": "Refresh failed: {error}", "zh": "刷新失败：{error}"},
