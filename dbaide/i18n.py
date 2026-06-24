@@ -1157,6 +1157,12 @@ _STRINGS: dict[str, dict[str, str]] = {
     "app.refine_ph": {"en": "Tell me how to change it — e.g. make the month a date range, add a pie chart",
                       "zh": "继续说怎么改——如：月份改成日期范围、加个按品类的饼图"},
     "app.send": {"en": "Send", "zh": "发送"},
+    "app.studio_subtitle": {"en": "Refine this dashboard in natural language below",
+                            "zh": "在下方用自然语言继续调整这个看板"},
+    "app.updating": {"en": "Updating…", "zh": "更新中…"},
+    "app.building_title": {"en": "Building your dashboard…", "zh": "正在生成交互看板…"},
+    "app.building_hint": {"en": "The AI is writing the charts and filter controls from your analysis.",
+                          "zh": "AI 正在根据这次分析编写图表和筛选控件，稍候。"},
     "app.default_instruction": {
         "en": "Build an interactive dashboard from this analysis; add sensible filter controls for the data.",
         "zh": "基于以上分析做一个交互看板，根据数据加上合适的筛选控件。"},

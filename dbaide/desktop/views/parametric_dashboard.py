@@ -10,13 +10,21 @@ from __future__ import annotations
 
 from typing import Any
 
-from PyQt6.QtCore import QThread, pyqtSignal
+from PyQt6.QtCore import Qt, QSize, QThread, pyqtSignal
 from PyQt6.QtGui import QFont
-from PyQt6.QtWidgets import QHBoxLayout, QLabel, QLineEdit, QVBoxLayout, QWidget
+from PyQt6.QtWidgets import (
+    QFrame,
+    QHBoxLayout,
+    QLabel,
+    QLineEdit,
+    QStackedWidget,
+    QVBoxLayout,
+    QWidget,
+)
 
 from dbaide.desktop.components.base import compact_button
 from dbaide.desktop.components.dashboard_webview import DashboardWebView
-from dbaide.desktop.components.inputs import STANDARD_FIELD_HEIGHT, configure_compact_field
+from dbaide.desktop.components.spinner import BusyAnimator, spinner_pixmap
 from dbaide.desktop.dialogs.message_dialog import warn as dialog_warn
 from dbaide.desktop.theme import Theme
 from dbaide.i18n import t as _t
@@ -45,35 +53,93 @@ class ParametricDashboardStudio(QWidget):
         self._app_id = ""
         self._connection = ""
         self._worker: _BuildWorker | None = None
+        self._has_rendered = False
+        self._busy = BusyAnimator(self._tick, parent=self)
 
+        self.setStyleSheet(f"background:{Theme.BG};")
         root = QVBoxLayout(self)
-        root.setContentsMargins(16, 12, 16, 12)
-        root.setSpacing(10)
+        root.setContentsMargins(18, 16, 18, 16)
+        root.setSpacing(12)
 
+        # header: title + subtitle, with a small "updating" chip on the right ------
         head = QHBoxLayout()
+        titlecol = QVBoxLayout()
+        titlecol.setSpacing(2)
         self._title = QLabel(_t("app.window_title"))
-        self._title.setFont(QFont("Inter", 15, QFont.Weight.Bold))
+        self._title.setFont(QFont("Inter", 16, QFont.Weight.Bold))
         self._title.setStyleSheet(f"color:{Theme.TEXT}; background:transparent;")
-        head.addWidget(self._title, 1)
-        self._status = QLabel("")
-        self._status.setStyleSheet(f"color:{Theme.MUTED}; background:transparent;")
-        head.addWidget(self._status)
+        self._subtitle = QLabel(_t("app.studio_subtitle"))
+        self._subtitle.setStyleSheet(f"color:{Theme.MUTED}; font-size:11px; background:transparent;")
+        titlecol.addWidget(self._title)
+        titlecol.addWidget(self._subtitle)
+        head.addLayout(titlecol, 1)
+        self._chip = QFrame()
+        self._chip.setStyleSheet(
+            f"QFrame {{ background:{Theme.PANEL_2}; border:1px solid {Theme.BORDER_SOFT}; border-radius:12px; }}")
+        chip_l = QHBoxLayout(self._chip)
+        chip_l.setContentsMargins(10, 4, 12, 4)
+        chip_l.setSpacing(6)
+        self._chip_spin = QLabel()
+        chip_l.addWidget(self._chip_spin)
+        chip_lbl = QLabel(_t("app.updating"))
+        chip_lbl.setStyleSheet(f"color:{Theme.TEXT_2}; font-size:11px; background:transparent; border:none;")
+        chip_l.addWidget(chip_lbl)
+        self._chip.setVisible(False)
+        head.addWidget(self._chip)
         root.addLayout(head)
 
+        # content: loading placeholder ↔ rendered dashboard -----------------------
+        self._stack = QStackedWidget()
+        self._stack.addWidget(self._build_loading())   # 0
         self._web = DashboardWebView()
-        root.addWidget(self._web, 1)
+        self._stack.addWidget(self._web)                # 1
+        root.addWidget(self._stack, 1)
 
-        refine = QHBoxLayout()
-        refine.setSpacing(8)
+        # refine composer ---------------------------------------------------------
+        bar = QFrame()
+        bar.setStyleSheet(
+            f"QFrame {{ background:{Theme.PANEL}; border:1px solid {Theme.BORDER_SOFT};"
+            f" border-radius:10px; }}")
+        bl = QHBoxLayout(bar)
+        bl.setContentsMargins(12, 4, 6, 4)
+        bl.setSpacing(8)
         self._refine = QLineEdit()
         self._refine.setPlaceholderText(_t("app.refine_ph"))
-        configure_compact_field(self._refine, height=STANDARD_FIELD_HEIGHT)
+        self._refine.setFrame(False)
+        self._refine.setMinimumHeight(34)
+        self._refine.setStyleSheet(
+            f"QLineEdit {{ background:transparent; border:none; color:{Theme.TEXT}; font-size:13px; }}")
         self._refine.returnPressed.connect(self._on_refine)
-        refine.addWidget(self._refine, 1)
-        self._send = compact_button(_t("app.send"), primary=True, width=88)
+        bl.addWidget(self._refine, 1)
+        self._send = compact_button(_t("app.send"), primary=True, width=84)
         self._send.clicked.connect(self._on_refine)
-        refine.addWidget(self._send)
-        root.addLayout(refine)
+        bl.addWidget(self._send)
+        root.addWidget(bar)
+
+    def _build_loading(self) -> QWidget:
+        w = QWidget()
+        lay = QVBoxLayout(w)
+        lay.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        lay.setSpacing(12)
+        self._loading_spin = QLabel()
+        self._loading_spin.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        lay.addWidget(self._loading_spin, alignment=Qt.AlignmentFlag.AlignCenter)
+        msg = QLabel(_t("app.building_title"))
+        msg.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        msg.setStyleSheet(f"color:{Theme.TEXT}; font-size:14px; font-weight:600; background:transparent;")
+        lay.addWidget(msg)
+        hint = QLabel(_t("app.building_hint"))
+        hint.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        hint.setWordWrap(True)
+        hint.setMaximumWidth(420)
+        hint.setStyleSheet(f"color:{Theme.MUTED}; font-size:12px; background:transparent;")
+        lay.addWidget(hint, alignment=Qt.AlignmentFlag.AlignCenter)
+        return w
+
+    def _tick(self) -> None:
+        big = spinner_pixmap(self._busy.angle, size=30, color=Theme.ACCENT)
+        self._loading_spin.setPixmap(big)
+        self._chip_spin.setPixmap(spinner_pixmap(self._busy.angle, size=13, color=Theme.ACCENT))
 
     # -- public ---------------------------------------------------------------
 
@@ -91,6 +157,7 @@ class ParametricDashboardStudio(QWidget):
         self._render(str(app.get("html") or ""))
 
     def shutdown(self) -> None:
+        self._busy.stop()
         if self._worker is not None:
             self._worker.wait()
             self._worker.deleteLater()
@@ -146,6 +213,8 @@ class ParametricDashboardStudio(QWidget):
 
     def _render(self, body_html: str) -> None:
         self._web.set_dashboard(body_html, self._run_fn())
+        self._has_rendered = True
+        self._stack.setCurrentWidget(self._web)
 
     def _run_fn(self):
         from dbaide.charts.echarts import chart_spec_to_echarts_option
@@ -163,4 +232,12 @@ class ParametricDashboardStudio(QWidget):
     def _set_busy(self, busy: bool) -> None:
         self._send.setEnabled(not busy)
         self._refine.setEnabled(not busy)
-        self._status.setText(_t("app.compiling") if busy else "")
+        if busy:
+            self._busy.start()
+            if self._has_rendered:
+                self._chip.setVisible(True)          # refine: keep the board, show a chip
+            else:
+                self._stack.setCurrentIndex(0)        # first build: loading state
+        else:
+            self._busy.stop()
+            self._chip.setVisible(False)
