@@ -19,6 +19,26 @@ from pathlib import Path
 import pytest
 
 
+_SESSION_OK = {"value": False}
+
+
+def pytest_sessionfinish(session, exitstatus):
+    _SESSION_OK["value"] = int(exitstatus) == 0
+
+
+@pytest.hookimpl(trylast=True)
+def pytest_unconfigure(config):
+    """Qt/WebEngine can SIGABRT during interpreter teardown under offscreen Linux CI
+    even when every test passed (Chromium GPU/process shutdown) — turning a green run
+    red. After pytest has finished and printed its summary, exit immediately on a clean
+    run to skip the C++ teardown that aborts. Failures report normally (no early exit)."""
+    if _SESSION_OK["value"] and not hasattr(config, "workerinput"):   # not an xdist worker
+        import sys
+        sys.stdout.flush()
+        sys.stderr.flush()
+        os._exit(0)
+
+
 @pytest.fixture(autouse=True)
 def _disable_webengine_in_unit_tests(request, monkeypatch):
     """Linux CI installs PyQt6-WebEngine; real views SIGABRT under offscreen.
@@ -31,9 +51,26 @@ def _disable_webengine_in_unit_tests(request, monkeypatch):
         yield
         return
 
+    import importlib
+
     import dbaide.desktop.components.markdown_webview as markdown_webview
 
     monkeypatch.setattr(markdown_webview, "try_create_webengine_view", lambda: None)
+    # Modules that did `from markdown_webview import try_create_webengine_view` hold their
+    # OWN reference the patch above misses — patch each so no real WebEngine spawns (it
+    # SIGABRTs at interpreter teardown under offscreen Linux CI even when tests pass).
+    for modname in (
+        "dbaide.desktop.components.dashboard_webview",
+        "dbaide.desktop.components.answer_document",
+        "dbaide.desktop.dialogs.answer_export",
+        "dbaide.desktop.dialogs.chart_interaction",
+    ):
+        try:
+            mod = importlib.import_module(modname)
+        except Exception:  # noqa: BLE001
+            continue
+        if hasattr(mod, "try_create_webengine_view"):
+            monkeypatch.setattr(mod, "try_create_webengine_view", lambda: None)
     yield
 
 
