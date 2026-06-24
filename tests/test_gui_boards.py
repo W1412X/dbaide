@@ -144,7 +144,7 @@ def test_tile_reorder_persists_order(qapp, service):
     tab = DashboardTab(service)
     grid = tab._grid
     assert grid.tile_ids() == [q1, q2]
-    grid._drag_pos = QPoint(0, 100000)           # drop far below everything → append
+    grid._on_reorder_drag(q1, grid.mapToGlobal(QPoint(0, 100000)))   # drag far below → end
     grid._on_reorder_drop(q1)
     tiles = service.dispatch("get_dashboard", {"id": bid})["dashboard"]["tiles"]
     assert [t["question_id"] for t in tiles] == [q2, q1]

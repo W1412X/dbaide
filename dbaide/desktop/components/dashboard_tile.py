@@ -123,11 +123,13 @@ class DashboardTile(QFrame):
         self._editing = False
         self.setObjectName("dashTile")
         # Transparent by default so the board reads as one surface (the chart already
-        # shares the board background); only a hovered tile gets a faint panel to show
-        # it's the active target for drag/resize/controls.
+        # shares the board background); a hovered tile gets a faint panel, and a tile
+        # being dragged lifts with an accent outline. The always-present transparent
+        # border keeps the layout from shifting when the drag outline appears.
         self.setStyleSheet(
-            f"QFrame#dashTile {{ background: transparent; border: none; border-radius: 6px; }}"
+            f"QFrame#dashTile {{ background: transparent; border: 1px solid transparent; border-radius: 6px; }}"
             f"QFrame#dashTile:hover {{ background: {Theme.PANEL}; }}"
+            f'QFrame#dashTile[dragging="true"] {{ background: {Theme.PANEL}; border: 1px solid {Theme.ACCENT}; }}'
         )
         self.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Ignored)
 
@@ -184,6 +186,12 @@ class DashboardTile(QFrame):
 
     def question(self) -> dict[str, Any]:
         return dict(self._question)
+
+    def set_dragging(self, on: bool) -> None:
+        """Lift state while being dragged (accent outline + panel fill)."""
+        self.setProperty("dragging", bool(on))
+        self.style().unpolish(self)
+        self.style().polish(self)
 
     def set_loading(self, loading: bool) -> None:
         self._refresh_btn.setEnabled(not loading)

@@ -1,18 +1,20 @@
-"""Interactive tile grid for a dashboard.
+"""Interactive, animated tile grid for a dashboard.
 
 Absolute-positions :class:`DashboardTile`s from the pure packing engine
-(``dbaide.boards.grid``). Tiles can be dragged by their header to reorder and
-resized by a corner grip to change their grid footprint; both emit
-``layout_changed`` with the new order + sizes for the tab to persist. All
-geometry math is in the (unit-tested) engine — this widget just maps grid units
-to pixels and turns mouse gestures into ``move_to_index`` / size changes.
+(``dbaide.boards.grid``). Tiles drag (header) to reorder and resize (corner grip)
+to change their grid footprint; both persist via ``layout_changed``.
+
+Motion: while dragging, the other tiles glide out of the way live (the layout is
+re-packed with the dragged tile at its hovered index) and the dragged tile lifts.
+Only **positions** are animated — sizes change instantly — so the WebEngine
+charts inside aren't re-laid-out every frame.
 """
 
 from __future__ import annotations
 
 from typing import Any
 
-from PyQt6.QtCore import QPoint, QRect, pyqtSignal
+from PyQt6.QtCore import QEasingCurve, QPoint, QPropertyAnimation, QRect, pyqtSignal
 from PyQt6.QtWidgets import QWidget
 
 from dbaide.boards.grid import COLS, clamp_size, grid_rows, move_to_index, pack
@@ -23,26 +25,27 @@ class DashboardGrid(QWidget):
     refresh_requested = pyqtSignal(str)
     remove_requested = pyqtSignal(str)
     rename_requested = pyqtSignal(str, str)
-    layout_changed = pyqtSignal(list)        # [{question_id, w, h}, …] in order
+    layout_changed = pyqtSignal(list)
 
     ROW_PX = 72
     GAP = 8
+    DURATION = 180
 
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
-        self._order: list[dict[str, Any]] = []      # ordered tile dicts: {question_id, w, h}
+        self._order: list[dict[str, Any]] = []
         self._questions: dict[str, dict[str, Any]] = {}
         self._tiles: dict[str, DashboardTile] = {}
+        self._anims: dict[str, QPropertyAnimation] = {}
         self._resize_base: dict[str, tuple[int, int]] = {}
+        self._drag_qid: str | None = None
+        self._drag_index: int | None = None
         self._drag_pos: QPoint | None = None
 
     # -- content --------------------------------------------------------------
 
     def set_content(self, tiles: list[dict[str, Any]], questions: dict[str, dict[str, Any]]) -> None:
-        """``tiles`` are board tiles ({question_id, w, h, …}) in order; ``questions``
-        maps id → saved-question dict. Dangling tile refs are skipped."""
         self._clear()
-        self._order = []
         for t in tiles:
             qid = str((t or {}).get("question_id") or "")
             q = questions.get(qid)
@@ -52,7 +55,7 @@ class DashboardGrid(QWidget):
             self._order.append({"question_id": qid, "w": w, "h": h})
             self._questions[qid] = q
             self._build_tile(qid, q)
-        self._relayout()
+        self._relayout(animate=False)   # initial placement is instant, not a fly-in
 
     def tile_ids(self) -> list[str]:
         return [t["question_id"] for t in self._order]
@@ -81,14 +84,18 @@ class DashboardGrid(QWidget):
         self._tiles[qid] = tile
 
     def _clear(self) -> None:
+        for anim in self._anims.values():
+            anim.stop()
+        self._anims.clear()
         for tile in self._tiles.values():
             tile.deleteLater()
         self._tiles.clear()
         self._questions.clear()
         self._order = []
         self._resize_base.clear()
+        self._drag_qid = self._drag_index = self._drag_pos = None
 
-    # -- layout ---------------------------------------------------------------
+    # -- geometry -------------------------------------------------------------
 
     def _col_width(self) -> float:
         return max(1.0, self.width()) / COLS
@@ -101,50 +108,97 @@ class DashboardGrid(QWidget):
         h = t["h"] * self.ROW_PX - self.GAP
         return QRect(x, y, max(80, w), max(60, h))
 
-    def _relayout(self) -> None:
-        packed = pack(self._order)
-        for t in packed:
-            tile = self._tiles.get(t["question_id"])
-            if tile is not None:
-                tile.setGeometry(self._pixel_rect(t))
-        self.setMinimumHeight(grid_rows(packed) * self.ROW_PX + 4)
+    def _positions(self, order: list[dict[str, Any]]) -> dict[str, QRect]:
+        return {t["question_id"]: self._pixel_rect(t) for t in pack(order)}
+
+    def _set_instant(self, qid: str, rect: QRect) -> None:
+        anim = self._anims.get(qid)
+        if anim is not None and anim.state() == QPropertyAnimation.State.Running:
+            anim.stop()
+        tile = self._tiles.get(qid)
+        if tile is not None:
+            tile.setGeometry(rect)
+
+    def _animate(self, qid: str, rect: QRect) -> None:
+        tile = self._tiles.get(qid)
+        if tile is None:
+            return
+        if tile.size() != rect.size():
+            tile.resize(rect.size())       # size changes are instant (cheap; rare in reflow)
+        if tile.pos() == rect.topLeft():
+            return
+        anim = self._anims.get(qid)
+        if anim is None:
+            anim = QPropertyAnimation(tile, b"pos", self)
+            anim.setDuration(self.DURATION)
+            anim.setEasingCurve(QEasingCurve.Type.OutCubic)
+            self._anims[qid] = anim
+        anim.stop()
+        anim.setStartValue(tile.pos())
+        anim.setEndValue(rect.topLeft())
+        anim.start()
+
+    def _relayout(self, *, animate: bool, skip: tuple[str, ...] = ()) -> None:
+        place = self._animate if animate else self._set_instant
+        for qid, rect in self._positions(self._order).items():
+            if qid not in skip:
+                place(qid, rect)
+        self.setMinimumHeight(grid_rows(pack(self._order)) * self.ROW_PX + 4)
 
     def resizeEvent(self, e) -> None:  # noqa: N802
         super().resizeEvent(e)
-        self._relayout()
+        self._relayout(animate=False)   # window resize → reflow instantly, no easing lag
 
-    # -- drag reorder ---------------------------------------------------------
+    # -- drag reorder (live reflow) -------------------------------------------
 
     def _on_reorder_drag(self, qid: str, global_pos: QPoint) -> None:
         tile = self._tiles.get(qid)
         if tile is None:
             return
-        tile.raise_()
+        if self._drag_qid != qid:
+            self._drag_qid = qid
+            self._drag_index = self._index_of(qid)
+            tile.set_dragging(True)
+            tile.raise_()
         local = self.mapFromGlobal(global_pos)
         self._drag_pos = local
-        # follow the cursor so the move is visible; relayout on drop snaps it
-        tile.move(local.x() - tile.width() // 2, max(0, local.y() - 14))
+        # the dragged tile follows the cursor directly (no easing)
+        self._set_instant(qid, QRect(local.x() - tile.width() // 2,
+                                     max(0, local.y() - 14), tile.width(), tile.height()))
+        # re-pack with the dragged tile at its hovered slot and glide the others
+        idx = self._reading_index(local, exclude=qid)
+        if idx != self._drag_index:
+            self._drag_index = idx
+            preview = move_to_index(self._order, qid, idx)
+            for q, rect in self._positions(preview).items():
+                if q != qid:
+                    self._animate(q, rect)
+            self.setMinimumHeight(grid_rows(pack(preview)) * self.ROW_PX + 4)
 
     def _on_reorder_drop(self, qid: str) -> None:
-        if self._drag_pos is not None:
-            idx = self._drop_index(self._drag_pos, qid)
-            self._order = move_to_index(self._order, qid, idx)
-        self._drag_pos = None
-        self._relayout()
+        tile = self._tiles.get(qid)
+        if tile is not None:
+            tile.set_dragging(False)
+        if self._drag_index is not None:
+            self._order = move_to_index(self._order, qid, self._drag_index)
+        self._drag_qid = self._drag_index = self._drag_pos = None
+        self._relayout(animate=True)        # ease the dragged tile into its slot too
         self.layout_changed.emit(self._payload())
 
-    def _drop_index(self, point: QPoint, dragged: str) -> int:
-        """Insertion index from a drop point, by which tile it landed on."""
-        order_ids = [t["question_id"] for t in self._order if t["question_id"] != dragged]
-        packed = {t["question_id"]: t for t in pack(self._order)}
-        for i, qid in enumerate(order_ids):
-            rect = self._pixel_rect(packed[qid])
-            if rect.contains(point):
-                return i if point.x() < rect.center().x() else i + 1
-        # below everything → append; above/left → front
-        if not order_ids:
-            return 0
-        return len(order_ids)
+    def _index_of(self, qid: str) -> int:
+        ids = [t["question_id"] for t in self._order if t["question_id"] != qid]
+        return min(len(ids), [t["question_id"] for t in self._order].index(qid))
+
+    def _reading_index(self, point: QPoint, exclude: str) -> int:
+        """Insertion index among the other tiles, in row-major reading order."""
+        cw = self._col_width()
+        cursor_rank = (point.y() / self.ROW_PX) * COLS + (point.x() / cw)
+        others = [t for t in self._order if t["question_id"] != exclude]
+        idx = 0
+        for t in pack(others):
+            if (t["y"] * COLS + t["x"]) < cursor_rank:
+                idx += 1
+        return idx
 
     # -- resize ---------------------------------------------------------------
 
@@ -159,10 +213,14 @@ class DashboardGrid(QWidget):
         new_w, new_h = clamp_size(bw + round(delta.x() / cw), bh + round(delta.y() / self.ROW_PX))
         if (new_w, new_h) != (item["w"], item["h"]):
             item["w"], item["h"] = new_w, new_h
-            self._relayout()
+            self._relayout(animate=True, skip=(qid,))   # others glide; active follows the grip
+            rects = self._positions(self._order)
+            if qid in rects:
+                self._set_instant(qid, rects[qid])
 
     def _on_resize_drop(self, qid: str) -> None:
         self._resize_base.pop(qid, None)
+        self._relayout(animate=True)
         self.layout_changed.emit(self._payload())
 
     def _payload(self) -> list[dict[str, Any]]:
