@@ -24,6 +24,7 @@ class AskTab(QWidget):
 
     empty_action = pyqtSignal(str)
     clarification_choice = pyqtSignal(str, str)   # (slot key, reply)
+    pin_charts_requested = pyqtSignal(object, str)   # (charts, question/title)
 
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
@@ -323,6 +324,11 @@ class AskTab(QWidget):
                     lambda: self._open_chart_interaction_dialog(
                         raw_answer, chart_list, export_title, export_theme,
                     ),
+                ))
+                menu_items.append((
+                    "save",
+                    _t("ask.pin_to_dashboard"),
+                    lambda: self.pin_charts_requested.emit(chart_list, export_title),
                 ))
             menu_items.append((
                 "download",

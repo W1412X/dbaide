@@ -41,6 +41,7 @@ def _tab_label(tab_id: str) -> str:
     return {
         "Assistant": _i18n_t("mode.assistant"),
         "Workbench": _i18n_t("mode.workbench"),
+        "Dashboards": _i18n_t("mode.dashboards"),
     }.get(tab_id, tab_id)
 
 
@@ -53,6 +54,7 @@ def _fk_filter_where(ref_column: str, value: object, dialect: str) -> str:
     from dbaide.rendering.table import _sql_literal
     return f"{quote_identifier(ref_column, dialect)} = {_sql_literal(value, dialect=dialect)}"
 from dbaide.desktop.views.ask_tab import AskTab
+from dbaide.desktop.views.dashboard_tab import DashboardTab
 from dbaide.desktop.dialogs.joins import JoinsDialog
 from dbaide.desktop.dialogs.note_editor import NoteEditorDialog
 from dbaide.desktop.views.joins_tab import JoinsTab
@@ -104,7 +106,7 @@ class MainWindow(QMainWindow):
         # The active chat session (会话) — the server id of the visible slot.
         self.current_session_id = ""
         self._settings = QSettings("DBAide", "DBAide")
-        self._tab_names = ("Assistant", "Workbench")
+        self._tab_names = ("Assistant", "Workbench", "Dashboards")
         self.setWindowTitle("DBAide")
         self.resize(1440, 900)
         self.setMinimumSize(1000, 720)
@@ -434,6 +436,7 @@ class MainWindow(QMainWindow):
         mode_icons = {
             "Assistant": "message-circle",
             "Workbench": "terminal",
+            "Dashboards": "table",
         }
         for name in self._tab_names:
             index = self.tabbar.addTab(
@@ -496,8 +499,11 @@ class MainWindow(QMainWindow):
         self.workbench.navigate_table.connect(self._open_table_by_name)
         self.workbench.navigate_fk.connect(self._navigate_fk)
         self.workbench.doc_requested.connect(self._load_table_doc)
+        self.dashboard_tab = DashboardTab(self.service)
+        self.ask_tab.pin_charts_requested.connect(self._on_pin_charts)
         self.stack.addWidget(self.ask_tab)    # mode 0 — Assistant
         self.stack.addWidget(self.workbench)  # mode 1 — Workbench
+        self.stack.addWidget(self.dashboard_tab)  # mode 2 — Dashboards
         center_layout.addWidget(self.stack, 1)
 
         self.composer = ComposerWidget()
@@ -744,7 +750,47 @@ class MainWindow(QMainWindow):
 
     def _on_tab_changed(self, index: int) -> None:
         if 0 <= index < self.stack.count():
-            self._ensure_ui_state().apply_mode(ModeUiState(index=index, mode=self._tab_names[index]))
+            name = self._tab_names[index]
+            if name == "Dashboards":
+                self.dashboard_tab.reload()   # pick up boards/tiles pinned since last view
+            self._ensure_ui_state().apply_mode(ModeUiState(index=index, mode=name))
+
+    def _on_pin_charts(self, charts: object, question: str) -> None:
+        """Pin selected charts from an answer onto a dashboard (new or existing)."""
+        from dbaide.desktop.dialogs.pin_to_board import pin_charts as _pin_dialog
+
+        chart_list = [c for c in (charts or []) if isinstance(c, dict) and c.get("chart_id")]
+        if not chart_list:
+            return
+        boards = self.service.dispatch("list_dashboards", {}).get("dashboards", [])
+        result = _pin_dialog(self, chart_list, boards)
+        if result is None:
+            return
+        picked, dash_id, dash_name = result
+        conn = self.current_connection()
+        pinned = 0
+        for chart in picked:
+            payload: dict[str, Any] = {
+                "name": str(chart.get("title") or _i18n_t("conversation.chart")),
+                "connection_name": conn,
+                "nl_question": str(question or ""),
+                "sql": str(chart.get("source_sql") or ""),
+                "chart_plan": chart.get("chart_plan") if isinstance(chart.get("chart_plan"), dict) else None,
+                "chart_spec": chart,
+                "row_count": int(chart.get("row_count") or 0),
+            }
+            if dash_id:
+                payload["dashboard_id"] = dash_id
+            else:
+                payload["dashboard_name"] = dash_name
+            out = self.service.dispatch("pin_chart", payload)
+            board = out.get("dashboard") if isinstance(out, dict) else None
+            if board and not dash_id:   # reuse the just-created board for the remaining charts
+                dash_id = str(board.get("id") or "")
+            pinned += 1
+        if pinned:
+            self.toast(_i18n_t("toast.pinned", n=pinned))
+            self.dashboard_tab.reload()
 
     def animate_page_in(self, index: int) -> None:
         """Subtle fade-in for the page that just became current. Skipped for pages that
