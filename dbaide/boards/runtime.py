@@ -132,12 +132,15 @@ def run_parametric_chart(chart: ParametricChart, param_values: dict[str, Any], e
         result_sets.append((src, _rows_as_dicts(columns, res.get("rows"))))
     combined = combine_rows(result_sets, chart.combine)
     if not combined:
-        return {"chart_spec": None, "row_count": 0}   # a filter that matched nothing → "no data", not an error
+        return {"chart_spec": None, "row_count": 0, "columns": [], "rows": []}   # matched nothing → "no data"
+    # rows/columns are returned too, so kpi and table tiles can render straight from the
+    # data even when this recipe can't form a chart
+    columns = list(combined[0].keys())
+    rows = [dict(r) for r in combined[:200]]
     plan = chart_plan_from_dict(chart.chart_plan or {})
     try:
         spec = ChartAgent().build_spec(plan, chart_id=chart.chart_id or "chart", rows=combined)
+        chart_spec = chart_spec_to_dict(spec)
     except ValueError:
-        # rows can't form a chart for this plan (e.g. the value column is empty) — degrade
-        # to "no data" rather than surfacing an error on every such filter change
-        return {"chart_spec": None, "row_count": len(combined)}
-    return {"chart_spec": chart_spec_to_dict(spec), "row_count": len(combined)}
+        chart_spec = None   # can't chart these rows — a chart tile shows "no data", kpi/table still work
+    return {"chart_spec": chart_spec, "row_count": len(combined), "columns": columns, "rows": rows}

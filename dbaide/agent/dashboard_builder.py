@@ -1,9 +1,9 @@
 """Conversational dashboard-builder agent.
 
 SEPARATE from ChartAgent (rows→chart) and the Ask orchestrator (Q&A). It authors
-an interactive HTML dashboard + the named parameterized recipes behind it, and
-refines them across turns. Output is a :class:`ParametricDashboard` (with HTML);
-the runtime executes the recipes and the WebChannel bridge serves the page.
+a DECLARATIVE layout (rows of typed tiles) + the named parameterized recipes —
+never HTML. The system renders the layout (render_body); the result is a
+:class:`ParametricDashboard` whose recipes the runtime executes via the bridge.
 """
 
 from __future__ import annotations
@@ -17,7 +17,7 @@ from dbaide.agent.prompts.dashboard_builder import (
 )
 from dbaide.boards.parametric import ParametricChart, ParametricDashboard
 from dbaide.boards.runtime import render_sql
-from dbaide.rendering.dashboard_body import normalize_body
+from dbaide.rendering.dashboard_body import render_body
 from dbaide.llm import LLMClient, LLMMessage, NullLLMClient
 
 Validate = Callable[[str], Any]
@@ -41,7 +41,7 @@ class DashboardBuilderAgent:
             raise ModelRequiredError("An LLM is required to build a dashboard.")
         existing_payload = None
         if existing is not None:
-            existing_payload = {"name": existing.name, "html": existing.html,
+            existing_payload = {"name": existing.name, "layout": existing.layout,
                                 "charts": [c.to_dict() for c in existing.charts]}
         payload = self.llm.complete_json([
             LLMMessage("system", dashboard_builder_system_prompt()),
@@ -59,17 +59,20 @@ class DashboardBuilderAgent:
             raise ValueError("builder returned no charts")
         if validate is not None:
             self._validate(charts, validate)
-        # The model's HTML is not trusted: scripts are stripped, and if it doesn't
-        # cover every recipe we fall back to a clean generated layout. This makes the
-        # page render well regardless of generation quality (a missing/garbled body
-        # no longer breaks the dashboard).
-        html = normalize_body(str(payload.get("html") or ""), charts)
+        # The agent emits a declarative layout, NOT HTML. The system renders it
+        # deterministically (render_body), so generation quality can never break or
+        # uglify the page — a malformed/missing layout just falls back to an auto-grid.
+        raw_layout = payload.get("layout") or payload.get("rows") or []
+        if isinstance(raw_layout, dict):
+            raw_layout = raw_layout.get("rows") or []
+        layout = [r for r in raw_layout if isinstance(r, dict)]
 
         app = existing or ParametricDashboard(name="", connection_name=connection_name)
         app.name = str(payload.get("name") or app.name or "交互看板")
         app.connection_name = connection_name or app.connection_name
         app.charts = charts
-        app.html = html
+        app.layout = layout
+        app.html = render_body(layout, charts)
         return app
 
     @staticmethod

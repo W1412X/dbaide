@@ -1,4 +1,4 @@
-"""Conversational dashboard-builder agent: HTML + runnable recipes (mock LLM)."""
+"""Conversational dashboard-builder agent: declarative layout + runnable recipes (mock LLM)."""
 
 from __future__ import annotations
 
@@ -27,9 +27,10 @@ def _ok(_sql):
 
 _PAYLOAD = {
     "name": "销售看板",
-    "html": ('<div class="bar"><label>月份</label>'
-             '<input data-param="month" value="2024-06"><button data-apply>应用</button></div>'
-             '<div data-chart="c1" style="height:280px"></div>'),
+    "layout": {"rows": [
+        {"tiles": [{"kind": "kpi", "chart": "c1", "span": 3, "label": "销售额"},
+                   {"kind": "chart", "chart": "c1", "span": 9, "title": "各区域销售额"}]},
+    ]},
     "charts": [{
         "chart_id": "c1", "title": "各区域销售额",
         "sources": [{"id": "main", "sql": "SELECT region, sum(amt) AS amt FROM sales WHERE month=:month GROUP BY 1"}],
@@ -40,30 +41,32 @@ _PAYLOAD = {
 }
 
 
-def test_builder_produces_html_and_runnable_recipes():
+def test_builder_renders_layout_and_runnable_recipes():
     validated = []
     app = DashboardBuilderAgent(_MockLLM(_PAYLOAD)).build(
         instruction="做个销售看板", context_charts=[], connection_name="shop",
         validate=lambda sql: (validated.append(sql), _ok(sql))[1])
     assert app.name == "销售看板" and app.connection_name == "shop"
+    assert app.layout and app.layout[0]["tiles"][0]["kind"] == "kpi"   # structured layout kept
+    # the system renders that layout into a themed body (no model HTML)
     assert 'data-chart="c1"' in app.html and 'data-param="month"' in app.html
-    assert app.charts[0].chart_id == "c1"
-    assert validated and ":month" not in validated[0]      # validated a fully-bound SELECT
-    # the recipe actually runs through the deterministic runtime
+    assert 'data-kind="kpi"' in app.html and "dbaide-row" in app.html
+    assert "<script" not in app.html.lower()
+    assert validated and ":month" not in validated[0]                  # validated a fully-bound SELECT
     out = run_parametric_chart(app.charts[0], {"month": "2024-06"},
                                lambda sql: {"columns": ["region", "amt"], "rows": [["华东", 9], ["华北", 4]]})
     assert out["chart_spec"]["categories"] == ["华东", "华北"]
 
 
-def test_builder_refine_feeds_existing_to_the_model():
+def test_builder_refine_feeds_existing_layout_to_the_model():
     existing = ParametricDashboard(
-        "旧看板", "shop", html="<old/>",
+        "旧看板", "shop", layout=[{"tiles": [{"kind": "chart", "chart": "c1", "span": 12}]}],
         charts=[ParametricChart.from_dict(_PAYLOAD["charts"][0])])
     llm = _MockLLM({**_PAYLOAD, "name": "新看板"})
     app = DashboardBuilderAgent(llm).build(instruction="加个饼图", existing=existing, connection_name="shop")
     assert app.id == existing.id and app.name == "新看板"   # same app, updated in place
     user_msg = llm.seen[-1].content
-    assert "CURRENT dashboard" in user_msg and "<old/>" in user_msg   # existing passed for refinement
+    assert "CURRENT dashboard" in user_msg and '"layout"' in user_msg   # existing layout passed for refinement
 
 
 def test_builder_requires_llm():
@@ -71,11 +74,10 @@ def test_builder_requires_llm():
         DashboardBuilderAgent().build(instruction="x")
 
 
-def test_builder_synthesizes_a_body_when_html_is_empty():
-    # empty/garbled HTML no longer fails — a clean layout is generated from the recipes
-    app = DashboardBuilderAgent(_MockLLM({**_PAYLOAD, "html": ""})).build(instruction="x")
-    from dbaide.rendering.dashboard_body import chart_container_ids
-    assert chart_container_ids(app.html) == {c.chart_id for c in app.charts}
+def test_builder_falls_back_to_auto_grid_when_layout_missing():
+    # a missing/garbled layout no longer fails — the system renders an auto-grid of recipes
+    app = DashboardBuilderAgent(_MockLLM({**_PAYLOAD, "layout": None})).build(instruction="x")
+    assert 'data-chart="c1"' in app.html and "dbaide-grid" in app.html
 
 
 def test_builder_still_rejects_no_charts():

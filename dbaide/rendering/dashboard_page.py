@@ -44,14 +44,31 @@ _CLIENT_JS = r"""
     });
     return out;
   }
-  function renderChart(cid, params){
-    var el=document.querySelector('[data-chart="'+cid+'"]');
-    if(!el || !window.echarts) return;
+  function esc(v){ return (v==null?'':String(v)).replace(/[&<>]/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;'}[c];}); }
+  function fmtNum(v){ return (typeof v==='number')?v.toLocaleString():esc(v); }
+  function kpiValue(res){
+    var rows=res.rows||[], cols=res.columns||[];
+    if(!rows.length || !cols.length) return null;
+    var r=rows[0], val=null;
+    for(var i=0;i<cols.length;i++){ if(typeof r[cols[i]]==='number') val=r[cols[i]]; }  // last numeric
+    return (val===null)?r[cols[cols.length-1]]:val;
+  }
+  function renderTable(el, res){
+    var cols=res.columns||[], rows=res.rows||[];
+    var head='<tr>'+cols.map(function(c){return '<th>'+esc(c)+'</th>';}).join('')+'</tr>';
+    var body=rows.slice(0,100).map(function(r){
+      return '<tr>'+cols.map(function(c){return '<td>'+esc(r[c])+'</td>';}).join('')+'</tr>'; }).join('');
+    el.innerHTML='<table class="dbaide-table"><thead>'+head+'</thead><tbody>'+body+'</tbody></table>';
+  }
+  function renderTile(el, params){
+    var cid=el.getAttribute('data-chart'), kind=el.getAttribute('data-kind')||'chart';
     query(cid, params).then(function(res){
-      if(!res || res.error || !res.echarts_option){
-        el.classList.add('dbaide-empty'); el.textContent=(res&&res.error)?res.error:'无数据'; return;
-      }
+      if(!res || res.error){ el.classList.add('dbaide-empty'); el.textContent=(res&&res.error)?res.error:'无数据'; return; }
       el.classList.remove('dbaide-empty');
+      if(kind==='kpi'){ var v=kpiValue(res); el.textContent=(v==null)?'—':fmtNum(v); return; }
+      if(kind==='table'){ renderTable(el, res); return; }
+      if(!res.echarts_option){ el.classList.add('dbaide-empty'); el.textContent='无数据'; return; }
+      if(!window.echarts) return;
       var inst=insts[cid]; if(!inst){ inst=echarts.init(el); insts[cid]=inst; }
       inst.setOption(res.echarts_option, true); inst.resize();
     });
@@ -59,10 +76,10 @@ _CLIENT_JS = r"""
   function refresh(){
     whenReady(function(){
       var params=collectParams();
-      document.querySelectorAll('[data-chart]').forEach(function(el){ renderChart(el.getAttribute('data-chart'), params); });
+      document.querySelectorAll('[data-chart]').forEach(function(el){ renderTile(el, params); });
     });
   }
-  window.dbaide={query:query, collectParams:collectParams, renderChart:renderChart, refresh:refresh};
+  window.dbaide={query:query, collectParams:collectParams, renderTile:renderTile, refresh:refresh};
   window.addEventListener('resize', function(){ Object.keys(insts).forEach(function(k){ insts[k].resize(); }); });
   function wire(){
     document.querySelectorAll('[data-apply]').forEach(function(b){
@@ -112,6 +129,17 @@ def _base_css(theme: dict[str, Any]) -> str:
       padding:14px 16px; }}
     .dbaide-card-title {{ color:var(--text); font-weight:600; font-size:13px; margin-bottom:10px; }}
     .dbaide-card [data-chart] {{ background:transparent; border:none; min-height:0; }}
+    /* declarative 12-column rows */
+    .dbaide-row {{ display:grid; grid-template-columns:repeat(12,1fr); gap:14px; margin-bottom:14px; }}
+    .dbaide-heading {{ grid-column:span 12; color:var(--text); font-size:15px; font-weight:700; margin:6px 0 0; }}
+    .dbaide-kpi {{ display:flex; flex-direction:column; justify-content:center; gap:4px; }}
+    .dbaide-kpi-value {{ color:var(--accent); font-size:26px; font-weight:700; line-height:1.1; }}
+    .dbaide-kpi-label {{ color:var(--text2); font-size:12px; }}
+    .dbaide-table-wrap {{ overflow:auto; max-height:320px; }}
+    .dbaide-table {{ width:100%; border-collapse:collapse; font-size:12px; }}
+    .dbaide-table th, .dbaide-table td {{ text-align:left; padding:6px 10px;
+      border-bottom:1px solid var(--border); color:var(--text); white-space:nowrap; }}
+    .dbaide-table th {{ color:var(--text2); font-weight:600; position:sticky; top:0; background:var(--panel); }}
     """
 
 

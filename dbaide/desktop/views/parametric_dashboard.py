@@ -248,10 +248,10 @@ class ParametricDashboardStudio(QWidget):
             res = service.dispatch("run_app_chart",
                                    {"app_id": self._app_id, "chart_id": chart_id, "params": params})
             spec = res.get("chart_spec")
-            if not spec:
-                return {"echarts_option": None, "title": None}   # no rows → page shows "无数据"
-            return {"echarts_option": chart_spec_to_echarts_option(spec, theme=_theme_payload()),
-                    "title": spec.get("title")}
+            option = chart_spec_to_echarts_option(spec, theme=_theme_payload()) if spec else None
+            # return data too: kpi/table tiles render from rows; chart tiles use the option
+            return {"echarts_option": option, "title": spec.get("title") if spec else None,
+                    "columns": res.get("columns") or [], "rows": res.get("rows") or []}
         return run
 
     def _set_busy(self, busy: bool) -> None:

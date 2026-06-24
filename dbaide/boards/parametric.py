@@ -135,8 +135,8 @@ class ParametricDashboard:
     connection_name: str
     id: str = field(default_factory=new_id)
     charts: list[ParametricChart] = field(default_factory=list)
-    layout: list[dict[str, Any]] = field(default_factory=list)   # [{chart_id, x, y, w, h}]
-    html: str = ""                  # AI-authored page body (controls + chart containers)
+    layout: list[dict[str, Any]] = field(default_factory=list)   # declarative rows: [{"tiles":[{kind,chart,span,...}]}]
+    html: str = ""                  # deterministically rendered body (cache of layout+charts)
     created_at: str = field(default_factory=utc_now)
     updated_at: str = field(default_factory=utc_now)
 
