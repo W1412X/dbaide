@@ -52,9 +52,12 @@ Layout rules (the "ui" is a nestable component tree — compose freely):
   "grid" ("cols": N), "section" ("title" + children), "card" (a bordered box), and
   "tabs" whose children are "tab" nodes ({"label","children"}).
 - LEAVES (content): "chart" (an ECharts chart; optional "height", default 280),
-  "kpi" (one big metric — its recipe MUST return a single aggregate value, e.g.
-  SELECT sum(amt) AS total; give a short "label"), "table" (the recipe's rows),
-  "text"/"markdown" (a note; basic markdown), "heading" ("text"), "divider".
+  "kpi" (a big metric; give a short "label" and optional "format":"int|float|percent|
+  currency". Its recipe returns ONE aggregate value — OR, for a trend KPI, set
+  "trend":true and have the recipe return an ordered time series (label,value); the tile
+  then shows the latest value + %-change vs the previous point + a sparkline),
+  "table" (the recipe's rows; numeric columns auto-format/right-align and headers are
+  click-to-sort), "text"/"markdown" (a note; basic markdown), "heading" ("text"), "divider".
 - Every chart/kpi/table node MUST reference a "chart" id that exists in "charts".
 - Nest to taste: rows inside sections, tabs inside cards, etc. Keep it clean and scannable.
 - The filter control bar is generated AUTOMATICALLY from the recipe params (params with

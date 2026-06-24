@@ -1168,6 +1168,8 @@ _STRINGS: dict[str, dict[str, str]] = {
     "dash.gallery_title": {"en": "Interactive dashboards", "zh": "交互看板"},
     "dash.card_charts": {"en": "{n} charts", "zh": "{n} 个图表"},
     "dash.open": {"en": "Open", "zh": "打开"},
+    "dash.select_all": {"en": "All", "zh": "全选"},
+    "dash.clear": {"en": "Clear", "zh": "清空"},
     "dash.delete": {"en": "Delete", "zh": "删除"},
     "dash.back": {"en": "← Boards", "zh": "← 看板"},
     "dash.delete_confirm": {"en": "Delete dashboard “{name}”? This cannot be undone.",

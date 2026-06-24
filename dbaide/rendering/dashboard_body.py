@@ -19,6 +19,8 @@ import re
 from html import escape
 from typing import Any, Iterable
 
+from dbaide.i18n import t as _t
+
 _LEAVES = {"chart", "kpi", "table", "text", "markdown", "heading", "divider"}
 _STACKERS = {"page", "col", "stack", "section", "card", "group", "tab", "root"}
 
@@ -51,8 +53,10 @@ def _control(p: Any) -> str:
                 f'<label class="dbaide-check"><input type="checkbox" data-param="{name}" '
                 f'value="{escape(str(o))}"{" checked" if o in selected else ""}>{escape(str(o))}</label>'
                 for o in options)
+            bar = (f'<div class="dbaide-ckbar"><button type="button" data-ckall>{escape(_t("dash.select_all"))}</button>'
+                   f'<button type="button" data-ckno>{escape(_t("dash.clear"))}</button></div>')
             return (f'<details class="dbaide-dd"><summary data-ddlabel="{label}">{label}</summary>'
-                    f'<div class="dbaide-checklist">{checks}</div></details>')
+                    f'<div class="dbaide-checklist">{bar}{checks}</div></details>')
         opts = "".join(
             f'<option value="{escape(str(o))}"{" selected" if o in selected else ""}>{escape(str(o))}</option>'
             for o in options)
@@ -134,9 +138,13 @@ def _render_leaf(node: dict[str, Any], ntype: str, ctx: dict[str, Any]) -> str:
     title_html = f'<div class="dbaide-card-title">{title}</div>' if title else ""
     if ntype == "kpi":
         label = escape(str(node.get("label") or node.get("title") or ""))
-        return (f'<div class="dbaide-card dbaide-kpi">'
-                f'<div class="dbaide-kpi-value" data-chart="{ecid}" data-kind="kpi">…</div>'
-                f'<div class="dbaide-kpi-label">{label}</div></div>')
+        fmt = escape(str(node.get("format") or ""))
+        trend = "1" if node.get("trend") else ""
+        return (f'<div class="dbaide-card dbaide-kpi" data-chart="{ecid}" data-kind="kpi"'
+                f' data-format="{fmt}" data-trend="{trend}">'
+                f'<div class="dbaide-kpi-value">…</div>'
+                f'<div class="dbaide-kpi-label">{label}</div>'
+                f'<div class="dbaide-kpi-spark"></div></div>')
     if ntype == "table":
         return (f'<div class="dbaide-card">{title_html}'
                 f'<div data-chart="{ecid}" data-kind="table" class="dbaide-table-wrap"></div></div>')

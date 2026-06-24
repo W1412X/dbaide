@@ -83,6 +83,25 @@ def test_legacy_rows_still_render():
     assert 'data-chart="c1"' in render_body(legacy, charts) and "dbaide-row" in render_body(legacy, charts)
 
 
+def test_kpi_tile_carries_format_and_trend():
+    charts = [_chart("c1")]
+    ui = {"type": "page", "children": [
+        {"type": "kpi", "chart": "c1", "label": "总额", "format": "currency", "trend": True}]}
+    body = render_body(ui, charts)
+    # data-chart/kind/format/trend live on the card; value+spark slots present
+    assert 'data-kind="kpi"' in body and 'data-format="currency"' in body and 'data-trend="1"' in body
+    assert "dbaide-kpi-value" in body and "dbaide-kpi-spark" in body
+    # a plain KPI has empty trend flag
+    plain = render_body({"type": "kpi", "chart": "c1", "label": "x"}, charts)
+    assert 'data-trend=""' in plain
+
+
+def test_multiselect_has_select_all_and_clear():
+    charts = [_chart("c1", [ParamSpec("region", "enum", options=["A", "B"], multi=True)])]
+    body = render_body({"type": "chart", "chart": "c1"}, charts)
+    assert "data-ckall" in body and "data-ckno" in body and "dbaide-ckbar" in body
+
+
 def test_controls_auto_generated_and_deduped():
     charts = [_chart("c1", [ParamSpec("region", "enum", options=["A", "B"], multi=True, default=["A"])]),
               _chart("c2", [ParamSpec("region", "enum", options=["A", "B"], multi=True)])]

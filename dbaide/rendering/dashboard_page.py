@@ -45,20 +45,62 @@ _CLIENT_JS = r"""
     return out;
   }
   function esc(v){ return (v==null?'':String(v)).replace(/[&<>]/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;'}[c];}); }
-  function fmtNum(v){ return (typeof v==='number')?v.toLocaleString():esc(v); }
-  function kpiValue(res){
+  function numColumns(cols, rows){
+    return cols.filter(function(c){ var seen=false;
+      for(var i=0;i<rows.length;i++){ var x=rows[i][c]; if(x==null) continue; if(typeof x!=='number') return false; seen=true; }
+      return seen; });
+  }
+  function fmtVal(v, fmt){
+    if(v==null) return '—';
+    if(typeof v!=='number') return esc(v);
+    if(fmt==='percent') return (Math.round(v*10)/10).toLocaleString()+'%';
+    if(fmt==='currency') return '¥'+Math.round(v).toLocaleString();
+    if(fmt==='int') return Math.round(v).toLocaleString();
+    return v.toLocaleString();
+  }
+  function kpiSeries(res){
     var rows=res.rows||[], cols=res.columns||[];
     if(!rows.length || !cols.length) return null;
-    var r=rows[0], val=null;
-    for(var i=0;i<cols.length;i++){ if(typeof r[cols[i]]==='number') val=r[cols[i]]; }  // last numeric
-    return (val===null)?r[cols[cols.length-1]]:val;
+    var nums=numColumns(cols, rows), col=nums.length?nums[nums.length-1]:cols[cols.length-1];
+    return rows.map(function(r){ return r[col]; });
+  }
+  function sparkSvg(vals){
+    var nums=vals.filter(function(x){return typeof x==='number';});
+    if(nums.length<2) return '';
+    var min=Math.min.apply(null,nums), max=Math.max.apply(null,nums), rng=(max-min)||1, w=120,h=34,n=nums.length;
+    var pts=nums.map(function(v,i){ var x=(i/(n-1))*w, y=h-((v-min)/rng)*(h-4)-2; return x.toFixed(1)+','+y.toFixed(1); }).join(' ');
+    return '<svg viewBox="0 0 '+w+' '+h+'" preserveAspectRatio="none"><polyline fill="none" stroke="var(--accent)" stroke-width="2" points="'+pts+'"/></svg>';
+  }
+  function renderKpi(card, res){
+    var fmt=card.getAttribute('data-format')||'', trend=card.getAttribute('data-trend')==='1';
+    var valEl=card.querySelector('.dbaide-kpi-value'), sparkEl=card.querySelector('.dbaide-kpi-spark');
+    var vals=kpiSeries(res);
+    if(!vals){ valEl.textContent='—'; if(sparkEl) sparkEl.innerHTML=''; return; }
+    var cur=vals[vals.length-1], html=fmtVal(cur, fmt);
+    if(trend){
+      var nums=vals.filter(function(x){return typeof x==='number';});
+      if(nums.length>=2){ var prev=nums[nums.length-2], d=(prev===0)?0:((cur-prev)/Math.abs(prev))*100;
+        var cls=d>=0?'up':'down', arr=d>=0?'▲':'▼';
+        html+=' <span class="dbaide-kpi-delta '+cls+'">'+arr+Math.abs(Math.round(d*10)/10)+'%</span>'; }
+      if(sparkEl) sparkEl.innerHTML=sparkSvg(vals);
+    } else if(sparkEl){ sparkEl.innerHTML=''; }
+    valEl.innerHTML=html;
   }
   function renderTable(el, res){
-    var cols=res.columns||[], rows=res.rows||[];
-    var head='<tr>'+cols.map(function(c){return '<th>'+esc(c)+'</th>';}).join('')+'</tr>';
-    var body=rows.slice(0,100).map(function(r){
-      return '<tr>'+cols.map(function(c){return '<td>'+esc(r[c])+'</td>';}).join('')+'</tr>'; }).join('');
-    el.innerHTML='<table class="dbaide-table"><thead>'+head+'</thead><tbody>'+body+'</tbody></table>';
+    var cols=res.columns||[], rows=(res.rows||[]).slice(0,200), nums=numColumns(cols, rows);
+    function draw(sortCol, dir){
+      var rr=rows.slice();
+      if(sortCol!=null){ rr.sort(function(a,b){ var x=a[sortCol],y=b[sortCol];
+        if(x==null) return 1; if(y==null) return -1; if(x<y) return -dir; if(x>y) return dir; return 0; }); }
+      var head='<tr>'+cols.map(function(c){ var isn=nums.indexOf(c)>=0, sc=(c===sortCol)?' sorted':'', arrow=(c===sortCol)?(dir>0?'▲':'▼'):'';
+        return '<th class="'+(isn?'num':'')+sc+'" data-col="'+esc(c)+'" data-arrow="'+arrow+'">'+esc(c)+'</th>'; }).join('')+'</tr>';
+      var body=rr.slice(0,100).map(function(r){ return '<tr>'+cols.map(function(c){ var isn=nums.indexOf(c)>=0;
+        return '<td class="'+(isn?'num':'')+'">'+(isn?fmtVal(r[c],''):esc(r[c]))+'</td>'; }).join('')+'</tr>'; }).join('');
+      el.innerHTML='<table class="dbaide-table"><thead>'+head+'</thead><tbody>'+body+'</tbody></table>';
+      el.querySelectorAll('th').forEach(function(th){ th.addEventListener('click', function(){
+        var c=th.getAttribute('data-col'); draw(c, (c===sortCol && dir>0)?-1:1); }); });
+    }
+    draw(null, 1);
   }
   function cachedQuery(cid, params){
     // dedup within a refresh: one recipe feeding kpi+chart+table runs its SQL once
@@ -70,9 +112,13 @@ _CLIENT_JS = r"""
     if(el.closest('.dbaide-tabpanel:not(.active)')) return;   // render lazily when its tab opens
     var cid=el.getAttribute('data-chart'), kind=el.getAttribute('data-kind')||'chart';
     cachedQuery(cid, params).then(function(res){
-      if(!res || res.error){ el.classList.add('dbaide-empty'); el.textContent=(res&&res.error)?res.error:'无数据'; return; }
+      var err=(!res || res.error);
+      if(kind==='kpi'){   // a card with child nodes — never wipe it with textContent
+        if(err){ var v=el.querySelector('.dbaide-kpi-value'); if(v) v.textContent='—'; return; }
+        renderKpi(el, res); return;
+      }
+      if(err){ el.classList.add('dbaide-empty'); el.textContent=(res&&res.error)?res.error:'无数据'; return; }
       el.classList.remove('dbaide-empty');
-      if(kind==='kpi'){ var v=kpiValue(res); el.textContent=(v==null)?'—':fmtNum(v); return; }
       if(kind==='table'){
         if(!res.rows || !res.rows.length){ el.classList.add('dbaide-empty'); el.textContent='无数据'; }
         else renderTable(el, res);
@@ -124,6 +170,13 @@ _CLIENT_JS = r"""
     document.querySelectorAll('.dbaide-tab').forEach(function(b){
       b.addEventListener('click', function(e){ e.preventDefault(); activateTab(b); });
     });
+    document.querySelectorAll('[data-ckall],[data-ckno]').forEach(function(b){
+      b.addEventListener('click', function(e){ e.preventDefault();
+        var on=b.hasAttribute('data-ckall'), box=b.closest('.dbaide-checklist');
+        box.querySelectorAll('input[type="checkbox"]').forEach(function(c){ c.checked=on; });
+        updateSummaries();
+      });
+    });
     document.addEventListener('change', updateSummaries);
     updateSummaries();
     init();
@@ -149,10 +202,10 @@ def _base_css(theme: dict[str, Any]) -> str:
     body {{ margin:0; background:var(--bg); color:var(--text);
       font-family:Inter,-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif; font-size:13px; }}
     #dbaide-root {{ padding:16px; }}
-    [data-chart] {{ width:100%; min-height:260px; background:var(--panel); border:1px solid var(--border);
+    [data-kind="chart"] {{ width:100%; min-height:260px; background:var(--panel); border:1px solid var(--border);
       border-radius:8px; }}
-    [data-chart].dbaide-empty {{ display:flex; align-items:center; justify-content:center;
-      color:var(--muted); min-height:200px; }}
+    .dbaide-empty {{ display:flex; align-items:center; justify-content:center;
+      color:var(--muted); min-height:120px; }}
     input, select {{ font:inherit; color:var(--text); background:var(--panel2);
       border:1px solid var(--border); border-radius:6px; padding:6px 9px; min-width:120px; }}
     input:focus, select:focus {{ outline:none; border-color:var(--accent); }}
@@ -182,6 +235,10 @@ def _base_css(theme: dict[str, Any]) -> str:
       color:var(--text); font-size:12px; cursor:pointer; white-space:nowrap; }}
     .dbaide-check:hover {{ background:var(--panel2); }}
     .dbaide-check input {{ margin:0; accent-color:var(--accent); }}
+    .dbaide-ckbar {{ display:flex; gap:6px; padding:2px 4px 6px; position:sticky; top:0;
+      background:var(--panel); border-bottom:1px solid var(--border); margin-bottom:4px; }}
+    .dbaide-ckbar button {{ background:transparent; color:var(--accent); border:none; padding:2px 6px;
+      font-size:11px; font-weight:600; cursor:pointer; }}
     .dbaide-grid {{ display:grid; grid-template-columns:repeat(auto-fill,minmax(360px,1fr)); gap:14px; }}
     .dbaide-card {{ background:var(--panel); border:1px solid var(--border); border-radius:10px;
       padding:14px 16px; }}
@@ -210,12 +267,20 @@ def _base_css(theme: dict[str, Any]) -> str:
     .dbaide-heading {{ color:var(--text); font-size:15px; font-weight:700; margin:6px 0 10px; }}
     .dbaide-kpi {{ display:flex; flex-direction:column; justify-content:center; gap:4px; }}
     .dbaide-kpi-value {{ color:var(--accent); font-size:26px; font-weight:700; line-height:1.1; }}
+    .dbaide-kpi-delta {{ font-size:12px; font-weight:600; margin-left:8px; }}
+    .dbaide-kpi-delta.up {{ color:#22c55e; }} .dbaide-kpi-delta.down {{ color:#ef4444; }}
     .dbaide-kpi-label {{ color:var(--text2); font-size:12px; }}
+    .dbaide-kpi-spark {{ margin-top:6px; height:34px; }}
+    .dbaide-kpi-spark svg {{ width:100%; height:34px; display:block; }}
     .dbaide-table-wrap {{ overflow:auto; max-height:320px; }}
     .dbaide-table {{ width:100%; border-collapse:collapse; font-size:12px; }}
     .dbaide-table th, .dbaide-table td {{ text-align:left; padding:6px 10px;
       border-bottom:1px solid var(--border); color:var(--text); white-space:nowrap; }}
-    .dbaide-table th {{ color:var(--text2); font-weight:600; position:sticky; top:0; background:var(--panel); }}
+    .dbaide-table th {{ color:var(--text2); font-weight:600; position:sticky; top:0; background:var(--panel);
+      cursor:pointer; user-select:none; }}
+    .dbaide-table th:hover {{ color:var(--text); }}
+    .dbaide-table th.sorted::after {{ content:attr(data-arrow); color:var(--accent); margin-left:4px; }}
+    .dbaide-table td.num, .dbaide-table th.num {{ text-align:right; font-variant-numeric:tabular-nums; }}
     """
 
 
