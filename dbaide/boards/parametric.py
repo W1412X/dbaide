@@ -136,6 +136,7 @@ class ParametricDashboard:
     id: str = field(default_factory=new_id)
     charts: list[ParametricChart] = field(default_factory=list)
     layout: list[dict[str, Any]] = field(default_factory=list)   # [{chart_id, x, y, w, h}]
+    html: str = ""                  # AI-authored page body (controls + chart containers)
     created_at: str = field(default_factory=utc_now)
     updated_at: str = field(default_factory=utc_now)
 
@@ -160,6 +161,7 @@ class ParametricDashboard:
             "id": self.id, "name": self.name, "connection_name": self.connection_name,
             "charts": [c.to_dict() for c in self.charts],
             "layout": [dict(t) for t in self.layout],
+            "html": self.html,
             "created_at": self.created_at, "updated_at": self.updated_at,
         }
 
@@ -172,6 +174,7 @@ class ParametricDashboard:
             id=str(d.get("id") or new_id()),
             charts=[ParametricChart.from_dict(c) for c in (d.get("charts") or []) if isinstance(c, dict)],
             layout=[dict(t) for t in (d.get("layout") or []) if isinstance(t, dict)],
+            html=str(d.get("html") or ""),
             created_at=str(d.get("created_at") or utc_now()),
             updated_at=str(d.get("updated_at") or utc_now()),
         )

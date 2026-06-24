@@ -70,6 +70,7 @@ ACTION_METHODS: tuple[tuple[str, str], ...] = (
     ("get_dashboard_app", "get_dashboard_app"),
     ("delete_dashboard_app", "delete_dashboard_app"),
     ("compile_dashboard_app", "compile_dashboard_app"),
+    ("build_dashboard_app", "build_dashboard_app"),
     ("run_app_chart", "run_app_chart"),
     ("resource_defaults", "resource_defaults"),
     ("save_resource_defaults", "save_resource_defaults"),

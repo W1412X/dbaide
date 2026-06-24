@@ -17,7 +17,6 @@ from PyQt6.QtWidgets import (
     QInputDialog,
     QLabel,
     QMessageBox,
-    QProgressDialog,
     QScrollArea,
     QVBoxLayout,
     QWidget,
@@ -61,35 +60,14 @@ class _RefreshWorker(QThread):
         self.finished_all.emit()
 
 
-class _CompileWorker(QThread):
-    """Compile a board's questions into a parametric app (LLM) off the UI thread."""
-
-    done = pyqtSignal(object)
-    failed = pyqtSignal(str)
-
-    def __init__(self, service, name: str, question_ids: list[str], parent=None) -> None:
-        super().__init__(parent)
-        self._service = service
-        self._name = name
-        self._ids = list(question_ids)
-
-    def run(self) -> None:
-        try:
-            res = self._service.dispatch("compile_dashboard_app",
-                                         {"name": self._name, "question_ids": self._ids})
-            self.done.emit(res)
-        except BaseException as exc:  # noqa: BLE001
-            self.failed.emit(str(exc))
-
-
 class DashboardTab(QWidget):
+    """The basic (static) dashboard — a grid of pinned, refreshable chart tiles."""
+
     def __init__(self, service, parent=None) -> None:
         super().__init__(parent)
         self._service = service
         self._board_id = ""
         self._worker: _RefreshWorker | None = None
-        self._compile_worker: _CompileWorker | None = None
-        self._app_windows: list[QWidget] = []
 
         root = QVBoxLayout(self)
         root.setContentsMargins(0, 0, 0, 0)
@@ -111,10 +89,6 @@ class DashboardTab(QWidget):
         self._delete_btn.clicked.connect(self._on_delete_board)
         bar.addWidget(self._delete_btn)
         bar.addStretch(1)
-        self._gen_app = compact_button(_t("app.generate"), width=124)
-        self._gen_app.setToolTip(_t("app.generate_tip"))
-        self._gen_app.clicked.connect(self._on_generate_app)
-        bar.addWidget(self._gen_app)
         self._refresh_all = compact_button(_t("board.refresh_all"), width=110)
         self._refresh_all.clicked.connect(self._on_refresh_all)
         bar.addWidget(self._refresh_all)
@@ -143,17 +117,6 @@ class DashboardTab(QWidget):
 
     def shutdown(self) -> None:
         self._stop_worker()
-        if self._compile_worker is not None:
-            self._compile_worker.wait()
-            self._compile_worker.deleteLater()
-            self._compile_worker = None
-        for win in self._app_windows:
-            try:
-                win.shutdown()
-                win.close()
-            except Exception:  # noqa: BLE001
-                pass
-        self._app_windows.clear()
 
     def _stop_worker(self) -> None:
         worker = self._worker
@@ -182,7 +145,7 @@ class DashboardTab(QWidget):
         self._board_id = str(self._picker.currentData() or "")
         self._picker.blockSignals(False)
         has_board = bool(boards)
-        for w in (self._picker, self._rename_btn, self._delete_btn, self._refresh_all, self._gen_app):
+        for w in (self._picker, self._rename_btn, self._delete_btn, self._refresh_all):
             w.setVisible(has_board)
         if has_board:
             self._load_board(self._board_id)
@@ -267,61 +230,6 @@ class DashboardTab(QWidget):
         qids = [qid for qid in self._grid.tile_ids()
                 if (self._grid.tile(qid) and self._grid.tile(qid).question().get("refreshable"))]
         self._start_refresh(qids)
-
-    # -- interactive (parameterized) app -------------------------------------
-
-    def _refreshable_qids(self) -> list[str]:
-        return [qid for qid in self._grid.tile_ids()
-                if (self._grid.tile(qid) and self._grid.tile(qid).question().get("refreshable"))]
-
-    def _on_generate_app(self) -> None:
-        from dbaide.desktop.dialogs.message_dialog import warn as dialog_warn
-        if self._compile_worker is not None:
-            return
-        qids = self._refreshable_qids()
-        if not qids:
-            dialog_warn(self, _t("app.generate"), _t("app.no_questions"))
-            return
-        name = self._picker.currentText() or _t("app.window_title")
-        dlg = QProgressDialog(_t("app.compiling"), None, 0, 0, self)
-        dlg.setWindowTitle(_t("app.generate"))
-        dlg.setWindowModality(Qt.WindowModality.ApplicationModal)
-        dlg.setMinimumDuration(0)
-        dlg.setCancelButton(None)
-        dlg.show()
-
-        worker = _CompileWorker(self._service, name, qids, self)
-
-        def _finish(close_only=False):
-            dlg.close()
-            worker.wait()
-            worker.deleteLater()
-            self._compile_worker = None
-
-        def _done(res):
-            _finish()
-            app = res.get("app") if isinstance(res, dict) else None
-            self._open_app(app)
-
-        def _failed(err):
-            _finish()
-            dialog_warn(self, _t("app.generate"), _t("app.compile_failed", error=str(err)[:200]))
-
-        worker.done.connect(_done)
-        worker.failed.connect(_failed)
-        self._compile_worker = worker
-        worker.start()
-
-    def _open_app(self, app: object) -> None:
-        if not isinstance(app, dict) or not app.get("id"):
-            return
-        data = self._service.dispatch("get_dashboard_app", {"id": app["id"]})
-        from dbaide.desktop.views.parametric_dashboard import ParametricDashboardView
-        view = ParametricDashboardView(self._service, data["app"], data.get("controls") or [], data.get("defaults") or {})
-        view.setWindowTitle(_t("app.window_title") + " · " + str(app.get("name") or ""))
-        view.resize(980, 700)
-        view.show()
-        self._app_windows.append(view)   # keep a reference so it isn't GC'd
 
     def _start_refresh(self, qids: list[str]) -> None:
         if self._worker is not None or not qids:

@@ -135,6 +135,9 @@ class MainWindow(QMainWindow):
         # or Qt aborts with "QThread destroyed while running" on close.
         try:
             self.dashboard_tab.shutdown()
+            for studio in self._dashboard_studios:
+                studio.shutdown()
+                studio.close()
         except Exception:
             pass
         super().closeEvent(event)
@@ -506,7 +509,9 @@ class MainWindow(QMainWindow):
         self.workbench.navigate_fk.connect(self._navigate_fk)
         self.workbench.doc_requested.connect(self._load_table_doc)
         self.dashboard_tab = DashboardTab(self.service)
+        self._dashboard_studios: list[QWidget] = []
         self.ask_tab.pin_charts_requested.connect(self._on_pin_charts)
+        self.ask_tab.build_dashboard_requested.connect(self._on_build_dashboard)
         self.stack.addWidget(self.ask_tab)    # mode 0 — Assistant
         self.stack.addWidget(self.workbench)  # mode 1 — Workbench
         self.stack.addWidget(self.dashboard_tab)  # mode 2 — Dashboards
@@ -802,6 +807,28 @@ class MainWindow(QMainWindow):
             return
         self.toast(_i18n_t("toast.pinned", n=len(picked)))
         self.dashboard_tab.reload()
+
+    def _on_build_dashboard(self, charts: object, question: str) -> None:
+        """Open the AI dashboard studio seeded with this answer's analysis."""
+        chart_list = [c for c in (charts or []) if isinstance(c, dict) and c.get("chart_id")]
+        conn = self.current_connection()
+        context = [
+            {"nl_question": str(question or ""), "sql": str(c.get("source_sql") or ""),
+             "chart_plan": c.get("chart_plan") if isinstance(c.get("chart_plan"), dict) else {},
+             "title": str(c.get("title") or ""), "connection_name": conn}
+            for c in chart_list if c.get("source_sql")
+        ]
+        if not context:
+            self.toast(_i18n_t("app.no_questions"))
+            return
+        from dbaide.desktop.views.parametric_dashboard import ParametricDashboardStudio
+        studio = ParametricDashboardStudio(self.service)
+        studio.setWindowTitle(_i18n_t("app.window_title"))
+        studio.resize(1040, 760)
+        studio.show()
+        self._dashboard_studios.append(studio)
+        studio.start(name=str(question or _i18n_t("app.window_title")), connection_name=conn,
+                     context=context, instruction=_i18n_t("app.default_instruction"))
 
     def animate_page_in(self, index: int) -> None:
         """Subtle fade-in for the page that just became current. Skipped for pages that

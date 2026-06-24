@@ -25,6 +25,7 @@ class AskTab(QWidget):
     empty_action = pyqtSignal(str)
     clarification_choice = pyqtSignal(str, str)   # (slot key, reply)
     pin_charts_requested = pyqtSignal(object, str)   # (charts, question/title)
+    build_dashboard_requested = pyqtSignal(object, str)   # (charts, question) → AI dashboard studio
 
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
@@ -329,6 +330,11 @@ class AskTab(QWidget):
                     "save",
                     _t("ask.pin_to_dashboard"),
                     lambda: self.pin_charts_requested.emit(chart_list, export_title),
+                ))
+                menu_items.append((
+                    "sparkles",
+                    _t("app.build_menu"),
+                    lambda: self.build_dashboard_requested.emit(chart_list, export_title),
                 ))
             menu_items.append((
                 "download",

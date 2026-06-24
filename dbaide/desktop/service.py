@@ -35,6 +35,7 @@ from dbaide.boards.parametric import ParametricDashboard
 from dbaide.boards.runtime import run_parametric_chart
 from dbaide.boards.store import ParametricDashboardStore
 from dbaide.agent.dashboard_compiler import DashboardCompiler
+from dbaide.agent.dashboard_builder import DashboardBuilderAgent
 from dbaide.assets.summarizer import (
     render_database_markdown,
     render_instance_markdown,
@@ -1640,6 +1641,28 @@ class DesktopService:
                 chart_plan=q.chart_plan or {}, nl_question=q.nl_question, validate=validate))
         app = ParametricDashboard(
             name=str(payload.get("name") or "交互看板"), connection_name=conn_name, charts=charts)
+        self.boards_apps.upsert(app)
+        return {"app": app.to_dict()}
+
+    def build_dashboard_app(self, payload: dict[str, Any]) -> dict[str, Any]:
+        """Author or refine an interactive HTML dashboard via the builder agent (LLM).
+
+        ``context`` is the prior analysis ([{nl_question, sql, chart_plan}, …]).
+        ``app_id`` refines an existing app; otherwise a new one is created. Slow —
+        run on a worker thread."""
+        context = [c for c in (payload.get("context") or []) if isinstance(c, dict)]
+        app_id = str(payload.get("app_id") or "")
+        existing = self.boards_apps.get(app_id) if app_id else None
+        conn_name = str(payload.get("connection_name") or (existing.connection_name if existing else "")
+                        or (context[0].get("connection_name") if context else ""))
+        conn = self.cfg.get_connection(conn_name or None)
+        tools = self._query_tools(conn)
+        validate = lambda sql: tools.validate_sql_report(sql, add_limit=True)  # noqa: E731
+        agent = DashboardBuilderAgent(self._safe_llm())
+        app = agent.build(
+            instruction=str(payload.get("instruction") or ""),
+            context_charts=context, connection_name=conn_name,
+            existing=existing, validate=validate)
         self.boards_apps.upsert(app)
         return {"app": app.to_dict()}
 
