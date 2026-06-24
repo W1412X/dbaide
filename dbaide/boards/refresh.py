@@ -70,10 +70,16 @@ def refresh_question(question: SavedQuestion, execute_sql: ExecuteSql) -> dict[s
     if missing:
         raise ValueError("schema changed — refreshed query is missing column(s): " + ", ".join(missing))
     rows = _rows_as_dicts(columns, res.get("rows"))
+    row_count = int(res.get("row_count") or len(rows))
+    if not rows:
+        return {"chart_spec": None, "columns": columns, "row_count": 0}   # refreshed to empty → "no data"
     plan = chart_plan_from_dict(question.chart_plan or {})
-    spec = ChartAgent().build_spec(plan, chart_id=question.id, rows=rows)
+    try:
+        spec = ChartAgent().build_spec(plan, chart_id=question.id, rows=rows)
+    except ValueError:
+        return {"chart_spec": None, "columns": columns, "row_count": row_count}
     return {
         "chart_spec": chart_spec_to_dict(spec),
         "columns": columns,
-        "row_count": int(res.get("row_count") or len(rows)),
+        "row_count": row_count,
     }

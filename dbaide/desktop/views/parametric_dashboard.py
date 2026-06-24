@@ -247,7 +247,9 @@ class ParametricDashboardStudio(QWidget):
         def run(chart_id: str, params: dict[str, Any]) -> dict[str, Any]:
             res = service.dispatch("run_app_chart",
                                    {"app_id": self._app_id, "chart_id": chart_id, "params": params})
-            spec = res.get("chart_spec") or {}
+            spec = res.get("chart_spec")
+            if not spec:
+                return {"echarts_option": None, "title": None}   # no rows → page shows "无数据"
             return {"echarts_option": chart_spec_to_echarts_option(spec, theme=_theme_payload()),
                     "title": spec.get("title")}
         return run

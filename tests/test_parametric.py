@@ -117,6 +117,20 @@ def test_run_parametric_chart_survives_edge_filter_values():
     assert out["chart_spec"]["chart_type"] == "bar"
 
 
+def test_run_parametric_chart_empty_rows_is_no_data_not_error():
+    # THE bug: a filter that matched nothing made build_spec().validate() raise
+    # "each series requires non-empty values" → the chart errored on every such change.
+    chart = ParametricChart(
+        chart_id="c1", title="t",
+        sources=[QuerySource("s", "SELECT region, sum(amt) AS amt FROM s WHERE month=:m GROUP BY 1")],
+        params=[ParamSpec("m", "date", default="@month_str")],
+        combine=Combine("single"),
+        chart_plan={"chart_type": "bar", "category_field": "region", "value_fields": ["amt"]},
+    )
+    out = run_parametric_chart(chart, {"m": "2099-01"}, lambda _sql: {"columns": ["region", "amt"], "rows": []})
+    assert out["chart_spec"] is None and out["row_count"] == 0   # no rows → "no data", never raises
+
+
 def test_run_parametric_chart_multi_sql_join():
     chart = ParametricChart(
         chart_id="c2", title="销售 vs 目标",

@@ -131,6 +131,13 @@ def run_parametric_chart(chart: ParametricChart, param_values: dict[str, Any], e
         columns = [str(c) for c in (res.get("columns") or [])]
         result_sets.append((src, _rows_as_dicts(columns, res.get("rows"))))
     combined = combine_rows(result_sets, chart.combine)
+    if not combined:
+        return {"chart_spec": None, "row_count": 0}   # a filter that matched nothing → "no data", not an error
     plan = chart_plan_from_dict(chart.chart_plan or {})
-    spec = ChartAgent().build_spec(plan, chart_id=chart.chart_id or "chart", rows=combined)
+    try:
+        spec = ChartAgent().build_spec(plan, chart_id=chart.chart_id or "chart", rows=combined)
+    except ValueError:
+        # rows can't form a chart for this plan (e.g. the value column is empty) — degrade
+        # to "no data" rather than surfacing an error on every such filter change
+        return {"chart_spec": None, "row_count": len(combined)}
     return {"chart_spec": chart_spec_to_dict(spec), "row_count": len(combined)}
