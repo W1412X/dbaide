@@ -71,6 +71,37 @@ def _disable_webengine_in_unit_tests(request, monkeypatch):
             continue
         if hasattr(mod, "try_create_webengine_view"):
             monkeypatch.setattr(mod, "try_create_webengine_view", lambda: None)
+
+    # chart_block creates QWebEngineView DIRECTLY (no helper to patch). Stub the class
+    # itself so any direct creation yields a harmless widget — a real Chromium view
+    # SIGABRTs (exit 134) mid-run under offscreen Linux CI and kills the whole suite.
+    try:
+        import PyQt6.QtWebEngineWidgets as _we
+        from PyQt6.QtWidgets import QWidget
+
+        class _StubPage:
+            def setBackgroundColor(self, *a, **k):
+                pass
+
+            def setWebChannel(self, *a, **k):
+                pass
+
+            def runJavaScript(self, *a, **k):
+                pass
+
+        class _StubWebEngineView(QWidget):
+            def setHtml(self, *a, **k):
+                pass
+
+            def setUrl(self, *a, **k):
+                pass
+
+            def page(self):
+                return _StubPage()
+
+        monkeypatch.setattr(_we, "QWebEngineView", _StubWebEngineView)
+    except Exception:  # noqa: BLE001
+        pass
     yield
 
 
