@@ -38,10 +38,25 @@ def test_multi_select_expands_to_in_list():
     assert out == "WHERE cat IN ('A', 'C')"
 
 
-def test_multi_select_validates_each_value():
+def test_multi_select_drops_out_of_options_and_blanks():
+    # robustness: a filter change must not crash — unknown/blank values are dropped
     p = ParamSpec("cats", "enum", options=["A", "B"], multi=True)
-    with pytest.raises(ValueError):
-        render_sql("cat IN (:cats)", {"cats": ["A", "Z"]}, [p])   # Z not allowed
+    assert render_sql("cat IN (:cats)", {"cats": ["A", "Z", ""]}, [p]) == "cat IN ('A')"
+    assert render_sql("cat IN (:cats)", {"cats": []}, [p]) == "cat IN (NULL)"
+
+
+def test_render_sql_is_robust_to_bad_values():
+    assert render_sql("x = :n", {"n": "notanum"}, [ParamSpec("n", "number")]) == "x = NULL"
+    assert render_sql("x = :n", {"n": ""}, [ParamSpec("n", "number")]) == "x = NULL"
+    # date is not format-strict now: a month string renders escaped (works on string cols)
+    assert render_sql("d = :d", {"d": "2024-06"}, [ParamSpec("d", "date")]) == "d = '2024-06'"
+    assert render_sql("c = :c", {"c": "Z"}, [ParamSpec("c", "enum", options=["A", "B"])]) == "c = NULL"
+
+
+def test_cleared_control_falls_back_to_default():
+    p = ParamSpec("month", "text", default="2024-01")
+    assert render_sql("m = :month", {"month": ""}, [p]) == "m = '2024-01'"   # cleared → default
+    assert render_sql("m = :m", {"m": ""}, [ParamSpec("m", "text")]) == "m = NULL"   # no default → NULL
 
 
 def test_multi_number_no_quotes():

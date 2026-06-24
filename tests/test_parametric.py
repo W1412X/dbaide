@@ -39,13 +39,12 @@ def test_render_sql_binds_declared_params_by_type():
     assert "':notparam'" in out               # undeclared colon token left untouched
 
 
-def test_render_sql_rejects_bad_types_and_enum():
-    with pytest.raises(ValueError):
-        render_sql("x = :n", {"n": "notanumber"}, [ParamSpec("n", "number")])
-    with pytest.raises(ValueError):
-        render_sql("d = :d", {"d": "2024/03/01"}, [ParamSpec("d", "date")])
-    with pytest.raises(ValueError):
-        render_sql("c = :c", {"c": "Z"}, [ParamSpec("c", "enum", options=["A", "B"])])
+def test_render_sql_degrades_bad_values_to_null_never_raises():
+    # a filter change must never crash the chart — bad/unknown values become NULL
+    assert render_sql("x = :n", {"n": "notanumber"}, [ParamSpec("n", "number")]) == "x = NULL"
+    assert render_sql("c = :c", {"c": "Z"}, [ParamSpec("c", "enum", options=["A", "B"])]) == "c = NULL"
+    # date is escaped, not format-validated (a month or full date both render safely)
+    assert render_sql("d = :d", {"d": "2024/03/01"}, [ParamSpec("d", "date")]) == "d = '2024/03/01'"
 
 
 # -- combine ----------------------------------------------------------------
@@ -89,6 +88,33 @@ def test_run_parametric_chart_is_deterministic():
     assert spec["chart_type"] == "bar"
     assert spec["categories"] == ["华东", "华北"]
     assert spec["series"][0]["values"] == [30.0, 12.0]
+
+
+def test_run_parametric_chart_survives_edge_filter_values():
+    # the user's report: changing a filter must not error. Month strings, empties,
+    # and out-of-range values used to crash the bind; now they degrade gracefully.
+    chart = ParametricChart(
+        chart_id="c1", title="t",
+        sources=[QuerySource("s", "SELECT region, sum(amt) AS amt FROM s WHERE month=:month "
+                                  "AND region IN (:region) GROUP BY 1")],
+        params=[ParamSpec("month", "date", default="@month_str"),
+                ParamSpec("region", "enum", options=["华东", "华北"], multi=True)],
+        combine=Combine("single"),
+        chart_plan={"chart_type": "bar", "category_field": "region", "value_fields": ["amt"]},
+    )
+    seen = {}
+
+    def ex(sql):
+        seen["sql"] = sql
+        return {"columns": ["region", "amt"], "rows": [["华东", 1]]}
+
+    # a month string (not a full ISO date) — used to raise, now binds escaped
+    run_parametric_chart(chart, {"month": "2024-06", "region": ["华东"]}, ex)
+    assert "month='2024-06'" in seen["sql"] and "IN ('华东')" in seen["sql"]
+    # cleared month → falls back to default; unchecked regions → IN (NULL); no crash
+    out = run_parametric_chart(chart, {"month": "", "region": []}, ex)
+    assert "IN (NULL)" in seen["sql"]
+    assert out["chart_spec"]["chart_type"] == "bar"
 
 
 def test_run_parametric_chart_multi_sql_join():

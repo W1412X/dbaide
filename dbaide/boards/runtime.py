@@ -28,39 +28,45 @@ from dbaide.charts.spec import chart_spec_to_dict
 ExecuteSql = Callable[[str], dict[str, Any]]
 
 
+def _is_blank(value: Any) -> bool:
+    return value is None or (isinstance(value, str) and value.strip() == "")
+
+
 def _render_one(spec: ParamSpec, value: Any) -> str:
-    """Render a single scalar value as a type-checked SQL literal."""
-    if value is None:
+    """Render a single value as a SAFE SQL literal.
+
+    Robustness-first: a control can send anything (empty, a month string, a typo),
+    and a filter change must never hard-error. Bad/empty values render as NULL
+    (so the filter matches nothing rather than crashing); everything else is
+    single-quote-escaped (injection-safe) — the read-only engine is the backstop.
+    """
+    if _is_blank(value):
         return "NULL"
     if spec.type == "number":
         try:
             f = float(value)
         except (TypeError, ValueError):
-            raise ValueError(f"param {spec.name!r} expects a number, got {value!r}")
+            return "NULL"                       # bad number → NULL, never crash the chart
         return str(int(f)) if f.is_integer() else repr(f)
-    if spec.type == "date":
-        s = str(value)
-        try:
-            date.fromisoformat(s)
-        except ValueError:
-            raise ValueError(f"param {spec.name!r} expects an ISO date (YYYY-MM-DD), got {value!r}")
-        return "'" + s + "'"
-    if spec.type == "enum":
-        if spec.options and value not in spec.options:
-            raise ValueError(f"param {spec.name!r}={value!r} is not in the allowed options")
-        if isinstance(value, (int, float)) and not isinstance(value, bool):
-            return str(value)
-        return "'" + str(value).replace("'", "''") + "'"
-    return "'" + str(value).replace("'", "''") + "'"   # text
+    if spec.type == "enum" and spec.options and value not in spec.options:
+        return "NULL"                           # constrain to the allow-list (no match, no crash)
+    if isinstance(value, (int, float)) and not isinstance(value, bool):
+        return str(value)
+    # text / date / enum-value → escaped quoted literal. Dates are NOT format-validated
+    # here (a "2024-06" month or a full date both work); escaping keeps it injection-safe.
+    return "'" + str(value).replace("'", "''") + "'"
 
 
 def _render_param(spec: ParamSpec, value: Any, today: date | None) -> str:
-    """Render a param value: resolve dynamic tokens, expand multi-select to a list."""
+    """Render a param value: empty → default, resolve @tokens, expand multi → IN list."""
+    if _is_blank(value):
+        value = spec.default                    # cleared control → fall back to the default
     if spec.multi:
-        items = value if isinstance(value, (list, tuple)) else ([] if value is None else [value])
-        rendered = [_render_one(spec, resolve_value(v, today)) for v in items]
+        raw = value if isinstance(value, (list, tuple)) else ([] if _is_blank(value) else [value])
+        rendered = [_render_one(spec, resolve_value(v, today)) for v in raw if not _is_blank(v)]
+        rendered = [r for r in rendered if r != "NULL"]   # drop blanks/out-of-options from IN(...)
         return ", ".join(rendered) if rendered else "NULL"
-    return _render_one(spec, resolve_value(value if value is not None else spec.default, today))
+    return _render_one(spec, resolve_value(value, today))
 
 
 def render_sql(template: str, values: dict[str, Any], params: list[ParamSpec],
