@@ -53,11 +53,10 @@ class _DashboardBridge(QObject):
     resultReady = pyqtSignal(str, str)   # (token, payload_json) — consumed by the page
     _deliver = pyqtSignal(str, str)      # internal: worker thread → main thread re-emit
 
-    def __init__(self, run_fn: RunFn, parent=None) -> None:
+    def __init__(self, run_fn: RunFn, pool: QThreadPool, parent=None) -> None:
         super().__init__(parent)
         self._run = run_fn
-        self._pool = QThreadPool(self)
-        self._pool.setMaxThreadCount(4)
+        self._pool = pool   # shared, owned by the view (not per-bridge → no use-after-free on re-render)
         self._deliver.connect(self.resultReady)   # queued onto the main thread
 
     @pyqtSlot(str, str, str)
@@ -89,6 +88,8 @@ class DashboardWebView(QWidget):
         self._view: Any = None
         self._channel: Any = None
         self._bridge: _DashboardBridge | None = None
+        self._pool = QThreadPool(self)   # one pool for the view's lifetime
+        self._pool.setMaxThreadCount(4)
 
     def set_dashboard(self, body_html: str, run_fn: RunFn) -> None:
         view_cls = try_create_webengine_view()
@@ -101,10 +102,10 @@ class DashboardWebView(QWidget):
         from PyQt6.QtWebChannel import QWebChannel
 
         es = echarts_script_src()
-        old = self._bridge   # retire the previous bridge (and its thread pool) on re-render
-        if old is not None:
-            old.deleteLater()
-        self._bridge = _DashboardBridge(run_fn, self)
+        # A new bridge per render; the OLD bridge stays parented (NOT deleteLater'd) so an
+        # in-flight worker can't emit on a freed object. Its stale results have no live page
+        # listener after setHtml, so they're harmless; the shared pool is reused.
+        self._bridge = _DashboardBridge(run_fn, self._pool, self)
         self._channel = QWebChannel(self)
         self._channel.registerObject("bridge", self._bridge)
         self._view.page().setWebChannel(self._channel)

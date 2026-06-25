@@ -1170,6 +1170,7 @@ _STRINGS: dict[str, dict[str, str]] = {
     "dash.open": {"en": "Open", "zh": "打开"},
     "dash.select_all": {"en": "All", "zh": "全选"},
     "dash.clear": {"en": "Clear", "zh": "清空"},
+    "dash.apply": {"en": "Apply", "zh": "应用"},
     "dash.delete": {"en": "Delete", "zh": "删除"},
     "dash.back": {"en": "← Boards", "zh": "← 看板"},
     "dash.delete_confirm": {"en": "Delete dashboard “{name}”? This cannot be undone.",

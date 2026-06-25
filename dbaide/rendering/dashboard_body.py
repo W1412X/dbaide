@@ -80,7 +80,7 @@ def render_controls(charts: list[Any]) -> str:
     if not params:
         return ""
     controls = "".join(_control(p) for p in params)
-    return f'<div class="dbaide-controls">{controls}<button data-apply>应用</button></div>'
+    return f'<div class="dbaide-controls">{controls}<button data-apply>{escape(_t("dash.apply"))}</button></div>'
 
 
 # -- helpers ----------------------------------------------------------------
