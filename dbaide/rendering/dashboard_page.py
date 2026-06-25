@@ -19,19 +19,24 @@ from typing import Any
 
 _CLIENT_JS = r"""
 (function(){
-  var bridge=null, ready=false, q=[], cache=null, lastParams={};
+  var bridge=null, ready=false, q=[], cache=null, lastParams={}, pending={}, tok=0;
   function whenReady(fn){ ready?fn():q.push(fn); }
   function init(){
     if(typeof QWebChannel==='undefined' || !window.qt){ return; }
     new QWebChannel(qt.webChannelTransport, function(ch){
-      bridge=ch.objects.bridge; ready=true; q.forEach(function(f){f();}); q=[]; refresh();
+      bridge=ch.objects.bridge; ready=true;
+      // async results arrive by token (the SQL runs off the GUI thread → no freeze)
+      bridge.resultReady.connect(function(token, payload){
+        var resolve=pending[token]; if(!resolve) return; delete pending[token];
+        var r=null; try{ r=JSON.parse(payload); }catch(e){} resolve(r);
+      });
+      q.forEach(function(f){f();}); q=[]; refresh();
     });
   }
   function query(cid, params){
     return new Promise(function(resolve){
-      bridge.query(cid, JSON.stringify(params||{}), function(payload){
-        var r=null; try{ r=JSON.parse(payload); }catch(e){} resolve(r);
-      });
+      var token='t'+(++tok); pending[token]=resolve;
+      bridge.request(token, cid, JSON.stringify(params||{}));
     });
   }
   function collectParams(){
@@ -108,15 +113,27 @@ _CLIENT_JS = r"""
     var k=cid+'|'+JSON.stringify(params||{});
     return cache[k] || (cache[k]=query(cid, params));
   }
+  function isEmptyTile(el, kind){
+    if(kind==='kpi'){ var v=el.querySelector('.dbaide-kpi-value'); return !v || v.textContent==='…' || v.textContent===''; }
+    if(kind==='table') return !el.querySelector('table');
+    return !el.querySelector('canvas');
+  }
+  function markLoading(el, kind){
+    if(!isEmptyTile(el, kind)) return;   // on a refresh keep old content until new data lands (no flicker)
+    if(kind==='kpi'){ var v=el.querySelector('.dbaide-kpi-value'); if(v) v.innerHTML='<span class="dbaide-spin"></span>'; return; }
+    el.classList.remove('dbaide-empty'); el.classList.add('dbaide-loading'); el.innerHTML='';
+  }
   function renderTile(el, params){
     if(el.closest('.dbaide-tabpanel:not(.active)')) return;   // render lazily when its tab opens
     var cid=el.getAttribute('data-chart'), kind=el.getAttribute('data-kind')||'chart';
+    markLoading(el, kind);
     cachedQuery(cid, params).then(function(res){
       var err=(!res || res.error);
       if(kind==='kpi'){   // a card with child nodes — never wipe it with textContent
         if(err){ var v=el.querySelector('.dbaide-kpi-value'); if(v) v.textContent='—'; return; }
         renderKpi(el, res); return;
       }
+      el.classList.remove('dbaide-loading');
       if(err){ el.classList.add('dbaide-empty'); el.textContent=(res&&res.error)?res.error:'无数据'; return; }
       el.classList.remove('dbaide-empty');
       if(kind==='table'){
@@ -206,6 +223,11 @@ def _base_css(theme: dict[str, Any]) -> str:
       border-radius:8px; }}
     .dbaide-empty {{ display:flex; align-items:center; justify-content:center;
       color:var(--muted); min-height:120px; }}
+    @keyframes dbaide-rot {{ to {{ transform:rotate(360deg); }} }}
+    .dbaide-loading {{ display:flex; align-items:center; justify-content:center; min-height:120px; }}
+    .dbaide-spin, .dbaide-loading::after {{ content:''; display:inline-block; width:22px; height:22px;
+      border:2px solid var(--border); border-top-color:var(--accent); border-radius:50%;
+      animation:dbaide-rot .7s linear infinite; }}
     input, select {{ font:inherit; color:var(--text); background:var(--panel2);
       border:1px solid var(--border); border-radius:6px; padding:6px 9px; min-width:120px; }}
     input:focus, select:focus {{ outline:none; border-color:var(--accent); }}

@@ -83,6 +83,22 @@ def test_legacy_rows_still_render():
     assert 'data-chart="c1"' in render_body(legacy, charts) and "dbaide-row" in render_body(legacy, charts)
 
 
+def test_dynamic_default_resolved_in_control():
+    import re
+    charts = [_chart("c1", [ParamSpec("start", "date", default="@month_start")])]
+    body = render_body({"type": "chart", "chart": "c1"}, charts)
+    m = re.search(r'data-param="start"[^>]*value="([^"]*)"', body)
+    # the @token is resolved to a concrete date so the initial filter is visible/editable
+    assert m and re.match(r"\d{4}-\d{2}-\d{2}$", m.group(1)) and "@month_start" not in body
+
+
+def test_page_uses_async_bridge_and_loading():
+    from dbaide.rendering.dashboard_page import build_dashboard_page
+    page = build_dashboard_page("<div></div>", echarts_src="x", theme={})
+    assert "bridge.request(" in page and "resultReady.connect" in page   # async, off-thread queries
+    assert "markLoading" in page and "dbaide-spin" in page               # per-tile loading view
+
+
 def test_kpi_tile_carries_format_and_trend():
     charts = [_chart("c1")]
     ui = {"type": "page", "children": [

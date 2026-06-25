@@ -10,7 +10,7 @@ from __future__ import annotations
 import json
 from typing import Any, Callable
 
-from PyQt6.QtCore import QObject, pyqtSlot
+from PyQt6.QtCore import QObject, QRunnable, QThreadPool, pyqtSignal, pyqtSlot
 from PyQt6.QtWidgets import QLabel, QVBoxLayout, QWidget
 
 from dbaide.desktop.components.markdown_webview import try_create_webengine_view
@@ -22,22 +22,53 @@ from dbaide.rendering.dashboard_page import build_dashboard_page
 RunFn = Callable[[str, dict[str, Any]], dict[str, Any]]
 
 
+class _QueryRunnable(QRunnable):
+    """Runs one recipe off the GUI thread, then delivers the JSON back to the page."""
+
+    def __init__(self, bridge: "_DashboardBridge", token: str, chart_id: str, params: dict) -> None:
+        super().__init__()
+        self._bridge = bridge
+        self._token = token
+        self._chart_id = chart_id
+        self._params = params
+
+    def run(self) -> None:  # worker thread
+        try:
+            payload = json.dumps(self._bridge._run(self._chart_id, self._params),
+                                 ensure_ascii=False, default=str)
+        except Exception as exc:  # noqa: BLE001 — surface to the page, never crash the worker
+            payload = json.dumps({"error": str(exc)[:200]}, ensure_ascii=False)
+        # marshal back to the main thread (queued) → resultReady → QWebChannel → JS
+        self._bridge._deliver.emit(self._token, payload)
+
+
 class _DashboardBridge(QObject):
-    """The single, locked entry point the page can call. No raw SQL crosses it."""
+    """The single, locked entry point the page can call. No raw SQL crosses it.
+
+    Async: the page calls ``request(token, chart_id, params)`` (a void slot), the SQL
+    runs on a worker thread, and the result is delivered via the ``resultReady`` signal
+    — so a dashboard with many tiles never freezes the GUI while it loads.
+    """
+
+    resultReady = pyqtSignal(str, str)   # (token, payload_json) — consumed by the page
+    _deliver = pyqtSignal(str, str)      # internal: worker thread → main thread re-emit
 
     def __init__(self, run_fn: RunFn, parent=None) -> None:
         super().__init__(parent)
         self._run = run_fn
+        self._pool = QThreadPool(self)
+        self._pool.setMaxThreadCount(4)
+        self._deliver.connect(self.resultReady)   # queued onto the main thread
 
-    @pyqtSlot(str, str, result=str)
-    def query(self, chart_id: str, params_json: str) -> str:
+    @pyqtSlot(str, str, str)
+    def request(self, token: str, chart_id: str, params_json: str) -> None:
         try:
             params = json.loads(params_json or "{}")
             if not isinstance(params, dict):
                 params = {}
-            return json.dumps(self._run(str(chart_id), params), ensure_ascii=False, default=str)
-        except Exception as exc:  # noqa: BLE001 — surface to the page, never crash the slot
-            return json.dumps({"error": str(exc)[:200]}, ensure_ascii=False)
+        except Exception:  # noqa: BLE001
+            params = {}
+        self._pool.start(_QueryRunnable(self, str(token), str(chart_id), params))
 
 
 def _theme_payload() -> dict[str, str]:
@@ -70,6 +101,9 @@ class DashboardWebView(QWidget):
         from PyQt6.QtWebChannel import QWebChannel
 
         es = echarts_script_src()
+        old = self._bridge   # retire the previous bridge (and its thread pool) on re-render
+        if old is not None:
+            old.deleteLater()
         self._bridge = _DashboardBridge(run_fn, self)
         self._channel = QWebChannel(self)
         self._channel.registerObject("bridge", self._bridge)

@@ -62,8 +62,15 @@ def _control(p: Any) -> str:
             for o in options)
         return f'<label>{label}<select data-param="{name}">{opts}</select></label>'
     html_type = {"date": "date", "number": "number"}.get(ptype, "text")
-    val = "" if (isinstance(default, str) and default.startswith("@")) else (
-        "" if default in (None, "") or isinstance(default, (list, tuple)) else escape(str(default)))
+    # resolve a dynamic @token default (e.g. @month_start) to a concrete value so the
+    # initial filter condition is VISIBLE and editable in the control, not a blank box
+    if isinstance(default, str) and default.startswith("@"):
+        try:
+            from dbaide.boards.dates import resolve_value
+            default = resolve_value(default)
+        except Exception:  # noqa: BLE001
+            default = ""
+    val = "" if default in (None, "") or isinstance(default, (list, tuple)) else escape(str(default))
     val_attr = f' value="{val}"' if val else ""
     return f'<label>{label}<input type="{html_type}" data-param="{name}"{val_attr}></label>'
 
