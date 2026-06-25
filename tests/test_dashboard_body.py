@@ -47,6 +47,18 @@ def test_render_tree_tabs_and_markdown():
     assert "<strong>重点</strong>" in body            # mini-markdown applied
 
 
+def test_markdown_tile_renders_pipe_table():
+    charts = [_chart("c1")]
+    md = "## 关键发现\n\n| 城市 | 销售额 |\n|---|---|\n| 广州 | **15808** |\n| 成都 | 15241 |\n\n说明文字"
+    body = render_body({"type": "page", "children": [
+        {"type": "markdown", "text": md}, {"type": "chart", "chart": "c1"}]}, charts)
+    assert "dbaide-md-table" in body                       # the pipe table became an HTML table
+    assert "<th>城市</th>" in body and "<th>销售额</th>" in body
+    assert "<td>广州</td>" in body and "<strong>15808</strong>" in body   # inline markdown inside cells
+    assert "|---|" not in body and "| 城市 |" not in body  # raw pipe syntax not leaked
+    assert "<h3>关键发现</h3>" in body and "说明文字" in body
+
+
 def test_render_tree_grid_and_nesting():
     charts = [_chart("c1"), _chart("c2"), _chart("c3")]
     ui = {"type": "grid", "cols": 3, "children": [

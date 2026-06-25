@@ -327,6 +327,10 @@ def _base_css(theme: dict[str, Any]) -> str:
     .dbaide-text h2,.dbaide-text h3,.dbaide-text h4 {{ color:var(--text); margin:6px 0; }}
     .dbaide-text code {{ background:var(--panel2); padding:1px 5px; border-radius:4px; }}
     .dbaide-text blockquote {{ margin:4px 0; padding-left:10px; border-left:3px solid var(--border); color:var(--muted); }}
+    .dbaide-md-table {{ border-collapse:collapse; font-size:12px; margin:8px 0; }}
+    .dbaide-md-table th, .dbaide-md-table td {{ border:1px solid var(--border); padding:5px 10px;
+      text-align:left; color:var(--text); white-space:nowrap; }}
+    .dbaide-md-table th {{ color:var(--text2); font-weight:600; background:var(--panel2); }}
     .dbaide-divider {{ border:none; border-top:1px solid var(--border); margin:6px 0 16px; }}
     /* tabs */
     .dbaide-tabs {{ margin-bottom:14px; }}

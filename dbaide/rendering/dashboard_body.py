@@ -99,13 +99,47 @@ _INLINE_MD = (
 )
 
 
+def _inline_md(raw: str) -> str:
+    s = escape(raw)
+    for pat, repl in _INLINE_MD:
+        s = pat.sub(repl, s)
+    return s
+
+
+def _is_md_table_sep(line: str) -> bool:
+    """A GFM table separator row, e.g. ``|---|:--:|``."""
+    s = line.strip()
+    if "|" not in s:
+        return False
+    cells = [c.strip() for c in s.strip("|").split("|")]
+    return bool(cells) and all(c and set(c) <= set("-: ") and "-" in c for c in cells)
+
+
+def _md_cells(line: str) -> list[str]:
+    return [c.strip() for c in line.strip().strip("|").split("|")]
+
+
 def _mini_markdown(text: str) -> str:
-    """Tiny, safe markdown for text/markdown leaves (escape first, then a few rules)."""
+    """Tiny, safe markdown for text/markdown leaves: headings, bold/code, quotes, lists,
+    line breaks, AND GFM pipe tables (so a composed summary table renders as a table)."""
+    lines = str(text or "").split("\n")
     out: list[str] = []
-    for raw in str(text or "").split("\n"):
-        line = escape(raw)
-        for pat, repl in _INLINE_MD:
-            line = pat.sub(repl, line)
+    i, n = 0, len(lines)
+    while i < n:
+        raw = lines[i]
+        # a pipe table: a row with '|' followed by a separator row
+        if "|" in raw and i + 1 < n and _is_md_table_sep(lines[i + 1]):
+            header = [_inline_md(c) for c in _md_cells(raw)]
+            i += 2
+            body: list[list[str]] = []
+            while i < n and "|" in lines[i] and lines[i].strip():
+                body.append([_inline_md(c) for c in _md_cells(lines[i])])
+                i += 1
+            th = "".join(f"<th>{c}</th>" for c in header)
+            trs = "".join("<tr>" + "".join(f"<td>{c}</td>" for c in row) + "</tr>" for row in body)
+            out.append(f'<table class="dbaide-md-table"><thead><tr>{th}</tr></thead><tbody>{trs}</tbody></table>')
+            continue
+        line = _inline_md(raw)
         s = line.strip()
         if s.startswith("&gt; "):
             out.append(f'<blockquote>{s[5:]}</blockquote>')
@@ -117,9 +151,12 @@ def _mini_markdown(text: str) -> str:
             out.append(f'<h2>{s[2:]}</h2>')
         elif s.startswith("- ") or s.startswith("* "):
             out.append(f'<li>{s[2:]}</li>')
+        elif s == "":
+            out.append("<br>")
         else:
-            out.append(line)
-    return "<br>".join(out)
+            out.append(line + "<br>")
+        i += 1
+    return "".join(out)
 
 
 def _chart_id(node: dict[str, Any]) -> str:

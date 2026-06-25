@@ -59,7 +59,11 @@ Layout rules (the "ui" is a nestable component tree — compose freely):
   the value, shows the latest point + %-change vs the previous + a sparkline. Without
   ORDER BY the trend is meaningless, so always order it),
   "table" (the recipe's rows; numeric columns auto-format/right-align and headers are
-  click-to-sort), "text"/"markdown" (a note; basic markdown), "heading" ("text"), "divider".
+  click-to-sort), "text"/"markdown" (a note OR a composed summary — supports markdown
+  incl. GFM pipe tables `| A | B |`), "heading" ("text"), "divider".
+- NOT everything should be a chart. Use a "table" tile for detail/top-N/breakdown data
+  that reads better as rows; use a "text"/"markdown" tile (with a markdown table) for a
+  small static summary or key-findings table that doesn't need to be re-queried.
 - Every chart/kpi/table node MUST reference a "chart" id that exists in "charts".
 - Nest to taste: rows inside sections, tabs inside cards, etc. Keep it clean and scannable.
 - The filter control bar is generated AUTOMATICALLY from the recipe params (params with
