@@ -6,6 +6,20 @@ All notable changes to DBAide are documented here. The format is loosely based o
 
 ## [Unreleased]
 
+## [0.9.9] — 2026-06-24
+
+### Added
+
+- **Responsive dashboard loading** — the dashboard's data bridge is now asynchronous:
+  each tile's query runs on a worker thread instead of back-to-back on the GUI thread,
+  so opening a multi-tile board no longer freezes the app. Tiles show a loading spinner
+  while their data is in flight (and keep their previous content during a filter refresh).
+
+### Fixed
+
+- Filters with a dynamic default (e.g. start-of-month) now render the resolved concrete
+  value, so the initial filter condition is visible and editable rather than a blank box.
+
 ## [0.9.8] — 2026-06-24
 
 ### Added
