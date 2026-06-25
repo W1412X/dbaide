@@ -1003,6 +1003,7 @@ class DesktopService:
             database=database,
             limit=limit,
             confirmed=report.requires_confirmation,
+            enforce_cost_gate=bool(payload.get("enforce_cost_gate")),
         )
         return {
             "columns": result.columns,
@@ -1750,7 +1751,10 @@ class DesktopService:
         params = payload.get("params") if isinstance(payload.get("params"), dict) else {}
 
         def _exec(sql: str) -> dict[str, Any]:
-            return self.execute_sql({"connection_name": app.connection_name, "sql": sql})
+            # a dashboard fans out many queries per refresh — apply the EXPLAIN cost gate
+            # so an over-large recipe surfaces as a tile error instead of a heavy scan
+            return self.execute_sql({"connection_name": app.connection_name, "sql": sql,
+                                     "enforce_cost_gate": True})
 
         return run_parametric_chart(chart, params, _exec)
 

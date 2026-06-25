@@ -110,3 +110,21 @@ def test_build_dashboard_app_uses_selected_model(tmp_path, monkeypatch):
     out = svc.dispatch("build_dashboard_app", {"connection_name": "shop", "instruction": "x", "model": "m2"})
     assert seen["name"] == "m2"                 # routed to the chosen model, not the default
     assert out["app"]["name"] == "D"
+
+
+def test_run_app_chart_enforces_cost_gate(service):
+    from dbaide.boards.parametric import Combine, ParametricChart, ParametricDashboard, QuerySource
+    chart = ParametricChart(chart_id="c1", title="t", sources=[QuerySource("m", "SELECT a, b FROM t")],
+                            params=[], combine=Combine("single"),
+                            chart_plan={"chart_type": "bar", "category_field": "a", "value_fields": ["b"]})
+    app = ParametricDashboard("d", "shop", charts=[chart])
+    service.boards_apps.upsert(app)
+    seen = {}
+
+    def cap(payload):
+        seen["gate"] = payload.get("enforce_cost_gate")
+        return {"columns": ["a", "b"], "rows": [["x", 1]], "row_count": 1}
+
+    service.execute_sql = cap   # capture the flag the dashboard path passes
+    service.dispatch("run_app_chart", {"app_id": app.id, "chart_id": "c1", "params": {}})
+    assert seen["gate"] is True   # dashboard recipes run through the EXPLAIN cost gate
