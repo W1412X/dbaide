@@ -6,6 +6,23 @@ All notable changes to DBAide are documented here. The format is loosely based o
 
 ## [Unreleased]
 
+## [0.9.12] — 2026-06-25
+
+### Fixed
+
+- **Charts render reliably from real data.** The top cause of a blank/garbage chart was
+  the chart_plan (column→role mapping) drifting from the SQL it was paired with — naming
+  columns the query doesn't return, which silently produced all-"—"/0 charts. Two layers
+  now prevent this: the runtime reconciles the plan against the ACTUAL result columns
+  (auto-deriving category/value/x/y from the real data when a field is missing), and the
+  page falls back to assembling a chart client-side from the returned rows if the
+  server-side spec is still absent. A chart only shows "no data" when there genuinely is none.
+
+### Changed
+
+- The left schema/assets sidebar is hidden in the Dashboards mode (it's irrelevant there),
+  giving the board full width; it returns when switching back to Assistant/Workbench.
+
 ## [0.9.11] — 2026-06-24
 
 ### Fixed
