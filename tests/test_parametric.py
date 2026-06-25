@@ -117,6 +117,26 @@ def test_run_parametric_chart_survives_edge_filter_values():
     assert out["chart_spec"]["chart_type"] == "bar"
 
 
+def test_run_parametric_chart_reconciles_mismatched_plan():
+    # THE failure: chart_plan fields drifted from the SQL columns → it rendered garbage
+    # (all "—"/0). Reconciliation maps the plan onto the real columns so it renders.
+    chart = ParametricChart(
+        chart_id="c", title="t", sources=[QuerySource("s", "SELECT 1")], params=[],
+        combine=Combine("single"),
+        chart_plan={"chart_type": "bar", "category_field": "region", "value_fields": ["amt"]})
+    out = run_parametric_chart(chart, {},
+                               lambda _s: {"columns": ["城市", "销售额"], "rows": [["广州", 100], ["成都", 80]]})
+    s = out["chart_spec"]
+    assert s["categories"] == ["广州", "成都"]            # category auto-derived to the text column
+    assert s["series"][0]["values"] == [100.0, 80.0]      # values auto-derived to the numeric column
+    # a CORRECT plan is left untouched
+    chart2 = ParametricChart(
+        chart_id="c", title="t", sources=[QuerySource("s", "SELECT 1")], params=[], combine=Combine("single"),
+        chart_plan={"chart_type": "bar", "category_field": "城市", "value_fields": ["销售额"]})
+    out2 = run_parametric_chart(chart2, {}, lambda _s: {"columns": ["城市", "销售额"], "rows": [["广州", 5]]})
+    assert out2["chart_spec"]["categories"] == ["广州"]
+
+
 def test_combine_join_drops_null_key_rows():
     from dbaide.boards.runtime import combine_rows
     s1, s2 = QuerySource("a", ""), QuerySource("b", "")

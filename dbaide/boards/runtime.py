@@ -154,10 +154,59 @@ def run_parametric_chart(chart: ParametricChart, param_values: dict[str, Any], e
     # numeric detection + formatting on the page).
     columns = list(combined[0].keys())
     rows = [{k: _jsonable(v) for k, v in r.items()} for r in combined[:200]]
-    plan = chart_plan_from_dict(chart.chart_plan or {})
+    # Reconcile the chart_plan's field→role mapping against the ACTUAL result columns: the
+    # plan is authored separately from the SQL and often drifts (wrong column names), which
+    # otherwise renders garbage (all "—"/0). This makes the chart shape from real data.
+    plan = chart_plan_from_dict(_reconcile_chart_plan(chart.chart_plan or {}, columns, combined))
     try:
         spec = ChartAgent().build_spec(plan, chart_id=chart.chart_id or "chart", rows=combined)
         chart_spec = chart_spec_to_dict(spec)
     except ValueError:
         chart_spec = None   # can't chart these rows — a chart tile shows "no data", kpi/table still work
     return {"chart_spec": chart_spec, "row_count": len(combined), "columns": columns, "rows": rows}
+
+
+def _is_numeric_column(col: str, rows: list[dict[str, Any]]) -> bool:
+    seen = False
+    for r in rows:
+        v = r.get(col)
+        if v is None:
+            continue
+        if isinstance(v, bool) or not isinstance(v, (int, float, Decimal)):
+            return False
+        seen = True
+    return seen
+
+
+def _reconcile_chart_plan(plan: dict[str, Any], columns: list[str], rows: list[dict[str, Any]]) -> dict[str, Any]:
+    """Repair a chart_plan whose role fields don't match the real result columns.
+
+    A field that names a column that doesn't exist is replaced by an auto-derived one
+    (first text column → category/x; numeric columns → values/y). Fields that DO match are
+    left untouched, so a correct plan is unchanged."""
+    if not columns:
+        return plan
+    p = dict(plan)
+    colset = set(columns)
+    numeric = [c for c in columns if _is_numeric_column(c, rows)]
+    text = [c for c in columns if c not in numeric]
+
+    # category / x-axis label field
+    for role in ("category_field", "x_field"):
+        if p.get(role) and p[role] not in colset:
+            p[role] = (text[0] if text else columns[0])
+    cat = p.get("category_field") or p.get("x_field") or ""
+
+    # value series fields
+    vals = [v for v in (p.get("value_fields") or []) if v in colset]
+    if p.get("value_fields") and not vals:
+        vals = [c for c in numeric if c != cat] or [c for c in columns if c != cat]
+        p["value_fields"] = vals
+
+    # scalar y / size fields used by scatter-like charts
+    for role in ("y_field", "size_field"):
+        if p.get(role) and p[role] not in colset:
+            cand = [c for c in numeric if c != cat]
+            if cand:
+                p[role] = cand[0]
+    return p
