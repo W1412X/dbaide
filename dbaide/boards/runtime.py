@@ -180,32 +180,47 @@ def _is_numeric_column(col: str, rows: list[dict[str, Any]]) -> bool:
     return seen
 
 
+_CATVAL_CHARTS = {
+    "bar", "horizontal_bar", "grouped_bar", "stacked_bar", "line", "area", "stacked_area",
+    "multi_axis_line", "combo", "pie", "donut", "funnel", "waterfall",
+}
+
+
 def _reconcile_chart_plan(plan: dict[str, Any], columns: list[str], rows: list[dict[str, Any]]) -> dict[str, Any]:
     """Repair a chart_plan whose role fields don't match the real result columns.
 
-    A field that names a column that doesn't exist is replaced by an auto-derived one
-    (first text column → category/x; numeric columns → values/y). Fields that DO match are
-    left untouched, so a correct plan is unchanged."""
+    For category/value chart types the category + value fields are GUARANTEED valid
+    (auto-derived from the data when missing or naming a column that isn't there: first
+    text column → category, numeric columns → values). For other types (scatter/heatmap/…)
+    only set-but-missing fields are repaired. Fields that already match are left untouched,
+    so a correct plan is unchanged."""
     if not columns:
         return plan
     p = dict(plan)
     colset = set(columns)
     numeric = [c for c in columns if _is_numeric_column(c, rows)]
     text = [c for c in columns if c not in numeric]
+    ctype = str(p.get("chart_type") or "").lower()
 
-    # category / x-axis label field
+    if ctype in _CATVAL_CHARTS:
+        # ensure category + values exist and point at real columns
+        if not p.get("category_field") or p["category_field"] not in colset:
+            p["category_field"] = (text[0] if text else columns[0])
+        cat = p["category_field"]
+        vals = [v for v in (p.get("value_fields") or []) if v in colset]
+        if not vals:
+            vals = [c for c in numeric if c != cat] or [c for c in columns if c != cat]
+        p["value_fields"] = vals
+        return p
+
+    # other chart types: only repair role fields that are set but name a missing column
+    cat = p.get("category_field") or p.get("x_field") or ""
     for role in ("category_field", "x_field"):
         if p.get(role) and p[role] not in colset:
             p[role] = (text[0] if text else columns[0])
-    cat = p.get("category_field") or p.get("x_field") or ""
-
-    # value series fields
     vals = [v for v in (p.get("value_fields") or []) if v in colset]
     if p.get("value_fields") and not vals:
-        vals = [c for c in numeric if c != cat] or [c for c in columns if c != cat]
-        p["value_fields"] = vals
-
-    # scalar y / size fields used by scatter-like charts
+        p["value_fields"] = [c for c in numeric if c != cat] or [c for c in columns if c != cat]
     for role in ("y_field", "size_field"):
         if p.get(role) and p[role] not in colset:
             cand = [c for c in numeric if c != cat]

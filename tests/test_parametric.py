@@ -137,6 +137,16 @@ def test_run_parametric_chart_reconciles_mismatched_plan():
     assert out2["chart_spec"]["categories"] == ["广州"]
 
 
+def test_run_parametric_chart_reconciles_sparse_plan():
+    # a category/value chart with NO fields set must still render (fields derived from data)
+    chart = ParametricChart(
+        chart_id="c", title="t", sources=[QuerySource("s", "SELECT 1")], params=[],
+        combine=Combine("single"), chart_plan={"chart_type": "bar"})
+    s = run_parametric_chart(chart, {},
+                             lambda _s: {"columns": ["城市", "销售额"], "rows": [["广州", 100], ["成都", 80]]})["chart_spec"]
+    assert s and set(s["categories"]) == {"广州", "成都"} and 100.0 in s["series"][0]["values"]
+
+
 def test_combine_join_drops_null_key_rows():
     from dbaide.boards.runtime import combine_rows
     s1, s2 = QuerySource("a", ""), QuerySource("b", "")
