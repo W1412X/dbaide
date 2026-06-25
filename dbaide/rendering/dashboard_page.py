@@ -118,8 +118,14 @@ _CLIENT_JS = r"""
     if(kind==='table') return !el.querySelector('table');
     return !el.querySelector('canvas');
   }
+  function showBusy(el){
+    if(el.querySelector(':scope > .dbaide-busy')) return;
+    var o=document.createElement('div'); o.className='dbaide-busy'; o.innerHTML='<span class="dbaide-spin"></span>';
+    el.appendChild(o);
+  }
+  function clearBusy(el){ var o=el.querySelector(':scope > .dbaide-busy'); if(o && o.parentNode) o.parentNode.removeChild(o); }
   function markLoading(el, kind){
-    if(!isEmptyTile(el, kind)) return;   // on a refresh keep old content until new data lands (no flicker)
+    if(!isEmptyTile(el, kind)){ showBusy(el); return; }   // refresh/apply: overlay spinner over existing content
     if(kind==='kpi'){ var v=el.querySelector('.dbaide-kpi-value'); if(v) v.innerHTML='<span class="dbaide-spin"></span>'; return; }
     el.classList.remove('dbaide-empty'); el.classList.add('dbaide-loading'); el.innerHTML='';
   }
@@ -128,6 +134,7 @@ _CLIENT_JS = r"""
     var cid=el.getAttribute('data-chart'), kind=el.getAttribute('data-kind')||'chart';
     markLoading(el, kind);
     cachedQuery(cid, params).then(function(res){
+      clearBusy(el);   // remove the apply/refresh overlay once new data lands
       var err=(!res || res.error);
       if(kind==='kpi'){   // a card with child nodes — never wipe it with textContent
         if(err){ var v=el.querySelector('.dbaide-kpi-value'); if(v) v.textContent='—'; return; }
@@ -228,6 +235,9 @@ def _base_css(theme: dict[str, Any]) -> str:
     .dbaide-spin, .dbaide-loading::after {{ content:''; display:inline-block; width:22px; height:22px;
       border:2px solid var(--border); border-top-color:var(--accent); border-radius:50%;
       animation:dbaide-rot .7s linear infinite; }}
+    .dbaide-card, [data-kind="chart"], .dbaide-table-wrap {{ position:relative; }}
+    .dbaide-busy {{ position:absolute; inset:0; display:flex; align-items:center; justify-content:center;
+      background:rgba(0,0,0,.28); border-radius:8px; z-index:5; }}
     input, select {{ font:inherit; color:var(--text); background:var(--panel2);
       border:1px solid var(--border); border-radius:6px; padding:6px 9px; min-width:120px; }}
     input:focus, select:focus {{ outline:none; border-color:var(--accent); }}

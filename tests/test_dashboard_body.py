@@ -97,6 +97,7 @@ def test_page_uses_async_bridge_and_loading():
     page = build_dashboard_page("<div></div>", echarts_src="x", theme={})
     assert "bridge.request(" in page and "resultReady.connect" in page   # async, off-thread queries
     assert "markLoading" in page and "dbaide-spin" in page               # per-tile loading view
+    assert "showBusy" in page and "dbaide-busy" in page                  # overlay spinner on apply/refresh
 
 
 def test_kpi_tile_carries_format_and_trend():
