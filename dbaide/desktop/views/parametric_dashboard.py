@@ -278,8 +278,10 @@ class ParametricDashboardStudio(QWidget):
                                    {"app_id": app_id, "chart_id": chart_id, "params": params})
             spec = res.get("chart_spec")
             option = chart_spec_to_echarts_option(spec, theme=_theme_payload()) if spec else None
-            # return data too: kpi/table tiles render from rows; chart tiles use the option
+            # return data + chart_type too: kpi/table render from rows; chart tiles use the
+            # option, and fall back to a client-side chart from rows if the option is missing
             return {"echarts_option": option, "title": spec.get("title") if spec else None,
+                    "chart_type": res.get("chart_type") or "",
                     "columns": res.get("columns") or [], "rows": res.get("rows") or []}
         return run
 

@@ -163,7 +163,9 @@ def run_parametric_chart(chart: ParametricChart, param_values: dict[str, Any], e
         chart_spec = chart_spec_to_dict(spec)
     except ValueError:
         chart_spec = None   # can't chart these rows — a chart tile shows "no data", kpi/table still work
-    return {"chart_spec": chart_spec, "row_count": len(combined), "columns": columns, "rows": rows}
+    # chart_type lets the page build a client-side fallback chart from rows when chart_spec is None
+    return {"chart_spec": chart_spec, "chart_type": getattr(plan, "chart_type", "") or "",
+            "row_count": len(combined), "columns": columns, "rows": rows}
 
 
 def _is_numeric_column(col: str, rows: list[dict[str, Any]]) -> bool:

@@ -98,6 +98,7 @@ def test_page_uses_async_bridge_and_loading():
     assert "bridge.request(" in page and "resultReady.connect" in page   # async, off-thread queries
     assert "markLoading" in page and "dbaide-spin" in page               # per-tile loading view
     assert "showBusy" in page and "dbaide-busy" in page                  # overlay spinner on apply/refresh
+    assert "fallbackChart" in page                                       # client-side chart from rows when spec is null
 
 
 def test_kpi_tile_carries_format_and_trend():

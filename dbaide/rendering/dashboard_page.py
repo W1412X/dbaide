@@ -110,6 +110,38 @@ _CLIENT_JS = r"""
     }
     draw(null, 1);
   }
+  function cssVar(n){ try{ return getComputedStyle(document.documentElement).getPropertyValue(n).trim(); }catch(e){ return ''; } }
+  function fallbackChart(res){
+    // build a simple echarts option straight from columns+rows when the server spec is
+    // missing — a last-resort so a chart with real data never shows blank
+    var cols=res.columns||[], rows=res.rows||[];
+    if(!rows.length || !cols.length) return null;
+    var nums=numColumns(cols, rows), cat=null;
+    for(var i=0;i<cols.length;i++){ if(nums.indexOf(cols[i])<0){ cat=cols[i]; break; } }
+    if(cat==null) cat=cols[0];
+    var valCols=nums.filter(function(c){ return c!==cat; });
+    var t=(res.chart_type||'bar').toLowerCase();
+    var ac=cssVar('--accent')||'#3b82f6', tx=cssVar('--text2')||'#9aa0a6', bd=cssVar('--border')||'#2c2f36';
+    if((t==='pie'||t==='donut') && valCols.length){
+      var vc=valCols[0];
+      return {textStyle:{color:tx}, tooltip:{trigger:'item'}, series:[{type:'pie',
+        radius: t==='donut'?['42%','70%']:'66%',
+        data: rows.slice(0,50).map(function(r){ return {name:String(r[cat]), value:r[vc]}; })}]};
+    }
+    if(t==='scatter' && nums.length>=2){
+      return {textStyle:{color:tx}, tooltip:{trigger:'item'}, xAxis:{splitLine:{lineStyle:{color:bd}}},
+        yAxis:{splitLine:{lineStyle:{color:bd}}},
+        series:[{type:'scatter', itemStyle:{color:ac}, data: rows.slice(0,2000).map(function(r){ return [r[nums[0]], r[nums[1]]]; })}]};
+    }
+    if(!valCols.length) return null;
+    var stype=(t==='line'||t==='area')?'line':'bar';
+    return {textStyle:{color:tx}, tooltip:{trigger:'axis'}, grid:{left:54,right:18,top:24,bottom:42},
+      legend: valCols.length>1?{textStyle:{color:tx},top:0}:undefined,
+      xAxis:{type:'category', axisLine:{lineStyle:{color:bd}}, data: rows.slice(0,200).map(function(r){ return String(r[cat]); })},
+      yAxis:{type:'value', splitLine:{lineStyle:{color:bd}}},
+      series: valCols.map(function(c){ return {name:c, type:stype, data: rows.slice(0,200).map(function(r){ return r[c]; }),
+        areaStyle: t==='area'?{}:undefined, itemStyle: valCols.length===1?{color:ac}:undefined}; })};
+  }
   function cachedQuery(cid, params){
     // dedup within a refresh: one recipe feeding kpi+chart+table runs its SQL once
     if(!cache) return query(cid, params);
@@ -152,12 +184,15 @@ _CLIENT_JS = r"""
         else renderTable(el, res);
         return;
       }
-      if(!res.echarts_option){ el.classList.add('dbaide-empty'); el.textContent='无数据'; return; }
       if(!window.echarts) return;
+      // prefer the server-built option; if it's missing, fall back to a client-side chart
+      // assembled straight from columns+rows so real data never shows blank
+      var opt=res.echarts_option || fallbackChart(res);
+      if(!opt){ el.classList.add('dbaide-empty'); el.textContent='无数据'; return; }
       // key the instance by the ELEMENT (getInstanceByDom), not the chart_id — the same
       // recipe can drive several chart tiles, which would collide on a chart_id map
       var inst=echarts.getInstanceByDom(el) || echarts.init(el);
-      inst.setOption(res.echarts_option, true); inst.resize();
+      inst.setOption(opt, true); inst.resize();
     });
   }
   function refresh(){
