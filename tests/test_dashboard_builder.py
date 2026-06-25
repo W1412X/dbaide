@@ -109,6 +109,21 @@ def test_builder_raises_when_recipes_never_validate():
             instruction="x", validate=lambda sql: type("R", (), {"ok": False, "issues": ["not read-only"]})())
 
 
+def test_builder_validates_multi_param_in_list_form():
+    # a multi filter used in scalar form (col = :p) must FAIL validation — the validator
+    # binds 2 values so the IN(...) list form is actually exercised (not just the default)
+    bad = {**_PAYLOAD, "charts": [{**_PAYLOAD["charts"][0],
+           "sources": [{"id": "m", "sql": "SELECT region, sum(amt) AS amt FROM sales WHERE region = :region GROUP BY 1"}],
+           "params": [{"name": "region", "type": "enum", "options": ["A", "B"], "multi": True}]}]}
+
+    def validate(sql):
+        broken = "= '__a__', '__b__'" in sql or "= 'A', 'B'" in sql   # scalar `=` fed a list
+        return {"ok": not broken, "issues": ["syntax error near ','"] if broken else []}
+
+    with pytest.raises(ValueError, match="fail against the database"):
+        DashboardBuilderAgent(_MockLLM(bad)).build(instruction="x", validate=validate)
+
+
 def test_builder_self_corrects_using_db_errors():
     # 1st draft references an invented column; the DB error is fed back and the
     # 2nd draft (good) validates → build succeeds with the corrected recipe.

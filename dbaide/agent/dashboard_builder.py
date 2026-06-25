@@ -118,7 +118,14 @@ class DashboardBuilderAgent:
     def _validation_errors(charts: list[ParametricChart], validate: Validate) -> list[str]:
         errors: list[str] = []
         for chart in charts:
-            values = chart.default_params()
+            values = dict(chart.default_params())
+            # Force every multi param to a 2-VALUE list so the IN(...) list form is actually
+            # exercised — otherwise a scalar `col = :p` used for a multi filter passes
+            # validation (default is single/empty) but breaks at runtime when 2+ are selected.
+            for p in chart.params:
+                if getattr(p, "multi", False):
+                    opts = [str(o) for o in (getattr(p, "options", None) or [])]
+                    values[p.name] = (opts[:2] + ["__a__", "__b__"])[:2]
             for src in chart.sources:
                 bound = render_sql(src.sql, values, chart.params)
                 report = validate(bound)

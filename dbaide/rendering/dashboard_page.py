@@ -95,8 +95,11 @@ _CLIENT_JS = r"""
     var cols=res.columns||[], rows=(res.rows||[]).slice(0,200), nums=numColumns(cols, rows);
     function draw(sortCol, dir){
       var rr=rows.slice();
-      if(sortCol!=null){ rr.sort(function(a,b){ var x=a[sortCol],y=b[sortCol];
-        if(x==null) return 1; if(y==null) return -1; if(x<y) return -dir; if(x>y) return dir; return 0; }); }
+      if(sortCol!=null){ var isn=nums.indexOf(sortCol)>=0;
+        rr.sort(function(a,b){ var x=a[sortCol],y=b[sortCol], xn=(x==null), yn=(y==null);
+          if(xn&&yn) return 0; if(xn) return 1; if(yn) return -1;   // nulls always last (both orders)
+          var c=isn ? (x-y) : String(x).localeCompare(String(y));   // numeric cols numeric, else lexical
+          return c<0?-dir:(c>0?dir:0); }); }
       var head='<tr>'+cols.map(function(c){ var isn=nums.indexOf(c)>=0, sc=(c===sortCol)?' sorted':'', arrow=(c===sortCol)?(dir>0?'▲':'▼'):'';
         return '<th class="'+(isn?'num':'')+sc+'" data-col="'+esc(c)+'" data-arrow="'+arrow+'">'+esc(c)+'</th>'; }).join('')+'</tr>';
       var body=rr.slice(0,100).map(function(r){ return '<tr>'+cols.map(function(c){ var isn=nums.indexOf(c)>=0;
@@ -132,6 +135,7 @@ _CLIENT_JS = r"""
   function renderTile(el, params){
     if(el.closest('.dbaide-tabpanel:not(.active)')) return;   // render lazily when its tab opens
     var cid=el.getAttribute('data-chart'), kind=el.getAttribute('data-kind')||'chart';
+    el.setAttribute('data-sig', JSON.stringify(params||{}));  // mark which params this tile reflects
     markLoading(el, kind);
     cachedQuery(cid, params).then(function(res){
       clearBusy(el);   // remove the apply/refresh overlay once new data lands
@@ -169,8 +173,10 @@ _CLIENT_JS = r"""
     tabs.querySelectorAll(':scope > .dbaide-tabpanel').forEach(function(p){
       p.classList.toggle('active', p.getAttribute('data-tabpanel')===key);
     });
-    var panel=tabs.querySelector('.dbaide-tabpanel.active');
-    if(panel){ panel.querySelectorAll('[data-chart]').forEach(function(el){ renderTile(el, lastParams); }); }
+    var panel=tabs.querySelector('.dbaide-tabpanel.active'), sig=JSON.stringify(lastParams||{});
+    if(panel){ panel.querySelectorAll('[data-chart]').forEach(function(el){
+      if(el.getAttribute('data-sig')!==sig) renderTile(el, lastParams);   // only (re)render tiles not already current
+    }); }
   }
   function updateSummaries(){
     document.querySelectorAll('.dbaide-dd').forEach(function(d){

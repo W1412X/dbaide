@@ -53,9 +53,11 @@ Layout rules (the "ui" is a nestable component tree — compose freely):
   "tabs" whose children are "tab" nodes ({"label","children"}).
 - LEAVES (content): "chart" (an ECharts chart; optional "height", default 280),
   "kpi" (a big metric; give a short "label" and optional "format":"int|float|percent|
-  currency". Its recipe returns ONE aggregate value — OR, for a trend KPI, set
-  "trend":true and have the recipe return an ordered time series (label,value); the tile
-  then shows the latest value + %-change vs the previous point + a sparkline),
+  currency". Its recipe returns ONE row whose LAST column is the value — OR, for a trend
+  KPI, set "trend":true and have the recipe return a time series as (period_label, value)
+  with an explicit ORDER BY period ASC (oldest→newest); the tile reads the LAST column as
+  the value, shows the latest point + %-change vs the previous + a sparkline. Without
+  ORDER BY the trend is meaningless, so always order it),
   "table" (the recipe's rows; numeric columns auto-format/right-align and headers are
   click-to-sort), "text"/"markdown" (a note; basic markdown), "heading" ("text"), "divider".
 - Every chart/kpi/table node MUST reference a "chart" id that exists in "charts".

@@ -271,10 +271,11 @@ class ParametricDashboardStudio(QWidget):
         from dbaide.charts.echarts import chart_spec_to_echarts_option
         from dbaide.desktop.components.chart_block import _theme_payload
         service = self._service
+        app_id = self._app_id   # snapshot: an in-flight worker must hit THIS render's app, not a later one
 
         def run(chart_id: str, params: dict[str, Any]) -> dict[str, Any]:
             res = service.dispatch("run_app_chart",
-                                   {"app_id": self._app_id, "chart_id": chart_id, "params": params})
+                                   {"app_id": app_id, "chart_id": chart_id, "params": params})
             spec = res.get("chart_spec")
             option = chart_spec_to_echarts_option(spec, theme=_theme_payload()) if spec else None
             # return data too: kpi/table tiles render from rows; chart tiles use the option

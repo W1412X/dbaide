@@ -121,6 +121,9 @@ def combine_rows(result_sets: list[tuple[QuerySource, list[dict[str, Any]]]], co
         for src, rows in sets:
             for r in rows:
                 k = r.get(key)
+                if k is None:
+                    continue   # a row with no join key can't be joined — dropping it silently
+                              # (and merging all NULL-key rows into one bucket) would lose data
                 if k not in index:
                     index[k] = {}
                     order.append(k)

@@ -117,6 +117,17 @@ def test_run_parametric_chart_survives_edge_filter_values():
     assert out["chart_spec"]["chart_type"] == "bar"
 
 
+def test_combine_join_drops_null_key_rows():
+    from dbaide.boards.runtime import combine_rows
+    s1, s2 = QuerySource("a", ""), QuerySource("b", "")
+    sets = [(s1, [{"k": 1, "x": 10}, {"k": None, "x": 99}]),
+            (s2, [{"k": 1, "y": 20}, {"k": 2, "y": 30}])]
+    out = combine_rows(sets, Combine(mode="join", key="k"))
+    assert sorted(r["k"] for r in out) == [1, 2]          # the None-key row is dropped, not bucketed
+    merged = next(r for r in out if r["k"] == 1)
+    assert merged["x"] == 10 and merged["y"] == 20        # real keys still join correctly
+
+
 def test_run_parametric_chart_empty_rows_is_no_data_not_error():
     # THE bug: a filter that matched nothing made build_spec().validate() raise
     # "each series requires non-empty values" → the chart errored on every such change.

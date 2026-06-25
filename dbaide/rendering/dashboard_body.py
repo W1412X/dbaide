@@ -46,19 +46,20 @@ def _control(p: Any) -> str:
     options = list(getattr(p, "options", None) or [])
     default = getattr(p, "default", None)
     if ptype == "enum" and options:
-        selected = (set(default) if isinstance(default, (list, tuple))
-                    else ({default} if default not in (None, "") else set()))
+        raw_sel = (default if isinstance(default, (list, tuple))
+                   else ([default] if default not in (None, "") else []))
+        selected = {str(x) for x in raw_sel}   # str-normalize so a numeric default matches a string option
         if getattr(p, "multi", False):
             checks = "".join(
                 f'<label class="dbaide-check"><input type="checkbox" data-param="{name}" '
-                f'value="{escape(str(o))}"{" checked" if o in selected else ""}>{escape(str(o))}</label>'
+                f'value="{escape(str(o))}"{" checked" if str(o) in selected else ""}>{escape(str(o))}</label>'
                 for o in options)
             bar = (f'<div class="dbaide-ckbar"><button type="button" data-ckall>{escape(_t("dash.select_all"))}</button>'
                    f'<button type="button" data-ckno>{escape(_t("dash.clear"))}</button></div>')
             return (f'<details class="dbaide-dd"><summary data-ddlabel="{label}">{label}</summary>'
                     f'<div class="dbaide-checklist">{bar}{checks}</div></details>')
         opts = "".join(
-            f'<option value="{escape(str(o))}"{" selected" if o in selected else ""}>{escape(str(o))}</option>'
+            f'<option value="{escape(str(o))}"{" selected" if str(o) in selected else ""}>{escape(str(o))}</option>'
             for o in options)
         return f'<label>{label}<select data-param="{name}">{opts}</select></label>'
     html_type = {"date": "date", "number": "number"}.get(ptype, "text")
