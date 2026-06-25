@@ -6,6 +6,21 @@ All notable changes to DBAide are documented here. The format is loosely based o
 
 ## [Unreleased]
 
+## [0.9.13] — 2026-06-25
+
+### Added
+
+- Dashboards aren't chart-only: a text/markdown tile now renders GFM pipe tables
+  (`| A | B |`) as real tables (with inline markdown in cells), so composed summaries and
+  key-findings tables display alongside charts and recipe-driven data tables. The builder
+  is steered to use table/text tiles when a chart isn't the right fit.
+
+### Fixed
+
+- Chart-plan reconciliation is now chart-type-aware and guarantees the category/value
+  fields for category-type charts (bar/line/pie/…): a plan that omits or misnames those
+  fields still renders, with the mapping derived from the actual result columns.
+
 ## [0.9.12] — 2026-06-25
 
 ### Fixed
