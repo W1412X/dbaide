@@ -6,7 +6,24 @@ All notable changes to DBAide are documented here. The format is loosely based o
 
 ## [Unreleased]
 
-## [0.9.10] — 2026-06-24
+## [0.9.11] — 2026-06-24
+
+### Fixed
+
+- Correctness pass over the AI-dashboard subsystem (from an adversarial review):
+  - **Join data loss** — combining multiple sources with `mode:"join"` dropped rows
+    whose join key was NULL/missing into a single overwriting bucket; keyless rows are
+    now dropped cleanly and real keys join correctly.
+  - **Filter validation gap** — a multi-select filter mistakenly written in scalar form
+    (`col = :p`) passed build-time validation (which used the default) but produced
+    invalid SQL when 2+ values were selected; validation now exercises the `IN(...)` list
+    form so the mistake is caught and self-corrected at build time.
+  - **Table sorting** now uses a consistent comparator (numeric columns numerically,
+    others lexically, NULLs always last) instead of mixed-type comparison.
+  - Switching dashboard tabs no longer re-renders already-current tiles, and a tab opened
+    after applying a filter correctly refreshes with the new filter values.
+  - The dashboard's worker thread pool is owned by the view (not recreated per render),
+    removing a use-after-free window when refining while a query was still loading.
 
 ### Added
 
