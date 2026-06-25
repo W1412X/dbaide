@@ -764,6 +764,8 @@ class MainWindow(QMainWindow):
             name = self._tab_names[index]
             if name == "Dashboards":
                 self.dashboard_tab.reload()   # pick up boards/tiles pinned since last view
+            # the left schema/assets sidebar is irrelevant to dashboards — hide it there
+            self.sidebar.setVisible(name != "Dashboards")
             self._ensure_ui_state().apply_mode(ModeUiState(index=index, mode=name))
 
     def _on_pin_charts(self, charts: object, question: str) -> None:

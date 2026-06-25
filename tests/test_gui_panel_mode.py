@@ -97,3 +97,14 @@ def test_shortcut_close_keeps_history_pinned(qapp, tmp_path):
     win._shortcut_close_doc()  # History is pinned → no-op
     assert win.workbench.tabs.count() == before
     win.deleteLater(); _drain(qapp)
+
+
+def test_dashboards_mode_hides_left_sidebar(tmp_path, qapp):
+    win = _make_window(tmp_path, qapp)
+    names = win._tab_names
+    win.tabbar.setCurrentIndex(names.index("Assistant"))
+    assert not win.sidebar.isHidden()                 # schema/assets sidebar visible in Assistant
+    win.tabbar.setCurrentIndex(names.index("Dashboards"))
+    assert win.sidebar.isHidden()                     # irrelevant to dashboards → hidden
+    win.tabbar.setCurrentIndex(names.index("Workbench"))
+    assert not win.sidebar.isHidden()                 # back on switch away
