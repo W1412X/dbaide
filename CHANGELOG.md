@@ -6,6 +6,13 @@ All notable changes to DBAide are documented here. The format is loosely based o
 
 ## [Unreleased]
 
+## [0.9.10] — 2026-06-24
+
+### Added
+
+- Applying a filter now shows a loading overlay on each tile (a spinner over the
+  existing chart/KPI/table, which stays visible) until the refreshed data lands.
+
 ## [0.9.9] — 2026-06-24
 
 ### Added
