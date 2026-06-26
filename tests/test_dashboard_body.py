@@ -143,6 +143,7 @@ def test_page_uses_async_bridge_and_loading():
     assert "showBusy" in page and "dbaide-busy" in page                  # overlay spinner on apply/refresh
     assert "fallbackChart" in page                                       # client-side chart from rows when spec is null
     assert "autosizeChart" in page and "max-width:860px" in page          # data-aware sizing + responsive reflow
+    assert "crossFilter" in page and "inst.on('click'" in page            # click a chart category to filter the board
 
 
 def test_kpi_tile_carries_format_and_trend():

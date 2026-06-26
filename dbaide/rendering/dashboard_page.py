@@ -228,7 +228,22 @@ _CLIENT_JS = r"""
       // recipe can drive several chart tiles, which would collide on a chart_id map
       var inst=echarts.getInstanceByDom(el) || echarts.init(el);
       inst.setOption(opt, true); inst.resize();
+      inst.off('click'); inst.on('click', function(p){ if(p && p.name!=null) crossFilter(''+p.name); });
     });
+  }
+  function crossFilter(value){
+    // click a chart category → set the matching filter to that value → refresh all tiles.
+    // The filter is found by which multi-select's OPTIONS contain the clicked value, so no
+    // chart→param mapping has to be declared anywhere.
+    var boxes=document.querySelectorAll('input[type="checkbox"][data-param]'), target=null;
+    for(var i=0;i<boxes.length;i++){ if(boxes[i].value===value){ target=boxes[i]; break; } }
+    if(!target) return;   // clicked value isn't a filter dimension → no-op
+    var name=target.getAttribute('data-param');
+    document.querySelectorAll('input[type="checkbox"][data-param="'+name+'"]').forEach(function(c){
+      c.checked=(c.value===value);   // isolate the clicked value in that filter
+    });
+    updateSummaries();
+    refresh();
   }
   function refresh(){
     whenReady(function(){
@@ -257,7 +272,7 @@ _CLIENT_JS = r"""
       s.textContent=lbl+' ('+n+'/'+boxes.length+')';   // ▾ comes from ::after
     });
   }
-  window.dbaide={query:query, collectParams:collectParams, renderTile:renderTile, refresh:refresh};
+  window.dbaide={query:query, collectParams:collectParams, renderTile:renderTile, refresh:refresh, crossFilter:crossFilter};
   window.addEventListener('resize', function(){
     if(!window.echarts) return;
     document.querySelectorAll('[data-kind="chart"]').forEach(function(el){
