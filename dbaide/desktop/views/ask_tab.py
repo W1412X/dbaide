@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import os
 from typing import Any
 
 from PyQt6.QtCore import pyqtSignal
@@ -8,16 +7,8 @@ from PyQt6.QtWidgets import QApplication, QHBoxLayout, QSizePolicy, QStackedWidg
 
 from dbaide.desktop.components.base import compact_button, discard_widget
 from dbaide.desktop.components.conversation import ConversationView
-from dbaide.desktop.components.conversation_webview import ConversationWebView
 from dbaide.desktop.components.empty_state import EmptyState
 from dbaide.desktop.components.trace import close_trace_overlays, close_trace_overlays_for
-
-
-def _single_view_chat() -> bool:
-    """Render the whole conversation in ONE WebEngine view (bounded memory) instead of
-    one WebEngine view per answer. Default on; set DBAIDE_CHAT_SINGLE_VIEW=0 to fall
-    back to the legacy multi-widget view."""
-    return os.environ.get("DBAIDE_CHAT_SINGLE_VIEW", "1").strip().lower() not in ("0", "false", "no")
 
 
 class AskTab(QWidget):
@@ -62,7 +53,7 @@ class AskTab(QWidget):
         self.stack.addWidget(empty_page)  # index 0 — always present
 
         layout.addWidget(self.stack, 1)
-        self._views: dict[str, Any] = {}
+        self._views: dict[str, ConversationView] = {}
         self._active: str = ""
         self._has_conn = False
         self._hint_shown = False
@@ -70,10 +61,10 @@ class AskTab(QWidget):
     # ── slot lifecycle ────────────────────────────────────────────────────────
 
     def ensure_slot(self, key: str) -> ConversationView:
-        """Return the conversation view for ``key``, creating + wiring it if needed."""
+        """Return the ConversationView for ``key``, creating + wiring it if needed."""
         view = self._views.get(key)
         if view is None:
-            view = ConversationWebView() if _single_view_chat() else ConversationView()
+            view = ConversationView()
             view.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
             self._views[key] = view
             self.stack.addWidget(view)
@@ -216,25 +207,28 @@ class AskTab(QWidget):
         workflow_id = str(result.get("workflow_id") or "")
         ok = status not in ("failed", "cancelled")
         answer = result.get("answer_markdown") or result.get("answer_plaintext") or ""
-        self._finish(
-            self.ensure_slot(key),
+        self.ensure_slot(key).complete_turn(
             answer=answer,
             trace_events=result.get("trace") or [],
             warnings=result.get("warnings") or None,
             errors=result.get("errors") or None,
             workflow_id=workflow_id,
             ok=ok,
+            actions_widget=self._build_actions(
+                answer,
+                result.get("cli_command"),
+                result.get("selected_sql"),
+                charts=result.get("charts") or None,
+                export_title=str(result.get("question") or ""),
+            ),
             charts=result.get("charts") or None,
-            selected_sql=result.get("selected_sql"),
-            cli_command=result.get("cli_command"),
-            export_title=str(result.get("question") or ""),
         )
 
     def append_note(self, key: str, title: str, body: str) -> None:
         view = self.ensure_slot(key)
         view.begin_turn("")
         body = f"**{title}**\n\n{body}"
-        self._finish(view, answer=body, ok=True)
+        view.complete_turn(answer=body, ok=True, actions_widget=self._build_actions(body, None))
 
     def append_search_hits(self, key: str, query: str, hits: list[dict[str, Any]]) -> None:
         from dbaide.i18n import t as _t
@@ -249,7 +243,7 @@ class AskTab(QWidget):
             body = "\n".join(lines)
         view = self.ensure_slot(key)
         view.begin_turn(query)
-        self._finish(view, answer=body, ok=True)
+        view.complete_turn(answer=body, ok=True, actions_widget=self._build_actions(body, None))
 
     def clear_slot(self, key: str) -> None:
         view = self._views.get(key)
@@ -278,21 +272,25 @@ class AskTab(QWidget):
                 view.begin_turn(str(turn.get("question") or ""), meta=meta_line, placeholder=False,
                                 attachments=attachments)
                 status = str(turn.get("status") or "completed")
-                self._finish(
-                    view,
+                view.complete_turn(
                     answer=str(turn.get("answer_markdown") or ""),
                     trace_events=turn.get("trace") or [],
                     ok=status not in ("failed", "cancelled"),
+                    actions_widget=self._build_actions(
+                        str(turn.get("answer_markdown") or ""),
+                        None,
+                        turn.get("selected_sql"),
+                        charts=turn.get("charts") or None,
+                        export_title=str(turn.get("question") or ""),
+                    ),
                     charts=turn.get("charts") or None,
-                    selected_sql=turn.get("selected_sql"),
-                    export_title=str(turn.get("question") or ""),
                 )
         finally:
             view.end_bulk_load()
 
     # ── helpers ───────────────────────────────────────────────────────────────
 
-    def _menu_items(
+    def _build_actions(
         self,
         answer: str,
         cli_command: str | None,
@@ -300,10 +298,7 @@ class AskTab(QWidget):
         charts: list[dict[str, Any]] | None = None,
         *,
         export_title: str = "",
-    ) -> list[tuple[str, str, object]]:
-        """The answer's action menu, view-agnostic: a list of (kind, label, payload)
-        where payload is either text-to-copy or a callable. Shared by the native
-        ``⋯`` button (multi-widget view) and the inline HTML buttons (single view)."""
+    ) -> QWidget | None:
         raw_answer = str(answer or "")
         answer = raw_answer.strip()
         selected_sql = str(selected_sql or "").strip()
@@ -311,8 +306,12 @@ class AskTab(QWidget):
             dict(c) for c in (charts or []) if isinstance(c, dict) and c.get("chart_id")
         ]
         if not answer and not cli_command and not selected_sql:
-            return []
+            return None
         from dbaide.desktop.components.answer_document import answer_theme_payload
+        from dbaide.desktop.components.icon_button import IconToolButton
+        from dbaide.desktop.components.icons import svg_icon
+        from dbaide.desktop.components.menu import _style_menu
+        from dbaide.desktop.theme import Theme
         from dbaide.i18n import t as _t
 
         menu_items: list[tuple[str, str, object]] = []
@@ -343,70 +342,6 @@ class AskTab(QWidget):
             menu_items.append(("copy", _t("ask.copy_sql"), selected_sql))
         if cli_command:
             menu_items.append(("copy", _t("ask.copy_cli"), str(cli_command)))
-        return menu_items
-
-    def _finish(
-        self,
-        view: Any,
-        *,
-        answer: str = "",
-        trace_events: list[dict] | None = None,
-        warnings: list[str] | None = None,
-        errors: list[str] | None = None,
-        workflow_id: str = "",
-        ok: bool = True,
-        charts: list[dict[str, Any]] | None = None,
-        selected_sql: str | None = None,
-        cli_command: str | None = None,
-        export_title: str = "",
-    ) -> None:
-        """Finalize a turn on either view type, wiring the action menu appropriately."""
-        if isinstance(view, ConversationWebView):
-            items = self._menu_items(answer, cli_command, selected_sql, charts, export_title=export_title)
-            descriptors = [{"id": str(i), "label": label} for i, (_kind, label, _p) in enumerate(items)]
-
-            def on_action(action_id: str, _items=items) -> None:
-                try:
-                    idx = int(action_id)
-                except (TypeError, ValueError):
-                    return
-                if 0 <= idx < len(_items):
-                    payload = _items[idx][2]
-                    if callable(payload):
-                        payload()
-                    else:
-                        QApplication.clipboard().setText(str(payload))
-
-            view.complete_turn(
-                answer=answer, trace_events=trace_events, warnings=warnings, errors=errors,
-                workflow_id=workflow_id, ok=ok, charts=charts,
-                actions=descriptors, on_action=on_action,
-            )
-        else:
-            view.complete_turn(
-                answer=answer, trace_events=trace_events, warnings=warnings, errors=errors,
-                workflow_id=workflow_id, ok=ok, charts=charts,
-                actions_widget=self._build_actions(
-                    answer, cli_command, selected_sql, charts=charts, export_title=export_title,
-                ),
-            )
-
-    def _build_actions(
-        self,
-        answer: str,
-        cli_command: str | None,
-        selected_sql: str | None = None,
-        charts: list[dict[str, Any]] | None = None,
-        *,
-        export_title: str = "",
-    ) -> QWidget | None:
-        from dbaide.desktop.components.icon_button import IconToolButton
-        from dbaide.desktop.components.icons import svg_icon
-        from dbaide.desktop.components.menu import _style_menu
-        from dbaide.desktop.theme import Theme
-        from dbaide.i18n import t as _t
-
-        menu_items = self._menu_items(answer, cli_command, selected_sql, charts, export_title=export_title)
         if not menu_items:
             return None
 

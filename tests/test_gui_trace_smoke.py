@@ -767,8 +767,7 @@ def test_trace_drawer_card_height_stays_content_sized(qapp):
     qapp.processEvents()
 
 
-def test_switching_slots_closes_trace_drawer(qapp, monkeypatch):
-    monkeypatch.setenv("DBAIDE_CHAT_SINGLE_VIEW", "0")  # legacy view: block._toggle_trace path
+def test_switching_slots_closes_trace_drawer(qapp):
     from dbaide.desktop.views.ask_tab import AskTab
 
     tab = AskTab()
@@ -795,8 +794,7 @@ def test_switching_slots_closes_trace_drawer(qapp, monkeypatch):
     qapp.processEvents()
 
 
-def test_loading_session_closes_trace_drawer_before_replacing_turns(qapp, monkeypatch):
-    monkeypatch.setenv("DBAIDE_CHAT_SINGLE_VIEW", "0")  # legacy view: block._toggle_trace path
+def test_loading_session_closes_trace_drawer_before_replacing_turns(qapp):
     from dbaide.desktop.views.ask_tab import AskTab
 
     tab = AskTab()
@@ -837,8 +835,7 @@ def test_loading_session_closes_trace_drawer_before_replacing_turns(qapp, monkey
     qapp.processEvents()
 
 
-def test_clearing_slot_with_open_trace_closes_drawer(qapp, monkeypatch):
-    monkeypatch.setenv("DBAIDE_CHAT_SINGLE_VIEW", "0")  # legacy view: block._toggle_trace path
+def test_clearing_slot_with_open_trace_closes_drawer(qapp):
     from dbaide.desktop.views.ask_tab import AskTab
 
     tab = AskTab()
@@ -865,8 +862,7 @@ def test_clearing_slot_with_open_trace_closes_drawer(qapp, monkeypatch):
     qapp.processEvents()
 
 
-def test_loading_other_slot_does_not_close_active_trace_drawer(qapp, monkeypatch):
-    monkeypatch.setenv("DBAIDE_CHAT_SINGLE_VIEW", "0")  # legacy view: block._toggle_trace path
+def test_loading_other_slot_does_not_close_active_trace_drawer(qapp):
     from dbaide.desktop.views.ask_tab import AskTab
 
     tab = AskTab()

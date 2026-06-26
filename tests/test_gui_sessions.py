@@ -141,9 +141,7 @@ def _bar_chart(cid: str = "chart:1") -> dict:
     }
 
 
-def test_load_session_restores_charts_with_full_render(qapp, monkeypatch):
-    # exercises the legacy multi-widget view's WebEngine-upgrade path specifically
-    monkeypatch.setenv("DBAIDE_CHAT_SINGLE_VIEW", "0")
+def test_load_session_restores_charts_with_full_render(qapp):
     from dbaide.desktop.components.answer_document import AnswerDocumentBlock
     from dbaide.desktop.views.ask_tab import AskTab
     from dbaide.rendering.compose import compose_blocks
