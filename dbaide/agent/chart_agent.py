@@ -437,7 +437,7 @@ def _materialize_heatmap(plan: ChartPlan, rows: list[dict[str, Any]]) -> dict[st
     x_vals: list[str] = []
     y_vals: list[str] = []
     x_key = plan.x_field or plan.category_field
-    value_field = plan.value_fields[0]
+    value_field = plan.value_fields[0] if plan.value_fields else ""
     cell_totals: dict[tuple[str, str], float] = {}
     for row in rows[: plan.limit]:
         xv = str(row.get(x_key) or "—")
@@ -457,7 +457,7 @@ def _materialize_heatmap(plan: ChartPlan, rows: list[dict[str, Any]]) -> dict[st
 
 
 def _materialize_sankey(plan: ChartPlan, rows: list[dict[str, Any]]) -> dict[str, Any]:
-    value_field = plan.value_fields[0]
+    value_field = plan.value_fields[0] if plan.value_fields else ""
     nodes: dict[str, dict[str, Any]] = {}
     link_totals: dict[tuple[str, str], float] = {}
     for row in rows[: plan.limit]:
@@ -514,7 +514,7 @@ def _materialize_candlestick(plan: ChartPlan, rows: list[dict[str, Any]]) -> dic
 
 def _materialize_boxplot(plan: ChartPlan, rows: list[dict[str, Any]]) -> dict[str, Any]:
     groups: dict[str, list[float]] = {}
-    field = plan.value_fields[0]
+    field = plan.value_fields[0] if plan.value_fields else ""
     for row in rows:
         key = str(row.get(plan.category_field) or "—")
         groups.setdefault(key, []).append(_as_float(row.get(field)))
