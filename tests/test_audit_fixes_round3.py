@@ -41,6 +41,18 @@ def test_gauge_chart_handles_missing_value_field():
     assert out["data"]["value"] == 0.0
 
 
+def test_import_manifest_save_is_atomic_and_round_trips(tmp_path):
+    from dbaide.ingest.manifest import ImportManifest
+    m = ImportManifest(version=1, workbooks=[])
+    path = tmp_path / "sub" / "manifest.json"  # parent doesn't exist yet
+    m.save(path)
+    assert path.exists()
+    # no temp files left behind
+    assert not list(path.parent.glob("*.tmp"))
+    loaded = ImportManifest.load(path)
+    assert loaded.to_dict() == m.to_dict()
+
+
 def test_progressive_schema_assets_handles_unnamed_database(monkeypatch):
     # _discover_from_assets filters out unnamed databases when building db_items but the
     # kept indices are positions in the ORIGINAL list; indexing the filtered db_items

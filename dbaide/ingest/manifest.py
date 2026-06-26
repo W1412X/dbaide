@@ -9,6 +9,8 @@ path itself is a plain read-only SQLite connection — the manifest is pure meta
 from __future__ import annotations
 
 import json
+import os
+import tempfile
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any
@@ -93,9 +95,23 @@ class ImportManifest:
         return cls(version=int(data.get("version") or MANIFEST_VERSION), workbooks=workbooks)
 
     def save(self, path: Path) -> None:
-        Path(path).write_text(
-            json.dumps(self.to_dict(), ensure_ascii=False, indent=2), encoding="utf-8"
-        )
+        # Atomic write (tempfile + os.replace), matching the config/board/annotation
+        # stores: a crash mid-write must not leave a truncated manifest.json that fails
+        # to parse and orphans the imported tables.
+        path = Path(path)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        content = json.dumps(self.to_dict(), ensure_ascii=False, indent=2)
+        fd, tmp = tempfile.mkstemp(dir=str(path.parent), suffix=".tmp")
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8") as fh:
+                fh.write(content)
+            os.replace(tmp, str(path))
+        except Exception:
+            try:
+                os.unlink(tmp)
+            except OSError:
+                pass
+            raise
 
     @classmethod
     def load(cls, path: Path) -> "ImportManifest":
