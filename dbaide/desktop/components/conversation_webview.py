@@ -449,16 +449,27 @@ class ConversationWebView(QWidget):
         self._push("clearAll")
 
     def copy_text(self) -> str:
-        parts: list[str] = []
+        """Export the whole conversation: each turn's question, structured trace and
+        answer (parity with the multi-widget view's 'Copy conversation')."""
+        from dbaide.agent.trace_model import render_events_text
+        blocks: list[str] = []
+        n = 0
         for turn in self._turns:
-            user = (turn.get("user") or {}).get("text") or ""
-            if user:
-                parts.append(user)
-            final = turn.get("_final") or turn.get("_answer") or ""
-            if final:
-                parts.append(final)
-            parts.append("---")
-        return "\n\n".join(parts).strip()
+            q = str((turn.get("user") or {}).get("text") or "").strip()
+            ans = str(turn.get("_final") or turn.get("_answer") or "").strip()
+            trace = render_events_text(turn.get("_events") or [])
+            if not (q or ans or trace):
+                continue
+            n += 1
+            parts = [f"### Turn {n}"]
+            if q:
+                parts.append(f"Q: {q}")
+            if trace:
+                parts += ["", "Trace:", trace]
+            if ans:
+                parts += ["", "Answer:", ans]
+            blocks.append("\n".join(parts))
+        return ("\n\n" + "─" * 60 + "\n\n").join(blocks)
 
     def refresh_theme(self) -> None:
         """Push the current app palette to the page (call after a theme switch)."""

@@ -15,8 +15,9 @@ from dbaide.desktop.components.trace import close_trace_overlays, close_trace_ov
 
 def _single_view_chat() -> bool:
     """Render the whole conversation in ONE WebEngine view (bounded memory) instead of
-    one view per answer. Opt-in while it stabilises; flipped on by default once verified."""
-    return os.environ.get("DBAIDE_CHAT_SINGLE_VIEW", "0").strip().lower() not in ("", "0", "false", "no")
+    one WebEngine view per answer. Default on; set DBAIDE_CHAT_SINGLE_VIEW=0 to fall
+    back to the legacy multi-widget view."""
+    return os.environ.get("DBAIDE_CHAT_SINGLE_VIEW", "1").strip().lower() not in ("0", "false", "no")
 
 
 class AskTab(QWidget):
