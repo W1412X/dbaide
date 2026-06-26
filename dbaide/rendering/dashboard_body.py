@@ -362,6 +362,7 @@ def _render_legacy_rows(layout: list[dict[str, Any]], ctx: dict[str, Any]) -> st
 def render_body(layout: Any, charts: list[Any]) -> str:
     """Render the declarative *layout* (component tree, or legacy rows) into a themed,
     system-owned body; always safe; falls back to an auto-grid when unusable."""
+    charts = charts or []  # honour the "always safe" contract — a board may have no charts
     valid = {str(getattr(c, "chart_id", "") or "") for c in charts if getattr(c, "chart_id", "")}
     types = {str(getattr(c, "chart_id", "") or ""):
              str((getattr(c, "chart_plan", None) or {}).get("chart_type") or "").lower()

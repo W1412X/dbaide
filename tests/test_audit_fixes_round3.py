@@ -41,6 +41,15 @@ def test_gauge_chart_handles_missing_value_field():
     assert out["data"]["value"] == 0.0
 
 
+def test_render_body_is_always_safe_with_none_charts():
+    # render_body documents "always safe"; charts=None must not crash (a board may
+    # have no charts).
+    from dbaide.rendering.dashboard_body import render_body
+    for layout in (None, {}, {"type": "row", "children": [{"type": "chart", "chart_id": "x"}]}):
+        out = render_body(layout, None)
+        assert isinstance(out, str)
+
+
 def test_special_charts_tolerate_missing_value_field():
     # heatmap/sankey/boxplot indexed value_fields[0] unguarded → crash on a plan with
     # no value field. They must degrade (zeros), not raise.
