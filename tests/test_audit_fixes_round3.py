@@ -4,6 +4,7 @@ One test (or small group) per fix; see the matching commit for context."""
 from __future__ import annotations
 
 from dbaide.agent.chart_agent import _materialize_gauge, chart_plan_from_dict
+from dbaide.cli import _print_backup_result
 
 
 def test_gauge_chart_handles_empty_rows():
@@ -18,3 +19,10 @@ def test_gauge_chart_handles_missing_value_field():
     plan = chart_plan_from_dict({"chart_type": "gauge", "value_fields": []})
     out = _materialize_gauge(plan, [{"x": 1}])
     assert out["data"]["value"] == 0.0
+
+
+def test_print_backup_result_tolerates_partial_dict(capsys):
+    # A success result missing fields must not KeyError-crash the CLI output.
+    _print_backup_result({"file_size": 10})  # no database/table/row_count/file_path
+    out = capsys.readouterr().out
+    assert "OK" in out and "rows" in out

@@ -1062,7 +1062,11 @@ def _print_backup_result(result: dict) -> None:
         print(f"  FAIL  {result.get('database', '')}.{result.get('table', '')}: {result['error']}")
         return
     size = _fmt_size(result.get("file_size", 0))
-    print(f"  OK    {result['database']}.{result['table']}  {result['row_count']:,} rows  {size}  → {result['file_path']}")
+    db = result.get("database", "")
+    table = result.get("table", "")
+    rows = int(result.get("row_count", 0) or 0)
+    path = result.get("file_path", "")
+    print(f"  OK    {db}.{table}  {rows:,} rows  {size}  → {path}")
 
 
 def _fmt_size(n: int) -> str:
