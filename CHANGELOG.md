@@ -6,7 +6,40 @@ All notable changes to DBAide are documented here. The format is loosely based o
 
 ## [Unreleased]
 
-## [0.9.13] — 2026-06-25
+## [0.9.14] — 2026-06-25
+
+### Added
+
+- **Cross-filtering** — click a category on any dashboard chart to filter the whole board
+  to that value (the classic drill-down). The matching filter is found automatically by
+  which one's options contain the clicked value — no setup. Click the same value again to
+  clear it.
+- **System-driven chart sizing + responsive layout** — the system now sizes charts by type
+  AND real data instead of relying on the model's guesses: type-aware heights (clamped so a
+  pie can't be 600px), natural widths / "size" classes, and client-side auto-grow (a
+  horizontal bar grows with its bar count; a crowded category axis rotates labels and gains
+  a scroll zoom). Rows stack full-width on narrow screens.
+- **Polished components** — KPI cards (label-over-value, optional %-delta + sparkline,
+  number formatting), sortable/zebra-striped tables, refined cards and filters, a cohesive
+  chart colour palette.
+
+### Changed
+
+- The builder is steered toward denser layouts (charts side-by-side or grouped into tabs
+  rather than a tall single column) and toward summary tiles when asked.
+- Dashboard recipe execution now also runs through the EXPLAIN cost gate (when the
+  connection policy sets a row limit), so an over-large query surfaces as a tile error
+  instead of a heavy scan.
+
+### Fixed
+
+- Teardown safety: the dashboard's query thread pool is now drained on close (no
+  use-after-free if you close while tiles are loading).
+- A chart no longer renders blank after a no-data→data refresh (stale echarts instance is
+  disposed); horizontal-bar fallback/sizing reads the right axis; union/join recipes keep
+  columns that only later rows add; scatter reconcile can't collapse x and y onto one
+  column; multi-select filter validation, low-cardinality value grounding on MySQL, and
+  light-theme table striping are all corrected.
 
 ### Added
 
