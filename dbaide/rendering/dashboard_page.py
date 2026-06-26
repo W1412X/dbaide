@@ -111,6 +111,7 @@ _CLIENT_JS = r"""
     draw(null, 1);
   }
   function cssVar(n){ try{ return getComputedStyle(document.documentElement).getPropertyValue(n).trim(); }catch(e){ return ''; } }
+  var PALETTE=['#3b82f6','#22c55e','#8b5cf6','#0ea5e9','#14b8a6','#eab308','#ef4444','#f97316'];
   function fallbackChart(res){
     // build a simple echarts option straight from columns+rows when the server spec is
     // missing — a last-resort so a chart with real data never shows blank
@@ -121,26 +122,26 @@ _CLIENT_JS = r"""
     if(cat==null) cat=cols[0];
     var valCols=nums.filter(function(c){ return c!==cat; });
     var t=(res.chart_type||'bar').toLowerCase();
-    var ac=cssVar('--accent')||'#3b82f6', tx=cssVar('--text2')||'#9aa0a6', bd=cssVar('--border')||'#2c2f36';
+    var tx=cssVar('--text2')||'#9aa0a6', bd=cssVar('--border')||'#2c2f36';
     if((t==='pie'||t==='donut') && valCols.length){
       var vc=valCols[0];
-      return {textStyle:{color:tx}, tooltip:{trigger:'item'}, series:[{type:'pie',
+      return {color:PALETTE, textStyle:{color:tx}, tooltip:{trigger:'item'}, series:[{type:'pie',
         radius: t==='donut'?['42%','70%']:'66%',
         data: rows.slice(0,50).map(function(r){ return {name:String(r[cat]), value:r[vc]}; })}]};
     }
     if(t==='scatter' && nums.length>=2){
-      return {textStyle:{color:tx}, tooltip:{trigger:'item'}, xAxis:{splitLine:{lineStyle:{color:bd}}},
+      return {color:PALETTE, textStyle:{color:tx}, tooltip:{trigger:'item'}, xAxis:{splitLine:{lineStyle:{color:bd}}},
         yAxis:{splitLine:{lineStyle:{color:bd}}},
-        series:[{type:'scatter', itemStyle:{color:ac}, data: rows.slice(0,2000).map(function(r){ return [r[nums[0]], r[nums[1]]]; })}]};
+        series:[{type:'scatter', data: rows.slice(0,2000).map(function(r){ return [r[nums[0]], r[nums[1]]]; })}]};
     }
     if(!valCols.length) return null;
     var stype=(t==='line'||t==='area')?'line':'bar';
-    return {textStyle:{color:tx}, tooltip:{trigger:'axis'}, grid:{left:54,right:18,top:24,bottom:42},
+    return {color:PALETTE, textStyle:{color:tx}, tooltip:{trigger:'axis'}, grid:{left:54,right:18,top:24,bottom:42},
       legend: valCols.length>1?{textStyle:{color:tx},top:0}:undefined,
       xAxis:{type:'category', axisLine:{lineStyle:{color:bd}}, data: rows.slice(0,200).map(function(r){ return String(r[cat]); })},
       yAxis:{type:'value', splitLine:{lineStyle:{color:bd}}},
       series: valCols.map(function(c){ return {name:c, type:stype, data: rows.slice(0,200).map(function(r){ return r[c]; }),
-        areaStyle: t==='area'?{}:undefined, itemStyle: valCols.length===1?{color:ac}:undefined}; })};
+        areaStyle: t==='area'?{}:undefined}; })};
   }
   function cachedQuery(cid, params){
     // dedup within a refresh: one recipe feeding kpi+chart+table runs its SQL once
@@ -288,8 +289,8 @@ def _base_css(theme: dict[str, Any]) -> str:
     label {{ color:var(--text2); font-size:11px; }}
     /* the layout classes used by the generated body (and recommended to the model) */
     .dbaide-controls {{ display:flex; flex-wrap:wrap; gap:16px; align-items:flex-end;
-      margin-bottom:16px; padding:14px 16px; background:var(--panel); border:1px solid var(--border);
-      border-radius:10px; }}
+      margin-bottom:18px; padding:14px 16px; background:var(--panel); border:1px solid var(--border);
+      border-radius:12px; box-shadow:0 1px 2px rgba(0,0,0,.18); }}
     .dbaide-controls > label, .dbaide-field {{ display:flex; flex-direction:column; gap:6px; }}
     .dbaide-flabel {{ color:var(--text2); font-size:11px; }}
     /* compact collapsible multi-select dropdown */
@@ -312,10 +313,10 @@ def _base_css(theme: dict[str, Any]) -> str:
       background:var(--panel); border-bottom:1px solid var(--border); margin-bottom:4px; }}
     .dbaide-ckbar button {{ background:transparent; color:var(--accent); border:none; padding:2px 6px;
       font-size:11px; font-weight:600; cursor:pointer; }}
-    .dbaide-grid {{ display:grid; grid-template-columns:repeat(auto-fill,minmax(360px,1fr)); gap:14px; }}
-    .dbaide-card {{ background:var(--panel); border:1px solid var(--border); border-radius:10px;
-      padding:14px 16px; }}
-    .dbaide-card-title {{ color:var(--text); font-weight:600; font-size:13px; margin-bottom:10px; }}
+    .dbaide-grid {{ display:grid; grid-template-columns:repeat(auto-fill,minmax(360px,1fr)); gap:16px; }}
+    .dbaide-card {{ background:var(--panel); border:1px solid var(--border); border-radius:12px;
+      padding:16px 18px; box-shadow:0 1px 2px rgba(0,0,0,.18); }}
+    .dbaide-card-title {{ color:var(--text); font-weight:600; font-size:13px; margin-bottom:12px; }}
     .dbaide-card [data-chart] {{ background:transparent; border:none; min-height:0; }}
     /* declarative component tree */
     .dbaide-row {{ display:grid; grid-template-columns:repeat(12,1fr); gap:14px; margin-bottom:14px; align-items:stretch; }}
@@ -342,21 +343,27 @@ def _base_css(theme: dict[str, Any]) -> str:
     .dbaide-tabpanel {{ display:none; }}
     .dbaide-tabpanel.active {{ display:block; }}
     .dbaide-heading {{ color:var(--text); font-size:15px; font-weight:700; margin:6px 0 10px; }}
-    .dbaide-kpi {{ display:flex; flex-direction:column; justify-content:center; gap:4px; }}
-    .dbaide-kpi-value {{ color:var(--accent); font-size:26px; font-weight:700; line-height:1.1; }}
-    .dbaide-kpi-delta {{ font-size:12px; font-weight:600; margin-left:8px; }}
+    .dbaide-kpi {{ display:flex; flex-direction:column; justify-content:center; gap:5px; }}
+    .dbaide-kpi-label {{ color:var(--muted); font-size:11px; font-weight:600; }}
+    .dbaide-kpi-value {{ color:var(--accent); font-size:30px; font-weight:750; line-height:1.05;
+      letter-spacing:-.01em; }}
+    .dbaide-kpi-delta {{ font-size:12px; font-weight:600; margin-left:8px; letter-spacing:0; }}
     .dbaide-kpi-delta.up {{ color:#22c55e; }} .dbaide-kpi-delta.down {{ color:#ef4444; }}
-    .dbaide-kpi-label {{ color:var(--text2); font-size:12px; }}
-    .dbaide-kpi-spark {{ margin-top:6px; height:34px; }}
-    .dbaide-kpi-spark svg {{ width:100%; height:34px; display:block; }}
-    .dbaide-table-wrap {{ overflow:auto; max-height:320px; }}
+    .dbaide-kpi-spark {{ margin-top:8px; height:32px; opacity:.9; }}
+    .dbaide-kpi-spark svg {{ width:100%; height:32px; display:block; }}
+    .dbaide-kpi-spark:empty {{ display:none; }}   /* no dead space on a non-trend KPI */
+    .dbaide-table-wrap {{ overflow:auto; max-height:320px; border-radius:8px; }}
     .dbaide-table {{ width:100%; border-collapse:collapse; font-size:12px; }}
-    .dbaide-table th, .dbaide-table td {{ text-align:left; padding:6px 10px;
+    .dbaide-table th, .dbaide-table td {{ text-align:left; padding:7px 12px;
       border-bottom:1px solid var(--border); color:var(--text); white-space:nowrap; }}
-    .dbaide-table th {{ color:var(--text2); font-weight:600; position:sticky; top:0; background:var(--panel);
+    .dbaide-table th {{ color:var(--muted); font-weight:600; position:sticky; top:0; background:var(--panel);
       cursor:pointer; user-select:none; }}
     .dbaide-table th:hover {{ color:var(--text); }}
+    .dbaide-table th.sorted {{ color:var(--accent); }}
     .dbaide-table th.sorted::after {{ content:attr(data-arrow); color:var(--accent); margin-left:4px; }}
+    .dbaide-table tbody tr:nth-child(even) {{ background:rgba(255,255,255,.022); }}
+    .dbaide-table tbody tr:hover {{ background:rgba(255,255,255,.05); }}
+    .dbaide-table tbody tr:last-child td {{ border-bottom:none; }}
     .dbaide-table td.num, .dbaide-table th.num {{ text-align:right; font-variant-numeric:tabular-nums; }}
     """
 

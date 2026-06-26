@@ -187,8 +187,8 @@ def _render_leaf(node: dict[str, Any], ntype: str, ctx: dict[str, Any]) -> str:
         trend = "1" if node.get("trend") else ""
         return (f'<div class="dbaide-card dbaide-kpi" data-chart="{ecid}" data-kind="kpi"'
                 f' data-format="{fmt}" data-trend="{trend}">'
-                f'<div class="dbaide-kpi-value">…</div>'
                 f'<div class="dbaide-kpi-label">{label}</div>'
+                f'<div class="dbaide-kpi-value">…</div>'
                 f'<div class="dbaide-kpi-spark"></div></div>')
     if ntype == "table":
         return (f'<div class="dbaide-card">{title_html}'
