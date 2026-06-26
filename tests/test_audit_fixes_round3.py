@@ -3,14 +3,28 @@ One test (or small group) per fix; see the matching commit for context."""
 
 from __future__ import annotations
 
+import pytest
+
 from dbaide.agent.chart_agent import (
+    _materialize,
     _materialize_boxplot,
     _materialize_gauge,
     _materialize_heatmap,
     _materialize_sankey,
     chart_plan_from_dict,
 )
+from dbaide.charts.spec import CHART_TYPES
 from dbaide.cli import _print_backup_result
+
+
+@pytest.mark.parametrize("chart_type", sorted(CHART_TYPES))
+@pytest.mark.parametrize("rows", [[], [{}], [{"a": 1, "b": "x"}]], ids=["empty", "one-empty", "one-row"])
+def test_every_chart_type_survives_degenerate_input(chart_type, rows):
+    # No chart type may crash on an empty result set or a plan missing its role
+    # fields — a tile must degrade to an empty chart, never raise.
+    plan = chart_plan_from_dict({"chart_type": chart_type})  # minimal plan, no fields
+    out = _materialize(plan, rows)
+    assert isinstance(out, dict) and "data" in out
 
 
 def test_gauge_chart_handles_empty_rows():
