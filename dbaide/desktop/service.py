@@ -81,6 +81,10 @@ class DesktopService:
         import threading
         self._build_lock = threading.Lock()
         self._active_builds: set[str] = set()
+        # Schema grounding for the dashboard builder is ~60 read queries (list/describe +
+        # a DISTINCT per low-cardinality text column). Cache it per connection so
+        # generating several dashboards in a row doesn't re-introspect every time.
+        self._dashboard_schema_cache: dict[str, str] = {}
 
     # ── Mutual exclusion: don't query an instance while it is being built ────
 
@@ -144,6 +148,7 @@ class DesktopService:
                 payload["password_env"] = existing.password_env
         conn = self._connection_from_payload(payload)
         self.cfg.upsert_connection(conn, make_default=bool(payload.get("make_default", False)))
+        self._dashboard_schema_cache.pop(conn.name, None)  # config/schema may have changed
         return {"connection": connection_payload(conn, has_assets=bool(self.store.instance_doc(conn.name, connection=conn)))}
 
     def delete_connection(self, payload: dict[str, Any]) -> dict[str, Any]:
@@ -151,6 +156,7 @@ class DesktopService:
         if not name:
             raise ValueError("Connection name is required")
         self.cfg.delete_connection(name)
+        self._dashboard_schema_cache.pop(name, None)
         # Remove ALL per-connection data, not just the config entry — otherwise the
         # offline assets, saved joins, user notes, chat sessions, workflow history and
         # the query-audit log linger as orphans (a "fake delete"). Each store owns its
@@ -1693,7 +1699,15 @@ class DesktopService:
 
         For low-cardinality text columns we include the REAL distinct values, so the
         builder uses filter options that actually match the data (guessing them is the
-        top cause of an all-"无数据" dashboard)."""
+        top cause of an all-"无数据" dashboard).
+
+        Cached per connection for the session — it's a best-effort grounding hint, and
+        the builder's EXPLAIN validation + client fallback already guard against any
+        drift, so a slightly stale cache is safe and avoids redundant introspection."""
+        cache_key = conn_name or "<default>"
+        cached = self._dashboard_schema_cache.get(cache_key)
+        if cached is not None:
+            return cached
         adapter = getattr(tools, "adapter", None)
         if adapter is None:
             return ""
@@ -1724,7 +1738,9 @@ class DesktopService:
                         entry += " values=[" + "|".join(vals) + "]"
                 parts.append(entry)
             lines.append(f"{name}({', '.join(parts)})")
-        return "\n".join(lines)
+        result = "\n".join(lines)
+        self._dashboard_schema_cache[cache_key] = result
+        return result
 
     def _distinct_values(self, conn_name: str, table: str, col: str, cap: int = 30) -> list[str] | None:
         """Distinct values for a column, or None if high-cardinality/empty/unavailable."""
