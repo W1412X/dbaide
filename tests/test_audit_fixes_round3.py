@@ -41,6 +41,23 @@ def test_gauge_chart_handles_missing_value_field():
     assert out["data"]["value"] == 0.0
 
 
+def test_parametric_from_dict_tolerates_missing_required_fields():
+    # The dashboard builder feeds model JSON straight through ParametricChart.from_dict;
+    # a source missing id/sql or a param missing name must not crash the build with
+    # TypeError — it should construct (and an empty sql then fails validation, which the
+    # builder can repair).
+    from dbaide.boards.parametric import ParametricChart
+    chart = ParametricChart.from_dict({
+        "chart_id": "c1",
+        "sources": [{"sql": "SELECT 1"}, {"id": "s2"}],  # first lacks id, second lacks sql
+        "params": [{}, {"name": "region", "type": "enum"}],  # first lacks name
+        "chart_plan": {"chart_type": "bar"},
+    })
+    assert len(chart.sources) == 2
+    assert chart.sources[0].id == "" and chart.sources[1].sql == ""
+    assert chart.params[0].name == "" and chart.params[1].name == "region"
+
+
 def test_import_manifest_save_is_atomic_and_round_trips(tmp_path):
     from dbaide.ingest.manifest import ImportManifest
     m = ImportManifest(version=1, workbooks=[])

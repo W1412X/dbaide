@@ -49,7 +49,9 @@ class ParamSpec:
 
     @classmethod
     def from_dict(cls, d: dict[str, Any]) -> "ParamSpec":
-        out = cls(**_filter_known(cls, d))
+        known = _filter_known(cls, d)
+        known.setdefault("name", "")   # tolerate model output that omits the name
+        out = cls(**known)
         out.type = out.type if out.type in PARAM_TYPES else "text"
         return out
 
@@ -67,7 +69,13 @@ class QuerySource:
 
     @classmethod
     def from_dict(cls, d: dict[str, Any]) -> "QuerySource":
-        return cls(**_filter_known(cls, d))
+        known = _filter_known(cls, d)
+        # Tolerate model output that omits id/sql: a missing sql becomes "" so it surfaces
+        # as a normal validation/EXPLAIN error the builder can repair, instead of a
+        # TypeError that crashes the whole generation. id is only a union-tag fallback.
+        known.setdefault("id", "")
+        known.setdefault("sql", "")
+        return cls(**known)
 
 
 @dataclass
