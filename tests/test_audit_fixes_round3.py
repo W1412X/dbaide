@@ -41,6 +41,20 @@ def test_gauge_chart_handles_missing_value_field():
     assert out["data"]["value"] == 0.0
 
 
+def test_heatmap_axes_are_deterministic_regardless_of_row_order():
+    # Same data in two row orders must yield the same axes + cell mapping (the cell
+    # coordinates are stable across refreshes).
+    plan = chart_plan_from_dict(
+        {"chart_type": "heatmap", "x_field": "x", "y_field": "y", "value_fields": ["v"]})
+    rows_a = [{"x": "b", "y": "2", "v": 1}, {"x": "a", "y": "1", "v": 2}, {"x": "a", "y": "2", "v": 3}]
+    rows_b = list(reversed(rows_a))
+    a = _materialize_heatmap(plan, rows_a)["data"]
+    b = _materialize_heatmap(plan, rows_b)["data"]
+    assert a["x_categories"] == b["x_categories"] == ["a", "b"]
+    assert a["y_categories"] == b["y_categories"] == ["1", "2"]
+    assert sorted(map(tuple, a["points"])) == sorted(map(tuple, b["points"]))
+
+
 def test_render_body_is_always_safe_with_none_charts():
     # render_body documents "always safe"; charts=None must not crash (a board may
     # have no charts).

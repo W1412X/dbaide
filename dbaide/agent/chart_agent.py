@@ -434,8 +434,6 @@ def _materialize_scatter_like(plan: ChartPlan, rows: list[dict[str, Any]], *, bu
 
 
 def _materialize_heatmap(plan: ChartPlan, rows: list[dict[str, Any]]) -> dict[str, Any]:
-    x_vals: list[str] = []
-    y_vals: list[str] = []
     x_key = plan.x_field or plan.category_field
     value_field = plan.value_fields[0] if plan.value_fields else ""
     cell_totals: dict[tuple[str, str], float] = {}
@@ -444,13 +442,15 @@ def _materialize_heatmap(plan: ChartPlan, rows: list[dict[str, Any]]) -> dict[st
         yv = str(row.get(plan.y_field) or "—")
         key = (xv, yv)
         cell_totals[key] = cell_totals.get(key, 0.0) + _as_float(row.get(value_field))
-    for xv, yv in cell_totals:
-        if xv not in x_vals:
-            x_vals.append(xv)
-        if yv not in y_vals:
-            y_vals.append(yv)
+    # Sorted axes give a deterministic, readable order (stable across refreshes even if
+    # the row order changes) and an O(1) index map instead of list.index() per cell,
+    # which was O(n^2) over the grid.
+    x_vals = sorted({xv for xv, _ in cell_totals})
+    y_vals = sorted({yv for _, yv in cell_totals})
+    x_idx = {v: i for i, v in enumerate(x_vals)}
+    y_idx = {v: i for i, v in enumerate(y_vals)}
     points: list[list[float | int]] = [
-        [x_vals.index(xv), y_vals.index(yv), total]
+        [x_idx[xv], y_idx[yv], total]
         for (xv, yv), total in cell_totals.items()
     ]
     return {"categories": [], "series": [], "data": {"x_categories": x_vals, "y_categories": y_vals, "points": points}}
