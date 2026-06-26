@@ -623,9 +623,13 @@ class DesktopService:
         if not isinstance(errors, list):
             errors = []
         total_tables = len(table_docs)
-        total_columns = sum(int(td.get("column_count") or len(td.get("columns") or [])) for td in table_docs)
-        sampled_tables = sum(1 for td in table_docs if td.get("sample_rows") or td.get("enriched_at"))
-        stale_tables = sum(1 for td in table_docs if td.get("enrichment_stale"))
+        total_columns = sampled_tables = stale_tables = 0
+        for td in table_docs:
+            total_columns += int(td.get("column_count") or len(td.get("columns") or []))
+            if td.get("sample_rows") or td.get("enriched_at"):
+                sampled_tables += 1
+            if td.get("enrichment_stale"):
+                stale_tables += 1
         if not total_tables:
             state = "failed" if errors else "missing"
         elif errors:
