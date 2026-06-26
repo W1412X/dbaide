@@ -346,11 +346,44 @@ class ConversationWebView(QWidget):
 
     def _on_action(self, turn_id: str, action_id: str) -> None:
         handler = self._action_handlers.get(turn_id)
-        if handler is not None:
-            try:
-                handler(str(action_id))
-            except Exception:  # noqa: BLE001
-                pass
+        if handler is None:
+            return
+        if action_id == "__menu__":
+            # the page shows a single "⋯" button; pop the full action list as a native
+            # menu (matching the legacy view) at the cursor, which is over the button
+            turn = self._by_id.get(turn_id)
+            actions = (turn or {}).get("actions") or []
+            if actions:
+                self._show_action_menu(actions, handler)
+            return
+        self._dispatch_action(handler, str(action_id))
+
+    @staticmethod
+    def _dispatch_action(handler: Any, action_id: str) -> None:
+        try:
+            handler(action_id)
+        except Exception:  # noqa: BLE001
+            pass
+
+    def _show_action_menu(self, actions: list[dict[str, Any]], handler: Any) -> None:
+        from PyQt6.QtGui import QCursor
+        from PyQt6.QtWidgets import QMenu
+        menu = QMenu(self)
+        try:
+            from dbaide.desktop.components.menu import _style_menu
+            _style_menu(menu)
+        except Exception:  # noqa: BLE001
+            pass
+        for a in actions:
+            label = str((a or {}).get("label") or "")
+            aid = str((a or {}).get("id") or "")
+            if not label:
+                continue
+            act = menu.addAction(label)
+            act.triggered.connect(
+                lambda _checked=False, _aid=aid: self._dispatch_action(handler, _aid)
+            )
+        menu.exec(QCursor.pos())
 
     def _on_trace_toggle(self, turn_id: str) -> None:
         turn = self._by_id.get(turn_id)

@@ -135,9 +135,16 @@ def test_actions_registered_and_dispatched(qapp):
                     on_action=lambda aid: fired.__setitem__("id", aid))
     turn = v._turns[0]
     assert [a["label"] for a in turn["actions"]] == ["Copy", "Export"]
-    # the bridge fires _on_action(turn_id, action_id) → registered dispatcher
+    # direct dispatch by id
     v._on_action(turn["id"], "1")
     assert fired["id"] == "1"
+    # the "⋯" button sends action_id "__menu__" → pop the full list as a native menu
+    captured = {}
+    v._show_action_menu = lambda actions, handler: captured.update(actions=actions, handler=handler)
+    v._on_action(turn["id"], "__menu__")
+    assert [a["label"] for a in captured["actions"]] == ["Copy", "Export"]
+    captured["handler"]("0")  # selecting an item dispatches it
+    assert fired["id"] == "0"
 
 
 def test_append_clarification_reply_appends_to_user(qapp):

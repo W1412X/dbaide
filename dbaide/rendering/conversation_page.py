@@ -282,12 +282,13 @@ _CONVERSATION_JS = r"""
     var actions = turn.actions || [];
     if (!actions.length) return null;
     var row = el('dbc-actions');
-    actions.forEach(function(a){
-      var btn = el('dbc-btn' + (a.kind === 'primary' ? ' dbc-btn-primary' : ''), 'button');
-      btn.textContent = a.label || '';
-      btn.onclick = function(){ call('action', String(turn.id), String(a.id || '')); };
-      row.appendChild(btn);
-    });
+    // A single compact "⋯" that pops the full action list as a native menu (Python
+    // side), so the row stays clean no matter how many actions a turn has.
+    var btn = el('dbc-more', 'button');
+    btn.textContent = '⋯';
+    btn.title = (actions[0] && actions[0].menuTitle) || 'More';
+    btn.onclick = function(){ call('action', String(turn.id), '__menu__'); };
+    row.appendChild(btn);
     return row;
   }
 
@@ -469,6 +470,9 @@ def _base_css() -> str:
       border-radius:6px; padding:6px 12px; cursor:pointer; font:inherit; }
     .dbc-btn-primary { background:var(--accent); color:var(--accent-text); border-color:var(--accent); }
     .dbc-btn:hover { filter:brightness(1.1); }
+    .dbc-more { background:transparent; border:none; color:var(--muted); cursor:pointer;
+      font-size:16px; line-height:1; font-weight:700; padding:2px 10px; border-radius:6px; }
+    .dbc-more:hover { color:var(--text); background:var(--panel2); }
     .dbc-hint { color:var(--muted); font-size:13px; padding:8px 0; }
     /* markdown + chart blocks (shared look with the answer page) */
     .md-block > :first-child { margin-top:0; } .md-block > :last-child { margin-bottom:0; }
