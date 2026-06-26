@@ -49,7 +49,7 @@ _CLIENT_JS = r"""
     });
     return out;
   }
-  function esc(v){ return (v==null?'':String(v)).replace(/[&<>]/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;'}[c];}); }
+  function esc(v){ return (v==null?'':String(v)).replace(/[&<>"']/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c];}); }
   function numColumns(cols, rows){
     return cols.filter(function(c){ var seen=false;
       for(var i=0;i<rows.length;i++){ var x=rows[i][c]; if(x==null) continue; if(typeof x!=='number') return false; seen=true; }

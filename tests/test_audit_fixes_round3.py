@@ -26,3 +26,12 @@ def test_print_backup_result_tolerates_partial_dict(capsys):
     _print_backup_result({"file_size": 10})  # no database/table/row_count/file_path
     out = capsys.readouterr().out
     assert "OK" in out and "rows" in out
+
+
+def test_dashboard_page_esc_escapes_quotes():
+    # esc() writes column names into data-col="..." attributes; a column name with a
+    # double quote must not break out of the attribute (injection).
+    from dbaide.rendering.dashboard_page import build_dashboard_page
+    page = build_dashboard_page("<div></div>", echarts_src="echarts.js")
+    assert "'\"':'&quot;'" in page  # esc map covers the double quote
+    assert '/[&<>"\']/g' in page    # and the regex matches it
