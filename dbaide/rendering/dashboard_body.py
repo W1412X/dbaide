@@ -163,6 +163,61 @@ def _chart_id(node: dict[str, Any]) -> str:
     return str(node.get("chart") or node.get("chart_id") or "")
 
 
+# -- sizing: the system decides appropriate sizes by chart type (the AI's guesses are
+#    unreliable). (default_height, min, max) per type; defaults cover bar/line/area/etc. --
+_CHART_H = {
+    "pie": (300, 240, 440), "donut": (300, 240, 440), "radar": (320, 260, 460),
+    "gauge": (260, 200, 360), "funnel": (300, 240, 460),
+    "scatter": (320, 260, 500), "bubble": (320, 260, 500), "boxplot": (320, 260, 520),
+    "candlestick": (340, 260, 560),
+    "heatmap": (380, 300, 640), "treemap": (380, 300, 640), "sunburst": (380, 300, 640),
+    "sankey": (400, 320, 640), "tree": (380, 300, 640),
+}
+_CHART_H_DEFAULT = (300, 220, 540)
+_NARROW_TYPES = {"pie", "donut", "radar", "gauge", "funnel"}
+_WIDE_TYPES = {"heatmap", "treemap", "sunburst", "sankey", "tree"}
+_SIZE_SPAN = {"sm": 3, "md": 6, "lg": 8, "wide": 12, "full": 12}
+
+
+def _chart_height(ctype: str, requested: Any) -> int:
+    """Type-aware height: use the type default when unset; clamp the AI's value into a
+    sane band for that type (so a pie can't be 600px tall, a bar can't be 120px)."""
+    d, lo, hi = _CHART_H.get(ctype, _CHART_H_DEFAULT)
+    if requested is None:
+        return d
+    try:
+        return max(lo, min(hi, int(requested)))
+    except (TypeError, ValueError):
+        return d
+
+
+def _natural_span(node: dict[str, Any], ctx: dict[str, Any]) -> int:
+    kind = str(node.get("type") or "").lower()
+    if kind == "kpi":
+        return 3
+    if kind in ("text", "markdown", "heading", "divider"):
+        return 12
+    if kind == "table":
+        return 8
+    ctype = ctx.get("types", {}).get(_chart_id(node), "")
+    if ctype in _NARROW_TYPES:
+        return 4
+    if ctype in _WIDE_TYPES:
+        return 8
+    return 6
+
+
+def _tile_span(node: dict[str, Any], ctx: dict[str, Any]) -> int:
+    """Explicit span wins; else a "size" class (sm/md/lg/wide/full); else a natural span
+    derived from the tile/chart type — so the AI can omit sizing and still look right."""
+    if node.get("span") is not None:
+        return _clamp(node.get("span"), 1, 12, 6)
+    sz = str(node.get("size") or "").lower()
+    if sz in _SIZE_SPAN:
+        return _SIZE_SPAN[sz]
+    return _natural_span(node, ctx)
+
+
 # -- the recursive renderer -------------------------------------------------
 
 def _render_leaf(node: dict[str, Any], ntype: str, ctx: dict[str, Any]) -> str:
@@ -193,9 +248,11 @@ def _render_leaf(node: dict[str, Any], ntype: str, ctx: dict[str, Any]) -> str:
     if ntype == "table":
         return (f'<div class="dbaide-card">{title_html}'
                 f'<div data-chart="{ecid}" data-kind="table" class="dbaide-table-wrap"></div></div>')
-    h = _clamp(node.get("height"), 140, 720, 280)   # chart
+    ctype = ctx.get("types", {}).get(cid, "")   # chart: type-aware, clamped height
+    h = _chart_height(ctype, node.get("height"))
     return (f'<div class="dbaide-card">{title_html}'
-            f'<div data-chart="{ecid}" data-kind="chart" style="height:{h}px"></div></div>')
+            f'<div data-chart="{ecid}" data-kind="chart" data-ctype="{escape(ctype)}" '
+            f'style="height:{h}px"></div></div>')
 
 
 def _render_children(children: Any, ctx: dict[str, Any]) -> str:
@@ -210,7 +267,7 @@ def _render_row(children: Any, ctx: dict[str, Any]) -> str:
         inner = render_node(c, ctx)
         if not inner:
             continue
-        span = _clamp(c.get("span"), 1, 12, max(1, 12 // n)) if c.get("span") is not None else max(1, 12 // n)
+        span = _tile_span(c, ctx)   # explicit span › size class › natural-by-type
         cells.append(f'<div class="dbaide-cell" style="grid-column:span {span}">{inner}</div>')
     return f'<div class="dbaide-row">{"".join(cells)}</div>' if cells else ""
 
@@ -298,7 +355,10 @@ def render_body(layout: Any, charts: list[Any]) -> str:
     """Render the declarative *layout* (component tree, or legacy rows) into a themed,
     system-owned body; always safe; falls back to an auto-grid when unusable."""
     valid = {str(getattr(c, "chart_id", "") or "") for c in charts if getattr(c, "chart_id", "")}
-    ctx = {"valid": valid, "covered": set(), "uid": [0]}
+    types = {str(getattr(c, "chart_id", "") or ""):
+             str((getattr(c, "chart_plan", None) or {}).get("chart_type") or "").lower()
+             for c in charts if getattr(c, "chart_id", "")}
+    ctx = {"valid": valid, "types": types, "covered": set(), "uid": [0]}
 
     if isinstance(layout, dict):
         body = render_node(layout, ctx)

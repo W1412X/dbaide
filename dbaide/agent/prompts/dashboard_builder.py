@@ -65,6 +65,10 @@ Layout rules (the "ui" is a nestable component tree — compose freely):
   that reads better as rows; use a "text"/"markdown" tile (with a markdown table) for a
   small static summary or key-findings table that doesn't need to be re-queried.
 - Every chart/kpi/table node MUST reference a "chart" id that exists in "charts".
+- SIZING is mostly automatic — the system picks an appropriate height/width per chart type
+  and the actual data. You usually do NOT need "height"; for width prefer a "size" class:
+  "sm" (kpi), "md" (most charts), "lg"/"wide" (dense or time-series), "full" (table/section).
+  You may still give an explicit "span" (1-12) for precise control. Don't oversize.
 - Nest to taste: rows inside sections, tabs inside cards, etc. Keep it clean and scannable.
 - The filter control bar is generated AUTOMATICALLY from the recipe params (params with
   the same name across charts share one control) — do NOT put controls in the tree.

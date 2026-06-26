@@ -111,6 +111,26 @@ _CLIENT_JS = r"""
     draw(null, 1);
   }
   function cssVar(n){ try{ return getComputedStyle(document.documentElement).getPropertyValue(n).trim(); }catch(e){ return ''; } }
+  function categoryCount(opt, res){
+    var ax=opt && (Array.isArray(opt.xAxis)?opt.xAxis[0]:opt.xAxis);
+    if(ax && Array.isArray(ax.data)) return ax.data.length;
+    return (res.rows||[]).length;
+  }
+  function autosizeChart(el, opt, res){
+    // the AI rarely sizes for the real data shape — adjust to it here
+    var ct=el.getAttribute('data-ctype')||'', n=categoryCount(opt, res);
+    if(ct==='horizontal_bar'){          // each bar needs vertical room → grow with bar count
+      el.style.height=Math.max(220, Math.min(640, n*26+90))+'px';
+      return;
+    }
+    var catTypes={bar:1,line:1,area:1,combo:1,stacked_bar:1,grouped_bar:1,stacked_area:1,waterfall:1};
+    if(catTypes[ct] && n>=10){          // crowded x-axis → rotate labels, and scroll if very dense
+      var ax=Array.isArray(opt.xAxis)?opt.xAxis[0]:opt.xAxis;
+      if(ax){ ax.axisLabel=Object.assign({}, ax.axisLabel||{}, {rotate: n>=16?45:30, interval:0}); }
+      if(n>=24){ opt.dataZoom=[{type:'inside'},{type:'slider',height:14,bottom:6}];
+        opt.grid=Object.assign({bottom:56}, opt.grid||{}); }
+    }
+  }
   var PALETTE=['#3b82f6','#22c55e','#8b5cf6','#0ea5e9','#14b8a6','#eab308','#ef4444','#f97316'];
   function fallbackChart(res){
     // build a simple echarts option straight from columns+rows when the server spec is
@@ -190,6 +210,7 @@ _CLIENT_JS = r"""
       // assembled straight from columns+rows so real data never shows blank
       var opt=res.echarts_option || fallbackChart(res);
       if(!opt){ el.classList.add('dbaide-empty'); el.textContent='无数据'; return; }
+      autosizeChart(el, opt, res);   // size the chart to its ACTUAL data shape
       // key the instance by the ELEMENT (getInstanceByDom), not the chart_id — the same
       // recipe can drive several chart tiles, which would collide on a chart_id map
       var inst=echarts.getInstanceByDom(el) || echarts.init(el);
@@ -319,8 +340,12 @@ def _base_css(theme: dict[str, Any]) -> str:
     .dbaide-card-title {{ color:var(--text); font-weight:600; font-size:13px; margin-bottom:12px; }}
     .dbaide-card [data-chart] {{ background:transparent; border:none; min-height:0; }}
     /* declarative component tree */
-    .dbaide-row {{ display:grid; grid-template-columns:repeat(12,1fr); gap:14px; margin-bottom:14px; align-items:stretch; }}
+    .dbaide-row {{ display:grid; grid-template-columns:repeat(12,1fr); gap:16px; margin-bottom:16px; align-items:stretch; }}
     .dbaide-cell {{ min-width:0; }}
+    @media (max-width:860px) {{   /* narrow screens: tiles stack full-width */
+      .dbaide-cell {{ grid-column:1 / -1 !important; }}
+      .dbaide-grid2 {{ grid-template-columns:1fr !important; }}
+    }}
     .dbaide-cell > * {{ height:100%; }}
     .dbaide-grid2 {{ display:grid; gap:14px; margin-bottom:14px; }}
     .dbaide-section {{ margin-bottom:14px; }}

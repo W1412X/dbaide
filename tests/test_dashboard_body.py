@@ -47,6 +47,30 @@ def test_render_tree_tabs_and_markdown():
     assert "<strong>重点</strong>" in body            # mini-markdown applied
 
 
+def _pie(cid="p"):
+    return ParametricChart(chart_id=cid, title="t", sources=[QuerySource("s", "SELECT 1")], params=[],
+                           combine=Combine("single"),
+                           chart_plan={"chart_type": "pie", "category_field": "a", "value_fields": ["b"]})
+
+
+def test_sizing_type_aware_height_and_clamp():
+    pie = _pie()
+    assert "height:300px" in render_body({"type": "chart", "chart": "p"}, [pie])          # type default
+    assert "height:440px" in render_body({"type": "chart", "chart": "p", "height": 900}, [pie])  # clamped to pie max
+    bar = _chart("c1")
+    assert "height:120px" not in render_body({"type": "chart", "chart": "c1", "height": 120}, [bar])  # clamped up
+    assert "height:220px" in render_body({"type": "chart", "chart": "c1", "height": 120}, [bar])
+
+
+def test_sizing_size_class_and_natural_span():
+    pie = _pie()
+    assert "grid-column:span 12" in render_body({"type": "row", "children": [
+        {"type": "chart", "chart": "p", "size": "wide"}]}, [pie])          # size class → span
+    body = render_body({"type": "row", "children": [
+        {"type": "kpi", "chart": "p"}, {"type": "chart", "chart": "p"}]}, [pie])
+    assert "grid-column:span 3" in body and "grid-column:span 4" in body   # kpi→3, pie chart→4 (natural)
+
+
 def test_markdown_tile_renders_pipe_table():
     charts = [_chart("c1")]
     md = "## 关键发现\n\n| 城市 | 销售额 |\n|---|---|\n| 广州 | **15808** |\n| 成都 | 15241 |\n\n说明文字"
@@ -111,6 +135,7 @@ def test_page_uses_async_bridge_and_loading():
     assert "markLoading" in page and "dbaide-spin" in page               # per-tile loading view
     assert "showBusy" in page and "dbaide-busy" in page                  # overlay spinner on apply/refresh
     assert "fallbackChart" in page                                       # client-side chart from rows when spec is null
+    assert "autosizeChart" in page and "max-width:860px" in page          # data-aware sizing + responsive reflow
 
 
 def test_kpi_tile_carries_format_and_trend():
