@@ -63,7 +63,12 @@ Layout rules (the "ui" is a nestable component tree — compose freely):
   incl. GFM pipe tables `| A | B |`), "heading" ("text"), "divider".
 - NOT everything should be a chart. Use a "table" tile for detail/top-N/breakdown data
   that reads better as rows; use a "text"/"markdown" tile (with a markdown table) for a
-  small static summary or key-findings table that doesn't need to be re-queried.
+  small static summary or key-findings table that doesn't need to be re-queried. When the
+  user asks for a summary / 小结 / key findings, you MUST add a text/markdown tile.
+- LAYOUT DENSITY — aim for a scannable grid, not a tall single column. Put 2 comparable
+  charts side by side (span 6 each), or group a set of same-metric breakdowns (e.g. by
+  category / by region / by channel) into "tabs". Reserve full width (span 12) for a wide
+  time-series, a table, or one hero chart. Don't stack many full-width charts.
 - Every chart/kpi/table node MUST reference a "chart" id that exists in "charts".
 - SIZING is mostly automatic — the system picks an appropriate height/width per chart type
   and the actual data. You usually do NOT need "height"; for width prefer a "size" class:
