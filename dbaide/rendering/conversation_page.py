@@ -118,6 +118,39 @@ _CONVERSATION_JS = r"""
     var xs = Array.isArray(root.xAxis) ? root.xAxis : [root.xAxis];
     xs.forEach(function(a){ if (a && a.type === 'value') patch(a); });
   }
+  // Lazy chart virtualization: ECharts instances are created only while their canvas is
+  // near the viewport and disposed when scrolled far away (the canvas keeps its height,
+  // so layout never jumps and it re-inits on scroll-back). This bounds memory to roughly
+  // the on-screen charts regardless of how many the conversation accumulates.
+  var chartObserver = null;
+  function ensureChartObserver(){
+    if (chartObserver || !window.IntersectionObserver) return chartObserver;
+    chartObserver = new IntersectionObserver(function(entries){
+      entries.forEach(function(en){ if (en.isIntersecting) initChart(en.target); else releaseChart(en.target); });
+    }, { rootMargin: '600px 0px' });
+    return chartObserver;
+  }
+  function initChart(canvas){
+    if (!window.echarts || !canvas.__opt) return;
+    if (echarts.getInstanceByDom(canvas)) return;
+    var option = canvas.__opt;
+    try { applyRuntimeFormatters(option); } catch(e){}
+    try {
+      var chart = echarts.init(canvas, null, { renderer: 'canvas' });
+      chart.setOption(option, true);
+      var resize = function(){ try { chart.resize(); } catch(e){} };
+      if (window.ResizeObserver) { canvas.__ro = new ResizeObserver(resize); canvas.__ro.observe(canvas); }
+      setTimeout(resize, 0);
+    } catch(e){}
+  }
+  function releaseChart(canvas){
+    if (!window.echarts) return;
+    try {
+      if (canvas.__ro){ canvas.__ro.disconnect(); canvas.__ro = null; }
+      var inst = echarts.getInstanceByDom(canvas);
+      if (inst) inst.dispose();
+    } catch(e){}
+  }
   function renderChart(block){
     var wrap = document.createElement('section');
     wrap.className = 'chart-block';
@@ -128,17 +161,9 @@ _CONVERSATION_JS = r"""
     canvas.style.height = Math.max(240, Number(block.height) || 320) + 'px';
     wrap.appendChild(canvas);
     if (!window.echarts){ var e = document.createElement('div'); e.className = 'chart-error'; e.textContent = 'ECharts failed to load.'; wrap.appendChild(e); return wrap; }
-    var option = block.echarts_option || {};
-    try { applyRuntimeFormatters(option); } catch(e){}
-    try {
-      var chart = echarts.init(canvas, null, { renderer: 'canvas' });
-      chart.setOption(option, true);
-      var resize = function(){ try { chart.resize(); } catch(e){} };
-      // Per-canvas observer only (no global window listener that would leak one handler
-      // per chart ever rendered); disconnected + the chart disposed in disposeCharts.
-      if (window.ResizeObserver) { canvas.__ro = new ResizeObserver(resize); canvas.__ro.observe(canvas); }
-      setTimeout(resize, 0);
-    } catch(e){ var er = document.createElement('div'); er.className = 'chart-error'; er.textContent = 'Chart render failed.'; wrap.appendChild(er); }
+    canvas.__opt = block.echarts_option || {};   // stashed; the instance is created lazily near the viewport
+    var obs = ensureChartObserver();
+    if (obs) obs.observe(canvas); else initChart(canvas);   // no IntersectionObserver → eager
     return wrap;
   }
   function renderBlocks(blocks){
@@ -267,14 +292,15 @@ _CONVERSATION_JS = r"""
   }
 
   function disposeCharts(node){
-    // QtWebEngine keeps the renderer process forever, but ECharts instances + their
-    // ResizeObservers still pile up in it unless disposed before the DOM is wiped.
-    if (!window.echarts || !node) return;
+    // QtWebEngine keeps the renderer process forever, but ECharts instances, their
+    // ResizeObservers, and the IntersectionObserver registrations still pile up in it
+    // unless cleaned up before the DOM is wiped.
+    if (!node) return;
     node.querySelectorAll('.chart-canvas').forEach(function(c){
       try {
+        if (chartObserver) chartObserver.unobserve(c);
         if (c.__ro){ c.__ro.disconnect(); c.__ro = null; }
-        var inst = echarts.getInstanceByDom(c);
-        if (inst) inst.dispose();
+        if (window.echarts){ var inst = echarts.getInstanceByDom(c); if (inst) inst.dispose(); }
       } catch(e){}
     });
   }

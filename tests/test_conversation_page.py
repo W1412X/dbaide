@@ -57,6 +57,15 @@ def test_empty_page_is_valid():
     assert html.count("<body>") == 1 and html.count("</body>") == 1
 
 
+def test_charts_are_lazily_virtualized():
+    # ECharts instances are created only near the viewport and disposed when far, so
+    # memory stays bounded regardless of how many charts the conversation accumulates.
+    html = _build()
+    assert "IntersectionObserver" in html
+    assert "initChart" in html and "releaseChart" in html
+    assert "disposeCharts" in html
+
+
 def test_qwebchannel_script_included_by_default():
     # the bridge (clarification submit / action buttons / trace toggle) needs it
     assert "qrc:///qtwebchannel/qwebchannel.js" in _build()
