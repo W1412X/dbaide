@@ -112,8 +112,12 @@ _CLIENT_JS = r"""
   }
   function cssVar(n){ try{ return getComputedStyle(document.documentElement).getPropertyValue(n).trim(); }catch(e){ return ''; } }
   function categoryCount(opt, res){
-    var ax=opt && (Array.isArray(opt.xAxis)?opt.xAxis[0]:opt.xAxis);
-    if(ax && Array.isArray(ax.data)) return ax.data.length;
+    if(opt){
+      var ax=Array.isArray(opt.xAxis)?opt.xAxis[0]:opt.xAxis;
+      if(ax && Array.isArray(ax.data)) return ax.data.length;
+      var ay=Array.isArray(opt.yAxis)?opt.yAxis[0]:opt.yAxis;   // horizontal bar puts categories on y
+      if(ay && Array.isArray(ay.data)) return ay.data.length;
+    }
     return (res.rows||[]).length;
   }
   function autosizeChart(el, opt, res){
@@ -155,6 +159,13 @@ _CLIENT_JS = r"""
         series:[{type:'scatter', data: rows.slice(0,2000).map(function(r){ return [r[nums[0]], r[nums[1]]]; })}]};
     }
     if(!valCols.length) return null;
+    if(t==='horizontal_bar'){   // categories on y, values on x (matches the auto-grown height)
+      return {color:PALETTE, textStyle:{color:tx}, tooltip:{trigger:'axis'}, grid:{left:90,right:18,top:24,bottom:30},
+        xAxis:{type:'value', splitLine:{lineStyle:{color:bd}}},
+        yAxis:{type:'category', axisLine:{lineStyle:{color:bd}}, data: rows.slice(0,200).map(function(r){ return String(r[cat]); })},
+        legend: valCols.length>1?{textStyle:{color:tx},top:0}:undefined,
+        series: valCols.map(function(c){ return {name:c, type:'bar', data: rows.slice(0,200).map(function(r){ return r[c]; })}; })};
+    }
     var stype=(t==='line'||t==='area')?'line':'bar';
     return {color:PALETTE, textStyle:{color:tx}, tooltip:{trigger:'axis'}, grid:{left:54,right:18,top:24,bottom:42},
       legend: valCols.length>1?{textStyle:{color:tx},top:0}:undefined,
@@ -208,7 +219,9 @@ _CLIENT_JS = r"""
       if(!window.echarts) return;
       // prefer the server-built option; if it's missing, fall back to a client-side chart
       // assembled straight from columns+rows so real data never shows blank
-      var opt=res.echarts_option || fallbackChart(res);
+      // clone the server option: it may be shared (cache dedups recipes across tiles) and
+      // autosizeChart mutates it — never mutate a shared object handed to another instance
+      var opt=res.echarts_option ? JSON.parse(JSON.stringify(res.echarts_option)) : fallbackChart(res);
       if(!opt){ el.classList.add('dbaide-empty'); el.textContent='无数据'; return; }
       autosizeChart(el, opt, res);   // size the chart to its ACTUAL data shape
       // key the instance by the ELEMENT (getInstanceByDom), not the chart_id — the same
@@ -352,6 +365,7 @@ def _base_css(theme: dict[str, Any]) -> str:
     .dbaide-text {{ color:var(--text2); font-size:13px; line-height:1.6; margin:4px 0 14px; }}
     .dbaide-text h2,.dbaide-text h3,.dbaide-text h4 {{ color:var(--text); margin:6px 0; }}
     .dbaide-text code {{ background:var(--panel2); padding:1px 5px; border-radius:4px; }}
+    .dbaide-text ul {{ margin:4px 0; padding-left:20px; }} .dbaide-text li {{ margin:2px 0; }}
     .dbaide-text blockquote {{ margin:4px 0; padding-left:10px; border-left:3px solid var(--border); color:var(--muted); }}
     .dbaide-md-table {{ border-collapse:collapse; font-size:12px; margin:8px 0; }}
     .dbaide-md-table th, .dbaide-md-table td {{ border:1px solid var(--border); padding:5px 10px;

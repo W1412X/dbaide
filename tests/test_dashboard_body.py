@@ -83,6 +83,13 @@ def test_markdown_tile_renders_pipe_table():
     assert "<h3>关键发现</h3>" in body and "说明文字" in body
 
 
+def test_markdown_lists_grouped_and_ragged_tables_padded():
+    body = render_body({"type": "markdown",
+                        "text": "- 甲\n- 乙\n\n| A | B | C |\n|---|---|---|\n| 1 | 2 |"}, [_chart("c1")])
+    assert "<ul><li>甲</li><li>乙</li></ul>" in body          # consecutive bullets → one <ul>
+    assert "<td>1</td><td>2</td><td></td>" in body            # short row padded to header width
+
+
 def test_render_tree_grid_and_nesting():
     charts = [_chart("c1"), _chart("c2"), _chart("c3")]
     ui = {"type": "grid", "cols": 3, "children": [

@@ -135,9 +135,19 @@ def _mini_markdown(text: str) -> str:
             while i < n and "|" in lines[i] and lines[i].strip():
                 body.append([_inline_md(c) for c in _md_cells(lines[i])])
                 i += 1
+            ncol = len(header)
             th = "".join(f"<th>{c}</th>" for c in header)
-            trs = "".join("<tr>" + "".join(f"<td>{c}</td>" for c in row) + "</tr>" for row in body)
+            trs = "".join("<tr>" + "".join(f"<td>{row[j] if j < len(row) else ''}</td>"
+                                           for j in range(ncol)) + "</tr>" for row in body)   # pad ragged rows
             out.append(f'<table class="dbaide-md-table"><thead><tr>{th}</tr></thead><tbody>{trs}</tbody></table>')
+            continue
+        # a list block: group consecutive bullet lines into one <ul>
+        if raw.strip().startswith("- ") or raw.strip().startswith("* "):
+            items = []
+            while i < n and (lines[i].strip().startswith("- ") or lines[i].strip().startswith("* ")):
+                items.append(f"<li>{_inline_md(lines[i].strip()[2:])}</li>")
+                i += 1
+            out.append(f"<ul>{''.join(items)}</ul>")
             continue
         line = _inline_md(raw)
         s = line.strip()
@@ -149,8 +159,6 @@ def _mini_markdown(text: str) -> str:
             out.append(f'<h3>{s[3:]}</h3>')
         elif s.startswith("# "):
             out.append(f'<h2>{s[2:]}</h2>')
-        elif s.startswith("- ") or s.startswith("* "):
-            out.append(f'<li>{s[2:]}</li>')
         elif s == "":
             out.append("<br>")
         else:

@@ -214,16 +214,16 @@ def _reconcile_chart_plan(plan: dict[str, Any], columns: list[str], rows: list[d
         return p
 
     # other chart types: only repair role fields that are set but name a missing column
-    cat = p.get("category_field") or p.get("x_field") or ""
     for role in ("category_field", "x_field"):
         if p.get(role) and p[role] not in colset:
             p[role] = (text[0] if text else columns[0])
+    cat = p.get("category_field") or p.get("x_field") or ""   # AFTER repair, so y excludes the chosen x
     vals = [v for v in (p.get("value_fields") or []) if v in colset]
     if p.get("value_fields") and not vals:
         p["value_fields"] = [c for c in numeric if c != cat] or [c for c in columns if c != cat]
     for role in ("y_field", "size_field"):
         if p.get(role) and p[role] not in colset:
-            cand = [c for c in numeric if c != cat]
+            cand = [c for c in numeric if c != cat]   # don't collapse y onto the x column
             if cand:
                 p[role] = cand[0]
     return p
