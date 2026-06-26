@@ -6,6 +6,16 @@ All notable changes to DBAide are documented here. The format is loosely based o
 
 ## [Unreleased]
 
+## [0.9.15] — 2026-06-26
+
+### Performance
+
+- **Dashboard schema grounding cached per connection** — generating a dashboard gathers
+  schema context for the builder (~60 read queries: list/describe tables plus a `DISTINCT`
+  per low-cardinality text column). This is now cached per connection for the session, so
+  iterating on several dashboards in a row no longer re-introspects the database each time.
+  The cache is invalidated when a connection is saved or deleted.
+
 ## [0.9.14] — 2026-06-25
 
 ### Added
