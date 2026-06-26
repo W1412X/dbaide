@@ -41,6 +41,39 @@ def test_gauge_chart_handles_missing_value_field():
     assert out["data"]["value"] == 0.0
 
 
+def test_progressive_schema_assets_handles_unnamed_database(monkeypatch):
+    # _discover_from_assets filters out unnamed databases when building db_items but the
+    # kept indices are positions in the ORIGINAL list; indexing the filtered db_items
+    # with them crashed (IndexError) when an unnamed database preceded a kept one.
+    from dbaide.agent.progressive_schema import ProgressiveSchemaAgent
+    from dbaide.llm import LLMClient
+
+    class _LLM(LLMClient):  # any non-null client; the restrict path never calls it
+        pass
+
+    class FakeStore:
+        def has_instance(self, inst, *, fingerprint=""):
+            return True
+
+        def database_docs(self, inst, *, fingerprint=""):
+            return [{"name": "db1"}, {"name": ""}, {"name": "db2"}]  # unnamed in the middle
+
+        def table_docs(self, inst, db, *, fingerprint=""):
+            return []
+
+        def column_docs(self, inst, db, tbl, *, fingerprint=""):
+            return []
+
+    agent = ProgressiveSchemaAgent(_LLM(), FakeStore(), "inst")
+    monkeypatch.setattr(agent, "_asset_fingerprint", lambda: "")
+    # restrict to db2 → kept index is 2 (its original position); the filtered db_items
+    # has only 2 entries, so the old code raised IndexError here.
+    res = agent._discover_from_assets("q", restrict_databases={"db2"})
+    names = {h.name for h in res.hits}
+    assert "db2" in names      # correctly resolved + scanned
+    assert "" not in names     # the unnamed database is never scanned
+
+
 def test_mcp_tool_context_get_is_thread_safe(monkeypatch):
     # MCP runs each ask on its own thread; concurrent get() for one connection must
     # build the adapter exactly once (no unlocked check-then-act race).

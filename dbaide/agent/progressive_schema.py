@@ -247,14 +247,17 @@ class ProgressiveSchemaAgent:
             parent,
             "",
             f"Kept {len(db_indices)} database(s)",
-            detail=", ".join(db_items[i]["name"] for i in db_indices[:6]),
+            # db_indices are 'index' values = positions in the ORIGINAL databases list
+            # (db_items is the name-filtered subset), so index databases[] like the
+            # table/column scans do — indexing db_items[] here was off-by-removed-entries.
+            detail=", ".join(str(databases[i].get("name") or "") for i in db_indices[:6]),
         )
 
         table_hits: list[SchemaHit] = []
         column_hits: list[SchemaHit] = []
 
         def _scan_database(db_index: int) -> tuple[list[SchemaHit], list[SchemaHit], str]:
-            db_name = db_items[db_index]["name"]
+            db_name = str(databases[db_index].get("name") or "")
             tables = self.store.table_docs(self.instance, db_name, fingerprint=self._asset_fingerprint())
             if not tables:
                 return [], [], f"{db_name}: no tables"
@@ -339,7 +342,7 @@ class ProgressiveSchemaAgent:
             }
             for future in as_completed(futures):
                 idx = futures[future]
-                db_name = db_items[idx]["name"]
+                db_name = str(databases[idx].get("name") or "")
                 try:
                     tables, columns, note = future.result()
                     table_hits.extend(tables)
@@ -354,8 +357,8 @@ class ProgressiveSchemaAgent:
                                         node_id=f"{parent}/db:{db_name}", status="failed")
 
         for db_index in db_indices:
-            db_name = db_items[db_index]["name"]
             doc = databases[db_index]
+            db_name = str(doc.get("name") or "")
             if any(h.database == db_name for h in table_hits):
                 continue
             result.hits.append(
