@@ -105,6 +105,19 @@ def test_bulk_load_and_clear(qapp):
     assert v._turns == [] and v.has_open_turn() is False
 
 
+def test_actions_registered_and_dispatched(qapp):
+    v = _view()
+    v.begin_turn("q")
+    fired = {}
+    v.complete_turn(answer="a", actions=[{"id": "0", "label": "Copy"}, {"id": "1", "label": "Export"}],
+                    on_action=lambda aid: fired.__setitem__("id", aid))
+    turn = v._turns[0]
+    assert [a["label"] for a in turn["actions"]] == ["Copy", "Export"]
+    # the bridge fires _on_action(turn_id, action_id) → registered dispatcher
+    v._on_action(turn["id"], "1")
+    assert fired["id"] == "1"
+
+
 def test_append_clarification_reply_appends_to_user(qapp):
     v = _view()
     v.begin_turn("base question")

@@ -439,6 +439,7 @@ def build_conversation_page(
     hljs_src: str | None = None,
     echarts_src: str | None = None,
     initial_turns: list[dict[str, Any]] | None = None,
+    qwebchannel: bool = True,
 ) -> str:
     """Build the single HTML document that renders the whole conversation.
 
@@ -454,6 +455,7 @@ def build_conversation_page(
     hljs_json = json.dumps(hljs, ensure_ascii=False)
     echarts_json = json.dumps(echarts, ensure_ascii=False)
     initial_json = script_json(list(initial_turns or []))
+    channel = '<script src="qrc:///qtwebchannel/qwebchannel.js"></script>' if qwebchannel else ""
     return f"""<!doctype html>
 <html>
 <head>
@@ -463,6 +465,7 @@ def build_conversation_page(
     :root {{ {_theme_vars(theme)} }}
     {_base_css()}
   </style>
+  {channel}
   <script src={marked_json}></script>
   <script src={hljs_json}></script>
   <script src={echarts_json}></script>

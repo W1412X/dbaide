@@ -159,6 +159,9 @@ class ConversationWebView(QWidget):
         self._stream_timer.timeout.connect(self._flush_stream)
         # clarification proxies kept alive per turn so the signal survives until answered
         self._clarify_proxies: dict[str, _ClarificationProxy] = {}
+        # per-turn action dispatcher: action_id -> runs the (copy / chart dialog / build /
+        # export) handler the caller registered for that turn
+        self._action_handlers: dict[str, Any] = {}
 
         lay = QVBoxLayout(self)
         lay.setContentsMargins(0, 0, 0, 0)
@@ -181,6 +184,8 @@ class ConversationWebView(QWidget):
             return
         self._bridge = _ConversationBridge(self)
         self._bridge.clarifySubmitted.connect(self._on_clarify)
+        self._bridge.actionInvoked.connect(self._on_action)
+        self._bridge.traceToggled.connect(self._on_trace_toggle)
         self._channel = QWebChannel(self)
         self._channel.registerObject("bridge", self._bridge)
         self._view.page().setWebChannel(self._channel)
@@ -296,7 +301,8 @@ class ConversationWebView(QWidget):
     def complete_turn(self, *, answer: str = "", trace_events: list[dict[str, Any]] | None = None,
                       warnings: list[str] | None = None, errors: list[str] | None = None,
                       workflow_id: str = "", ok: bool = True, actions_widget: QWidget | None = None,
-                      charts: list[dict[str, Any]] | None = None) -> None:
+                      charts: list[dict[str, Any]] | None = None,
+                      actions: list[dict[str, Any]] | None = None, on_action: Any = None) -> None:
         if self._current is None:
             self.begin_turn("")
         turn = self._current
@@ -323,12 +329,38 @@ class ConversationWebView(QWidget):
         turn.update({
             "blocks": blocks, "stream": None, "notes": notes,
             "agenda": _agenda_dicts(events), "clarification": None,
+            "actions": list(actions or []),
             "status": {"state": "done" if ok else "error", "steps": steps,
                        "seconds": round(time.monotonic() - turn["_start"], 1), "ok": bool(ok)},
             "_events": events, "_final": final,
         })
+        if on_action is not None:
+            self._action_handlers[turn["id"]] = on_action
         self._current = None
         self._sync(turn)
+
+    def _on_action(self, turn_id: str, action_id: str) -> None:
+        handler = self._action_handlers.get(turn_id)
+        if handler is not None:
+            try:
+                handler(str(action_id))
+            except Exception:  # noqa: BLE001
+                pass
+
+    def _on_trace_toggle(self, turn_id: str) -> None:
+        turn = self._by_id.get(turn_id)
+        if turn is None:
+            return
+        try:
+            from dbaide.desktop.components.trace import toggle_trace_drawer
+            toggle_trace_drawer(
+                self, owner_widget=self, owner_id=str(turn_id),
+                events=list(turn.get("_events") or []), live=False,
+                ok=bool((turn.get("status") or {}).get("ok", True)),
+                on_close=lambda: None,
+            )
+        except Exception:  # noqa: BLE001
+            pass
 
     def finish_turn_error(self, message: str) -> None:
         self._stream_timer.stop()
@@ -410,6 +442,7 @@ class ConversationWebView(QWidget):
         self._by_id = {}
         self._current = None
         self._clarify_proxies = {}
+        self._action_handlers = {}
         self._stream_full = ""
         self._stream_pushed = 0
         self._hint = ""

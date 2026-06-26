@@ -55,3 +55,9 @@ def test_empty_page_is_valid():
     html = _build(initial_turns=[])
     assert "__DBC_INITIAL__ = []" in html
     assert html.count("<body>") == 1 and html.count("</body>") == 1
+
+
+def test_qwebchannel_script_included_by_default():
+    # the bridge (clarification submit / action buttons / trace toggle) needs it
+    assert "qrc:///qtwebchannel/qwebchannel.js" in _build()
+    assert "qrc:///qtwebchannel/qwebchannel.js" not in _build(qwebchannel=False)
