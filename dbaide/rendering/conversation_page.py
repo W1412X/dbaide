@@ -134,8 +134,9 @@ _CONVERSATION_JS = r"""
       var chart = echarts.init(canvas, null, { renderer: 'canvas' });
       chart.setOption(option, true);
       var resize = function(){ try { chart.resize(); } catch(e){} };
-      window.addEventListener('resize', resize);
-      if (window.ResizeObserver) new ResizeObserver(resize).observe(canvas);
+      // Per-canvas observer only (no global window listener that would leak one handler
+      // per chart ever rendered); disconnected + the chart disposed in disposeCharts.
+      if (window.ResizeObserver) { canvas.__ro = new ResizeObserver(resize); canvas.__ro.observe(canvas); }
       setTimeout(resize, 0);
     } catch(e){ var er = document.createElement('div'); er.className = 'chart-error'; er.textContent = 'Chart render failed.'; wrap.appendChild(er); }
     return wrap;
@@ -265,7 +266,21 @@ _CONVERSATION_JS = r"""
     return row;
   }
 
+  function disposeCharts(node){
+    // QtWebEngine keeps the renderer process forever, but ECharts instances + their
+    // ResizeObservers still pile up in it unless disposed before the DOM is wiped.
+    if (!window.echarts || !node) return;
+    node.querySelectorAll('.chart-canvas').forEach(function(c){
+      try {
+        if (c.__ro){ c.__ro.disconnect(); c.__ro = null; }
+        var inst = echarts.getInstanceByDom(c);
+        if (inst) inst.dispose();
+      } catch(e){}
+    });
+  }
+
   function renderTurnInto(node, turn){
+    disposeCharts(node);
     node.innerHTML = '';
     node.className = 'dbc-turn';
     var add = function(x){ if (x) node.appendChild(x); };
@@ -306,7 +321,7 @@ _CONVERSATION_JS = r"""
   var DBChat = {
     render: function(list){
       turns = list || []; byId = {};
-      var r = root(); r.innerHTML = ''; hintEl = null;
+      var r = root(); disposeCharts(r); r.innerHTML = ''; hintEl = null;
       turns.forEach(function(t){
         var node = el('dbc-turn'); byId[t.id] = { model: t, node: node };
         renderTurnInto(node, t); r.appendChild(node);
@@ -316,8 +331,15 @@ _CONVERSATION_JS = r"""
     setTurn: function(turn){
       if (!turn || turn.id == null) return;
       var entry = byId[turn.id];
-      if (entry){ entry.model = turn; renderTurnInto(entry.node, turn); }
-      else {
+      if (entry){
+        // Carry the in-flight streamed text across a full re-render: a setTurn from
+        // Python doesn't include the live stream (it's pushed via appendStream), so
+        // without this the streamed answer would vanish if a setTurn lands mid-stream.
+        if (turn.stream == null && (!turn.blocks || !turn.blocks.length) && entry.model.stream != null){
+          turn.stream = entry.model.stream;
+        }
+        entry.model = turn; renderTurnInto(entry.node, turn);
+      } else {
         var node = el('dbc-turn'); byId[turn.id] = { model: turn, node: node };
         turns.push(turn); renderTurnInto(node, turn); root().appendChild(node);
       }
@@ -330,10 +352,25 @@ _CONVERSATION_JS = r"""
       if (pre){ pre.appendChild(document.createTextNode(text)); } else { renderTurnInto(entry.node, m); }
       scrollIfFollowing();
     },
-    setStatus: function(id, status){ var e = byId[id]; if (!e) return; e.model.status = status; rerenderTurn(e.model); },
-    setAgenda: function(id, items){ var e = byId[id]; if (!e) return; e.model.agenda = items || []; rerenderTurn(e.model); },
+    setStatus: function(id, status){
+      var e = byId[id]; if (!e) return; e.model.status = status;
+      // Surgically swap just the status chip — never re-render the turn (which would
+      // touch the live stream / charts) for a frequent phase update during a run.
+      var cur = e.node.querySelector('.dbc-status');
+      var next = renderStatus(e.model);
+      if (cur && next){ cur.parentNode.replaceChild(next, cur); }
+      else if (cur && !next){ cur.parentNode.removeChild(cur); }
+      else { rerenderTurn(e.model); }
+      scrollIfFollowing();
+    },
+    setAgenda: function(id, items){
+      // Agenda updates arrive during the tool phase (before the answer streams), so a
+      // turn re-render here can't clobber stream; rerenderTurn reuses e.model (which
+      // holds any accumulated stream) so it's safe either way.
+      var e = byId[id]; if (!e) return; e.model.agenda = items || []; rerenderTurn(e.model);
+    },
     setHint: showHint,
-    clearAll: function(){ turns = []; byId = {}; hintEl = null; root().innerHTML = ''; followBottom = true; },
+    clearAll: function(){ turns = []; byId = {}; hintEl = null; var r = root(); disposeCharts(r); r.innerHTML = ''; followBottom = true; },
     setTheme: function(theme){
       var rs = document.documentElement.style;
       for (var k in (theme || {})){ if (Object.prototype.hasOwnProperty.call(theme, k)) rs.setProperty('--' + k, theme[k]); }

@@ -105,6 +105,28 @@ def test_bulk_load_and_clear(qapp):
     assert v._turns == [] and v.has_open_turn() is False
 
 
+def test_trace_event_midstream_does_not_drop_streamed_answer(qapp):
+    # A trace event mid-stream must push granular status/agenda (not a full setTurn that
+    # would re-render over — and wipe — the live streamed answer). At the model level we
+    # assert the streamed text accumulation survives a trace event.
+    v = _view()
+    v.begin_turn("q")
+    v.append_answer_chunk("Hello ")
+    v.append_trace_event({"stage": "execute_sql", "kind": "phase"})
+    v.append_answer_chunk("world")
+    v._flush_stream()
+    assert v._turns[0]["_answer"] == "Hello world"
+    assert v._turns[0]["status"]["state"] == "running"  # trace still updated status
+
+
+def test_clear_resets_turn_sequence(qapp):
+    v = _view()
+    v.begin_turn("a")
+    v.clear()
+    v.begin_turn("b")
+    assert v._turns[0]["id"] == "t1"  # ids restart after clear
+
+
 def test_actions_registered_and_dispatched(qapp):
     v = _view()
     v.begin_turn("q")

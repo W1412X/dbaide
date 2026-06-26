@@ -280,7 +280,10 @@ class ConversationWebView(QWidget):
         if turn is None or not message:
             return
         turn["status"] = {"state": "running", "phase": str(message)}
-        self._sync(turn)
+        # Granular push (not a full setTurn) so a status update never re-renders the
+        # turn over an in-flight streamed answer.
+        if not self._bulk:
+            self._push("setStatus", turn["id"], turn["status"])
 
     def append_trace_event(self, event: dict[str, Any]) -> None:
         if self._current is None:
@@ -296,7 +299,9 @@ class ConversationWebView(QWidget):
         if phase:
             turn["status"] = {"state": "running", "phase": str(phase)}
         turn["agenda"] = _agenda_dicts(turn["_events"])
-        self._sync(turn)
+        if not self._bulk:
+            self._push("setStatus", turn["id"], turn["status"])
+            self._push("setAgenda", turn["id"], turn["agenda"])
 
     def complete_turn(self, *, answer: str = "", trace_events: list[dict[str, Any]] | None = None,
                       warnings: list[str] | None = None, errors: list[str] | None = None,
@@ -441,6 +446,7 @@ class ConversationWebView(QWidget):
         self._turns = []
         self._by_id = {}
         self._current = None
+        self._turn_seq = 0
         self._clarify_proxies = {}
         self._action_handlers = {}
         self._stream_full = ""
