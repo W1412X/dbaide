@@ -537,13 +537,14 @@ def _materialize_boxplot(plan: ChartPlan, rows: list[dict[str, Any]]) -> dict[st
 
 
 def _materialize_gauge(plan: ChartPlan, rows: list[dict[str, Any]]) -> dict[str, Any]:
-    field = plan.value_fields[0]
-    row = rows[0]
+    field = plan.value_fields[0] if plan.value_fields else ""
+    row = rows[0] if rows else {}
     label = str(
         row.get(plan.category_field)
         or (plan.series_names[0] if plan.series_names else field)
+        or ""
     )
-    value = _as_float(row.get(field))
+    value = _as_float(row.get(field)) if field else 0.0
     return {"categories": [], "series": [], "data": {"value": value, "name": label}}
 
 
