@@ -152,7 +152,13 @@ def run_parametric_chart(chart: ParametricChart, param_values: dict[str, Any], e
     # data even when this recipe can't form a chart. Coerce so numerics survive the
     # bridge's JSON as NUMBERS (Decimal/date would otherwise stringify, breaking KPI
     # numeric detection + formatting on the page).
-    columns = list(combined[0].keys())
+    columns: list[str] = []   # ordered union across ALL rows — union/join sources can be ragged
+    seen: set[str] = set()
+    for r in combined:
+        for k in r.keys():
+            if k not in seen:
+                seen.add(k)
+                columns.append(k)
     rows = [{k: _jsonable(v) for k, v in r.items()} for r in combined[:200]]
     # Reconcile the chart_plan's field→role mapping against the ACTUAL result columns: the
     # plan is authored separately from the SQL and often drifts (wrong column names), which
@@ -222,8 +228,9 @@ def _reconcile_chart_plan(plan: dict[str, Any], columns: list[str], rows: list[d
     if p.get("value_fields") and not vals:
         p["value_fields"] = [c for c in numeric if c != cat] or [c for c in columns if c != cat]
     for role in ("y_field", "size_field"):
-        if p.get(role) and p[role] not in colset:
-            cand = [c for c in numeric if c != cat]   # don't collapse y onto the x column
+        yv = p.get(role)
+        if yv and (yv not in colset or yv == cat):   # missing OR collides with the x column → move off
+            cand = [c for c in numeric if c != cat]
             if cand:
                 p[role] = cand[0]
     return p

@@ -1729,8 +1729,10 @@ class DesktopService:
     def _distinct_values(self, conn_name: str, table: str, col: str, cap: int = 30) -> list[str] | None:
         """Distinct values for a column, or None if high-cardinality/empty/unavailable."""
         try:
-            res = self.execute_sql({"connection_name": conn_name,
-                                    "sql": f'SELECT DISTINCT "{col}" AS v FROM "{table}" LIMIT {cap + 1}'})
+            dialect = self._table_dialect(self.cfg.get_connection(conn_name or None))   # backticks on MySQL, etc.
+            sql = (f"SELECT DISTINCT {quote_identifier(col, dialect)} AS v "
+                   f"FROM {quote_identifier(table, dialect)} LIMIT {cap + 1}")
+            res = self.execute_sql({"connection_name": conn_name, "sql": sql})
             rows = res.get("rows") or []
             vals = [str(r.get("v") if isinstance(r, dict) else r[0]) for r in rows]
             vals = [v for v in vals if v not in ("", "None")]

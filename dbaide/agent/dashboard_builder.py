@@ -125,7 +125,9 @@ class DashboardBuilderAgent:
             for p in chart.params:
                 if getattr(p, "multi", False):
                     opts = [str(o) for o in (getattr(p, "options", None) or [])]
-                    values[p.name] = (opts[:2] + ["__a__", "__b__"])[:2]
+                    # 2 ALLOWLISTED values (an enum drops out-of-options ones, which would
+                    # collapse the test back to a single literal and defeat the IN(...) check)
+                    values[p.name] = (opts * 2)[:2] if opts else ["__a__", "__b__"]
             for src in chart.sources:
                 bound = render_sql(src.sql, values, chart.params)
                 report = validate(bound)

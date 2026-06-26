@@ -147,6 +147,32 @@ def test_run_parametric_chart_reconciles_sparse_plan():
     assert s and set(s["categories"]) == {"广州", "成都"} and 100.0 in s["series"][0]["values"]
 
 
+def test_run_parametric_chart_columns_union_across_ragged_rows():
+    # union/join sources can be ragged — columns must be the union across ALL rows, not row 0
+    chart = ParametricChart(
+        chart_id="c", title="t",
+        sources=[QuerySource("a", "SELECT 1"), QuerySource("b", "SELECT 1")],
+        params=[], combine=Combine(mode="union", tag_field="src"),
+        chart_plan={"chart_type": "bar", "category_field": "x", "value_fields": ["y"]})
+    calls = [0]
+
+    def ex(_sql):
+        calls[0] += 1
+        return ({"columns": ["x"], "rows": [["a"]]} if calls[0] == 1
+                else {"columns": ["x", "y"], "rows": [["b", 9]]})
+
+    out = run_parametric_chart(chart, {}, ex)
+    assert "y" in out["columns"]   # the column only the 2nd source emits isn't lost
+
+
+def test_reconcile_scatter_does_not_collapse_x_and_y():
+    from dbaide.boards.runtime import _reconcile_chart_plan
+    # x names a missing column (repaired to the real one); y already equals that column → must move off
+    p = _reconcile_chart_plan({"chart_type": "scatter", "x_field": "ZZZ", "y_field": "a"},
+                              ["a", "b"], [{"a": 1, "b": 2}])
+    assert p["x_field"] != p["y_field"]   # not a degenerate y=x line
+
+
 def test_combine_join_drops_null_key_rows():
     from dbaide.boards.runtime import combine_rows
     s1, s2 = QuerySource("a", ""), QuerySource("b", "")

@@ -184,6 +184,7 @@ class ParametricDashboardStudio(QWidget):
 
     def shutdown(self) -> None:
         self._busy.stop()
+        self._web.shutdown()   # drain the dashboard query workers before teardown
         if self._worker is not None:
             self._worker.wait()
             self._worker.deleteLater()

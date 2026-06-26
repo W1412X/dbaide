@@ -191,10 +191,11 @@ _CLIENT_JS = r"""
     el.appendChild(o);
   }
   function clearBusy(el){ var o=el.querySelector(':scope > .dbaide-busy'); if(o && o.parentNode) o.parentNode.removeChild(o); }
+  function disposeChart(el){ if(window.echarts){ var i=echarts.getInstanceByDom(el); if(i) i.dispose(); } }
   function markLoading(el, kind){
     if(!isEmptyTile(el, kind)){ showBusy(el); return; }   // refresh/apply: overlay spinner over existing content
     if(kind==='kpi'){ var v=el.querySelector('.dbaide-kpi-value'); if(v) v.innerHTML='<span class="dbaide-spin"></span>'; return; }
-    el.classList.remove('dbaide-empty'); el.classList.add('dbaide-loading'); el.innerHTML='';
+    el.classList.remove('dbaide-empty'); el.classList.add('dbaide-loading'); disposeChart(el); el.innerHTML='';
   }
   function renderTile(el, params){
     if(el.closest('.dbaide-tabpanel:not(.active)')) return;   // render lazily when its tab opens
@@ -205,14 +206,15 @@ _CLIENT_JS = r"""
       clearBusy(el);   // remove the apply/refresh overlay once new data lands
       var err=(!res || res.error);
       if(kind==='kpi'){   // a card with child nodes — never wipe it with textContent
-        if(err){ var v=el.querySelector('.dbaide-kpi-value'); if(v) v.textContent='—'; return; }
+        if(err){ var v=el.querySelector('.dbaide-kpi-value'); if(v) v.textContent='—';
+          var sp=el.querySelector('.dbaide-kpi-spark'); if(sp) sp.innerHTML=''; return; }   // clear stale sparkline
         renderKpi(el, res); return;
       }
       el.classList.remove('dbaide-loading');
-      if(err){ el.classList.add('dbaide-empty'); el.textContent=(res&&res.error)?res.error:'无数据'; return; }
+      if(err){ disposeChart(el); el.classList.add('dbaide-empty'); el.textContent=(res&&res.error)?res.error:'无数据'; return; }
       el.classList.remove('dbaide-empty');
       if(kind==='table'){
-        if(!res.rows || !res.rows.length){ el.classList.add('dbaide-empty'); el.textContent='无数据'; }
+        if(!res.rows || !res.rows.length){ disposeChart(el); el.classList.add('dbaide-empty'); el.textContent='无数据'; }
         else renderTable(el, res);
         return;
       }
@@ -222,7 +224,7 @@ _CLIENT_JS = r"""
       // clone the server option: it may be shared (cache dedups recipes across tiles) and
       // autosizeChart mutates it — never mutate a shared object handed to another instance
       var opt=res.echarts_option ? JSON.parse(JSON.stringify(res.echarts_option)) : fallbackChart(res);
-      if(!opt){ el.classList.add('dbaide-empty'); el.textContent='无数据'; return; }
+      if(!opt){ disposeChart(el); el.classList.add('dbaide-empty'); el.textContent='无数据'; return; }
       autosizeChart(el, opt, res);   // size the chart to its ACTUAL data shape
       // key the instance by the ELEMENT (getInstanceByDom), not the chart_id — the same
       // recipe can drive several chart tiles, which would collide on a chart_id map
@@ -239,9 +241,10 @@ _CLIENT_JS = r"""
     for(var i=0;i<boxes.length;i++){ if(boxes[i].value===value){ target=boxes[i]; break; } }
     if(!target) return;   // clicked value isn't a filter dimension → no-op
     var name=target.getAttribute('data-param');
-    document.querySelectorAll('input[type="checkbox"][data-param="'+name+'"]').forEach(function(c){
-      c.checked=(c.value===value);   // isolate the clicked value in that filter
-    });
+    var group=document.querySelectorAll('input[type="checkbox"][data-param="'+name+'"]');
+    var checked=Array.prototype.filter.call(group, function(c){ return c.checked; });
+    var alreadyIsolated=(checked.length===1 && checked[0]===target);   // click again on the lone value → clear
+    group.forEach(function(c){ c.checked = alreadyIsolated ? true : (c.value===value); });
     updateSummaries();
     refresh();
   }
@@ -276,6 +279,7 @@ _CLIENT_JS = r"""
   window.addEventListener('resize', function(){
     if(!window.echarts) return;
     document.querySelectorAll('[data-kind="chart"]').forEach(function(el){
+      if(el.offsetParent===null) return;   // skip hidden-tab charts (resizing to 0×0 collapses them)
       var i=echarts.getInstanceByDom(el); if(i) i.resize(); });
   });
   function wire(){
@@ -410,13 +414,14 @@ def _base_css(theme: dict[str, Any]) -> str:
     .dbaide-table {{ width:100%; border-collapse:collapse; font-size:12px; }}
     .dbaide-table th, .dbaide-table td {{ text-align:left; padding:7px 12px;
       border-bottom:1px solid var(--border); color:var(--text); white-space:nowrap; }}
-    .dbaide-table th {{ color:var(--muted); font-weight:600; position:sticky; top:0; background:var(--panel);
+    .dbaide-table th {{ color:var(--muted); font-weight:600; position:sticky; top:0; z-index:1; background:var(--panel);
       cursor:pointer; user-select:none; }}
     .dbaide-table th:hover {{ color:var(--text); }}
     .dbaide-table th.sorted {{ color:var(--accent); }}
     .dbaide-table th.sorted::after {{ content:attr(data-arrow); color:var(--accent); margin-left:4px; }}
-    .dbaide-table tbody tr:nth-child(even) {{ background:rgba(255,255,255,.022); }}
-    .dbaide-table tbody tr:hover {{ background:rgba(255,255,255,.05); }}
+    /* neutral grey overlays work on both dark and light injected themes (white was invisible on light) */
+    .dbaide-table tbody tr:nth-child(even) {{ background:rgba(128,128,128,.08); }}
+    .dbaide-table tbody tr:hover {{ background:rgba(128,128,128,.16); }}
     .dbaide-table tbody tr:last-child td {{ border-bottom:none; }}
     .dbaide-table td.num, .dbaide-table th.num {{ text-align:right; font-variant-numeric:tabular-nums; }}
     """

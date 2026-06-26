@@ -111,3 +111,9 @@ class DashboardWebView(QWidget):
         self._view.page().setWebChannel(self._channel)
         page = build_dashboard_page(body_html, echarts_src=es, theme=_theme_payload())
         self._view.setHtml(page, webengine_html_base(es))
+
+    def shutdown(self) -> None:
+        """Drain in-flight query workers BEFORE the widget (and its bridge) is destroyed —
+        otherwise a worker could emit on a freed bridge at teardown (use-after-free)."""
+        self._pool.clear()
+        self._pool.waitForDone(5000)
