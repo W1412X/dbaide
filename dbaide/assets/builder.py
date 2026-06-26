@@ -159,18 +159,14 @@ class AssetBuilder:
             return
         rels, self._fk_relations = self._fk_relations, []
         saved = 0
-        for rel in rels:
-            try:
-                self.join_catalog.add(
-                    instance,
-                    rel,
-                    source="foreign_key",
-                    database=rel.get("database") or "",
-                    fingerprint=self.store.connection_metadata(self.connection)["connection_fingerprint"],
-                )
-                saved += 1
-            except Exception as exc:  # pragma: no cover - defensive
-                logger.debug("fk join persist failed: %s", exc)
+        try:
+            fingerprint = self.store.connection_metadata(self.connection)["connection_fingerprint"]
+            # one load+save for the whole batch instead of per-edge (O(n) not O(n^2))
+            saved = self.join_catalog.add_many(
+                instance, rels, source="foreign_key", fingerprint=fingerprint,
+            )
+        except Exception as exc:  # pragma: no cover - defensive
+            logger.debug("fk join persist failed: %s", exc)
         if saved:
             self._emit(f"saved {saved} foreign-key join(s) to the catalog", status="running")
 

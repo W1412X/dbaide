@@ -41,6 +41,31 @@ def test_gauge_chart_handles_missing_value_field():
     assert out["data"]["value"] == 0.0
 
 
+def test_join_catalog_add_many_matches_repeated_add(tmp_path):
+    # add_many must produce the same catalog as calling add() per relation (same
+    # undirected dedup), in one load+save instead of O(n) of them.
+    from dbaide.joins.catalog import JoinCatalogStore
+    rels = [
+        {"table": "orders", "column": "user_id", "ref_table": "users", "ref_column": "id"},
+        {"table": "users", "column": "id", "ref_table": "orders", "ref_column": "user_id"},  # reverse dup
+        {"table": "orders", "column": "product_id", "ref_table": "products", "ref_column": "id"},
+    ]
+    fp = "fp1"
+    a = JoinCatalogStore(tmp_path / "a")
+    for r in rels:
+        a.add("local", r, source="foreign_key", database="", fingerprint=fp)
+    b = JoinCatalogStore(tmp_path / "b")
+    n = b.add_many("local", rels, source="foreign_key", fingerprint=fp)
+
+    def edges(recs):
+        return sorted(tuple(sorted([(x["table"], x["column"]), (x["ref_table"], x["ref_column"])])) for x in recs)
+
+    ra, rb = a._load("local"), b._load("local")
+    assert len(ra) == len(rb) == 2  # the reverse duplicate is merged
+    assert edges(ra) == edges(rb)
+    assert n == 3  # three relations processed
+
+
 def test_heatmap_axes_are_deterministic_regardless_of_row_order():
     # Same data in two row orders must yield the same axes + cell mapping (the cell
     # coordinates are stable across refreshes).

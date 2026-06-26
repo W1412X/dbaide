@@ -245,6 +245,63 @@ class JoinCatalogStore:
         self._save(instance, records)
         return dict(record)
 
+    def add_many(
+        self,
+        instance: str,
+        rels: list[dict[str, Any]],
+        *,
+        source: str = "foreign_key",
+        fingerprint: str = "",
+    ) -> int:
+        """Upsert many relations in a single load+save (same undirected dedup semantics
+        as ``add``). FK discovery persists dozens of edges at once; doing it one ``add``
+        at a time re-read and re-wrote the whole catalog per edge — O(n^2) file I/O."""
+        if not rels:
+            return 0
+
+        def _canon(key: tuple[str, str, str, str]) -> tuple:
+            # undirected: a->b and b->a are the same join
+            return tuple(sorted(((key[0], key[1]), (key[2], key[3]))))
+
+        records = self._load(instance)
+        # index existing edges (restricted to the matching fingerprint, like add())
+        index: dict[tuple, int] = {}
+        for i, existing in enumerate(records):
+            if fingerprint and str(existing.get("connection_fingerprint") or "") != fingerprint:
+                continue
+            ekey = relation_endpoint_key(
+                str(existing.get("table") or ""), str(existing.get("column") or ""),
+                str(existing.get("ref_table") or ""), str(existing.get("ref_column") or ""),
+            )
+            index[(_canon(ekey), str(existing.get("database") or ""))] = i
+
+        saved = 0
+        for rel in rels:
+            record = relation_to_catalog_record(
+                rel, instance=instance, database=rel.get("database") or "",
+                source=source, fingerprint=fingerprint,
+            )
+            key = relation_endpoint_key(record["table"], record["column"], record["ref_table"], record["ref_column"])
+            ck = (_canon(key), str(record.get("database") or ""))
+            slot = index.get(ck)
+            if slot is not None:
+                existing = records[slot]
+                record["id"] = existing.get("id") or record["id"]
+                record["created_at"] = existing.get("created_at") or record["created_at"]
+                if source == "user":
+                    record["confidence"] = USER_JOIN_CONFIDENCE
+                    record["source"] = "user"
+                elif str(existing.get("source") or "") == "user":
+                    record["source"] = "user"
+                    record["confidence"] = max(_safe_float(existing.get("confidence")), _safe_float(record.get("confidence")))
+                records[slot] = record
+            else:
+                index[ck] = len(records)
+                records.append(record)
+            saved += 1
+        self._save(instance, records)
+        return saved
+
     def update(self, instance: str, join_id: str, fields: dict[str, Any], *, fingerprint: str = "") -> dict[str, Any] | None:
         records = self._load(instance)
         for index, rec in enumerate(records):
