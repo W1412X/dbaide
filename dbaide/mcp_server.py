@@ -366,15 +366,20 @@ class _ToolContext:
     def __init__(self) -> None:
         self._cache: dict[str, tuple[Any, Any, Any, Any]] = {}
         self._config_hash: dict[str, str] = {}
+        # MCP runs each `ask` on its own thread, so concurrent requests hit this shared
+        # context; without the lock the check-then-act below races and two threads
+        # redundantly rebuild the adapter (and write _cache/_config_hash non-atomically).
+        self._lock = threading.Lock()
 
     def get(self, conn_name: str | None) -> tuple[Any, Any, Any, Any]:
         """Return (adapter, schema_tools, query_tools, profile_tools) for a connection."""
         key = conn_name or ""
-        current_hash = self._connection_hash(conn_name)
-        if key not in self._cache or self._config_hash.get(key) != current_hash:
-            self._cache[key] = self._build(conn_name)
-            self._config_hash[key] = current_hash
-        return self._cache[key]
+        current_hash = self._connection_hash(conn_name)  # no shared state — keep off the lock
+        with self._lock:
+            if key not in self._cache or self._config_hash.get(key) != current_hash:
+                self._cache[key] = self._build(conn_name)
+                self._config_hash[key] = current_hash
+            return self._cache[key]
 
     @staticmethod
     def _connection_hash(conn_name: str | None) -> str:

@@ -41,6 +41,39 @@ def test_gauge_chart_handles_missing_value_field():
     assert out["data"]["value"] == 0.0
 
 
+def test_mcp_tool_context_get_is_thread_safe(monkeypatch):
+    # MCP runs each ask on its own thread; concurrent get() for one connection must
+    # build the adapter exactly once (no unlocked check-then-act race).
+    import threading
+    import time
+    from dbaide.mcp_server import _ToolContext
+
+    ctx = _ToolContext()
+    calls = {"n": 0}
+
+    def fake_build(conn_name):
+        calls["n"] += 1
+        time.sleep(0.05)  # widen the race window
+        return ("adapter", "s", "q", "p")
+
+    monkeypatch.setattr(ctx, "_build", fake_build)
+    monkeypatch.setattr(ctx, "_connection_hash", lambda c: "h")
+    barrier = threading.Barrier(8)
+    results = []
+
+    def worker():
+        barrier.wait()
+        results.append(ctx.get("c"))
+
+    threads = [threading.Thread(target=worker) for _ in range(8)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+    assert calls["n"] == 1  # built once despite 8 concurrent gets
+    assert all(r == ("adapter", "s", "q", "p") for r in results)
+
+
 def test_join_catalog_add_many_matches_repeated_add(tmp_path):
     # add_many must produce the same catalog as calling add() per relation (same
     # undirected dedup), in one load+save instead of O(n) of them.
