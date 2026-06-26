@@ -201,8 +201,9 @@ _CONVERSATION_JS = r"""
       if (s.state === 'running') chip.appendChild(el('dbc-spinner'));
       var t = el('dbc-status-text'); t.textContent = s.phase || ''; chip.appendChild(t);
     } else {
-      var label = s.state === 'error' ? (s.phase || 'Failed') : (s.steps ? ('View agent trace · ' + s.steps + ' steps') : 'View agent trace');
-      var lt = el('dbc-status-text'); lt.textContent = label; chip.appendChild(lt);
+      // step count / timing live in the footer (matching the legacy view); the chip is
+      // just the trace link.
+      var lt = el('dbc-status-text'); lt.textContent = s.traceLabel || 'View agent trace'; chip.appendChild(lt);
       chip.style.cursor = 'pointer';
       chip.onclick = function(){ call('toggleTrace', String(turn.id)); };
     }
@@ -278,17 +279,33 @@ _CONVERSATION_JS = r"""
     c.done = true; rerenderTurn(turn); call('clarify', String(turn.id), value);
   }
 
-  function renderActions(turn){
+  function renderActionsButton(turn){
     var actions = turn.actions || [];
     if (!actions.length) return null;
-    var row = el('dbc-actions');
     // A single compact "⋯" that pops the full action list as a native menu (Python
-    // side), so the row stays clean no matter how many actions a turn has.
+    // side), so the footer stays clean no matter how many actions a turn has.
     var btn = el('dbc-more', 'button');
     btn.textContent = '⋯';
-    btn.title = (actions[0] && actions[0].menuTitle) || 'More';
+    btn.title = 'More';
     btn.onclick = function(){ call('action', String(turn.id), '__menu__'); };
-    row.appendChild(btn);
+    return btn;
+  }
+
+  function renderFooter(turn){
+    var s = turn.status || {};
+    var done = s.state === 'done' || s.state === 'error';
+    var actBtn = renderActionsButton(turn);
+    if (!done && !actBtn) return null;
+    var row = el('dbc-footer');
+    var summary = el('dbc-summary', 'span');
+    if (done){
+      var label = s.state === 'error' ? 'Failed' : 'Done';
+      if (s.steps) label += ' · ' + s.steps + ' steps';
+      if (s.seconds != null) label += ' · ' + (+s.seconds).toFixed(1) + 's';
+      summary.textContent = label;
+    }
+    row.appendChild(summary);          // left (may be empty → just pushes ⋯ right)
+    if (actBtn) row.appendChild(actBtn);
     return row;
   }
 
@@ -315,6 +332,8 @@ _CONVERSATION_JS = r"""
     add(renderStatus(turn));
     add(renderAgenda(turn));
     var content = el('dbc-content');
+    var hasAnswer = (turn.blocks && turn.blocks.length) || turn.stream != null;
+    if (hasAnswer){ var who = el('dbc-author'); who.textContent = 'DBAide'; content.appendChild(who); }
     if (turn.blocks && turn.blocks.length){
       content.appendChild(renderBlocks(turn.blocks));
     } else if (turn.stream != null){
@@ -323,7 +342,7 @@ _CONVERSATION_JS = r"""
     var notes = renderNotes(turn); if (notes) content.appendChild(notes);
     var clar = renderClarification(turn); if (clar) content.appendChild(clar);
     if (content.childNodes.length) add(content);
-    add(renderActions(turn));
+    add(renderFooter(turn));
   }
 
   function rerenderTurn(turn){
@@ -421,8 +440,14 @@ def _base_css() -> str:
     html, body { margin:0; padding:0; background:var(--bg); color:var(--text);
       font-family: Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
       font-size:13px; line-height:1.55; }
-    #dbc-root { padding:16px 28px 28px; display:flex; flex-direction:column; gap:18px; }
+    /* Anchor the transcript to the bottom (newest turn near the composer), like the
+       legacy view: short conversations sit at the bottom, long ones scroll. */
+    #dbc-root { min-height:100vh; box-sizing:border-box; padding:16px 28px 28px;
+      display:flex; flex-direction:column; justify-content:flex-end; gap:18px; }
     .dbc-turn { display:flex; flex-direction:column; gap:8px; }
+    .dbc-author { color:var(--muted); font-size:10px; font-weight:600; letter-spacing:.3px; }
+    .dbc-footer { display:flex; justify-content:space-between; align-items:center; gap:8px; margin-top:2px; }
+    .dbc-summary { color:var(--muted); font-size:11px; }
     .dbc-user { display:flex; flex-direction:column; align-items:flex-end; gap:4px; }
     .dbc-meta { color:var(--muted); font-size:11px; }
     .dbc-tags { display:flex; gap:6px; flex-wrap:wrap; justify-content:flex-end; }
