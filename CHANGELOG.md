@@ -6,6 +6,42 @@ All notable changes to DBAide are documented here. The format is loosely based o
 
 ## [Unreleased]
 
+## [0.9.16] — 2026-06-28
+
+A hardening release from a codebase-wide audit + fuzzing pass. Every fix is verified
+and covered by a regression test.
+
+### Fixed
+
+- **Charts never crash on degenerate data** — the gauge, heatmap, sankey and boxplot
+  materializers indexed `rows[0]`/`value_fields[0]` unconditionally, so an empty result
+  set or a plan missing its role fields raised `IndexError`. All chart types now degrade
+  to an empty chart (covered by a fuzz test over every chart type).
+- **`render_body` is genuinely "always safe"** — it crashed on `charts=None` despite the
+  contract; guarded.
+- **Schema discovery `IndexError`** — asset discovery indexed the name-filtered database
+  list with original-list positions, crashing when a database had an empty name.
+- **Dashboard generation no longer crashes on partial model output** — `QuerySource`/
+  `ParamSpec.from_dict` tolerate a missing source `id`/`sql` or param `name` (an empty
+  SQL now surfaces as a normal, repairable validation error).
+- **CLI backup output** tolerates a partial result instead of `KeyError`.
+- **Attribute-injection fix** — the dashboard table header escaped `&<>` but not quotes,
+  so a column name containing `"` could break out of a `data-col="…"` attribute.
+- **Import manifest atomic write** — a crash mid-write no longer truncates `manifest.json`
+  and orphans the imported tables.
+- **MCP `_ToolContext` is thread-safe** — concurrent `ask` requests for one connection no
+  longer race the adapter cache.
+
+### Performance
+
+- **Foreign-key persistence is O(n) not O(n²)** — `JoinCatalogStore.add_many` does one
+  load+save for the whole batch instead of per edge.
+- **Heatmap rendering is O(n) not O(n²)** — sorted axis index map (also makes the axis
+  order deterministic across refreshes).
+- **QueryHistoryStore** mirrors history in memory, so the workbench no longer re-reads and
+  re-parses the capped file on every query.
+- Single-pass schema-asset summary.
+
 ## [0.9.15] — 2026-06-26
 
 ### Performance
