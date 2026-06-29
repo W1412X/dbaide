@@ -41,6 +41,30 @@ def test_gauge_chart_handles_missing_value_field():
     assert out["data"]["value"] == 0.0
 
 
+def test_query_history_cache_stays_consistent(tmp_path):
+    # The in-memory mirror must match what's persisted, survive a fresh store (read from
+    # disk), keep the cap + last-query dedup, and recent() must not mutate the cache.
+    from dbaide.history.query_store import QueryHistoryStore, MAX_ENTRIES
+    s = QueryHistoryStore(tmp_path)
+    s.record("c", "SELECT 1")
+    s.record("c", "SELECT 2")
+    s.record("c", "SELECT 2")  # rerun of the latest → dedup (timestamp bump), not a new row
+    assert [e["sql"] for e in s.recent("c")] == ["SELECT 2", "SELECT 1"]
+    # recent() returns a copy — mutating it must not corrupt the cache
+    r = s.recent("c")
+    r.clear()
+    assert len(s.recent("c")) == 2
+    # a fresh store reads the same from disk (cache mirrors the file)
+    assert [e["sql"] for e in QueryHistoryStore(tmp_path).recent("c")] == ["SELECT 2", "SELECT 1"]
+    # cap is enforced in place
+    for i in range(MAX_ENTRIES + 50):
+        s.record("c", f"SELECT q{i}")
+    assert len(s.recent("c", limit=10_000)) == MAX_ENTRIES
+    # clear wipes cache + file
+    s.clear("c")
+    assert s.recent("c") == [] and QueryHistoryStore(tmp_path).recent("c") == []
+
+
 def test_parametric_from_dict_tolerates_missing_required_fields():
     # The dashboard builder feeds model JSON straight through ParametricChart.from_dict;
     # a source missing id/sql or a param missing name must not crash the build with

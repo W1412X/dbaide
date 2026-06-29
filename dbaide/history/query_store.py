@@ -34,9 +34,18 @@ class QueryHistoryStore:
     def __init__(self, base_dir: Path | None = None) -> None:
         self.base_dir = base_dir or Path.home() / ".dbaide" / "query_history"
         self._lock = threading.Lock()
+        # In-memory mirror of each connection's history (this process is the only writer,
+        # like the rest of the local stores), so record()/recent() don't re-read and
+        # re-parse the whole capped file on every workbench query.
+        self._cache: dict[str, list[dict[str, Any]]] = {}
 
     def _path(self, connection_name: str) -> Path:
         return self.base_dir / f"{_safe_name(connection_name)}.jsonl"
+
+    def _load(self, connection_name: str) -> list[dict[str, Any]]:
+        if connection_name not in self._cache:
+            self._cache[connection_name] = self._read(connection_name)
+        return self._cache[connection_name]
 
     def record(
         self,
@@ -52,7 +61,7 @@ class QueryHistoryStore:
         if not sql:
             return
         with self._lock:
-            entries = self._read(connection_name)
+            entries = self._load(connection_name)
             # Collapse a re-run of the most recent query into a timestamp bump.
             if entries and entries[-1].get("sql") == sql:
                 entries.pop()
@@ -64,21 +73,23 @@ class QueryHistoryStore:
                 "database": database or "",
                 "ts": time.time(),
             })
-            entries = entries[-MAX_ENTRIES:]
+            if len(entries) > MAX_ENTRIES:
+                del entries[:-MAX_ENTRIES]   # trim in place so the cached list stays the live one
             self._write(connection_name, entries)
 
     def recent(self, connection_name: str, limit: int = 200) -> list[dict[str, Any]]:
         """Most-recent-first history entries."""
-        entries = self._read(connection_name)
-        entries.reverse()
-        return entries[: max(0, limit)]
+        entries = self._load(connection_name)
+        return list(reversed(entries))[: max(0, limit)]   # copy — never mutate the cache
 
     def clear(self, connection_name: str) -> None:
-        path = self._path(connection_name)
-        try:
-            path.unlink(missing_ok=True)
-        except OSError as exc:  # noqa: BLE001
-            logger.warning("failed to clear query history %s: %s", path, exc)
+        with self._lock:
+            self._cache.pop(connection_name, None)
+            path = self._path(connection_name)
+            try:
+                path.unlink(missing_ok=True)
+            except OSError as exc:  # noqa: BLE001
+                logger.warning("failed to clear query history %s: %s", path, exc)
 
     # ── io ──────────────────────────────────────────────────────────────────--
 
