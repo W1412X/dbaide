@@ -63,11 +63,16 @@ class ParametricDashboardStudio(QWidget):
 
         self.setStyleSheet(f"background:{Theme.BG};")
         root = QVBoxLayout(self)
-        root.setContentsMargins(18, 16, 18, 16)
-        root.setSpacing(12)
+        # Full-bleed: the dashboard web view runs edge-to-edge so the HTML's own
+        # padding (#dbaide-root) is the only content inset. The header/composer get a
+        # matching left/right inset so the Qt title stays aligned with the HTML content.
+        root.setContentsMargins(0, 0, 0, 0)
+        root.setSpacing(8)
+        _INSET = 16   # matches the HTML #dbaide-root padding
 
         # header: title + subtitle, with a small "updating" chip on the right ------
         head = QHBoxLayout()
+        head.setContentsMargins(_INSET, 12, _INSET, 0)
         titlecol = QVBoxLayout()
         titlecol.setSpacing(2)
         self._title = QLabel(_t("app.window_title"))
@@ -130,8 +135,13 @@ class ParametricDashboardStudio(QWidget):
         self._send = compact_button(_t("app.send"), primary=True, width=84)
         self._send.clicked.connect(self._on_refine)
         bl.addWidget(self._send)
-        self._composer = bar
-        root.addWidget(bar)
+        # inset the composer to match the header/content; toggling the wrapper hides
+        # its margins too (set_edit_mode flips this whole container's visibility).
+        self._composer = QWidget()
+        cwrap = QHBoxLayout(self._composer)
+        cwrap.setContentsMargins(_INSET, 0, _INSET, 12)
+        cwrap.addWidget(bar)
+        root.addWidget(self._composer)
 
         self._edit = True
         self.set_edit_mode(True)   # a fresh studio is ready to generate; open_existing() flips to view
