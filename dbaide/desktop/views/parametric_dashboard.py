@@ -48,6 +48,8 @@ class _BuildWorker(QThread):
 
 
 class ParametricDashboardStudio(QWidget):
+    titleChanged = pyqtSignal(str)   # emitted when the dashboard's name changes (for the tab label)
+
     def __init__(self, service, parent=None) -> None:
         super().__init__(parent)
         self._service = service
@@ -81,6 +83,10 @@ class ParametricDashboardStudio(QWidget):
             f" border-radius:6px; padding:5px 9px; font-size:12px; }}")
         self._populate_models()
         head.addWidget(self._model)
+        # "Edit" reveals the generate/refine controls; shown only in view mode.
+        self._edit_btn = compact_button(_t("app.edit_dashboard"), width=72)
+        self._edit_btn.clicked.connect(lambda: self.set_edit_mode(True))
+        head.addWidget(self._edit_btn)
         self._chip = QFrame()
         self._chip.setStyleSheet(
             f"QFrame {{ background:{Theme.PANEL_2}; border:1px solid {Theme.BORDER_SOFT}; border-radius:12px; }}")
@@ -123,7 +129,11 @@ class ParametricDashboardStudio(QWidget):
         self._send = compact_button(_t("app.send"), primary=True, width=84)
         self._send.clicked.connect(self._on_refine)
         bl.addWidget(self._send)
+        self._composer = bar
         root.addWidget(bar)
+
+        self._edit = True
+        self.set_edit_mode(True)   # a fresh studio is ready to generate; open_existing() flips to view
 
     def _build_loading(self) -> QWidget:
         w = QWidget()
@@ -169,17 +179,38 @@ class ParametricDashboardStudio(QWidget):
 
     # -- public ---------------------------------------------------------------
 
+    def set_edit_mode(self, edit: bool) -> None:
+        """View mode = just the dashboard (no model picker / refine box); edit mode
+        reveals the generate/refine controls. The model + input belong to editing."""
+        self._edit = bool(edit)
+        self._model.setVisible(edit)
+        self._subtitle.setVisible(edit)
+        self._composer.setVisible(edit)
+        self._edit_btn.setVisible(not edit)
+
+    def is_editing(self) -> bool:
+        return self._edit
+
+    def app_id(self) -> str:
+        return self._app_id
+
+    def title_text(self) -> str:
+        return self._title.text()
+
     def start(self, *, name: str, connection_name: str, context: list[dict], instruction: str) -> None:
+        self.set_edit_mode(True)   # generating a new dashboard → show the controls
         self._connection = connection_name
         self._build({"name": name, "connection_name": connection_name,
                      "context": context, "instruction": instruction})
 
     def open_existing(self, app_id: str) -> None:
+        self.set_edit_mode(False)   # opening a saved dashboard → view-only
         data = self._service.dispatch("get_dashboard_app", {"id": app_id})
         app = data.get("app") or {}
         self._app_id = str(app.get("id") or "")
         self._connection = str(app.get("connection_name") or "")
         self._title.setText(str(app.get("name") or _t("app.window_title")))
+        self.titleChanged.emit(self._title.text())
         self._render(str(app.get("html") or ""))
 
     def shutdown(self) -> None:
@@ -242,6 +273,7 @@ class ParametricDashboardStudio(QWidget):
         self._app_id = str(app.get("id") or self._app_id)
         self._connection = str(app.get("connection_name") or self._connection)
         self._title.setText(str(app.get("name") or _t("app.window_title")))
+        self.titleChanged.emit(self._title.text())
         self._render(str(app.get("html") or ""))
 
     def _on_failed(self, err: str) -> None:

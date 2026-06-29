@@ -17,6 +17,7 @@ from PyQt6.QtWidgets import (
     QLabel,
     QScrollArea,
     QStackedWidget,
+    QTabWidget,
     QVBoxLayout,
     QWidget,
 )
@@ -120,7 +121,9 @@ class _Gallery(QWidget):
 
 
 class DashboardsView(QWidget):
-    """Gallery ↔ studio. Drop-in for the old DashboardTab (same reload/shutdown API)."""
+    """Gallery ↔ tabbed studios. Opening a saved dashboard adds a VIEW-only tab;
+    generating a new one adds an edit/generate tab. Same reload/shutdown API as the
+    old DashboardTab, plus open_generate() for the chat 'build dashboard' action."""
 
     def __init__(self, service, parent=None) -> None:
         super().__init__(parent)
@@ -134,22 +137,21 @@ class DashboardsView(QWidget):
         self._gallery = _Gallery(service, on_open=self._open)
         self._stack.addWidget(self._gallery)            # 0
 
-        studio_page = QWidget()
-        sp = QVBoxLayout(studio_page)
-        sp.setContentsMargins(0, 0, 0, 0)
-        sp.setSpacing(0)
-        bar = QFrame()
-        bar.setStyleSheet(f"background:{Theme.BG}; border-bottom:1px solid {Theme.BORDER_SOFT};")
-        bl = QHBoxLayout(bar)
-        bl.setContentsMargins(14, 8, 14, 8)
-        back = compact_button(_t("dash.back"), width=92)
-        back.clicked.connect(self._back)
-        bl.addWidget(back)
-        bl.addStretch(1)
-        sp.addWidget(bar)
-        self._studio = ParametricDashboardStudio(service)
-        sp.addWidget(self._studio, 1)
-        self._stack.addWidget(studio_page)              # 1
+        # Opened dashboards live as tabs; a corner "Boards" button returns to the gallery.
+        self._tabs = QTabWidget()
+        self._tabs.setTabsClosable(True)
+        self._tabs.setMovable(True)
+        self._tabs.setDocumentMode(True)
+        self._tabs.setStyleSheet(
+            f"QTabBar::tab {{ background:{Theme.PANEL}; color:{Theme.TEXT_2}; border:1px solid {Theme.BORDER_SOFT};"
+            f" padding:6px 12px; margin-right:2px; border-top-left-radius:6px; border-top-right-radius:6px; }}"
+            f" QTabBar::tab:selected {{ background:{Theme.BG}; color:{Theme.TEXT}; border-bottom-color:{Theme.BG}; }}"
+            f" QTabWidget::pane {{ border:none; }}")
+        self._tabs.tabCloseRequested.connect(self._close_tab)
+        home = compact_button(_t("dash.boards_home"), width=92)
+        home.clicked.connect(self._show_gallery)
+        self._tabs.setCornerWidget(home, Qt.Corner.TopLeftCorner)
+        self._stack.addWidget(self._tabs)               # 1
         root.addWidget(self._stack)
 
     # -- API expected by main_window (mirrors the old DashboardTab) -----------
@@ -159,14 +161,59 @@ class DashboardsView(QWidget):
             self._gallery.reload()
 
     def shutdown(self) -> None:
-        self._studio.shutdown()
+        for i in range(self._tabs.count()):
+            w = self._tabs.widget(i)
+            if hasattr(w, "shutdown"):
+                w.shutdown()
+
+    def open_generate(self, *, name: str, connection_name: str,
+                      context: list[dict], instruction: str) -> ParametricDashboardStudio:
+        """Open a NEW tab that generates a dashboard (edit mode) — used by the chat
+        'build dashboard' action."""
+        studio = ParametricDashboardStudio(self._service)
+        i = self._tabs.addTab(studio, name or _t("dash.untitled"))
+        studio.titleChanged.connect(lambda t, s=studio: self._relabel(s, t))
+        studio.start(name=name, connection_name=connection_name, context=context, instruction=instruction)
+        self._tabs.setCurrentIndex(i)
+        self._stack.setCurrentIndex(1)
+        return studio
 
     # -- navigation -----------------------------------------------------------
 
     def _open(self, app_id: str) -> None:
-        self._studio.open_existing(app_id)
+        existing = self._tab_for_app(app_id) if app_id else -1
+        if existing >= 0:
+            self._tabs.setCurrentIndex(existing)
+        else:
+            studio = ParametricDashboardStudio(self._service)
+            studio.open_existing(app_id)              # view-only
+            i = self._tabs.addTab(studio, studio.title_text() or _t("dash.untitled"))
+            studio.titleChanged.connect(lambda t, s=studio: self._relabel(s, t))
+            self._tabs.setCurrentIndex(i)
         self._stack.setCurrentIndex(1)
 
-    def _back(self) -> None:
+    def _tab_for_app(self, app_id: str) -> int:
+        for i in range(self._tabs.count()):
+            w = self._tabs.widget(i)
+            if hasattr(w, "app_id") and w.app_id() == app_id:
+                return i
+        return -1
+
+    def _relabel(self, studio: QWidget, title: str) -> None:
+        i = self._tabs.indexOf(studio)
+        if i >= 0:
+            self._tabs.setTabText(i, title or _t("dash.untitled"))
+
+    def _close_tab(self, index: int) -> None:
+        w = self._tabs.widget(index)
+        if w is not None:
+            if hasattr(w, "shutdown"):
+                w.shutdown()
+            self._tabs.removeTab(index)
+            w.deleteLater()
+        if self._tabs.count() == 0:
+            self._show_gallery()
+
+    def _show_gallery(self) -> None:
         self._stack.setCurrentIndex(0)
         self._gallery.reload()

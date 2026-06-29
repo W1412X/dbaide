@@ -240,10 +240,13 @@ def test_dashboards_view_gallery_lists_and_opens_ai_apps(qapp, service):
              if view._gallery._list.itemAt(i).widget() is not None]
     assert len(cards) == 1
     # opening switches to the studio page and loads the app
+    # opening switches to the tabs page and loads the app in a view-only tab
     view._open(app.id)
     assert view._stack.currentIndex() == 1
-    assert view._studio._app_id == app.id
-    # back returns to the gallery
-    view._back()
+    assert view._tabs.count() == 1
+    assert view._tabs.widget(0).app_id() == app.id
+    assert view._tabs.widget(0).is_editing() is False   # opened board is view-only
+    # the Boards button returns to the gallery
+    view._show_gallery()
     assert view._stack.currentIndex() == 0
     view.shutdown()

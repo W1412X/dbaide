@@ -827,14 +827,12 @@ class MainWindow(QMainWindow):
         if not context:
             self.toast(_i18n_t("app.no_source_sql"))
             return
-        from dbaide.desktop.views.parametric_dashboard import ParametricDashboardStudio
-        studio = ParametricDashboardStudio(self.service)
-        studio.setWindowTitle(_i18n_t("app.window_title"))
-        studio.resize(1040, 760)
-        studio.show()
-        self._dashboard_studios.append(studio)
-        studio.start(name=str(question or _i18n_t("app.window_title")), connection_name=conn,
-                     context=context, instruction=_i18n_t("app.default_instruction"))
+        # Generate into a NEW tab in the Dashboards mode (not a separate window), so it
+        # lives alongside the other opened boards and is saved into the gallery.
+        self.tabbar.setCurrentIndex(self._tab_names.index("Dashboards"))
+        self.dashboard_tab.open_generate(
+            name=str(question or _i18n_t("app.window_title")), connection_name=conn,
+            context=context, instruction=_i18n_t("app.default_instruction"))
 
     def animate_page_in(self, index: int) -> None:
         """Subtle fade-in for the page that just became current. Skipped for pages that
