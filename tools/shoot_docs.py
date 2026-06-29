@@ -75,6 +75,8 @@ def _run_window_scenario(name: str) -> list[str]:
         paths = [promo.show_chart_answer(app, win)[0]]
     elif name == "breakdown":
         paths = [promo.show_chart_answer(app, win)[1]]
+    elif name == "dashboard":
+        paths = [promo.show_dashboards(app, win)]
     elif name == "clarify":
         paths = [promo.show_clarification(app, win)]
     elif name == "sql":

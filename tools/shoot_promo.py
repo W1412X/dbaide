@@ -64,6 +64,7 @@ DOC_SCENARIOS = [
     "trace",
     "analysis",
     "breakdown",
+    "dashboard",
     "clarify",
     "sql",
     "table",
@@ -1638,6 +1639,89 @@ def show_database_client(app: QApplication, win: MainWindow) -> tuple[Path, Path
     return sql_path, data_path
 
 
+def show_dashboards(app: QApplication, win: MainWindow) -> Path:
+    """Interactive dashboards: seed a parametric board over the e-commerce data and
+    capture it open in VIEW mode (filter bar + KPIs + charts + detail table) — the way a
+    saved dashboard looks when you open it from the gallery."""
+    from dbaide.boards.parametric import (
+        Combine, ParametricChart, ParametricDashboard, ParamSpec, QuerySource,
+    )
+
+    service = win.service
+    channels = ["搜索广告", "内容种草", "自然流量", "直播", "私域", "联盟"]
+    # one shared control drives every chart (the de-duped union of each chart's params)
+    chan = ParamSpec(name="channel", type="enum", label="渠道", multi=True,
+                     options=list(channels), default=list(channels))
+    where = "WHERE o.channel IN (:channel)"
+
+    def _chart(cid: str, title: str, sql: str, plan: dict[str, Any]) -> ParametricChart:
+        return ParametricChart(chart_id=cid, title=title,
+                               sources=[QuerySource(id="m", sql=sql)],
+                               params=[chan], combine=Combine(mode="single"), chart_plan=plan)
+
+    charts = [
+        _chart("k_orders", "订单量", f"SELECT COUNT(*) AS 订单量 FROM orders o {where}", {}),
+        _chart("k_gmv", "GMV", f"SELECT ROUND(SUM(o.gross_amount), 0) AS GMV FROM orders o {where}", {}),
+        _chart("k_aov", "客单价",
+               f"SELECT ROUND(SUM(o.gross_amount) / COUNT(*), 1) AS 客单价 FROM orders o {where}", {}),
+        _chart("c_channel", "各渠道 GMV",
+               f"SELECT o.channel AS 渠道, ROUND(SUM(o.gross_amount), 0) AS GMV "
+               f"FROM orders o {where} GROUP BY o.channel ORDER BY GMV DESC",
+               {"chart_type": "bar", "category_field": "渠道", "value_fields": ["GMV"]}),
+        _chart("c_trend", "月度订单趋势",
+               f"SELECT substr(o.ordered_at, 1, 7) AS 月份, COUNT(*) AS 订单量 "
+               f"FROM orders o {where} GROUP BY 1 ORDER BY 1",
+               {"chart_type": "line", "category_field": "月份", "value_fields": ["订单量"]}),
+        _chart("c_status", "订单状态占比",
+               f"SELECT o.status AS 状态, COUNT(*) AS 单数 FROM orders o {where} GROUP BY o.status",
+               {"chart_type": "donut", "category_field": "状态", "value_fields": ["单数"]}),
+        _chart("t_cat", "各类目销售明细",
+               "SELECT c.name AS 类目, COUNT(DISTINCT o.id) AS 订单数, "
+               "ROUND(SUM(oi.unit_price * oi.quantity), 0) AS 销售额 "
+               "FROM orders o JOIN order_items oi ON oi.order_id = o.id "
+               "JOIN products p ON p.id = oi.product_id "
+               "JOIN categories c ON c.id = p.category_id "
+               f"{where} GROUP BY c.name ORDER BY 销售额 DESC LIMIT 8", {}),
+    ]
+    layout = {"type": "page", "children": [
+        {"type": "row", "children": [
+            {"type": "kpi", "chart": "k_orders", "label": "订单量", "span": 4},
+            {"type": "kpi", "chart": "k_gmv", "label": "GMV（元）", "format": "int", "span": 4},
+            {"type": "kpi", "chart": "k_aov", "label": "客单价（元）", "span": 4},
+        ]},
+        {"type": "row", "children": [
+            {"type": "chart", "chart": "c_channel", "title": "各渠道 GMV", "span": 6},
+            {"type": "chart", "chart": "c_trend", "title": "月度订单趋势", "span": 6},
+        ]},
+        {"type": "row", "children": [
+            {"type": "chart", "chart": "c_status", "title": "订单状态占比", "span": 4},
+            {"type": "table", "chart": "t_cat", "title": "各类目销售明细", "span": 8},
+        ]},
+    ]}
+    board = ParametricDashboard(name="销售看板", connection_name="omni_shop",
+                                charts=charts, layout=layout)
+    service.boards_apps.upsert(board)
+
+    win.tabbar.setCurrentIndex(win._tab_names.index("Dashboards"))
+    view = win.dashboard_tab
+    view.reload()
+    view._open(board.id)                       # opens a VIEW-only tab and renders the body
+    _process(app, 6)
+
+    # wait for the WebEngine board to fetch each tile and paint (KPI values + chart canvases)
+    studio = view._tabs.widget(view._tabs.count() - 1)
+    page = studio._web._view.page() if getattr(studio._web, "_view", None) is not None else None
+    if page is not None:
+        ready_js = (
+            "(function(){var kv=document.querySelectorAll('.dbaide-kpi-value');var f=0;"
+            "kv.forEach(function(e){var t=(e.textContent||'').trim();if(t&&t!=='…')f++;});"
+            "return f>0 && document.querySelectorAll('canvas').length>0;})()"
+        )
+        _wait_until(app, lambda: _run_page_js_bool(page, app, ready_js, timeout_s=2.0), timeout_s=25.0)
+    _process(app, 4)
+    return _grab(app, win, "25-interactive-dashboard")
+
+
 def _connection_payloads(service: DesktopService) -> list[dict[str, Any]]:
     out: list[dict[str, Any]] = []
     for conn in service.cfg.connections().values():
@@ -1869,6 +1953,10 @@ def write_copy(paths: list[Path]) -> Path:
             "",
             "24. `16-connection-dialog.png`",
             "    连接表单内置只读负载配置、会话时区和 SSL 选项，便于安全地接入生产或分析库。",
+            "",
+            "25. `25-interactive-dashboard.png`",
+            "    交互看板：把一次分析沉淀成可保存的参数化看板——顶部筛选条联动 KPI 卡片、多张图表"
+            "与明细表，全部由只读 SQL 驱动；默认只读查看，点「编辑」可用自然语言继续优化。",
             "",
             "## 面向技术人员",
             "- 看得见 agent 的每一步，便于调试 prompt、SQL、join 推断和性能风险。",
