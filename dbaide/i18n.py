@@ -433,6 +433,8 @@ _STRINGS: dict[str, dict[str, str]] = {
     "res.agent_max_steps": {"en": "Agent step budget", "zh": "Agent 步数预算"},
     "res.big_table_rows": {"en": "Big-table threshold (rows)", "zh": "大表阈值（行）"},
     "res.explain_max_rows": {"en": "EXPLAIN cost gate (rows)", "zh": "EXPLAIN 成本闸（行）"},
+    "res.optimize_advise_rows": {"en": "SQL optimize advice threshold (rows, 0=off)",
+                                 "zh": "SQL 优化建议阈值（行，0=关）"},
     "res.join_sample_size": {"en": "Join sample size (rows)", "zh": "关联采样行数"},
     "res.prior_turns_window": {"en": "Prior turns in context", "zh": "上下文中的历史轮数"},
     "res.max_batch_tools": {"en": "Max parallel tool calls", "zh": "最大并行工具调用数"},

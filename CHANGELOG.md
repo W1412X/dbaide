@@ -6,6 +6,19 @@ All notable changes to DBAide are documented here. The format is loosely based o
 
 ## [Unreleased]
 
+### Added
+
+- **Advisory SQL optimizer.** After the model generates a query, if its EXPLAIN cost
+  exceeds a new `optimize_advise_rows` threshold (default 1,000,000 rows; 0 = off), an
+  advisor surfaces concrete optimization *suggestions* to the agent — full table scans /
+  no index used (from the EXPLAIN plan, per dialect), `SELECT *`, leading-wildcard
+  `LIKE`, and a function wrapped around a filtered column (non-sargable). It is advisory
+  only: it never rewrites the SQL and never blocks — the agent decides whether to issue a
+  better query, and the suggestions show in the agent trace. Only the existing
+  `explain_max_rows` gate can still require confirmation. Configure the threshold in
+  **Settings → Resources**. (SQLite gives no row estimate, so the advisor stays quiet
+  there; it engages on MySQL/PostgreSQL.)
+
 ## [0.9.20] — 2026-06-29
 
 ### Changed

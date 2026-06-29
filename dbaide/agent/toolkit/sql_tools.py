@@ -10,6 +10,7 @@ from dbaide.agent.memory import SQLArtifact, next_prefixed_id
 from dbaide.agent.sql_executions import normalize_sql_purpose, record_sql_execution
 from dbaide.i18n import t
 from dbaide.tools.registry import ToolContext, ToolRegistry, ToolResult
+from dbaide.tools.sql_advisor import SqlAdvisor
 from dbaide.tools.specs import (
     GENERATE_SQL, VALIDATE_SQL,
     EXECUTE_SQL, EXPLAIN_SQL,
@@ -345,12 +346,14 @@ def register(registry: ToolRegistry, orchestrator) -> None:
             if has_joins
             else 1.0
         )
-        # Pre-execution cost gate: estimate the scan size via EXPLAIN.
+        # Pre-execution cost gate: estimate the scan size via EXPLAIN. Also drives the
+        # advisory optimizer below, so estimate when EITHER threshold is configured.
         explain_max_rows = getattr(orchestrator.query, "explain_max_rows", 0)
+        optimize_advise_rows = getattr(orchestrator.query, "optimize_advise_rows", 0)
         estimated_rows = None
-        if explain_max_rows:
+        if explain_max_rows or optimize_advise_rows:
             estimated_rows = orchestrator.query.estimate_rows(validation.normalized_sql, database=database)
-            if estimated_rows is not None:
+            if estimated_rows is not None and explain_max_rows:
                 orchestrator.progress(
                     subagent_event(
                         agent="explain",
@@ -358,6 +361,27 @@ def register(registry: ToolRegistry, orchestrator) -> None:
                         parent="execute_sql",
                         detail=f"cost gate limit {explain_max_rows:,}",
                         status="completed" if estimated_rows <= explain_max_rows else "info",
+                    ),
+                )
+        # Advisory SQL optimizer: for a query whose estimated scan exceeds the advise
+        # threshold, attach concrete optimization suggestions for the agent to act on. It
+        # never rewrites or blocks — only the explain_max_rows gate (in the risk
+        # controller below) can require confirmation.
+        optimization = None
+        if optimize_advise_rows and estimated_rows is not None and estimated_rows > optimize_advise_rows:
+            try:
+                optimization = SqlAdvisor(orchestrator.query).advise(
+                    validation.normalized_sql, database=database, estimated_rows=estimated_rows)
+            except Exception:  # noqa: BLE001 - advisory: never fail the query over advice
+                optimization = None
+            if optimization:
+                orchestrator.progress(
+                    subagent_event(
+                        agent="optimize",
+                        title="Optimization suggestions",
+                        parent="execute_sql",
+                        detail=optimization,
+                        status="info",
                     ),
                 )
         risk = orchestrator.risk.decide(
@@ -425,6 +449,7 @@ def register(registry: ToolRegistry, orchestrator) -> None:
                         "sql": validation.normalized_sql,
                         "execute_args": execute_args,
                         "warnings": validation_report.warnings,
+                        **({"optimization": optimization} if optimization else {}),
                     },
                 )
 
@@ -496,6 +521,7 @@ def register(registry: ToolRegistry, orchestrator) -> None:
                     "result_summary": result_summary,
                     "sql": validation.normalized_sql,
                     "database": database,
+                    **({"optimization": optimization} if optimization else {}),
                 },
             )
         except PermissionError as exc:

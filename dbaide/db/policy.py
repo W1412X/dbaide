@@ -55,6 +55,8 @@ class ResourcePolicy:
     # Cost gates.
     big_table_rows: int = 1_000_000      # estimated rows above which profiling drops to metadata-only
     explain_max_rows: int = 5_000_000    # EXPLAIN estimate above which execution is blocked
+    optimize_advise_rows: int = 1_000_000  # EXPLAIN estimate above which the SQL advisor attaches
+                                           # optimization suggestions to the agent (0 = off; advisory)
 
     # Join sampling (rows sampled from the left table when probing a join).
     join_sample_size: int = 150

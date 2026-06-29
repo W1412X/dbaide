@@ -40,6 +40,7 @@ class QueryTools:
         )
         self.timeout_seconds = timeout_seconds
         self.explain_max_rows = policy.explain_max_rows if policy else 0
+        self.optimize_advise_rows = policy.optimize_advise_rows if policy else 0
 
     def _guard_for_limit(self, limit: int | None) -> SQLGuard:
         if limit is None:

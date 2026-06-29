@@ -403,6 +403,7 @@ class SettingsDialog(ChromeDialog):
             ("max_row_limit", 1, 1000000),
             ("big_table_rows", 1000, 1000000000),
             ("explain_max_rows", 1000, 1000000000),
+            ("optimize_advise_rows", 0, 1000000000),
             ("join_sample_size", 10, 1000),
         )),
         ("res.group.agent", (
