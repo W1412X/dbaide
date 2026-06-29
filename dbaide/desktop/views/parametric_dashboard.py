@@ -57,6 +57,8 @@ class ParametricDashboardStudio(QWidget):
         self._connection = ""
         self._worker: _BuildWorker | None = None
         self._has_rendered = False
+        self._shut = False
+        self._models_loaded = False
         self._busy = BusyAnimator(self._tick, parent=self)
 
         self.setStyleSheet(f"background:{Theme.BG};")
@@ -81,11 +83,10 @@ class ParametricDashboardStudio(QWidget):
         self._model.setStyleSheet(
             f"QComboBox {{ background:{Theme.PANEL_2}; color:{Theme.TEXT}; border:1px solid {Theme.BORDER_SOFT};"
             f" border-radius:6px; padding:5px 9px; font-size:12px; }}")
-        self._populate_models()
-        head.addWidget(self._model)
+        head.addWidget(self._model)   # populated lazily on first edit (bootstrap hits disk)
         # "Edit" reveals the generate/refine controls; shown only in view mode.
         self._edit_btn = compact_button(_t("app.edit_dashboard"), width=72)
-        self._edit_btn.clicked.connect(lambda: self.set_edit_mode(True))
+        self._edit_btn.clicked.connect(self._enter_edit)
         head.addWidget(self._edit_btn)
         self._chip = QFrame()
         self._chip.setStyleSheet(
@@ -188,6 +189,18 @@ class ParametricDashboardStudio(QWidget):
         self._composer.setVisible(edit)
         self._edit_btn.setVisible(not edit)
 
+    def _enter_edit(self) -> None:
+        self._ensure_models()
+        self.set_edit_mode(True)
+
+    def _ensure_models(self) -> None:
+        # bootstrap reads every connection's instance doc from disk — only pay it when
+        # the model picker is actually used (generating/refining), not for view-only tabs.
+        if self._models_loaded:
+            return
+        self._models_loaded = True
+        self._populate_models()
+
     def is_editing(self) -> bool:
         return self._edit
 
@@ -198,7 +211,7 @@ class ParametricDashboardStudio(QWidget):
         return self._title.text()
 
     def start(self, *, name: str, connection_name: str, context: list[dict], instruction: str) -> None:
-        self.set_edit_mode(True)   # generating a new dashboard → show the controls
+        self._enter_edit()   # generating a new dashboard → show + populate the controls
         self._connection = connection_name
         self._build({"name": name, "connection_name": connection_name,
                      "context": context, "instruction": instruction})
@@ -214,6 +227,7 @@ class ParametricDashboardStudio(QWidget):
         self._render(str(app.get("html") or ""))
 
     def shutdown(self) -> None:
+        self._shut = True   # a build that finishes after this must not render into a torn-down view
         self._busy.stop()
         self._web.shutdown()   # drain the dashboard query workers before teardown
         if self._worker is not None:
@@ -247,8 +261,9 @@ class ParametricDashboardStudio(QWidget):
         return str(self._model.currentData() or "")
 
     def _build(self, payload: dict) -> None:
-        if self._worker is not None:
+        if self._worker is not None or self._shut:
             return
+        self._ensure_models()
         payload.setdefault("model", self._current_model())   # generate with the chosen model
         self._set_busy(True)
         worker = _BuildWorker(self._service, payload, self)
@@ -266,6 +281,8 @@ class ParametricDashboardStudio(QWidget):
 
     def _on_built(self, res: object) -> None:
         self._finish_worker()
+        if self._shut:
+            return
         self._set_busy(False)
         app = res.get("app") if isinstance(res, dict) else None
         if not isinstance(app, dict):
@@ -278,6 +295,8 @@ class ParametricDashboardStudio(QWidget):
 
     def _on_failed(self, err: str) -> None:
         self._finish_worker()
+        if self._shut:
+            return
         self._set_busy(False)
         if self._has_rendered:
             dialog_warn(self, _t("app.window_title"), _t("app.compile_failed", error=str(err)[:200]))
@@ -296,6 +315,8 @@ class ParametricDashboardStudio(QWidget):
     # -- rendering ------------------------------------------------------------
 
     def _render(self, body_html: str) -> None:
+        if self._shut:
+            return
         self._web.set_dashboard(body_html, self._run_fn())
         self._has_rendered = True
         self._stack.setCurrentWidget(self._web)

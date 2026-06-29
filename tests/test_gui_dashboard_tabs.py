@@ -45,6 +45,35 @@ def test_studio_view_vs_edit_mode(qapp):
     qapp.processEvents()
 
 
+def test_view_only_tab_skips_bootstrap_and_post_shutdown_is_safe(qapp):
+    from dbaide.desktop.views.parametric_dashboard import ParametricDashboardStudio
+
+    class _CountingSvc(_StubSvc):
+        def __init__(self):
+            self.boot = 0
+
+        def dispatch(self, action, payload=None):
+            if action == "bootstrap":
+                self.boot += 1
+            return super().dispatch(action, payload)
+
+    svc = _CountingSvc()
+    s = ParametricDashboardStudio(svc)
+    assert svc.boot == 0                       # models populated lazily (bootstrap reads disk)
+    s.open_existing("a1")
+    assert svc.boot == 0 and s._model.count() == 0   # view-only never pays bootstrap
+    s._enter_edit()
+    assert svc.boot == 1 and s._model.count() == 1   # populated once on first edit
+    s._enter_edit()
+    assert svc.boot == 1                       # cached
+    # a build that finishes after shutdown must not render into the torn-down view
+    s.shutdown()
+    s._render("<div>x</div>")
+    s._on_built({"app": {"id": "z", "name": "Z", "html": "<d></d>"}})
+    assert s.app_id() == "a1"                   # unchanged, no crash
+    qapp.processEvents()
+
+
 def test_dashboards_view_opens_boards_as_tabs(qapp):
     from dbaide.desktop.views.dashboards_view import DashboardsView
     v = DashboardsView(_StubSvc())
