@@ -1,13 +1,15 @@
 """Process-wide cost-budget admission governor for SQL execution.
 
-Every executed query is admitted through one shared budget. Two rules, both keyed
-to the configured ``max_inflight_cost`` (the cost *threshold*):
+Queries run through the main query path — :meth:`dbaide.tools.query.QueryTools.execute_sql`
+(the agent's SQL tool, the desktop SQL editor, dashboards, table browsing, and the MCP
+``execute_sql`` tool) — are admitted through one shared budget. Two rules, both keyed to
+the configured ``max_inflight_cost`` (the cost *threshold*):
 
 1. **Per query** — a single query may not cost more than the threshold. Such a
    query could never fit the budget, so it is rejected up front (``CostExceeded``)
    rather than queued forever.
-2. **In aggregate** — the sum of the costs of all *currently executing* queries may
-   not exceed the threshold. A query that doesn't fit yet waits in a **FIFO** queue;
+2. **In aggregate** — the sum of the costs of the governed queries *currently executing*
+   may not exceed the threshold. A query that doesn't fit yet waits in a **FIFO** queue;
    the head of the queue is admitted as soon as enough budget frees up.
 
 Cost unit: EXPLAIN-estimated scanned rows (best-effort — an unknown estimate counts
@@ -15,9 +17,14 @@ as 0, so it never blocks). A budget of ``0`` disables the governor entirely: no
 gating, no queue, no tracking, and ``acquire()`` returns ``None`` so callers run
 straight through.
 
-The governor is a process-wide singleton (``governor``) shared by every execution
-path — agent answers, dashboards, the SQL editor, table browsing, MCP, CLI — so the
-in-flight total is global, not per session or per connection. It is thread-safe: SQL
+**Scope.** This governs the ``execute_sql`` path only. Bulk schema introspection /
+asset building and the dedicated profiling/sampling read tools (``sample_rows``,
+``profile_column``, ``column_stats``, ``explain``) call the adapter directly and run
+under their *own* concurrency control (``max_inflight_queries``), not this cost budget —
+so they don't appear in the pool and don't count toward the in-flight total.
+
+The governor is a process-wide singleton (``governor``); the budget is global across
+sessions and connections, not per session or per connection. It is thread-safe: SQL
 runs on background threads and many may contend at once.
 """
 

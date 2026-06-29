@@ -307,10 +307,13 @@ class ConfigManager:
             return DEFAULT_MAX_CONCURRENT_RUNS
 
     def max_inflight_cost(self) -> int:
-        """Global SQL cost budget (EXPLAIN-estimated rows). No single query may cost
-        more than this, and the costs of all *concurrently executing* queries may not
-        sum past it — over-budget queries wait in a FIFO queue. A process-wide cap
-        across every connection. Stored in ``[resource_defaults].max_inflight_cost``;
+        """Global SQL cost budget (EXPLAIN-estimated rows) for the query-execution path.
+        No single query may cost more than this, and the costs of the governed queries
+        executing at once may not sum past it — over-budget queries wait in a FIFO queue.
+        Applies to the ``execute_sql`` path (agent, SQL editor, dashboards, browsing, MCP
+        ``execute_sql``), process-wide across connections; bulk introspection / asset
+        building and the profiling-and-sampling read tools have their own concurrency cap
+        (``max_inflight_queries``). Stored in ``[resource_defaults].max_inflight_cost``;
         ``0`` (the default) disables the governor entirely."""
         raw = self.resource_defaults().get("max_inflight_cost")
         try:

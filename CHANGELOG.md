@@ -8,17 +8,23 @@ All notable changes to DBAide are documented here. The format is loosely based o
 
 ### Added
 
-- **SQL cost governor** — a process-wide admission control over query execution,
-  keyed to a new `max_inflight_cost` budget (EXPLAIN-estimated rows; `0` = off, the
-  default). No single query may cost more than the budget, and the costs of all
-  *concurrently executing* queries can't sum past it — over-budget queries wait in a
+- **SQL cost governor** — a process-wide admission control over the query-execution
+  path, keyed to a new `max_inflight_cost` budget (EXPLAIN-estimated rows; `0` = off,
+  the default). No single query may cost more than the budget, and the costs of the
+  governed queries executing at once can't sum past it — over-budget queries wait in a
   **FIFO queue** and are admitted as budget frees up; a query that exceeds the whole
-  budget is rejected up front. It spans every execution path (agent, dashboards, SQL
-  editor, browsing, MCP, CLI) so the in-flight total is global. A live **SQL pool**
-  status-bar indicator (running/queued counts + budget use) opens a dialog listing
-  each running and queued query with its cost, connection, and timing. Configure the
-  budget in **Settings → Resources**. (SQLite gives no row estimate, so the governor
-  is effectively inert there; it bites on MySQL/PostgreSQL.)
+  budget is rejected up front. It covers the `execute_sql` path (agent answers, the SQL
+  editor, dashboards, table browsing, the MCP `execute_sql` tool), global across
+  connections; the budget is enforced *after* read-only validation, table-scope, and the
+  confirmation gate, never before. Bulk schema introspection / asset building and the
+  dedicated profiling/sampling tools (`sample_rows`, `column_stats`, `profile_table`)
+  run under their own concurrency cap (`max_inflight_queries`), not this budget. A live
+  **SQL pool** status-bar indicator (running/queued counts + budget use) opens a dialog
+  listing each running and queued query with its cost, connection, and timing. Configure
+  the budget in **Settings → Resources**. (SQLite gives no row estimate, so the governor
+  is effectively inert there; it bites on MySQL/PostgreSQL.) Known limitation: a query
+  cancelled while still *queued* is not yet interrupted — it runs (read-only) when it
+  reaches the head of the queue.
 
 ## [0.9.17] — 2026-06-29
 
