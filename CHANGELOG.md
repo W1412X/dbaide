@@ -6,6 +6,34 @@ All notable changes to DBAide are documented here. The format is loosely based o
 
 ## [Unreleased]
 
+## [0.9.17] — 2026-06-29
+
+A dashboards UX pass plus an app-wide button-readability fix.
+
+### Added
+
+- **Tabbed dashboards with a view/edit split** — opening a saved board now shows it
+  **view-only** (filters + charts, no model picker or refine box — those belong to
+  editing); an **Edit** button reveals the generate/refine controls. Generating a new
+  board opens an edit tab. Multiple boards open side-by-side as closable tabs, with a
+  corner button back to the gallery. Model bootstrap (which reads connection docs from
+  disk) is now lazy — a view-only tab pays nothing — and a board that finishes building
+  after its tab is closed no longer renders into a torn-down view.
+
+### Fixed
+
+- **Primary buttons were unreadable in light mode** — under the Fusion style a
+  `QPushButton` ignores a `background` set via a global *property* selector
+  (`[primary="true"]`), so every primary button (send, Save, Confirm, Build, Install,
+  dashboard Open/Apply, …) rendered as an unfilled outline with white text — invisible
+  on a light background. They now paint the accent fill reliably via a direct stylesheet.
+- **Dashboard tab bar matches the rest of the app** — it reused a local stylesheet that
+  dropped the app-wide closable-tab chrome (the Workbench `panelTabs` style); now it
+  uses the shared style, with a themed close button, a vertically-centered corner icon,
+  and full-name tooltips on elided tabs.
+- **Trimmed the dashboard's oversized window margins** — the web view now runs
+  edge-to-edge (content inset ~34px → ~16px), with the title kept aligned to the content.
+
 ## [0.9.16] — 2026-06-28
 
 A hardening release from a codebase-wide audit + fuzzing pass. Every fix is verified
