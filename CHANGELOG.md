@@ -6,6 +6,8 @@ All notable changes to DBAide are documented here. The format is loosely based o
 
 ## [Unreleased]
 
+## [0.9.20] — 2026-06-29
+
 ### Changed
 
 - **Roomier SQL pool dialog** — bigger by default (1040×560) with the Running and Queued
