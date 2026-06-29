@@ -441,6 +441,29 @@ _STRINGS: dict[str, dict[str, str]] = {
     "res.session_uncompressed_turns": {"en": "Recent turns kept uncompressed", "zh": "保持未压缩的最近轮次"},
     "res.compress_threshold": {"en": "Compress threshold (%)", "zh": "压缩触发阈值（%）"},
     "res.max_concurrent_runs": {"en": "Max concurrent runs", "zh": "最大并发运行数"},
+    "res.max_inflight_cost": {"en": "In-flight cost budget (rows, 0=off)", "zh": "在途成本预算（行，0=关闭）"},
+    "res.max_inflight_cost_note": {
+        "en": "Global SQL cost budget (EXPLAIN-estimated rows): no single query may exceed it, and "
+              "the costs of all running queries can't sum past it — over-budget queries wait in a FIFO queue.",
+        "zh": "全局 SQL 成本预算（EXPLAIN 预估行数）：单条查询不得超过它，所有正在执行的查询成本之和也不得超过它"
+              "——超预算的查询进入先进先出队列等待。",
+    },
+    # SQL execution pool viewer
+    "sqlpool.title": {"en": "SQL pool", "zh": "SQL 执行池"},
+    "sqlpool.indicator": {"en": "SQL {running} run · {queued} wait · {pct}%",
+                          "zh": "SQL {running} 执行 · {queued} 排队 · {pct}%"},
+    "sqlpool.running": {"en": "Running", "zh": "执行中"},
+    "sqlpool.queued": {"en": "Queued", "zh": "排队中"},
+    "sqlpool.budget": {"en": "Cost budget: {used} / {budget} rows in flight ({pct}%)",
+                       "zh": "成本预算：在途 {used} / {budget} 行（{pct}%）"},
+    "sqlpool.col_sql": {"en": "SQL", "zh": "SQL"},
+    "sqlpool.col_cost": {"en": "Est. cost (rows)", "zh": "预估成本（行）"},
+    "sqlpool.col_conn": {"en": "Connection", "zh": "连接"},
+    "sqlpool.col_elapsed": {"en": "Running for", "zh": "已运行"},
+    "sqlpool.col_waited": {"en": "Waiting for", "zh": "已等待"},
+    "sqlpool.empty": {"en": "No running or queued SQL right now.", "zh": "当前没有执行中或排队的 SQL。"},
+    "sqlpool.disabled": {"en": "Cost governor off — set the in-flight cost budget in Settings → Resources.",
+                         "zh": "成本护栏未启用——在 设置 → 资源 里设置在途成本预算。"},
     "res.per_run_note": {
         "en": "How many sessions may run at once. The limits below apply to each run individually.",
         "zh": "最多同时运行多少个会话。下面的限制对每个运行单独生效。",

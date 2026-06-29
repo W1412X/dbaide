@@ -549,6 +549,9 @@ class MainWindow(QMainWindow):
         self.statusbar = QStatusBar()
         self.statusbar.setSizeGripEnabled(False)
         self.setStatusBar(self.statusbar)
+        from dbaide.desktop.views.sql_pool import SqlPoolIndicator
+        self.sql_pool_indicator = SqlPoolIndicator(self)
+        self.statusbar.addPermanentWidget(self.sql_pool_indicator)
         self._ensure_ui_state().statusbar_message("Ready")
         self._on_tab_changed(self.tabbar.currentIndex())
         # Land focus in the composer so the cursor is ready to type on launch

@@ -1007,6 +1007,10 @@ def serve(*, mode: str = "full") -> None:
     global _active_mode
     _active_mode = mode if mode in ("full", "ask", "tools") else "full"
 
+    from dbaide.config import ConfigManager
+    from dbaide.core.sql_governor import governor
+    governor.configure(ConfigManager().max_inflight_cost())   # arm the SQL cost governor
+
     logging.basicConfig(
         stream=sys.stderr,
         level=logging.WARNING,

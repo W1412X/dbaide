@@ -5,6 +5,7 @@ import re
 from dbaide.adapters.base import DatabaseAdapter
 from dbaide.context.disclosure import DisclosureContext
 from dbaide.core.result import ValidationReport
+from dbaide.core.sql_governor import governor
 from dbaide.models import QueryResult, ValidationResult
 from dbaide.validation import SQLGuard, TableScopeGuard
 
@@ -113,31 +114,44 @@ class QueryTools:
         if report.requires_confirmation and not confirmed:
             raise PermissionError("; ".join(report.warnings) or "SQL requires confirmation")
         normalized = report.normalized_sql
+        # Estimate EXPLAIN cost once if either the per-query cost gate or the in-flight
+        # cost governor needs it — they share the same estimate (avoids a double EXPLAIN).
+        estimated: int | None = None
+        if (enforce_cost_gate and self.explain_max_rows) or governor.enabled:
+            estimated = self.estimate_rows(normalized, database=database)
         # Hard EXPLAIN cost gate for callers without a risk-confirmation channel (the
         # MCP atomic execute_sql tool). The agent loop runs its own richer gate via the
         # risk controller; the GUI browse path leaves this off so paginated browsing of
         # large tables isn't blocked. No-op unless explain_max_rows is configured.
         if enforce_cost_gate and self.explain_max_rows:
-            estimated = self.estimate_rows(normalized, database=database)
             if estimated is not None and estimated > self.explain_max_rows:
                 raise ValueError(
                     f"Query estimated ~{estimated:,} rows, exceeding the cost gate limit of "
                     f"{self.explain_max_rows:,}. Add filters or narrow the range, then retry."
                 )
-        if preflight_explain:
-            explain_target = _strip_leading_explain(normalized)
-            try:
-                explain_result = self.adapter.explain(
-                    explain_target, database=database, timeout_seconds=timeout_seconds or self.timeout_seconds,
-                )
-                self.context.record_execution(explain_result.sql, database=database)
-            except (ValueError, RuntimeError, OSError):
-                pass
-        result = self.adapter.execute_readonly(
-            normalized, database=database, limit=effective_limit, timeout_seconds=timeout_seconds or self.timeout_seconds,
-        )
-        self.context.record_execution(result.sql, database=database)
-        return result
+        # In-flight cost governor: admit through one shared budget so the costs of all
+        # concurrently executing queries can't sum past max_inflight_cost (over-budget
+        # queries wait in a FIFO queue; a single query over the whole budget is rejected).
+        # Disabled (budget 0) → acquire() returns None and we run straight through; an
+        # unknown estimate counts as 0 so it never blocks.
+        token = governor.acquire(normalized, int(estimated or 0), connection=self.instance)
+        try:
+            if preflight_explain:
+                explain_target = _strip_leading_explain(normalized)
+                try:
+                    explain_result = self.adapter.explain(
+                        explain_target, database=database, timeout_seconds=timeout_seconds or self.timeout_seconds,
+                    )
+                    self.context.record_execution(explain_result.sql, database=database)
+                except (ValueError, RuntimeError, OSError):
+                    pass
+            result = self.adapter.execute_readonly(
+                normalized, database=database, limit=effective_limit, timeout_seconds=timeout_seconds or self.timeout_seconds,
+            )
+            self.context.record_execution(result.sql, database=database)
+            return result
+        finally:
+            governor.release(token)
 
 
 def _strip_leading_explain(sql: str) -> str:

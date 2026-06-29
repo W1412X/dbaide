@@ -306,6 +306,18 @@ class ConfigManager:
         except (TypeError, ValueError):
             return DEFAULT_MAX_CONCURRENT_RUNS
 
+    def max_inflight_cost(self) -> int:
+        """Global SQL cost budget (EXPLAIN-estimated rows). No single query may cost
+        more than this, and the costs of all *concurrently executing* queries may not
+        sum past it — over-budget queries wait in a FIFO queue. A process-wide cap
+        across every connection. Stored in ``[resource_defaults].max_inflight_cost``;
+        ``0`` (the default) disables the governor entirely."""
+        raw = self.resource_defaults().get("max_inflight_cost")
+        try:
+            return max(0, int(raw))
+        except (TypeError, ValueError):
+            return 0
+
     def set_resource_defaults(self, values: dict[str, Any]) -> None:
         """Persist ``[resource_defaults]`` (drops None/empty values)."""
         clean = {k: v for k, v in (values or {}).items() if v is not None and v != ""}

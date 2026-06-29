@@ -6,6 +6,20 @@ All notable changes to DBAide are documented here. The format is loosely based o
 
 ## [Unreleased]
 
+### Added
+
+- **SQL cost governor** — a process-wide admission control over query execution,
+  keyed to a new `max_inflight_cost` budget (EXPLAIN-estimated rows; `0` = off, the
+  default). No single query may cost more than the budget, and the costs of all
+  *concurrently executing* queries can't sum past it — over-budget queries wait in a
+  **FIFO queue** and are admitted as budget frees up; a query that exceeds the whole
+  budget is rejected up front. It spans every execution path (agent, dashboards, SQL
+  editor, browsing, MCP, CLI) so the in-flight total is global. A live **SQL pool**
+  status-bar indicator (running/queued counts + budget use) opens a dialog listing
+  each running and queued query with its cost, connection, and timing. Configure the
+  budget in **Settings → Resources**. (SQLite gives no row estimate, so the governor
+  is effectively inert there; it bites on MySQL/PostgreSQL.)
+
 ## [0.9.17] — 2026-06-29
 
 A dashboards UX pass plus an app-wide button-readability fix.

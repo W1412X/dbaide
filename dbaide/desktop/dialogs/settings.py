@@ -678,6 +678,23 @@ class SettingsDialog(ChromeDialog):
         note.setStyleSheet(f"color: {Theme.MUTED}; font-size: 11px; padding: 2px 0 8px 0;")
         form.addRow("", note)
 
+        cost_spin = QSpinBox()
+        cost_spin.setRange(0, 1_000_000_000)
+        cost_spin.setSingleStep(10_000)
+        cost_spin.setGroupSeparatorShown(True)
+        cost_spin.setMinimumWidth(120)
+        cost_spin.setMaximumWidth(150)
+        configure_compact_field(cost_spin, height=STANDARD_FIELD_HEIGHT, max_width=150)
+        cost_cur = self._resource_values.get("max_inflight_cost")
+        cost_spin.setValue(int(cost_cur) if cost_cur not in (None, "") else 0)
+        self._resource_spins["max_inflight_cost"] = cost_spin
+        self._resource_baselines["max_inflight_cost"] = 0
+        form.addRow(form_label(_t("res.max_inflight_cost")), cost_spin)
+        cost_note = QLabel(_t("res.max_inflight_cost_note"))
+        cost_note.setWordWrap(True)
+        cost_note.setStyleSheet(f"color: {Theme.MUTED}; font-size: 11px; padding: 2px 0 8px 0;")
+        form.addRow("", cost_note)
+
         for group_key, fields in self._RESOURCE_GROUPS:
             header = QLabel(_t(group_key))
             header.setStyleSheet(

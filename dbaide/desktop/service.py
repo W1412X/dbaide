@@ -78,6 +78,9 @@ class DesktopService:
         self.boards_questions = SavedQuestionStore()
         self.boards_apps = ParametricDashboardStore()
         self._handlers = build_action_handlers(self)
+        # Arm the process-wide SQL cost governor from config (0 = disabled).
+        from dbaide.core.sql_governor import governor
+        governor.configure(self.cfg.max_inflight_cost())
         import threading
         self._build_lock = threading.Lock()
         self._active_builds: set[str] = set()
@@ -1301,7 +1304,8 @@ class DesktopService:
         # Coerce known numeric keys; ignore unknowns.
         from dbaide.db.policy import ResourcePolicy
         from dataclasses import fields
-        numeric_keys = ({f.name for f in fields(ResourcePolicy)} - {"build_profile_mode"}) | {"max_concurrent_runs"}
+        numeric_keys = (({f.name for f in fields(ResourcePolicy)} - {"build_profile_mode"})
+                        | {"max_concurrent_runs", "max_inflight_cost"})
         clean: dict[str, Any] = {}
         for key, val in (values or {}).items():
             if val in (None, ""):
@@ -1314,6 +1318,9 @@ class DesktopService:
             elif key == "build_profile_mode":
                 clean[key] = str(val)
         self.cfg.set_resource_defaults(clean)
+        # Re-arm the cost governor so a changed budget takes effect immediately.
+        from dbaide.core.sql_governor import governor
+        governor.configure(self.cfg.max_inflight_cost())
         return {"values": self.cfg.resource_defaults()}
 
     # ── Query audit log (full SQL visibility) ────────────────────────────────
