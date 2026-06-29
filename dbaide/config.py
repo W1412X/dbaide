@@ -17,6 +17,12 @@ CONFIG_VERSION = 1
 
 # Default number of agent runs (sessions) allowed to execute concurrently.
 DEFAULT_MAX_CONCURRENT_RUNS = 6
+# Global SQL in-flight cost budget (EXPLAIN-estimated rows), on by default. Chosen ≥ the
+# per-query EXPLAIN cost gate of the production (5M) and staging (20M) profiles so it
+# never rejects a single query those profiles already allow; it caps the *concurrent*
+# total (≈10 heavy production queries at once) and powers the live SQL pool view. Set to
+# 0 in Settings → Resources to turn the governor off entirely.
+DEFAULT_MAX_INFLIGHT_COST = 50_000_000
 
 # Valid keys for ConnectionConfig and ModelConfig
 _CONNECTION_KEYS = {
@@ -319,7 +325,7 @@ class ConfigManager:
         try:
             return max(0, int(raw))
         except (TypeError, ValueError):
-            return 0
+            return DEFAULT_MAX_INFLIGHT_COST
 
     def set_resource_defaults(self, values: dict[str, Any]) -> None:
         """Persist ``[resource_defaults]`` (drops None/empty values)."""

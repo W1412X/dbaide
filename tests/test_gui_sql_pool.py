@@ -42,7 +42,12 @@ def test_indicator_visibility(qapp):
         governor.configure(1000)
         ind.refresh()
         assert ind.isHidden() is False                 # armed → always visible (discoverable)
-        assert "0" in ind.text()
+        from dbaide.i18n import t as _t
+        assert ind.text() == _t("sqlpool.title")       # armed + idle → tidy chip, not "0·0·0%"
+        tok2 = governor.acquire("SELECT 2", 100)
+        ind.refresh()
+        assert "%" in ind.text()                        # active → live counts + budget %
+        governor.release(tok2)
     finally:
         governor.configure(0)
 

@@ -8,6 +8,14 @@ All notable changes to DBAide are documented here. The format is loosely based o
 
 ### Changed
 
+- **The SQL cost governor is now on by default** with a generous `max_inflight_cost`
+  budget of 50,000,000 (EXPLAIN-estimated rows) — chosen ≥ the per-query cost gate of the
+  production (5M) and staging (20M) profiles, so it never rejects a single query those
+  profiles already allow; it caps the *concurrent* total and powers the live pool view
+  out of the box. The trade-off: each query now runs a quick EXPLAIN to estimate its
+  cost. Set the budget to 0 in **Settings → Resources** to turn the governor off (the
+  pool then falls back to a no-overhead monitor). SQLite gives no estimate, so it stays a
+  monitor there regardless.
 - **The SQL pool is now a live monitor even when the cost governor is off.** Previously
   the status-bar indicator only appeared after you set a budget, so there was no way to
   just *watch* running SQL. Now it tracks and shows in-flight queries with no gating

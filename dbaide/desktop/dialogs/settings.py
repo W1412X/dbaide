@@ -656,7 +656,7 @@ class SettingsDialog(ChromeDialog):
         self._resource_baselines: dict[str, int] = {}
 
         # Global app concurrency cap — distinct from the per-run database knobs below.
-        from dbaide.config import DEFAULT_MAX_CONCURRENT_RUNS
+        from dbaide.config import DEFAULT_MAX_CONCURRENT_RUNS, DEFAULT_MAX_INFLIGHT_COST
         group_header = QLabel(_t("res.group.app"))
         group_header.setStyleSheet(
             f"color: {Theme.TEXT}; font-size: 12px; font-weight: 600;"
@@ -686,9 +686,9 @@ class SettingsDialog(ChromeDialog):
         cost_spin.setMaximumWidth(150)
         configure_compact_field(cost_spin, height=STANDARD_FIELD_HEIGHT, max_width=150)
         cost_cur = self._resource_values.get("max_inflight_cost")
-        cost_spin.setValue(int(cost_cur) if cost_cur not in (None, "") else 0)
+        cost_spin.setValue(int(cost_cur) if cost_cur not in (None, "") else DEFAULT_MAX_INFLIGHT_COST)
         self._resource_spins["max_inflight_cost"] = cost_spin
-        self._resource_baselines["max_inflight_cost"] = 0
+        self._resource_baselines["max_inflight_cost"] = DEFAULT_MAX_INFLIGHT_COST
         form.addRow(form_label(_t("res.max_inflight_cost")), cost_spin)
         cost_note = QLabel(_t("res.max_inflight_cost_note"))
         cost_note.setWordWrap(True)

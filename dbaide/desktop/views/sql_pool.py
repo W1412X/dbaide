@@ -61,10 +61,13 @@ class SqlPoolIndicator(QToolButton):
             return
         self.setVisible(True)
         if snap["enabled"]:
-            budget = snap["budget"] or 1
-            pct = int(round(100 * snap["in_flight_cost"] / budget))
-            self.setText(_t("sqlpool.indicator", running=snap["running_count"],
-                            queued=snap["queued_count"], pct=pct))
+            if not active:
+                self.setText(_t("sqlpool.title"))   # armed but idle → tidy, clickable chip
+            else:
+                budget = snap["budget"] or 1
+                pct = int(round(100 * snap["in_flight_cost"] / budget))
+                self.setText(_t("sqlpool.indicator", running=snap["running_count"],
+                                queued=snap["queued_count"], pct=pct))
         else:
             self.setText(_t("sqlpool.indicator_monitor", running=snap["running_count"]))
 
