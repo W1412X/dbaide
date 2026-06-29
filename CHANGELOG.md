@@ -6,6 +6,13 @@ All notable changes to DBAide are documented here. The format is loosely based o
 
 ## [Unreleased]
 
+### Changed
+
+- **Roomier SQL pool dialog** — bigger by default (1040×560) with the Running and Queued
+  lists side by side instead of stacked vertically; when the governor is off the queue
+  column collapses so Running spans the full width. SQL cells show the full statement on
+  hover.
+
 ## [0.9.19] — 2026-06-29
 
 ### Changed

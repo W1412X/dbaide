@@ -12,6 +12,7 @@ from PyQt6.QtCore import Qt, QTimer
 from PyQt6.QtWidgets import (
     QAbstractItemView,
     QDialog,
+    QHBoxLayout,
     QHeaderView,
     QLabel,
     QProgressBar,
@@ -19,6 +20,7 @@ from PyQt6.QtWidgets import (
     QTableWidgetItem,
     QToolButton,
     QVBoxLayout,
+    QWidget,
 )
 
 from dbaide.core.sql_governor import governor
@@ -86,34 +88,38 @@ class SqlPoolDialog(QDialog):
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
         self.setWindowTitle(_t("sqlpool.title"))
-        self.resize(760, 460)
+        self.resize(1040, 560)
+        self.setMinimumSize(720, 380)
         lay = QVBoxLayout(self)
-        lay.setContentsMargins(16, 14, 16, 14)
-        lay.setSpacing(8)
+        lay.setContentsMargins(18, 16, 18, 16)
+        lay.setSpacing(10)
 
         self._budget_lbl = QLabel()
-        self._budget_lbl.setStyleSheet(f"color:{Theme.TEXT}; font-size:13px; font-weight:600;")
+        self._budget_lbl.setStyleSheet(f"color:{Theme.TEXT}; font-size:14px; font-weight:600;")
         lay.addWidget(self._budget_lbl)
         self._bar = QProgressBar()
         self._bar.setTextVisible(False)
-        self._bar.setFixedHeight(8)
+        self._bar.setFixedHeight(10)
         self._bar.setStyleSheet(
-            f"QProgressBar {{ background:{Theme.PANEL_2}; border:none; border-radius:4px; }}"
-            f"QProgressBar::chunk {{ background:{Theme.ACCENT}; border-radius:4px; }}")
+            f"QProgressBar {{ background:{Theme.PANEL_2}; border:none; border-radius:5px; }}"
+            f"QProgressBar::chunk {{ background:{Theme.ACCENT}; border-radius:5px; }}")
         lay.addWidget(self._bar)
 
         self._empty = QLabel()
         self._empty.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self._empty.setStyleSheet(f"color:{Theme.MUTED}; font-size:13px; padding:24px;")
+        self._empty.setStyleSheet(f"color:{Theme.MUTED}; font-size:13px; padding:8px;")
         lay.addWidget(self._empty)
 
-        lay.addWidget(self._heading(_t("sqlpool.running")))
+        # Running and Queued sit side by side, each its own column, so the dialog reads
+        # wide instead of one tall stack.
+        cols = QHBoxLayout()
+        cols.setSpacing(16)
         self._running = self._make_table(_t("sqlpool.col_elapsed"))
-        lay.addWidget(self._running, 1)
-        self._queued_heading = self._heading(_t("sqlpool.queued"))
-        lay.addWidget(self._queued_heading)
+        cols.addWidget(self._column(_t("sqlpool.running"), self._running), 1)
         self._queued = self._make_table(_t("sqlpool.col_waited"))
-        lay.addWidget(self._queued, 1)
+        self._queued_col = self._column(_t("sqlpool.queued"), self._queued)
+        cols.addWidget(self._queued_col, 1)
+        lay.addLayout(cols, 1)
 
         self._timer = QTimer(self)
         self._timer.setInterval(500)
@@ -124,17 +130,29 @@ class SqlPoolDialog(QDialog):
 
     def _heading(self, text: str) -> QLabel:
         lbl = QLabel(text)
-        lbl.setStyleSheet(f"color:{Theme.TEXT_2}; font-size:12px; font-weight:600; padding-top:4px;")
+        lbl.setStyleSheet(f"color:{Theme.TEXT_2}; font-size:13px; font-weight:600; padding-top:2px;")
         return lbl
+
+    def _column(self, title: str, table: QTableWidget) -> QWidget:
+        """A titled column (heading above its table) for side-by-side layout."""
+        col = QWidget()
+        v = QVBoxLayout(col)
+        v.setContentsMargins(0, 0, 0, 0)
+        v.setSpacing(5)
+        v.addWidget(self._heading(title))
+        v.addWidget(table, 1)
+        return col
 
     def _make_table(self, last_col: str) -> QTableWidget:
         table = QTableWidget(0, 4)
         table.setHorizontalHeaderLabels(
             [_t("sqlpool.col_sql"), _t("sqlpool.col_cost"), _t("sqlpool.col_conn"), last_col])
         table.verticalHeader().setVisible(False)
+        table.verticalHeader().setDefaultSectionSize(30)   # roomier rows
         table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
         table.setSelectionMode(QAbstractItemView.SelectionMode.NoSelection)
         table.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        table.setWordWrap(False)
         hh = table.horizontalHeader()
         hh.setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
         for c in (1, 2, 3):
@@ -158,8 +176,9 @@ class SqlPoolDialog(QDialog):
         # The budget bar + queue exist only when the governor is armed; otherwise the
         # dialog is a plain monitor of what's currently running.
         self._bar.setVisible(enabled)
-        self._queued_heading.setVisible(enabled)
-        self._queued.setVisible(enabled)
+        # the whole Queued column collapses when the governor is off (no queue exists),
+        # letting Running expand to the full width
+        self._queued_col.setVisible(enabled)
         if enabled:
             budget = snap["budget"] or 1
             used = snap["in_flight_cost"]
@@ -179,7 +198,9 @@ class SqlPoolDialog(QDialog):
     def _fill(self, table: QTableWidget, rows: list[dict], time_key: str) -> None:
         table.setRowCount(len(rows))
         for r, entry in enumerate(rows):
-            table.setItem(r, 0, QTableWidgetItem(entry["label"]))
+            sql_item = QTableWidgetItem(entry["label"])
+            sql_item.setToolTip(entry["label"])        # full text on hover (column is narrow)
+            table.setItem(r, 0, sql_item)
             cost = QTableWidgetItem(f"{entry['cost']:,}" if entry["cost"] else "—")
             cost.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
             table.setItem(r, 1, cost)

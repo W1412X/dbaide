@@ -93,7 +93,7 @@ def test_dialog_monitors_running_sql_when_governor_off(qapp):
         dlg.refresh()
         assert dlg._running.rowCount() == 0
         assert dlg._bar.isHidden() is True             # no budget bar when off
-        assert dlg._queued.isHidden() is True          # no queue concept when off
+        assert dlg._queued_col.isHidden() is True      # whole queue column collapses when off
         assert dlg._empty.isHidden() is False
         tok = governor.acquire("SELECT 1 FROM t", 0, connection="c")  # running, ungoverned
         dlg.refresh()
