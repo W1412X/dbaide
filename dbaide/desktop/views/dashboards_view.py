@@ -154,9 +154,18 @@ class DashboardsView(QWidget):
         self._tabs.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
         self._tabs.setStyleSheet(workbench_tab_stylesheet(bordered_pane=False))
         self._tabs.tabCloseRequested.connect(self._close_tab)
-        # left corner: return to the boards gallery (matches the Workbench corner icons)
+        # left corner: return to the boards gallery (matches the Workbench corner icons).
+        # Wrap the button in a holder whose HBoxLayout vertically centers it in the tab
+        # strip — setting the button as the corner widget directly left it top-aligned.
         home = self._corner_icon("table", _t("dash.boards_home"), self._show_gallery)
-        self._tabs.setCornerWidget(home, Qt.Corner.TopLeftCorner)
+        holder = QWidget()
+        holder.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
+        holder.setStyleSheet(f"background: {Theme.SURFACE}; border: none;")
+        hl = QHBoxLayout(holder)
+        hl.setContentsMargins(6, 0, 4, 0)
+        hl.setSpacing(0)
+        hl.addWidget(home)
+        self._tabs.setCornerWidget(holder, Qt.Corner.TopLeftCorner)
         self._stack.addWidget(self._tabs)               # 1
         root.addWidget(self._stack)
 
@@ -167,10 +176,10 @@ class DashboardsView(QWidget):
         btn.setIconSize(QSize(14, 14))
         btn.setToolTip(tooltip)
         btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        btn.setFixedSize(28, 22)
+        btn.setFixedSize(26, 20)   # the holder's layout centers it vertically in the tab strip
         btn.setStyleSheet(
             "QToolButton { background: transparent; border: none; border-radius: 7px;"
-            " padding: 0; margin: 1px 6px 1px 4px; }"
+            " padding: 0; margin: 0; min-width: 26px; max-width: 26px; min-height: 20px; max-height: 20px; }"
             f"QToolButton:hover {{ background: {Theme.PANEL_2}; }}")
         btn.clicked.connect(lambda _checked=False: on_click())
         return btn
