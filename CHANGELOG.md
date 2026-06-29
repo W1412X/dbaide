@@ -6,6 +6,8 @@ All notable changes to DBAide are documented here. The format is loosely based o
 
 ## [Unreleased]
 
+## [0.9.18] — 2026-06-29
+
 ### Added
 
 - **SQL cost governor** — a process-wide admission control over the query-execution
