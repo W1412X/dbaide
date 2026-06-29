@@ -123,6 +123,10 @@ number. DBAide is built on the opposite principle:
 - 📊 **Inline charts & HTML export.** Answers render Markdown + ECharts in one view;
   **More → Export HTML…** sets padding with live preview; use **Chart tools…** when
   you need zoom without stealing scroll from the chat.
+- 📈 **Interactive dashboards.** Turn any analysis into a saved **parametric dashboard** —
+  filter controls, KPI cards, charts, and a detail table, all driven by read-only SQL.
+  Saved boards open from the **Dashboards** tab (view-only by default), refine in natural
+  language, and stay open side-by-side as tabs.
 - 🧰 **A real database client, too.** Switch to the **Workbench** for a DBeaver-style
   workspace: multiple SQL editors and table viewers, a data browser, structure & DDL,
   query history — all read-only and safe (see below).
@@ -195,6 +199,27 @@ workspace, all read-only and routed through the same guardrails as the agent:
 
 Right-click a table in the schema tree to open it, or to **Generate SQL**
 (`SELECT` / `COUNT` / `INSERT` / `UPDATE` templates).
+
+### Dashboards — turn an analysis into an interactive board
+
+Found something worth keeping? Under any answer, open the **More ⋯** menu and choose
+**Build interactive dashboard…**. A builder agent turns that analysis into a
+**parametric dashboard** — filter controls, KPI cards, several charts, and a detail
+table, all backed by read-only SQL and the same guardrails as the agent. It opens in
+its own tab under **Dashboards** while it builds.
+
+Saved boards live in the **Dashboards** tab at the top:
+
+- 🖼️ **Gallery.** Every saved dashboard as a card — name, chart count, connection, and
+  date — with **Open** and **Delete**.
+- 👁️ **View by default.** Opening a board shows just its filters and charts; pick filter
+  values and hit **Apply** to re-query. No model picker or prompt box in the way —
+  those belong to editing.
+- ✍️ **Edit to refine.** Click **Edit** to reveal the model picker and a refine box, then
+  describe the change in plain language (*"make the month a date range, add a pie chart
+  by category"*) and the board rebuilds in place.
+- 🗂️ **Tabs.** Open several boards at once as closable tabs; the corner **Boards** button
+  returns to the gallery.
 
 ### Import / Export connections
 
