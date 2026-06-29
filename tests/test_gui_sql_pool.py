@@ -28,17 +28,21 @@ def _wait_for(predicate, timeout=2.0):
     return predicate()
 
 
-def test_indicator_hidden_when_disabled_visible_when_enabled(qapp):
+def test_indicator_visibility(qapp):
     from dbaide.desktop.views.sql_pool import SqlPoolIndicator
     governor.configure(0)
     try:
         ind = SqlPoolIndicator()
         ind.refresh()
-        assert ind.isHidden() is True                 # off → no status-bar clutter
+        assert ind.isHidden() is True                  # off + idle → no clutter
+        tok = governor.acquire("SELECT 1", 0)          # off but something running → monitor
+        ind.refresh()
+        assert ind.isHidden() is False
+        governor.release(tok)
         governor.configure(1000)
         ind.refresh()
-        assert ind.isHidden() is False                 # armed → indicator shows
-        assert "0" in ind.text()                       # 0 running / 0 queued
+        assert ind.isHidden() is False                 # armed → always visible (discoverable)
+        assert "0" in ind.text()
     finally:
         governor.configure(0)
 
@@ -76,10 +80,21 @@ def test_dialog_lists_running_and_queued(qapp):
         governor.configure(0)
 
 
-def test_dialog_shows_disabled_state(qapp):
+def test_dialog_monitors_running_sql_when_governor_off(qapp):
     from dbaide.desktop.views.sql_pool import SqlPoolDialog
     governor.configure(0)
-    dlg = SqlPoolDialog()
-    dlg.refresh()
-    assert dlg._running.rowCount() == 0 and dlg._queued.rowCount() == 0
-    assert dlg._empty.isHidden() is False
+    try:
+        dlg = SqlPoolDialog()
+        dlg.refresh()
+        assert dlg._running.rowCount() == 0
+        assert dlg._bar.isHidden() is True             # no budget bar when off
+        assert dlg._queued.isHidden() is True          # no queue concept when off
+        assert dlg._empty.isHidden() is False
+        tok = governor.acquire("SELECT 1 FROM t", 0, connection="c")  # running, ungoverned
+        dlg.refresh()
+        assert dlg._running.rowCount() == 1            # monitor shows it even with governor off
+        assert dlg._running.item(0, 1).text() == "—"   # cost unknown (not estimated when off)
+        assert dlg._empty.isHidden() is True
+        governor.release(tok)
+    finally:
+        governor.configure(0)

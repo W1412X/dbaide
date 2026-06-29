@@ -6,6 +6,15 @@ All notable changes to DBAide are documented here. The format is loosely based o
 
 ## [Unreleased]
 
+### Changed
+
+- **The SQL pool is now a live monitor even when the cost governor is off.** Previously
+  the status-bar indicator only appeared after you set a budget, so there was no way to
+  just *watch* running SQL. Now it tracks and shows in-flight queries with no gating
+  (cost shows as "—" since it isn't estimated when off); setting `max_inflight_cost` > 0
+  adds the budget bar + FIFO queue on top. The indicator sits at the right of the bottom
+  status bar — visible whenever the governor is armed or anything is running.
+
 ## [0.9.18] — 2026-06-29
 
 ### Added

@@ -53,14 +53,20 @@ class SqlPoolIndicator(QToolButton):
 
     def refresh(self) -> None:
         snap = governor.snapshot()
-        if not snap["enabled"]:
+        active = snap["running_count"] or snap["queued_count"]
+        # Show whenever the governor is armed (so it's discoverable + clickable) or
+        # whenever something is running (monitor mode). Hidden only when off and idle.
+        if not snap["enabled"] and not active:
             self.setVisible(False)
             return
         self.setVisible(True)
-        budget = snap["budget"] or 1
-        pct = int(round(100 * snap["in_flight_cost"] / budget))
-        self.setText(_t("sqlpool.indicator", running=snap["running_count"],
-                        queued=snap["queued_count"], pct=pct))
+        if snap["enabled"]:
+            budget = snap["budget"] or 1
+            pct = int(round(100 * snap["in_flight_cost"] / budget))
+            self.setText(_t("sqlpool.indicator", running=snap["running_count"],
+                            queued=snap["queued_count"], pct=pct))
+        else:
+            self.setText(_t("sqlpool.indicator_monitor", running=snap["running_count"]))
 
     def _open(self) -> None:
         if self._dialog is None:
@@ -101,7 +107,8 @@ class SqlPoolDialog(QDialog):
         lay.addWidget(self._heading(_t("sqlpool.running")))
         self._running = self._make_table(_t("sqlpool.col_elapsed"))
         lay.addWidget(self._running, 1)
-        lay.addWidget(self._heading(_t("sqlpool.queued")))
+        self._queued_heading = self._heading(_t("sqlpool.queued"))
+        lay.addWidget(self._queued_heading)
         self._queued = self._make_table(_t("sqlpool.col_waited"))
         lay.addWidget(self._queued, 1)
 
@@ -144,32 +151,33 @@ class SqlPoolDialog(QDialog):
 
     def refresh(self) -> None:
         snap = governor.snapshot()
-        if not snap["enabled"]:
-            self._budget_lbl.setText(_t("sqlpool.disabled"))
-            self._bar.setVisible(False)
-            self._empty.setVisible(True)
-            self._empty.setText(_t("sqlpool.disabled"))
-            self._running.setRowCount(0)
+        enabled = snap["enabled"]
+        # The budget bar + queue exist only when the governor is armed; otherwise the
+        # dialog is a plain monitor of what's currently running.
+        self._bar.setVisible(enabled)
+        self._queued_heading.setVisible(enabled)
+        self._queued.setVisible(enabled)
+        if enabled:
+            budget = snap["budget"] or 1
+            used = snap["in_flight_cost"]
+            self._budget_lbl.setText(_t("sqlpool.budget", used=f"{used:,}", budget=f"{snap['budget']:,}",
+                                        pct=int(round(100 * used / budget))))
+            self._bar.setRange(0, snap["budget"])
+            self._bar.setValue(min(used, snap["budget"]))
+            self._fill(self._queued, snap["queued"], "waited_s")
+        else:
+            self._budget_lbl.setText(_t("sqlpool.monitor_only"))
             self._queued.setRowCount(0)
-            return
-        self._bar.setVisible(True)
-        budget = snap["budget"] or 1
-        used = snap["in_flight_cost"]
-        self._budget_lbl.setText(_t("sqlpool.budget", used=f"{used:,}", budget=f"{snap['budget']:,}",
-                                    pct=int(round(100 * used / budget))))
-        self._bar.setRange(0, snap["budget"])
-        self._bar.setValue(min(used, snap["budget"]))
         self._fill(self._running, snap["running"], "elapsed_s")
-        self._fill(self._queued, snap["queued"], "waited_s")
         idle = not snap["running"] and not snap["queued"]
         self._empty.setVisible(idle)
-        self._empty.setText(_t("sqlpool.empty") if idle else "")
+        self._empty.setText((_t("sqlpool.empty") if enabled else _t("sqlpool.empty_monitor")) if idle else "")
 
     def _fill(self, table: QTableWidget, rows: list[dict], time_key: str) -> None:
         table.setRowCount(len(rows))
         for r, entry in enumerate(rows):
             table.setItem(r, 0, QTableWidgetItem(entry["label"]))
-            cost = QTableWidgetItem(f"{entry['cost']:,}")
+            cost = QTableWidgetItem(f"{entry['cost']:,}" if entry["cost"] else "—")
             cost.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
             table.setItem(r, 1, cost)
             table.setItem(r, 2, QTableWidgetItem(entry.get("connection") or "—"))

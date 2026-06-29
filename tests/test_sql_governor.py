@@ -19,12 +19,16 @@ def _wait_for(predicate, timeout=2.0):
     return predicate()
 
 
-def test_disabled_budget_runs_ungoverned():
+def test_disabled_budget_tracks_but_never_gates():
     g = CostGovernor()
     assert g.enabled is False
-    assert g.acquire("SELECT 1", 999_999) is None     # 0 budget → passthrough, no token
+    tok = g.acquire("SELECT 1", 999_999)              # 0 budget → no reject/queue, but tracked
+    assert tok is not None
     snap = g.snapshot()
-    assert snap["enabled"] is False and snap["running_count"] == 0
+    assert snap["enabled"] is False
+    assert snap["running_count"] == 1 and snap["queued_count"] == 0   # monitor, not gated
+    g.release(tok)
+    assert g.snapshot()["running_count"] == 0
 
 
 def test_per_query_cost_over_budget_is_rejected():

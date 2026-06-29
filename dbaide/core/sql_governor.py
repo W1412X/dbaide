@@ -99,16 +99,25 @@ class CostGovernor:
                 cancel=None) -> int | None:
         """Block until admitted; return an opaque token to pass to :meth:`release`.
 
-        Returns ``None`` when the governor is disabled (the caller then runs
-        ungoverned). Raises :class:`CostExceeded` if ``cost`` exceeds the whole
-        budget. ``cancel`` is an optional ``() -> bool`` predicate polled while
-        waiting; when it turns true the entry leaves the queue and
-        :class:`Cancelled` is raised.
+        When the governor is **disabled** (budget 0) the query is not gated — it is
+        still *tracked* (added to the running set) so the pool viewer works as a plain
+        monitor, then returns immediately without blocking, queueing, or rejecting.
+        When **enabled**, raises :class:`CostExceeded` if ``cost`` exceeds the whole
+        budget, else waits in the FIFO queue until admitted. ``cancel`` is an optional
+        ``() -> bool`` predicate polled while waiting; when it turns true the entry
+        leaves the queue and :class:`Cancelled` is raised.
         """
         with self._cond:
-            if self._budget <= 0:
-                return None
             cost = max(0, int(cost or 0))
+            if self._budget <= 0:
+                # Ungoverned: never block / queue / reject — but track the query so the
+                # pool viewer can show what's running (a pure monitor with no gating).
+                self._seq += 1
+                entry = _Entry(seq=self._seq, label=_truncate(label), cost=cost,
+                               connection=connection, enqueued_at=_now())
+                entry.started_at = entry.enqueued_at
+                self._running[entry.seq] = entry
+                return entry.seq
             if cost > self._budget:
                 raise CostExceeded(
                     f"Query estimated ~{cost:,} rows, over the in-flight cost budget of "
