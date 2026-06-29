@@ -242,6 +242,21 @@ class AgentButton(QPushButton):
         super().__init__(text, parent)
         if primary:
             self.setProperty("primary", True)
+            # Under Fusion, QPushButton ignores a `background` set via a global
+            # PROPERTY selector (`QPushButton[primary="true"]`) — color and border
+            # still apply, so primary buttons rendered as an unfilled outline with
+            # white text (invisible on a light background). A DIRECT widget stylesheet
+            # paints the fill reliably; mirror the global primary rules here.
+            self.setStyleSheet(
+                "QPushButton {"
+                f" background:{Theme.ACCENT}; color:{Theme.ACCENT_TEXT};"
+                f" border:1px solid {Theme.ACCENT}; border-radius:7px;"
+                " padding:0 12px; min-height:28px; max-height:28px; font-weight:600; }"
+                f"QPushButton:hover {{ background:{Theme.ACCENT_HOVER};"
+                f" border-color:{Theme.ACCENT_HOVER}; color:{Theme.ACCENT_TEXT}; }}"
+                f"QPushButton:pressed {{ background:{Theme.FOCUS}; border-color:{Theme.FOCUS}; }}"
+                f"QPushButton:disabled {{ background:{Theme.PANEL_2};"
+                f" color:{Theme.TEXT_2}; border-color:{Theme.BORDER_SOFT}; }}")
         if tab:
             self.setProperty("tab", True)
         if active:
