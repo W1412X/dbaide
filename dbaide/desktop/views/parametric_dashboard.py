@@ -261,9 +261,11 @@ class ParametricDashboardStudio(QWidget):
         return str(self._model.currentData() or "")
 
     def _build(self, payload: dict) -> None:
-        if self._worker is not None or self._shut:
+        if self._worker is not None:
             return
         self._ensure_models()
+        if self._shut:   # the tab may have been closed during _ensure_models()'s disk I/O
+            return
         payload.setdefault("model", self._current_model())   # generate with the chosen model
         self._set_busy(True)
         worker = _BuildWorker(self._service, payload, self)

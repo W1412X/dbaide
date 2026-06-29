@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from typing import Any, Callable
 
-from PyQt6.QtCore import Qt
+from PyQt6.QtCore import QSize, Qt
 from PyQt6.QtGui import QFont
 from PyQt6.QtWidgets import (
     QFrame,
@@ -18,13 +18,15 @@ from PyQt6.QtWidgets import (
     QScrollArea,
     QStackedWidget,
     QTabWidget,
+    QToolButton,
     QVBoxLayout,
     QWidget,
 )
 
 from dbaide.desktop.components.base import compact_button
+from dbaide.desktop.components.icons import svg_icon
 from dbaide.desktop.dialogs.message_dialog import confirm as dialog_confirm
-from dbaide.desktop.theme import Theme
+from dbaide.desktop.theme import Theme, workbench_tab_stylesheet
 from dbaide.desktop.views.parametric_dashboard import ParametricDashboardStudio
 from dbaide.i18n import t as _t
 
@@ -137,22 +139,41 @@ class DashboardsView(QWidget):
         self._gallery = _Gallery(service, on_open=self._open)
         self._stack.addWidget(self._gallery)            # 0
 
-        # Opened dashboards live as tabs; a corner "Boards" button returns to the gallery.
+        # Opened dashboards live as tabs, styled with the app-wide closable-content-tab
+        # chrome (the `panelTabs` QSS variant the Workbench uses) — NOT a local
+        # stylesheet, which would drop those rules and bring back the native gray tabs.
         self._tabs = QTabWidget()
-        self._tabs.setTabsClosable(True)
-        self._tabs.setMovable(True)
         self._tabs.setDocumentMode(True)
-        self._tabs.setStyleSheet(
-            f"QTabBar::tab {{ background:{Theme.PANEL}; color:{Theme.TEXT_2}; border:1px solid {Theme.BORDER_SOFT};"
-            f" padding:6px 12px; margin-right:2px; border-top-left-radius:6px; border-top-right-radius:6px; }}"
-            f" QTabBar::tab:selected {{ background:{Theme.BG}; color:{Theme.TEXT}; border-bottom-color:{Theme.BG}; }}"
-            f" QTabWidget::pane {{ border:none; }}")
+        self._tabs.setMovable(True)
+        self._tabs.setTabsClosable(True)
+        self._tabs.tabBar().setProperty("panelTabs", True)
+        self._tabs.tabBar().setDrawBase(False)
+        self._tabs.tabBar().setExpanding(False)
+        self._tabs.tabBar().setElideMode(Qt.TextElideMode.ElideRight)
+        self._tabs.tabBar().setUsesScrollButtons(True)
+        self._tabs.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
+        self._tabs.setStyleSheet(workbench_tab_stylesheet(bordered_pane=False))
         self._tabs.tabCloseRequested.connect(self._close_tab)
-        home = compact_button(_t("dash.boards_home"), width=92)
-        home.clicked.connect(self._show_gallery)
+        # left corner: return to the boards gallery (matches the Workbench corner icons)
+        home = self._corner_icon("table", _t("dash.boards_home"), self._show_gallery)
         self._tabs.setCornerWidget(home, Qt.Corner.TopLeftCorner)
         self._stack.addWidget(self._tabs)               # 1
         root.addWidget(self._stack)
+
+    def _corner_icon(self, icon_name: str, tooltip: str, on_click) -> QToolButton:
+        """Compact icon button for the tab-bar corner (same look as the Workbench)."""
+        btn = QToolButton()
+        btn.setIcon(svg_icon(icon_name, color=Theme.TEXT_2, size=14))
+        btn.setIconSize(QSize(14, 14))
+        btn.setToolTip(tooltip)
+        btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        btn.setFixedSize(28, 22)
+        btn.setStyleSheet(
+            "QToolButton { background: transparent; border: none; border-radius: 7px;"
+            " padding: 0; margin: 1px 6px 1px 4px; }"
+            f"QToolButton:hover {{ background: {Theme.PANEL_2}; }}")
+        btn.clicked.connect(lambda _checked=False: on_click())
+        return btn
 
     # -- API expected by main_window (mirrors the old DashboardTab) -----------
 
@@ -172,6 +193,7 @@ class DashboardsView(QWidget):
         'build dashboard' action."""
         studio = ParametricDashboardStudio(self._service)
         i = self._tabs.addTab(studio, name or _t("dash.untitled"))
+        self._tabs.setTabToolTip(i, name or _t("dash.untitled"))
         studio.titleChanged.connect(lambda t, s=studio: self._relabel(s, t))
         studio.start(name=name, connection_name=connection_name, context=context, instruction=instruction)
         self._tabs.setCurrentIndex(i)
@@ -187,7 +209,9 @@ class DashboardsView(QWidget):
         else:
             studio = ParametricDashboardStudio(self._service)
             studio.open_existing(app_id)              # view-only
-            i = self._tabs.addTab(studio, studio.title_text() or _t("dash.untitled"))
+            label = studio.title_text() or _t("dash.untitled")
+            i = self._tabs.addTab(studio, label)
+            self._tabs.setTabToolTip(i, label)
             studio.titleChanged.connect(lambda t, s=studio: self._relabel(s, t))
             self._tabs.setCurrentIndex(i)
         self._stack.setCurrentIndex(1)
@@ -202,7 +226,9 @@ class DashboardsView(QWidget):
     def _relabel(self, studio: QWidget, title: str) -> None:
         i = self._tabs.indexOf(studio)
         if i >= 0:
-            self._tabs.setTabText(i, title or _t("dash.untitled"))
+            label = title or _t("dash.untitled")
+            self._tabs.setTabText(i, label)
+            self._tabs.setTabToolTip(i, label)   # full name on hover (tab labels elide)
 
     def _close_tab(self, index: int) -> None:
         w = self._tabs.widget(index)
