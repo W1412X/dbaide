@@ -6,6 +6,8 @@ All notable changes to DBAide are documented here. The format is loosely based o
 
 ## [Unreleased]
 
+## [0.9.19] — 2026-06-29
+
 ### Changed
 
 - **The SQL cost governor is now on by default** with a generous `max_inflight_cost`
