@@ -390,6 +390,12 @@ def register(registry: ToolRegistry, orchestrator) -> None:
                     if r2.ok and cost2 is not None and cost2 < estimated_rows:
                         optimized_from = validation.normalized_sql
                         optimization_rationale = rationale
+                        # The executed SQL is now X' — keep the user-facing rationale honest
+                        # (the fallback answer pairs run_state.sql with run_state.sql_rationale).
+                        _base = (orchestrator.run_state.sql_rationale or "").strip()
+                        _note = (f"(Auto-optimized for performance: {rationale})" if rationale
+                                 else "(Auto-optimized for performance.)")
+                        orchestrator.run_state.sql_rationale = f"{_base} {_note}".strip()
                         validation, validation_report, estimated_rows = v2, r2, cost2
                         table_count = max(1, len(_tables_in_sql(validation.normalized_sql)))
                         has_joins = table_count > 1

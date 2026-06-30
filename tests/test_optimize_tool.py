@@ -66,6 +66,7 @@ def test_auto_rewrite_adopts_cheaper_query_and_syncs_agent_sql(tmp_path):
     assert "SELECT *" in r.data["optimized_from"]                 # discloses the original
     assert r.data.get("optimization_rationale")
     assert orch.run_state.sql == r.data["sql"]                    # the agent's SQL is synced to X'
+    assert "optimiz" in orch.run_state.sql_rationale.lower()      # rationale discloses the swap
 
 
 def test_no_rewrite_falls_back_to_advice_and_runs_original(tmp_path):
