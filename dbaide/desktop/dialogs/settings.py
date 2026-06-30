@@ -628,8 +628,6 @@ class SettingsDialog(ChromeDialog):
     def _build_resources_page(self) -> QWidget:
         from PyQt6.QtWidgets import QFormLayout, QScrollArea, QSpinBox
 
-        from dbaide.desktop.components.inputs import Combo
-
         page = QWidget()
         layout = QVBoxLayout(page)
         layout.setContentsMargins(0, 0, 0, 0)
@@ -698,19 +696,6 @@ class SettingsDialog(ChromeDialog):
         cost_note.setStyleSheet(f"color: {Theme.MUTED}; font-size: 11px; padding: 2px 0 8px 0;")
         form.addRow("", cost_note)
 
-        self._optimize_mode_combo = Combo()
-        for value in ("gate", "suggest", "off"):
-            self._optimize_mode_combo.addItem(_t(f"res.optimize_mode.{value}"), value)
-        configure_compact_field(self._optimize_mode_combo, height=STANDARD_FIELD_HEIGHT, max_width=220)
-        cur_mode = str(self._resource_values.get("optimize_advise_mode") or "gate")
-        idx = self._optimize_mode_combo.findData(cur_mode)
-        self._optimize_mode_combo.setCurrentIndex(idx if idx >= 0 else 0)
-        form.addRow(form_label(_t("res.optimize_advise_mode")), self._optimize_mode_combo)
-        mode_note = QLabel(_t("res.optimize_advise_mode_note"))
-        mode_note.setWordWrap(True)
-        mode_note.setStyleSheet(f"color: {Theme.MUTED}; font-size: 11px; padding: 2px 0 8px 0;")
-        form.addRow("", mode_note)
-
         for group_key, fields in self._RESOURCE_GROUPS:
             header = QLabel(_t(group_key))
             header.setStyleSheet(
@@ -763,9 +748,6 @@ class SettingsDialog(ChromeDialog):
         for key, spin in getattr(self, "_resource_spins", {}).items():
             if int(spin.value()) != self._resource_baselines.get(key):
                 values[key] = int(spin.value())
-        combo = getattr(self, "_optimize_mode_combo", None)
-        if combo is not None and combo.currentData() != "gate":   # "gate" is the default
-            values["optimize_advise_mode"] = combo.currentData()
         self._resource_values = values
         self.resource_saved.emit({"values": values})
 

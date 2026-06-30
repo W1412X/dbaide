@@ -13,7 +13,7 @@ from dbaide.agent.optimizer_agent import OptimizerAgent
 from dbaide.tools.registry import ToolContext, ToolRegistry, ToolResult
 from dbaide.tools.specs import (
     GENERATE_SQL, VALIDATE_SQL,
-    EXECUTE_SQL, EXPLAIN_SQL,
+    EXECUTE_SQL, EXPLAIN_SQL, OPTIMIZE_SQL,
 )
 from dbaide.agent.progress_events import subagent_event
 from dbaide.agent.schema_context import (
@@ -369,44 +369,16 @@ def register(registry: ToolRegistry, orchestrator) -> None:
         #     rewrite. A one-shot run_state flag exempts the very next execute_sql (the
         #     rewrite OR the same SQL resubmitted) → exactly one advise, never a loop.
         #  - "suggest": run the query, then attach the suggestions to the result.
-        optimize_mode = getattr(orchestrator.query, "optimize_advise_mode", "suggest")
-        heavy = bool(optimize_advise_rows and estimated_rows is not None
-                     and estimated_rows > optimize_advise_rows)
-        # A prior gate armed a ONE-SHOT exemption. The first execute_sql after it (the agent's
-        # rewrite OR the same SQL resubmitted) runs un-advised whatever its cost — consume the
-        # flag UNCONDITIONALLY here so it can never leak to a later unrelated heavy query (e.g.
-        # when the rewrite turned out cheap and skipped the block below).
-        was_gated = bool(orchestrator.run_state.skip_next_optimize)
-        orchestrator.run_state.skip_next_optimize = False
-        optimization = None
-        if optimize_mode != "off" and heavy and not (optimize_mode == "gate" and was_gated):
-            try:
-                optimization = OptimizerAgent(orchestrator.llm).evaluate_sql(
-                    validation.normalized_sql, query_tools=orchestrator.query, database=database,
-                    language=orchestrator.run_state.answer_language)
-            except Exception:  # noqa: BLE001 - advisory: never fail the query over advice
-                optimization = None
-            if optimization:
-                orchestrator.progress(subagent_event(
-                    agent="optimize",
-                    title="Optimization suggestions" if optimize_mode == "suggest" else "Optimization gate",
-                    parent="execute_sql", detail=optimization, status="info"))
-                if optimize_mode == "gate":
-                    # advise before executing; exempt the next call so it can't loop
-                    orchestrator.run_state.skip_next_optimize = True
-                    return ToolResult(ok=True, data={
-                            "executed": False,
-                            "optimization": optimization,
-                            "sql": validation.normalized_sql,
-                            "estimated_rows": estimated_rows,
-                            "guidance": (
-                                "This query is expensive and was NOT executed yet. Consider the "
-                                "optimization suggestions above. Call execute_sql again — with an "
-                                "improved query if you can write one, otherwise with the same SQL to "
-                                "run it as-is. The next call executes directly (you won't be advised "
-                                "again), so do not keep re-optimizing."
-                            ),
-                        })
+        # Heavy query → leave a lightweight hint pointing at the optimize_sql tool (no model
+        # call, no gate, no state). The agent OWNS optimization: it calls optimize_sql when it
+        # wants advice, before running queries it expects to scan a lot of rows.
+        optimization_hint = None
+        if optimize_advise_rows and estimated_rows is not None and estimated_rows > optimize_advise_rows:
+            optimization_hint = (
+                f"This query scanned ~{estimated_rows:,} rows. For queries you expect to be large, "
+                f"call the optimize_sql tool first to get optimization suggestions, then run a "
+                f"more efficient version."
+            )
         risk = orchestrator.risk.decide(
             validation=validation_report,
             plan_confidence=confidence,
@@ -472,7 +444,7 @@ def register(registry: ToolRegistry, orchestrator) -> None:
                         "sql": validation.normalized_sql,
                         "execute_args": execute_args,
                         "warnings": validation_report.warnings,
-                        **({"optimization": optimization} if optimization else {}),
+                        **({"optimization_hint": optimization_hint} if optimization_hint else {}),
                     },
                 )
 
@@ -544,7 +516,7 @@ def register(registry: ToolRegistry, orchestrator) -> None:
                     "result_summary": result_summary,
                     "sql": validation.normalized_sql,
                     "database": database,
-                    **({"optimization": optimization} if optimization else {}),
+                    **({"optimization_hint": optimization_hint} if optimization_hint else {}),
                 },
             )
         except PermissionError as exc:
@@ -582,10 +554,34 @@ def register(registry: ToolRegistry, orchestrator) -> None:
         report = orchestrator.diagnose.diagnose_sql(sql, database=database)
         return ToolResult(ok=bool(report.get("ok")), data=report)
 
+    def _optimize_sql(args: dict[str, Any], _ctx: ToolContext) -> ToolResult:
+        """Agent-invoked optimizer (option A): the agent calls this when it wants advice on a
+        query it expects to be expensive. One model call over SQL + EXPLAIN plan + relevant
+        schema → suggestions. Advisory only; never executes or rewrites."""
+        sql = str(args.get("sql") or orchestrator.run_state.sql or "").strip()
+        database = str(args.get("database") or orchestrator.run_state.table_database or orchestrator.run_state.database or "")
+        if not sql:
+            return ToolResult(ok=False, error=_err("optimize_sql", "sql is required"))
+        report = orchestrator.query.validate_sql_report(sql, add_limit=False)
+        if not report.ok:
+            return ToolResult(ok=False, error=_err("optimize_sql", "; ".join(report.issues)))
+        try:
+            suggestions = OptimizerAgent(orchestrator.llm).evaluate_sql(
+                report.normalized_sql, query_tools=orchestrator.query, database=database,
+                language=orchestrator.run_state.answer_language)
+        except Exception:  # noqa: BLE001 - advisory: never fail over advice
+            suggestions = None
+        if suggestions:
+            orchestrator.progress(subagent_event(
+                agent="optimize", title="Optimization suggestions",
+                parent="optimize_sql", detail=suggestions, status="info"))
+        return ToolResult(ok=True, data={"suggestions": suggestions or "", "sql": report.normalized_sql})
+
     registry.register(GENERATE_SQL, _generate_sql)
     registry.register(VALIDATE_SQL, _validate_sql)
     registry.register(EXECUTE_SQL, _execute_sql)
     registry.register(EXPLAIN_SQL, _explain_sql)
+    registry.register(OPTIMIZE_SQL, _optimize_sql)
 
 
 def _sql_note_targets(orchestrator, selected: list[tuple[str, str]]) -> list[tuple[str, str]]:

@@ -444,17 +444,6 @@ _STRINGS: dict[str, dict[str, str]] = {
     "res.compress_threshold": {"en": "Compress threshold (%)", "zh": "压缩触发阈值（%）"},
     "res.max_concurrent_runs": {"en": "Max concurrent runs", "zh": "最大并发运行数"},
     "res.max_inflight_cost": {"en": "In-flight cost budget (rows, 0=off)", "zh": "在途成本预算（行，0=关闭）"},
-    "res.optimize_advise_mode": {"en": "SQL optimizer (agent)", "zh": "SQL 优化器（Agent）"},
-    "res.optimize_advise_mode_note": {
-        "en": "What the agent does when a query exceeds the advice threshold. Gate: pause and "
-              "suggest a rewrite before running (advised once, no loop). Suggest: run, then attach "
-              "advice. Off: no agent-flow advisor. (The ⚡ button in the SQL editor works regardless.)",
-        "zh": "查询超过建议阈值时 Agent 的行为。门控：执行前先暂停给出优化建议(只建议一次,不循环)；"
-              "建议：先执行再附建议；关闭：Agent 流不启用。(SQL 编辑器的 ⚡ 按钮不受此影响。)",
-    },
-    "res.optimize_mode.gate": {"en": "Gate — advise before running", "zh": "门控 — 执行前先建议"},
-    "res.optimize_mode.suggest": {"en": "Suggest — run, then advise", "zh": "建议 — 执行后再建议"},
-    "res.optimize_mode.off": {"en": "Off", "zh": "关闭"},
     "res.max_inflight_cost_note": {
         "en": "Global SQL cost budget (EXPLAIN-estimated rows): no single query may exceed it, and "
               "the costs of all running queries can't sum past it — over-budget queries wait in a FIFO queue.",

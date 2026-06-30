@@ -311,6 +311,24 @@ EXPLAIN_SQL = ToolSpec(
     safe_for_auto_call=True,
 )
 
+OPTIMIZE_SQL = ToolSpec(
+    name="optimize_sql",
+    description=(
+        "Get optimization suggestions for a SQL query. Its EXPLAIN plan and the relevant table "
+        "schema (columns, indexes, foreign keys) are gathered for you. Call this BEFORE running a "
+        "query you expect to scan a lot of rows, then write a more efficient version. Advisory "
+        "only — it does not run or rewrite the query."
+    ),
+    input_schema={
+        "sql": {"type": "string", "description": "the SQL to analyze; defaults to the current draft"},
+        "database": {"type": "string"},
+    },
+    output_schema={"ok": "boolean", "suggestions": "string"},
+    permission_level=SQL_VALIDATE,
+    timeout_seconds=30,
+    safe_for_auto_call=True,
+)
+
 EXECUTE_SQL = ToolSpec(
     name="execute_sql",
     description=(
