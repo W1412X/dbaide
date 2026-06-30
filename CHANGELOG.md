@@ -6,6 +6,8 @@ All notable changes to DBAide are documented here. The format is loosely based o
 
 ## [Unreleased]
 
+## [0.9.22] — 2026-06-30
+
 ### Changed
 
 - **SQL optimizer: proactive tool + automatic rewrite-and-sync.** Two paths, no gate, no
