@@ -46,6 +46,11 @@ SERVER_KEY = "dbaide"
 
 def _dbaide_command() -> str:
     """Return the best command string to start the MCP server."""
+    # In a packaged (PyInstaller) build, sys.executable IS the app binary, which self-routes the
+    # `mcp` subcommand to the headless CLI (no GUI). Register it directly — don't hunt for a
+    # `dbaide` on PATH that may belong to a different install.
+    if getattr(sys, "frozen", False):
+        return sys.executable
     exe = shutil.which("dbaide")
     if exe:
         return exe
@@ -55,7 +60,9 @@ def _dbaide_command() -> str:
 def _command_and_args(mode: str = DEFAULT_MODE) -> tuple[str, list[str]]:
     """Resolve the (command, args) pair used to launch the MCP server."""
     exe = _dbaide_command()
-    if exe.endswith("dbaide"):
+    # A `dbaide` launcher or a frozen app binary takes the `mcp` subcommand directly; only a
+    # plain Python interpreter needs `-m dbaide.mcp_server` (a frozen binary can't run `-m`).
+    if exe.endswith("dbaide") or getattr(sys, "frozen", False):
         args = ["mcp"]
     else:
         args = ["-m", "dbaide.mcp_server"]

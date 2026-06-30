@@ -28,6 +28,20 @@ def main(argv: list[str] | None = None) -> int:
     if "--verify-webengine" in argv:
         return _verify_webengine_import()
 
+    # A CLI subcommand (e.g. the MCP server, which a packaged install registers against THIS
+    # same binary) must run headless — never spin up the desktop GUI. The GUI is launched with
+    # no positional args (double-click) or only flags; any leading non-flag token is a CLI
+    # subcommand, so delegate to the CLI BEFORE importing or initializing Qt (otherwise the app
+    # window pops up when a coding tool starts the MCP server).
+    # Also map the legacy `-m dbaide.mcp_server` registration (a frozen binary can't run `-m`,
+    # so older configs would otherwise launch the GUI) to the `mcp` subcommand.
+    if argv[:2] == ["-m", "dbaide.mcp_server"]:
+        from dbaide.cli import main as cli_main
+        return cli_main(["mcp", *argv[2:]])
+    if argv and not argv[0].startswith("-"):
+        from dbaide.cli import main as cli_main
+        return cli_main(argv)
+
     from dbaide.desktop.platform_ui import ensure_webengine_before_qapplication
 
     webengine_ok = ensure_webengine_before_qapplication()

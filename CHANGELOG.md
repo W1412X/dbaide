@@ -6,6 +6,16 @@ All notable changes to DBAide are documented here. The format is loosely based o
 
 ## [Unreleased]
 
+### Fixed
+
+- **MCP server no longer pops up the desktop GUI when a coding tool starts it.** In a packaged
+  install the MCP server is registered against the app binary; the binary's entry point always
+  launched the GUI, ignoring the `mcp` argument. The launcher now routes a CLI subcommand (and
+  the legacy `-m dbaide.mcp_server` form) to the headless CLI *before* initializing Qt, and the
+  registration prefers the app binary with the `mcp` subcommand when frozen (a frozen binary
+  can't run `-m module`). Existing installs are fixed by the launcher change alone (no need to
+  re-register).
+
 ## [0.9.22] — 2026-06-30
 
 ### Changed
