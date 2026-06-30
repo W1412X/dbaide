@@ -6,6 +6,8 @@ All notable changes to DBAide are documented here. The format is loosely based o
 
 ## [Unreleased]
 
+## [0.9.23] — 2026-06-30
+
 ### Fixed
 
 - **MCP server no longer pops up the desktop GUI when a coding tool starts it.** In a packaged
