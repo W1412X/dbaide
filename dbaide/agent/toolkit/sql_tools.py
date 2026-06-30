@@ -372,7 +372,8 @@ def register(registry: ToolRegistry, orchestrator) -> None:
         if optimize_advise_rows and estimated_rows is not None and estimated_rows > optimize_advise_rows:
             try:
                 optimization = OptimizerAgent(orchestrator.llm).evaluate_sql(
-                    validation.normalized_sql, query_tools=orchestrator.query, database=database)
+                    validation.normalized_sql, query_tools=orchestrator.query, database=database,
+                    language=orchestrator.run_state.answer_language)
             except Exception:  # noqa: BLE001 - advisory: never fail the query over advice
                 optimization = None
             if optimization:

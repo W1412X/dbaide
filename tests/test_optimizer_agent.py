@@ -47,6 +47,13 @@ def test_calls_model_with_sql_plan_and_schema():
     assert "SELECT *" in user and "SCAN orders" in user and "TABLE orders" in user and "sqlite" in user
 
 
+def test_answer_language_directive_is_applied():
+    llm = _FakeLLM()
+    OptimizerAgent(llm).evaluate("SELECT * FROM t", explain_text="x", schema_text="y", language="zh")
+    system = llm.seen[0].content                    # the system prompt carries the language directive
+    assert "简体中文" in system or "Chinese" in system
+
+
 def test_schema_digest_includes_columns_and_indexes(tmp_path):
     digest = build_schema_digest(_qt(tmp_path).adapter, ["orders"])
     assert "orders" in digest and "status" in digest and "idx_orders_amount" in digest

@@ -97,6 +97,15 @@ class SqlTab(QWidget):
         configure_readonly_text_view(self.advice)
         self.advice.setOpenExternalLinks(False)
         self.advice.setStyleSheet("QTextBrowser { background: transparent; border: none; font-size: 13px; }")
+        # themed rich-text CSS for the rendered markdown advice (code spans, list spacing, note)
+        self.advice.document().setDefaultStyleSheet(
+            f"body {{ color:{Theme.TEXT}; line-height:150%; }}"
+            f"li {{ margin:5px 0; }}"
+            f"code {{ background-color:{Theme.PANEL_2}; font-family:Menlo,monospace; }}"
+            f"pre {{ background-color:{Theme.PANEL_2}; }}"
+            f"strong {{ color:{Theme.TEXT}; }}"
+            f"a {{ color:{Theme.ACCENT}; }}"
+            f".advice-note {{ color:{Theme.MUTED}; font-size:12px; }}")
         self.tabs.addTab(self.result_table, t("sql.result"))
         self.tabs.addTab(self.messages, t("sql.messages"))
         self.tabs.addTab(self.advice, t("sql.advice"))
@@ -220,21 +229,26 @@ class SqlTab(QWidget):
 
     def show_optimization(self, payload: dict) -> None:
         """Render the optimizer's suggestions inline in the Advice tab (not a modal)."""
+        from html import escape
         from dbaide.i18n import t
+        from dbaide.rendering.markdown import render_markdown_safe
         err = str(payload.get("error") or "")
         suggestions = str(payload.get("suggestions") or "")
         if err == "no_model":
-            self.advice.setMarkdown(t("optimize.no_model"))
+            body = render_markdown_safe(t("optimize.no_model"))
         elif err:
-            self.advice.setPlainText(err)
+            body = f"<p>{escape(err)}</p>"
         elif not suggestions.strip():
-            self.advice.setMarkdown(t("optimize.empty"))
+            body = render_markdown_safe(t("optimize.empty"))
         else:
-            self.advice.setMarkdown(f"_{t('optimize.subtitle')}_\n\n{suggestions}")
+            note = f'<p class="advice-note">{escape(t("optimize.subtitle"))}</p>'
+            body = note + render_markdown_safe(suggestions)
+        self.advice.setHtml(body)
         self.tabs.setCurrentWidget(self.advice)
 
     def show_optimizing(self) -> None:
         """Placeholder while the optimizer model runs."""
+        from html import escape
         from dbaide.i18n import t
-        self.advice.setMarkdown(f"_{t('optimize.running')}_")
+        self.advice.setHtml(f'<p class="advice-note">{escape(t("optimize.running"))}</p>')
         self.tabs.setCurrentWidget(self.advice)

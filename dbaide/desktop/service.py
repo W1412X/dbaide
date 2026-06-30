@@ -1203,7 +1203,8 @@ class DesktopService:
         llm = build_llm_client(self.cfg.optimizer_model_config())
         if isinstance(llm, NullLLMClient):
             return {"suggestions": "", "error": "no_model"}
-        suggestions = OptimizerAgent(llm).evaluate_sql(report.normalized_sql, query_tools=tools, database=database)
+        suggestions = OptimizerAgent(llm).evaluate_sql(
+            report.normalized_sql, query_tools=tools, database=database, language=self.cfg.ui_language())
         return {"suggestions": suggestions or ""}
 
     def list_history(self, payload: dict[str, Any]) -> list[dict[str, Any]]:

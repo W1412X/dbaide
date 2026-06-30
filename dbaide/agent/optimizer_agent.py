@@ -12,6 +12,7 @@ chart agent). With a ``NullLLMClient`` (no model configured) it simply returns `
 
 from __future__ import annotations
 
+from dbaide.i18n import answer_language_directive
 from dbaide.llm import LLMClient, LLMMessage, NullLLMClient
 from dbaide.models import QueryResult
 
@@ -95,13 +96,17 @@ class OptimizerAgent:
         self.llm = llm or NullLLMClient()
 
     def evaluate(self, sql: str, *, explain_text: str = "", schema_text: str = "",
-                 dialect: str = "") -> str | None:
-        """Return suggestions text, or None (no model, empty SQL, or model error)."""
+                 dialect: str = "", language: str | None = None) -> str | None:
+        """Return suggestions text, or None (no model, empty SQL, or model error).
+
+        ``language`` (a UI language code, e.g. "zh"/"en") makes the prose follow the global
+        answer language; SQL/identifiers stay verbatim. None → the current UI language."""
         if not sql.strip() or isinstance(self.llm, NullLLMClient):
             return None
+        system = _SYSTEM_PROMPT + "\n\n" + answer_language_directive(language)
         try:
             text = self.llm.complete_text([
-                LLMMessage("system", _SYSTEM_PROMPT),
+                LLMMessage("system", system),
                 LLMMessage("user", _user_prompt(sql, explain_text, schema_text, dialect)),
             ])
         except Exception:  # noqa: BLE001 - advisory: a model hiccup must not fail the query
@@ -109,7 +114,8 @@ class OptimizerAgent:
         text = (text or "").strip()
         return text or None
 
-    def evaluate_sql(self, sql: str, *, query_tools, database: str = "") -> str | None:
+    def evaluate_sql(self, sql: str, *, query_tools, database: str = "",
+                     language: str | None = None) -> str | None:
         """Convenience: build the EXPLAIN + schema context from a QueryTools, then evaluate.
 
         ``query_tools`` only needs ``.explain_sql`` and ``.adapter`` (describe/indexes/FKs)."""
@@ -125,4 +131,5 @@ class OptimizerAgent:
             tables = []
         schema_text = build_schema_digest(query_tools.adapter, tables, database=database)
         dialect = getattr(query_tools.adapter, "dialect", "")
-        return self.evaluate(sql, explain_text=explain_text, schema_text=schema_text, dialect=dialect)
+        return self.evaluate(sql, explain_text=explain_text, schema_text=schema_text,
+                             dialect=dialect, language=language)
