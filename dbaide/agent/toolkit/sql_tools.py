@@ -372,27 +372,29 @@ def register(registry: ToolRegistry, orchestrator) -> None:
         optimize_mode = getattr(orchestrator.query, "optimize_advise_mode", "suggest")
         heavy = bool(optimize_advise_rows and estimated_rows is not None
                      and estimated_rows > optimize_advise_rows)
+        # A prior gate armed a ONE-SHOT exemption. The first execute_sql after it (the agent's
+        # rewrite OR the same SQL resubmitted) runs un-advised whatever its cost — consume the
+        # flag UNCONDITIONALLY here so it can never leak to a later unrelated heavy query (e.g.
+        # when the rewrite turned out cheap and skipped the block below).
+        was_gated = bool(orchestrator.run_state.skip_next_optimize)
+        orchestrator.run_state.skip_next_optimize = False
         optimization = None
-        if optimize_mode != "off" and heavy:
-            if optimize_mode == "gate" and orchestrator.run_state.skip_next_optimize:
-                # the agent's response to a prior gate → run it, don't re-advise
-                orchestrator.run_state.skip_next_optimize = False
-            else:
-                try:
-                    optimization = OptimizerAgent(orchestrator.llm).evaluate_sql(
-                        validation.normalized_sql, query_tools=orchestrator.query, database=database,
-                        language=orchestrator.run_state.answer_language)
-                except Exception:  # noqa: BLE001 - advisory: never fail the query over advice
-                    optimization = None
-                if optimization:
-                    orchestrator.progress(subagent_event(
-                        agent="optimize",
-                        title="Optimization suggestions" if optimize_mode == "suggest" else "Optimization gate",
-                        parent="execute_sql", detail=optimization, status="info"))
-                    if optimize_mode == "gate":
-                        # advise before executing; exempt the next call so it can't loop
-                        orchestrator.run_state.skip_next_optimize = True
-                        return ToolResult(ok=True, data={
+        if optimize_mode != "off" and heavy and not (optimize_mode == "gate" and was_gated):
+            try:
+                optimization = OptimizerAgent(orchestrator.llm).evaluate_sql(
+                    validation.normalized_sql, query_tools=orchestrator.query, database=database,
+                    language=orchestrator.run_state.answer_language)
+            except Exception:  # noqa: BLE001 - advisory: never fail the query over advice
+                optimization = None
+            if optimization:
+                orchestrator.progress(subagent_event(
+                    agent="optimize",
+                    title="Optimization suggestions" if optimize_mode == "suggest" else "Optimization gate",
+                    parent="execute_sql", detail=optimization, status="info"))
+                if optimize_mode == "gate":
+                    # advise before executing; exempt the next call so it can't loop
+                    orchestrator.run_state.skip_next_optimize = True
+                    return ToolResult(ok=True, data={
                             "executed": False,
                             "optimization": optimization,
                             "sql": validation.normalized_sql,

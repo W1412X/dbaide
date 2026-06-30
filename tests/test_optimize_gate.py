@@ -52,6 +52,25 @@ def test_gate_advises_once_then_resubmission_runs(tmp_path):
     assert orch.run_state.skip_next_optimize is False
 
 
+def test_gate_flag_does_not_leak_to_a_later_heavy_query(tmp_path):
+    orch = _orch(tmp_path)
+    # per-SQL cost: a query tagged "o_opt" is cheap (below threshold), others are heavy
+    orch.query.estimate_rows = lambda sql, database="": 500_000 if "o_opt" in sql else 2_000_000
+    registry = build_tool_registry(orch)
+
+    r1 = registry.invoke("execute_sql", {"sql": "SELECT * FROM orders"}, ToolContext())
+    assert r1.data.get("executed") is False and orch.run_state.skip_next_optimize is True
+
+    # the rewrite turned out cheap → it runs AND the one-shot flag is consumed anyway
+    r2 = registry.invoke("execute_sql", {"sql": "SELECT id FROM orders o_opt LIMIT 10"}, ToolContext())
+    assert "columns" in r2.data
+    assert orch.run_state.skip_next_optimize is False        # cleared even though cheap (no leak)
+
+    # a later, unrelated heavy query must still be advised (the stale flag didn't exempt it)
+    r3 = registry.invoke("execute_sql", {"sql": "SELECT * FROM orders o2"}, ToolContext())
+    assert r3.data.get("executed") is False                  # gated again, not silently run
+
+
 def test_suggest_mode_executes_and_attaches_advice(tmp_path):
     orch = _orch(tmp_path)
     orch.query.optimize_advise_mode = "suggest"      # old behavior: run, then advise
