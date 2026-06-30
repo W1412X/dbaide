@@ -564,6 +564,17 @@ _STRINGS: dict[str, dict[str, str]] = {
     "sql.format_tooltip": {"en": "Format SQL (⌘⇧F)", "zh": "格式化 SQL（⌘⇧F）"},
     "sql.explain": {"en": "Explain", "zh": "执行计划"},
     "sql.explain_tooltip": {"en": "Show the query plan (EXPLAIN)", "zh": "查看查询计划（EXPLAIN）"},
+    "sql.optimize_tooltip": {"en": "Optimization advice (AI)", "zh": "优化建议（AI）"},
+    "optimize.title": {"en": "SQL optimization advice", "zh": "SQL 优化建议"},
+    "optimize.subtitle": {
+        "en": "Suggestions from the optimizer model, based on the query, its EXPLAIN plan, and the "
+              "relevant schema. Advisory only — it doesn't rewrite or run anything.",
+        "zh": "优化器模型基于 SQL、EXPLAIN 计划与相关 schema 给出的建议；仅供参考，不会自动改写或执行。",
+    },
+    "optimize.no_model": {"en": "Configure a model in Settings → Models to get optimization advice.",
+                          "zh": "请先在 设置 → 模型 配置模型,再使用优化建议。"},
+    "optimize.empty": {"en": "No optimization suggestions — the query looks fine.",
+                       "zh": "没有优化建议——这条查询看起来还行。"},
     "sql.result": {"en": "Result", "zh": "结果"},
     "sql.messages": {"en": "Messages", "zh": "消息"},
     "sql.run_tooltip": {"en": "Run read-only query", "zh": "运行只读查询"},

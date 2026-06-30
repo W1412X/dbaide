@@ -500,6 +500,7 @@ class MainWindow(QMainWindow):
         self.workbench = WorkbenchView(self.history_panel)
         self.workbench.run_sql.connect(self._run_sql_from)
         self.workbench.explain_sql.connect(self._explain_from)
+        self.workbench.optimize_sql.connect(self._optimize_from)
         self.workbench.browse_requested.connect(self._browse_from)
         self.workbench.count_requested.connect(self._count_from)
         self.workbench.ddl_requested.connect(self._ddl_from)
@@ -1909,6 +1910,31 @@ class MainWindow(QMainWindow):
             "database": "",
             "sql": sql,
         })
+
+    def _optimize_from(self, editor, sql: str) -> None:
+        if not sql.strip():
+            return
+        self._active_sql_doc = editor
+        self.oneoff_controller.run_action("optimize_sql", {
+            "connection_name": self.current_connection(),
+            "database": "",
+            "sql": sql,
+        })
+
+    def _show_optimize_result(self, result: dict[str, Any]) -> None:
+        from dbaide.desktop.dialogs.sql_optimize_dialog import SqlOptimizeDialog
+        err = str((result or {}).get("error") or "")
+        suggestions = str((result or {}).get("suggestions") or "")
+        if err == "no_model":
+            self.toast(_i18n_t("optimize.no_model"))
+            return
+        if err:
+            self.toast(err)
+            return
+        if not suggestions.strip():
+            self.toast(_i18n_t("optimize.empty"))
+            return
+        SqlOptimizeDialog(suggestions, parent=self).exec()
 
     def _browse_from(self, doc, payload: dict[str, Any]) -> None:
         self._active_data_doc = doc

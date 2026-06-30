@@ -33,7 +33,7 @@ class OneOffActionController:
             return
         win.oneoff_state.begin(OneOffState(
             action=action,
-            sql_doc=win._safe_doc("active_sql") if action in ("execute_sql", "explain_sql") else None,
+            sql_doc=win._safe_doc("active_sql") if action in ("execute_sql", "explain_sql", "optimize_sql") else None,
             data_doc=win._safe_doc("active_data") if action in ("browse_table", "count_table") else None,
             sql=str(payload.get("sql") or win._last_sql or ""),
             connection=str(payload.get("connection_name") or payload.get("name") or win.current_connection() or ""),
@@ -41,7 +41,7 @@ class OneOffActionController:
         ))
         sql_doc = win._safe_doc("oneoff_sql")
         data_doc = win._safe_doc("oneoff_data")
-        if action in ("execute_sql", "explain_sql") and sql_doc is not None:
+        if action in ("execute_sql", "explain_sql", "optimize_sql") and sql_doc is not None:
             win._ensure_ui_state().set_doc_running(sql_doc, True)
         if action in ("browse_table", "count_table") and data_doc is not None:
             win._ensure_ui_state().set_doc_running(data_doc, True)
@@ -156,6 +156,9 @@ class OneOffActionController:
         if action == "explain_sql":
             if sql_doc is not None:
                 sql_doc.show_result(result)
+            return
+        if action == "optimize_sql":
+            win._show_optimize_result(result if isinstance(result, dict) else {})
             return
         if action == "test_connection":
             if run_connection == win.current_connection():

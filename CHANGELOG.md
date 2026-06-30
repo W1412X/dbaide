@@ -8,16 +8,21 @@ All notable changes to DBAide are documented here. The format is loosely based o
 
 ### Added
 
-- **Advisory SQL optimizer.** After the model generates a query, if its EXPLAIN cost
-  exceeds a new `optimize_advise_rows` threshold (default 1,000,000 rows; 0 = off), an
-  advisor surfaces concrete optimization *suggestions* to the agent — full table scans /
-  no index used (from the EXPLAIN plan, per dialect), `SELECT *`, leading-wildcard
-  `LIKE`, and a function wrapped around a filtered column (non-sargable). It is advisory
-  only: it never rewrites the SQL and never blocks — the agent decides whether to issue a
-  better query, and the suggestions show in the agent trace. Only the existing
-  `explain_max_rows` gate can still require confirmation. Configure the threshold in
-  **Settings → Resources**. (SQLite gives no row estimate, so the advisor stays quiet
-  there; it engages on MySQL/PostgreSQL.)
+- **LLM SQL optimization advisor.** A dedicated single-call optimizer agent looks at a
+  query together with its EXPLAIN plan and the relevant table schema (columns, indexes,
+  foreign keys) and returns concrete optimization *suggestions*. Two entry points:
+  - **Agent flow** — after the model generates a query, if its EXPLAIN cost exceeds the
+    new `optimize_advise_rows` threshold (default 1,000,000 rows; 0 = off), the suggestions
+    are attached to the tool result + agent trace. It's advisory only: it never rewrites
+    the SQL and never blocks — the main agent decides whether to issue a better query, and
+    only the existing `explain_max_rows` gate can still require confirmation.
+  - **Workbench** — a ⚡ button in the SQL editor runs the optimizer on the current SQL
+    (auto-fetching its EXPLAIN plan + schema) and shows the suggestions in a dialog.
+
+  Reuses the default model; set `[resource_defaults].optimizer_model` to a configured
+  model name to use a different one. Threshold lives in **Settings → Resources**. (SQLite
+  gives no row estimate, so the agent-flow trigger stays quiet there; the Workbench button
+  works on any connection that has a model configured.)
 
 ## [0.9.20] — 2026-06-29
 

@@ -37,6 +37,7 @@ from dbaide.desktop.views.table_document import TableDocument
 class WorkbenchView(QWidget):
     run_sql = pyqtSignal(object, str)        # (SqlTab, sql)
     explain_sql = pyqtSignal(object, str)    # (SqlTab, sql) — show query plan
+    optimize_sql = pyqtSignal(object, str)   # (SqlTab, sql) — LLM optimization advice
     browse_requested = pyqtSignal(object, dict)  # (TableDocument, payload)
     count_requested = pyqtSignal(object, dict)   # (TableDocument, count payload)
     ddl_requested = pyqtSignal(object, dict)     # (TableDocument, ddl payload)
@@ -159,6 +160,7 @@ class WorkbenchView(QWidget):
         editor.run_requested.connect(
             lambda text, action, ed=editor: (
                 self.explain_sql.emit(ed, text) if action == "explain"
+                else self.optimize_sql.emit(ed, text) if action == "optimize"
                 else self.run_sql.emit(ed, text)
             )
         )

@@ -9,8 +9,8 @@ from typing import Any
 from dbaide.agent.memory import SQLArtifact, next_prefixed_id
 from dbaide.agent.sql_executions import normalize_sql_purpose, record_sql_execution
 from dbaide.i18n import t
+from dbaide.agent.optimizer_agent import OptimizerAgent
 from dbaide.tools.registry import ToolContext, ToolRegistry, ToolResult
-from dbaide.tools.sql_advisor import SqlAdvisor
 from dbaide.tools.specs import (
     GENERATE_SQL, VALIDATE_SQL,
     EXECUTE_SQL, EXPLAIN_SQL,
@@ -364,14 +364,15 @@ def register(registry: ToolRegistry, orchestrator) -> None:
                     ),
                 )
         # Advisory SQL optimizer: for a query whose estimated scan exceeds the advise
-        # threshold, attach concrete optimization suggestions for the agent to act on. It
-        # never rewrites or blocks — only the explain_max_rows gate (in the risk
-        # controller below) can require confirmation.
+        # threshold, a single-call LLM optimizer (SQL + EXPLAIN plan + relevant schema)
+        # attaches concrete suggestions for the agent to act on. It never rewrites or
+        # blocks — only the explain_max_rows gate (in the risk controller below) can
+        # require confirmation. The main agent decides whether to issue a better query.
         optimization = None
         if optimize_advise_rows and estimated_rows is not None and estimated_rows > optimize_advise_rows:
             try:
-                optimization = SqlAdvisor(orchestrator.query).advise(
-                    validation.normalized_sql, database=database, estimated_rows=estimated_rows)
+                optimization = OptimizerAgent(orchestrator.llm).evaluate_sql(
+                    validation.normalized_sql, query_tools=orchestrator.query, database=database)
             except Exception:  # noqa: BLE001 - advisory: never fail the query over advice
                 optimization = None
             if optimization:

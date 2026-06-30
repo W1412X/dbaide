@@ -1186,6 +1186,26 @@ class DesktopService:
             "elapsed_ms": result.elapsed_ms,
         }
 
+    def optimize_sql(self, payload: dict[str, Any]) -> dict[str, Any]:
+        """Advisory SQL optimizer for the Workbench: given a SQL string, build the EXPLAIN
+        plan + relevant table schema and ask the optimizer model for suggestions (one call,
+        advisory only). Uses the optional optimizer-model override, else the default model."""
+        from dbaide.agent.optimizer_agent import OptimizerAgent
+        conn = self.cfg.get_connection(str(payload.get("connection_name") or "") or None)
+        database = str(payload.get("database") or "")
+        sql = str(payload.get("sql") or "").strip()
+        if not sql:
+            return {"suggestions": "", "error": "sql is required"}
+        tools = self._query_tools(conn)
+        report = tools.validate_sql_report(sql, add_limit=False)
+        if not report.ok:
+            return {"suggestions": "", "error": "; ".join(report.issues)}
+        llm = build_llm_client(self.cfg.optimizer_model_config())
+        if isinstance(llm, NullLLMClient):
+            return {"suggestions": "", "error": "no_model"}
+        suggestions = OptimizerAgent(llm).evaluate_sql(report.normalized_sql, query_tools=tools, database=database)
+        return {"suggestions": suggestions or ""}
+
     def list_history(self, payload: dict[str, Any]) -> list[dict[str, Any]]:
         name = str(payload.get("connection_name") or payload.get("name") or "")
         if not name:
@@ -1315,7 +1335,7 @@ class DesktopService:
                     clean[key] = int(val)
                 except (TypeError, ValueError):
                     continue
-            elif key == "build_profile_mode":
+            elif key in ("build_profile_mode", "optimizer_model"):
                 clean[key] = str(val)
         self.cfg.set_resource_defaults(clean)
         # Re-arm the cost governor so a changed budget takes effect immediately.

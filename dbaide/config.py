@@ -259,6 +259,12 @@ class ConfigManager:
             logger.warning("model %r not found in config (available: %s); returning unconfigured stub", name, ", ".join(models_map))
         return ModelConfig(name=name)
 
+    def optimizer_model_config(self) -> ModelConfig:
+        """Model for the SQL optimization advisor. Defaults to the default model; override
+        by setting ``[resource_defaults].optimizer_model`` to a configured model name."""
+        name = str(self.resource_defaults().get("optimizer_model") or "").strip()
+        return self.model(name or None)
+
     def models(self) -> dict[str, ModelConfig]:
         raw = self._data.get("models") or {}
         out: dict[str, ModelConfig] = {}

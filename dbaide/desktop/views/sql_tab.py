@@ -66,10 +66,13 @@ class SqlTab(QWidget):
         self.run_btn.clicked.connect(self._run)
         self.explain_btn = self._icon_button("list-tree", t("sql.explain_tooltip"))
         self.explain_btn.clicked.connect(self._explain)
+        self.optimize_btn = self._icon_button("zap", t("sql.optimize_tooltip"))
+        self.optimize_btn.clicked.connect(self._optimize)
         self.format_btn = self._icon_button("sparkles", f"{t('sql.format')} · ⌘⇧F")
         self.format_btn.clicked.connect(self._format)
         actions.addStretch(1)
         actions.addWidget(self.format_btn)
+        actions.addWidget(self.optimize_btn)
         actions.addWidget(self.explain_btn)
         actions.addWidget(self.run_btn)
         editor_row.addLayout(actions)
@@ -150,6 +153,10 @@ class SqlTab(QWidget):
     def _explain(self) -> None:
         if self.explain_btn.isEnabled():
             self.run_requested.emit(self._current_sql(), "explain")
+
+    def _optimize(self) -> None:
+        if self.optimize_btn.isEnabled():
+            self.run_requested.emit(self._current_sql(), "optimize")
 
     def _format(self) -> None:
         from dbaide.rendering.sql_format import format_sql

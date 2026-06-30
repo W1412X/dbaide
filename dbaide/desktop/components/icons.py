@@ -71,6 +71,7 @@ _GLYPHS: dict[str, str] = {
     "key": '<path d="m15.5 7.5 1 1"/><path d="m19 4-9.6 9.6"/><circle cx="7.5" cy="16.5" r="3.5"/><path d="M10 14 8 12"/><path d="M6 18l-2 2"/>',
     "terminal": '<polyline points="4 17 10 11 4 5"/><line x1="12" x2="20" y1="19" y2="19"/>',
     "loader": '<path d="M21 12a9 9 0 1 1-6.219-8.56"/>',  # 270° arc — the spinner
+    "zap": '<path d="M13 2 3 14h9l-1 8 10-12h-9l1-8z"/>',  # lightning — optimize / speed
     "table": '<rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18"/><path d="M9 3v18"/>',
     "columns": '<path d="M12 3v18"/><path d="M3 12h18"/>',
     "hash": '<line x1="4" x2="20" y1="9" y2="9"/><line x1="4" x2="20" y1="15" y2="15"/><line x1="10" x2="8" y1="3" y2="21"/><line x1="16" x2="14" y1="3" y2="21"/>',

@@ -74,6 +74,7 @@ ACTION_METHODS: tuple[tuple[str, str], ...] = (
     ("run_app_chart", "run_app_chart"),
     ("resource_defaults", "resource_defaults"),
     ("save_resource_defaults", "save_resource_defaults"),
+    ("optimize_sql", "optimize_sql"),
     ("recent_queries", "recent_queries"),
     ("export_connection", "export_connection"),
     ("import_connection", "import_connection"),
