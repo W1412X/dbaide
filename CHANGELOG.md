@@ -8,20 +8,24 @@ All notable changes to DBAide are documented here. The format is loosely based o
 
 ### Changed
 
-- **SQL optimizer: a proactive tool plus an automatic safety net.** Two complementary paths,
-  no gate and no tracking:
-  - **Proactive** — the agent has an `optimize_sql` tool it can call on a query it expects to
-    be expensive (one model call over SQL + EXPLAIN plan + relevant schema → suggestions), then
+- **SQL optimizer: proactive tool + automatic rewrite-and-sync.** Two paths, no gate, no
+  tracking:
+  - **Proactive** — the agent has an `optimize_sql` tool it can call on a query it expects to be
+    expensive (one model call over SQL + EXPLAIN plan + relevant schema → suggestions), then
     write a better query itself.
-  - **Automatic** — if a query still exceeds `optimize_advise_rows` at execution time (i.e. it
-    wasn't optimized), the optimizer runs once and its suggestions are attached to the result.
-    The query still runs (no pause). A query the agent already optimized is cheap, so it stays
-    under the threshold and never re-triggers — **the cost itself distinguishes "optimized"
-    from "not", so there's no flag, no loop, and nothing to track.** Set `optimize_advise_rows`
-    to 0 for tool-only (no automatic advice).
+  - **Automatic** — if a query still exceeds `optimize_advise_rows` at execution time, the
+    optimizer rewrites it. When the rewrite validates (read-only + table scope) and EXPLAIN shows
+    it's cheaper, dbaide **adopts and runs the optimized query and syncs the agent's SQL** —
+    `run_state.sql`, the SQL memory, and the tool result all become the optimized query, disclosed
+    as `X → X'` with a rationale (so charts, the final answer, and the agent's reasoning all use
+    it). If it can't be improved, the rationale is attached as advice and the original runs.
+    Result-level **equivalence is not verified** — the model is asked for an equivalent rewrite and
+    the swap is fully disclosed (the agent can react); read-only and the cost gates still apply. A
+    query the agent already optimized is cheap, so it stays under the threshold and never
+    re-triggers — **the cost itself distinguishes "optimized" from "not", so there's nothing to
+    track.** Set `optimize_advise_rows` to 0 for tool-only.
 
-  This replaces the earlier one-shot soft-gate (and its `optimize_advise_mode` knob). The
-  Workbench ⚡ button is unchanged. Suggestions follow the global answer language.
+  The Workbench ⚡ button (advice, manual) is unchanged. Suggestions follow the global answer language.
 
 ## [0.9.21] — 2026-06-29
 

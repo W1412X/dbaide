@@ -363,23 +363,49 @@ def register(registry: ToolRegistry, orchestrator) -> None:
                         status="completed" if estimated_rows <= explain_max_rows else "info",
                     ),
                 )
-        # Automatic safety net (advisory): if a heavy query reaches here un-optimized, run the
-        # optimizer once and attach its suggestions to the result — the query still runs (no
-        # gate). The agent can ALSO get advice proactively via the optimize_sql tool; a query it
-        # already optimized is cheap, so it stays under the threshold and never re-triggers this
-        # — the cost itself distinguishes "already optimized" from "not", with no flag/tracking.
+        # Auto-optimize: a heavy query is rewritten into a more efficient form (one LLM call over
+        # SQL + EXPLAIN + schema). If the rewrite validates (read-only + scope) and EXPLAIN shows
+        # it's cheaper, ADOPT it — execute it instead and SYNC the agent's SQL: run_state.sql, the
+        # SQL memory and the tool result all become the optimized query, disclosed as X → X'.
+        # Equivalence is NOT verified (the model is asked for an equivalent rewrite; the swap is
+        # fully disclosed). If it can't be improved, the rationale is attached as advice instead.
         optimization = None
+        optimized_from = None
+        optimization_rationale = None
         if optimize_advise_rows and estimated_rows is not None and estimated_rows > optimize_advise_rows:
             try:
-                optimization = OptimizerAgent(orchestrator.llm).evaluate_sql(
+                rewrite = OptimizerAgent(orchestrator.llm).rewrite_sql(
                     validation.normalized_sql, query_tools=orchestrator.query, database=database,
                     language=orchestrator.run_state.answer_language)
-            except Exception:  # noqa: BLE001 - advisory: never fail the query over advice
-                optimization = None
-            if optimization:
+            except Exception:  # noqa: BLE001 - advisory: never fail the query over optimization
+                rewrite = None
+            candidate = (rewrite or {}).get("rewritten_sql") or ""
+            rationale = (rewrite or {}).get("rationale") or ""
+            adopted = False
+            if candidate.strip():
+                v2 = orchestrator.query.validate_sql(candidate, add_limit=True, limit=limit)
+                if v2.ok:
+                    r2 = orchestrator.query.validate_sql_report(v2.normalized_sql, add_limit=False, limit=limit)
+                    cost2 = orchestrator.query.estimate_rows(v2.normalized_sql, database=database)
+                    if r2.ok and cost2 is not None and cost2 < estimated_rows:
+                        optimized_from = validation.normalized_sql
+                        optimization_rationale = rationale
+                        validation, validation_report, estimated_rows = v2, r2, cost2
+                        table_count = max(1, len(_tables_in_sql(validation.normalized_sql)))
+                        has_joins = table_count > 1
+                        join_conf = (join_confidence_for_sql(orchestrator.run_state.relations,
+                                                             validation.normalized_sql) if has_joins else 1.0)
+                        orchestrator.progress(subagent_event(
+                            agent="optimize", title=f"Auto-optimized · ~{cost2:,} rows",
+                            parent="execute_sql",
+                            detail=f"{optimized_from}\n→ {validation.normalized_sql}\n{rationale}",
+                            status="completed"))
+                        adopted = True
+            if not adopted and rationale:
+                optimization = rationale          # couldn't rewrite → fall back to advice (same call)
                 orchestrator.progress(subagent_event(
                     agent="optimize", title="Optimization suggestions",
-                    parent="execute_sql", detail=optimization, status="info"))
+                    parent="execute_sql", detail=rationale, status="info"))
         risk = orchestrator.risk.decide(
             validation=validation_report,
             plan_confidence=confidence,
@@ -446,6 +472,7 @@ def register(registry: ToolRegistry, orchestrator) -> None:
                         "execute_args": execute_args,
                         "warnings": validation_report.warnings,
                         **({"optimization": optimization} if optimization else {}),
+                        **({"optimized_from": optimized_from, "optimization_rationale": optimization_rationale} if optimized_from else {}),
                     },
                 )
 
@@ -518,6 +545,7 @@ def register(registry: ToolRegistry, orchestrator) -> None:
                     "sql": validation.normalized_sql,
                     "database": database,
                     **({"optimization": optimization} if optimization else {}),
+                    **({"optimized_from": optimized_from, "optimization_rationale": optimization_rationale} if optimized_from else {}),
                 },
             )
         except PermissionError as exc:

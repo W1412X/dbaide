@@ -79,6 +79,17 @@ _SYSTEM_PROMPT = (
 )
 
 
+_REWRITE_PROMPT = (
+    "You are a SQL performance optimizer. Given a query, its EXPLAIN plan, and the relevant table "
+    "schema (columns, indexes, foreign keys), rewrite it into a MORE EFFICIENT form that returns "
+    "the SAME result set: keep the SELECT output columns and their order identical; change only "
+    "execution-affecting parts — make predicates sargable (no functions on filtered columns, no "
+    "leading-wildcard LIKE), use indexed columns, choose better joins, push filters/aggregation "
+    "down. Keep the same SQL dialect and keep it read-only. If you cannot make it meaningfully more "
+    "efficient, return an empty rewritten_sql and put the reason in rationale."
+)
+
+
 def _user_prompt(sql: str, explain_text: str, schema_text: str, dialect: str) -> str:
     parts = [f"Dialect: {dialect or 'generic'}", "", "SQL:", sql.strip()]
     if explain_text:
@@ -113,6 +124,41 @@ class OptimizerAgent:
             return None
         text = (text or "").strip()
         return text or None
+
+    def rewrite_sql(self, sql: str, *, query_tools, database: str = "",
+                    language: str | None = None) -> dict | None:
+        """Rewrite a query into a more efficient form. Returns {rewritten_sql, rationale}
+        (rewritten_sql may be "" when no improvement is possible — then rationale doubles as
+        advice). One model call. Equivalence is requested of the model, not verified here."""
+        if isinstance(self.llm, NullLLMClient):
+            return None
+        explain_text = ""
+        try:
+            explain_text = format_explain(query_tools.explain_sql(sql, database=database))
+        except Exception:  # noqa: BLE001
+            explain_text = ""
+        from dbaide.agent.toolkit.support import _tables_in_sql  # lazy: avoid import cycle
+        try:
+            tables = _tables_in_sql(sql)
+        except Exception:  # noqa: BLE001
+            tables = []
+        schema_text = build_schema_digest(query_tools.adapter, tables, database=database)
+        dialect = getattr(query_tools.adapter, "dialect", "")
+        system = _REWRITE_PROMPT + "\n\n" + answer_language_directive(language)
+        try:
+            payload = self.llm.complete_json(
+                [LLMMessage("system", system),
+                 LLMMessage("user", _user_prompt(sql, explain_text, schema_text, dialect))],
+                schema_hint='Return JSON only: {"rewritten_sql": "<optimized SQL, or empty if no '
+                            'improvement>", "rationale": "<short explanation of the change>"}')
+        except Exception:  # noqa: BLE001
+            return None
+        if not isinstance(payload, dict):
+            return None
+        return {
+            "rewritten_sql": str(payload.get("rewritten_sql") or "").strip(),
+            "rationale": str(payload.get("rationale") or "").strip(),
+        }
 
     def evaluate_sql(self, sql: str, *, query_tools, database: str = "",
                      language: str | None = None) -> str | None:
