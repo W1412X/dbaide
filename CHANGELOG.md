@@ -6,6 +6,8 @@ All notable changes to DBAide are documented here. The format is loosely based o
 
 ## [Unreleased]
 
+## [0.9.21] — 2026-06-29
+
 ### Added
 
 - **LLM SQL optimization advisor.** A dedicated single-call optimizer agent looks at a
