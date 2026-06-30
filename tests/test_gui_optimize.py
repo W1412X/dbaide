@@ -23,11 +23,15 @@ def service(tmp_path, monkeypatch):
     return DesktopService()
 
 
-def test_optimize_dialog_renders_markdown(qapp):
-    from dbaide.desktop.dialogs.sql_optimize_dialog import SqlOptimizeDialog
-    dlg = SqlOptimizeDialog("- add an index on **orders.status**\n- avoid `SELECT *`")
-    txt = dlg.view.toPlainText().lower()
+def test_sqltab_shows_optimization_inline(qapp):
+    from dbaide.desktop.views.sql_tab import SqlTab
+    tab = SqlTab()
+    tab.show_optimization({"suggestions": "- add an index on **orders.status**\n- avoid `SELECT *`"})
+    assert tab.tabs.currentWidget() is tab.advice          # switches to the inline Advice tab
+    txt = tab.advice.toPlainText().lower()
     assert "index" in txt and "select *" in txt
+    tab.show_optimization({"error": "no_model"})            # no model → clear inline message
+    assert "model" in tab.advice.toPlainText().lower()
 
 
 def test_optimize_sql_action_reports_no_model(qapp, service, tmp_path):

@@ -63,7 +63,7 @@ def test_workbench_tab_rows_do_not_leak_native_background(qapp):
 
         img = wb.grab().toImage()
         bars = wb.findChildren(QTabBar)
-        result_bar = next(bar for bar in bars if bar.count() == 2)
+        result_bar = next(bar for bar in bars if bar.count() == 3)  # Result / Messages / Advice
         pt = result_bar.mapTo(wb, QPoint(0, 0))
         y = pt.y() + result_bar.height() // 2
         x = pt.x() + result_bar.width() + 120

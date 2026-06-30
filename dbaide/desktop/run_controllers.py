@@ -158,7 +158,8 @@ class OneOffActionController:
                 sql_doc.show_result(result)
             return
         if action == "optimize_sql":
-            win._show_optimize_result(result if isinstance(result, dict) else {})
+            if sql_doc is not None:
+                sql_doc.show_optimization(result if isinstance(result, dict) else {})
             return
         if action == "test_connection":
             if run_connection == win.current_connection():

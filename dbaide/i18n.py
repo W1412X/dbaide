@@ -565,7 +565,8 @@ _STRINGS: dict[str, dict[str, str]] = {
     "sql.explain": {"en": "Explain", "zh": "执行计划"},
     "sql.explain_tooltip": {"en": "Show the query plan (EXPLAIN)", "zh": "查看查询计划（EXPLAIN）"},
     "sql.optimize_tooltip": {"en": "Optimization advice (AI)", "zh": "优化建议（AI）"},
-    "optimize.title": {"en": "SQL optimization advice", "zh": "SQL 优化建议"},
+    "sql.advice": {"en": "Advice", "zh": "优化建议"},
+    "optimize.running": {"en": "Analyzing the query for optimizations…", "zh": "正在分析查询、生成优化建议…"},
     "optimize.subtitle": {
         "en": "Suggestions from the optimizer model, based on the query, its EXPLAIN plan, and the "
               "relevant schema. Advisory only — it doesn't rewrite or run anything.",

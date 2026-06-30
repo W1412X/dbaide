@@ -17,7 +17,8 @@ All notable changes to DBAide are documented here. The format is loosely based o
     the SQL and never blocks — the main agent decides whether to issue a better query, and
     only the existing `explain_max_rows` gate can still require confirmation.
   - **Workbench** — a ⚡ button in the SQL editor runs the optimizer on the current SQL
-    (auto-fetching its EXPLAIN plan + schema) and shows the suggestions in a dialog.
+    (auto-fetching its EXPLAIN plan + schema) and shows the suggestions **inline in an
+    Advice tab** next to Result/Messages, so the SQL stays visible (no modal).
 
   Reuses the default model; set `[resource_defaults].optimizer_model` to a configured
   model name to use a different one. Threshold lives in **Settings → Resources**. (SQLite

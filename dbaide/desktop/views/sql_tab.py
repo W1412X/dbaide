@@ -93,8 +93,13 @@ class SqlTab(QWidget):
         self.messages.setFont(QFont("Menlo", 10))
         configure_readonly_text_view(self.messages)
         self.messages.setStyleSheet("QTextBrowser { background: transparent; border: none; }")
+        self.advice = QTextBrowser()
+        configure_readonly_text_view(self.advice)
+        self.advice.setOpenExternalLinks(False)
+        self.advice.setStyleSheet("QTextBrowser { background: transparent; border: none; font-size: 13px; }")
         self.tabs.addTab(self.result_table, t("sql.result"))
         self.tabs.addTab(self.messages, t("sql.messages"))
+        self.tabs.addTab(self.advice, t("sql.advice"))
         self._splitter.addWidget(self.tabs)
         self._splitter.setStretchFactor(0, 1)
         self._splitter.setStretchFactor(1, 2)
@@ -212,3 +217,24 @@ class SqlTab(QWidget):
     def show_error(self, message: str) -> None:
         self.messages.setPlainText(message)
         self.tabs.setCurrentWidget(self.messages)
+
+    def show_optimization(self, payload: dict) -> None:
+        """Render the optimizer's suggestions inline in the Advice tab (not a modal)."""
+        from dbaide.i18n import t
+        err = str(payload.get("error") or "")
+        suggestions = str(payload.get("suggestions") or "")
+        if err == "no_model":
+            self.advice.setMarkdown(t("optimize.no_model"))
+        elif err:
+            self.advice.setPlainText(err)
+        elif not suggestions.strip():
+            self.advice.setMarkdown(t("optimize.empty"))
+        else:
+            self.advice.setMarkdown(f"_{t('optimize.subtitle')}_\n\n{suggestions}")
+        self.tabs.setCurrentWidget(self.advice)
+
+    def show_optimizing(self) -> None:
+        """Placeholder while the optimizer model runs."""
+        from dbaide.i18n import t
+        self.advice.setMarkdown(f"_{t('optimize.running')}_")
+        self.tabs.setCurrentWidget(self.advice)

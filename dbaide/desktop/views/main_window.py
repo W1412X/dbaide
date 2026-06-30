@@ -1915,26 +1915,13 @@ class MainWindow(QMainWindow):
         if not sql.strip():
             return
         self._active_sql_doc = editor
+        if hasattr(editor, "show_optimizing"):
+            editor.show_optimizing()
         self.oneoff_controller.run_action("optimize_sql", {
             "connection_name": self.current_connection(),
             "database": "",
             "sql": sql,
         })
-
-    def _show_optimize_result(self, result: dict[str, Any]) -> None:
-        from dbaide.desktop.dialogs.sql_optimize_dialog import SqlOptimizeDialog
-        err = str((result or {}).get("error") or "")
-        suggestions = str((result or {}).get("suggestions") or "")
-        if err == "no_model":
-            self.toast(_i18n_t("optimize.no_model"))
-            return
-        if err:
-            self.toast(err)
-            return
-        if not suggestions.strip():
-            self.toast(_i18n_t("optimize.empty"))
-            return
-        SqlOptimizeDialog(suggestions, parent=self).exec()
 
     def _browse_from(self, doc, payload: dict[str, Any]) -> None:
         self._active_data_doc = doc
