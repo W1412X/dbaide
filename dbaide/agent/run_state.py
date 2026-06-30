@@ -28,6 +28,10 @@ class RunState:
     database: str = ""
     execute_allowed: bool = False
     answer_language: str = "en"
+    # SQL optimizer soft-gate: set true right after the advisor gates a heavy query so the
+    # very next execute_sql (the agent's optimized rewrite OR the same SQL resubmitted) runs
+    # straight through without being re-advised — guarantees no advise→optimize→advise loop.
+    skip_next_optimize: bool = False
 
     # Schema discovery / disclosure accumulated during the loop.
     discovery: Any = None                                   # DiscoveryResult | None

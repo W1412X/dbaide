@@ -363,29 +363,48 @@ def register(registry: ToolRegistry, orchestrator) -> None:
                         status="completed" if estimated_rows <= explain_max_rows else "info",
                     ),
                 )
-        # Advisory SQL optimizer: for a query whose estimated scan exceeds the advise
-        # threshold, a single-call LLM optimizer (SQL + EXPLAIN plan + relevant schema)
-        # attaches concrete suggestions for the agent to act on. It never rewrites or
-        # blocks — only the explain_max_rows gate (in the risk controller below) can
-        # require confirmation. The main agent decides whether to issue a better query.
+        # SQL optimizer (advisory; single LLM call over SQL + EXPLAIN plan + relevant schema).
+        # Two modes for a query whose estimated scan exceeds the advise threshold:
+        #  - "gate": advise BEFORE executing and return the suggestions so the agent can
+        #     rewrite. A one-shot run_state flag exempts the very next execute_sql (the
+        #     rewrite OR the same SQL resubmitted) → exactly one advise, never a loop.
+        #  - "suggest": run the query, then attach the suggestions to the result.
+        optimize_mode = getattr(orchestrator.query, "optimize_advise_mode", "suggest")
+        heavy = bool(optimize_advise_rows and estimated_rows is not None
+                     and estimated_rows > optimize_advise_rows)
         optimization = None
-        if optimize_advise_rows and estimated_rows is not None and estimated_rows > optimize_advise_rows:
-            try:
-                optimization = OptimizerAgent(orchestrator.llm).evaluate_sql(
-                    validation.normalized_sql, query_tools=orchestrator.query, database=database,
-                    language=orchestrator.run_state.answer_language)
-            except Exception:  # noqa: BLE001 - advisory: never fail the query over advice
-                optimization = None
-            if optimization:
-                orchestrator.progress(
-                    subagent_event(
+        if optimize_mode != "off" and heavy:
+            if optimize_mode == "gate" and orchestrator.run_state.skip_next_optimize:
+                # the agent's response to a prior gate → run it, don't re-advise
+                orchestrator.run_state.skip_next_optimize = False
+            else:
+                try:
+                    optimization = OptimizerAgent(orchestrator.llm).evaluate_sql(
+                        validation.normalized_sql, query_tools=orchestrator.query, database=database,
+                        language=orchestrator.run_state.answer_language)
+                except Exception:  # noqa: BLE001 - advisory: never fail the query over advice
+                    optimization = None
+                if optimization:
+                    orchestrator.progress(subagent_event(
                         agent="optimize",
-                        title="Optimization suggestions",
-                        parent="execute_sql",
-                        detail=optimization,
-                        status="info",
-                    ),
-                )
+                        title="Optimization suggestions" if optimize_mode == "suggest" else "Optimization gate",
+                        parent="execute_sql", detail=optimization, status="info"))
+                    if optimize_mode == "gate":
+                        # advise before executing; exempt the next call so it can't loop
+                        orchestrator.run_state.skip_next_optimize = True
+                        return ToolResult(ok=True, data={
+                            "executed": False,
+                            "optimization": optimization,
+                            "sql": validation.normalized_sql,
+                            "estimated_rows": estimated_rows,
+                            "guidance": (
+                                "This query is expensive and was NOT executed yet. Consider the "
+                                "optimization suggestions above. Call execute_sql again — with an "
+                                "improved query if you can write one, otherwise with the same SQL to "
+                                "run it as-is. The next call executes directly (you won't be advised "
+                                "again), so do not keep re-optimizing."
+                            ),
+                        })
         risk = orchestrator.risk.decide(
             validation=validation_report,
             plan_confidence=confidence,

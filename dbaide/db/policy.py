@@ -57,6 +57,9 @@ class ResourcePolicy:
     explain_max_rows: int = 5_000_000    # EXPLAIN estimate above which execution is blocked
     optimize_advise_rows: int = 1_000_000  # EXPLAIN estimate above which the SQL advisor attaches
                                            # optimization suggestions to the agent (0 = off; advisory)
+    optimize_advise_mode: str = "gate"     # gate: advise BEFORE executing a heavy query, let the
+                                           # agent rewrite (once per query, no loop); suggest: run
+                                           # then attach advice; off: no advisor in the agent flow
 
     # Join sampling (rows sampled from the left table when probing a join).
     join_sample_size: int = 150

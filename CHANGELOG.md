@@ -6,6 +6,17 @@ All notable changes to DBAide are documented here. The format is loosely based o
 
 ## [Unreleased]
 
+### Changed
+
+- **The optimizer can now nudge the agent to rewrite *before* a heavy query runs.** New
+  `optimize_advise_mode` (default `gate`): when a query exceeds `optimize_advise_rows`, the
+  optimizer returns its suggestions and the query is **not executed yet** — the agent then
+  either submits an improved query or resubmits to run as-is. A one-shot per-run flag exempts
+  that next call, so a query is advised **at most once** and the optimized rewrite is never
+  re-advised — it cannot loop. Set the mode to `suggest` for the previous behavior (run, then
+  attach advice) or `off` to disable the agent-flow advisor. Suggestions follow the global
+  answer language.
+
 ## [0.9.21] — 2026-06-29
 
 ### Added

@@ -1336,7 +1336,7 @@ class DesktopService:
                     clean[key] = int(val)
                 except (TypeError, ValueError):
                     continue
-            elif key in ("build_profile_mode", "optimizer_model"):
+            elif key in ("build_profile_mode", "optimizer_model", "optimize_advise_mode"):
                 clean[key] = str(val)
         self.cfg.set_resource_defaults(clean)
         # Re-arm the cost governor so a changed budget takes effect immediately.
