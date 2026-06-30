@@ -45,3 +45,20 @@ def test_optimize_sql_action_reports_no_model(qapp, service, tmp_path):
     assert out["error"] == "no_model"        # no model configured → clear signal, not a crash
     out2 = service.dispatch("optimize_sql", {"connection_name": "a", "sql": "   "})
     assert out2.get("error")                  # empty SQL rejected
+
+
+def test_settings_optimizer_mode_combo_and_string_key_preservation(qapp, tmp_path):
+    import dbaide.desktop.views.main_window  # noqa: F401 — establish import order
+    from dbaide.desktop.dialogs.settings import SettingsDialog
+    dlg = SettingsDialog(connections=[], models=[], config_dir=str(tmp_path), initial_page="resources")
+    combo = dlg._optimize_mode_combo
+    assert [combo.itemData(i) for i in range(combo.count())] == ["gate", "suggest", "off"]
+    assert combo.currentData() == "gate"      # default
+    dlg._resource_values = {"optimizer_model": "fast"}   # a config-only key with no widget here
+    combo.setCurrentIndex(combo.findData("off"))
+    captured: dict = {}
+    dlg.resource_saved.connect(lambda d: captured.update(d))
+    dlg._save_resources()
+    vals = captured["values"]
+    assert vals["optimize_advise_mode"] == "off"          # mode persisted from the combo
+    assert vals.get("optimizer_model") == "fast"          # GUI save must not wipe config-only keys
