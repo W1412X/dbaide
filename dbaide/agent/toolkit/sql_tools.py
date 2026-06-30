@@ -363,22 +363,23 @@ def register(registry: ToolRegistry, orchestrator) -> None:
                         status="completed" if estimated_rows <= explain_max_rows else "info",
                     ),
                 )
-        # SQL optimizer (advisory; single LLM call over SQL + EXPLAIN plan + relevant schema).
-        # Two modes for a query whose estimated scan exceeds the advise threshold:
-        #  - "gate": advise BEFORE executing and return the suggestions so the agent can
-        #     rewrite. A one-shot run_state flag exempts the very next execute_sql (the
-        #     rewrite OR the same SQL resubmitted) → exactly one advise, never a loop.
-        #  - "suggest": run the query, then attach the suggestions to the result.
-        # Heavy query → leave a lightweight hint pointing at the optimize_sql tool (no model
-        # call, no gate, no state). The agent OWNS optimization: it calls optimize_sql when it
-        # wants advice, before running queries it expects to scan a lot of rows.
-        optimization_hint = None
+        # Automatic safety net (advisory): if a heavy query reaches here un-optimized, run the
+        # optimizer once and attach its suggestions to the result — the query still runs (no
+        # gate). The agent can ALSO get advice proactively via the optimize_sql tool; a query it
+        # already optimized is cheap, so it stays under the threshold and never re-triggers this
+        # — the cost itself distinguishes "already optimized" from "not", with no flag/tracking.
+        optimization = None
         if optimize_advise_rows and estimated_rows is not None and estimated_rows > optimize_advise_rows:
-            optimization_hint = (
-                f"This query scanned ~{estimated_rows:,} rows. For queries you expect to be large, "
-                f"call the optimize_sql tool first to get optimization suggestions, then run a "
-                f"more efficient version."
-            )
+            try:
+                optimization = OptimizerAgent(orchestrator.llm).evaluate_sql(
+                    validation.normalized_sql, query_tools=orchestrator.query, database=database,
+                    language=orchestrator.run_state.answer_language)
+            except Exception:  # noqa: BLE001 - advisory: never fail the query over advice
+                optimization = None
+            if optimization:
+                orchestrator.progress(subagent_event(
+                    agent="optimize", title="Optimization suggestions",
+                    parent="execute_sql", detail=optimization, status="info"))
         risk = orchestrator.risk.decide(
             validation=validation_report,
             plan_confidence=confidence,
@@ -444,7 +445,7 @@ def register(registry: ToolRegistry, orchestrator) -> None:
                         "sql": validation.normalized_sql,
                         "execute_args": execute_args,
                         "warnings": validation_report.warnings,
-                        **({"optimization_hint": optimization_hint} if optimization_hint else {}),
+                        **({"optimization": optimization} if optimization else {}),
                     },
                 )
 
@@ -516,7 +517,7 @@ def register(registry: ToolRegistry, orchestrator) -> None:
                     "result_summary": result_summary,
                     "sql": validation.normalized_sql,
                     "database": database,
-                    **({"optimization_hint": optimization_hint} if optimization_hint else {}),
+                    **({"optimization": optimization} if optimization else {}),
                 },
             )
         except PermissionError as exc:

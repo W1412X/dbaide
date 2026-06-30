@@ -8,15 +8,20 @@ All notable changes to DBAide are documented here. The format is loosely based o
 
 ### Changed
 
-- **The SQL optimizer is now an agent tool, not an auto-gate.** The agent has an
-  `optimize_sql` tool it calls when it wants advice on a query it expects to be expensive
-  (one model call over SQL + EXPLAIN plan + relevant schema → suggestions); it then writes a
-  better query itself. `execute_sql` no longer auto-runs the optimizer or pauses execution —
-  for a query over `optimize_advise_rows` it just attaches a lightweight hint pointing at the
-  tool. This removes the framework-side "did this get optimized?" tracking entirely (no gate,
-  no one-shot flag, no loop risk) and matches dbaide's agentic model: the agent owns
-  optimization. (The previous `optimize_advise_mode` gate/suggest knob is gone.) The Workbench
-  ⚡ button is unchanged. Suggestions follow the global answer language.
+- **SQL optimizer: a proactive tool plus an automatic safety net.** Two complementary paths,
+  no gate and no tracking:
+  - **Proactive** — the agent has an `optimize_sql` tool it can call on a query it expects to
+    be expensive (one model call over SQL + EXPLAIN plan + relevant schema → suggestions), then
+    write a better query itself.
+  - **Automatic** — if a query still exceeds `optimize_advise_rows` at execution time (i.e. it
+    wasn't optimized), the optimizer runs once and its suggestions are attached to the result.
+    The query still runs (no pause). A query the agent already optimized is cheap, so it stays
+    under the threshold and never re-triggers — **the cost itself distinguishes "optimized"
+    from "not", so there's no flag, no loop, and nothing to track.** Set `optimize_advise_rows`
+    to 0 for tool-only (no automatic advice).
+
+  This replaces the earlier one-shot soft-gate (and its `optimize_advise_mode` knob). The
+  Workbench ⚡ button is unchanged. Suggestions follow the global answer language.
 
 ## [0.9.21] — 2026-06-29
 

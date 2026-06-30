@@ -42,18 +42,19 @@ def test_optimize_sql_tool_returns_suggestions(tmp_path):
     assert "index" in r.data["suggestions"].lower()     # advice, never executes/rewrites
 
 
-def test_execute_sql_hints_the_tool_when_heavy_but_still_runs(tmp_path):
+def test_execute_sql_auto_advises_when_heavy_but_still_runs(tmp_path):
     orch = _orch(tmp_path)
-    orch.query.estimate_rows = lambda sql, database="": 2_000_000   # heavy
+    orch.query.estimate_rows = lambda sql, database="": 2_000_000   # heavy + un-optimized
     registry = build_tool_registry(orch)
     r = registry.invoke("execute_sql", {"sql": "SELECT * FROM orders"}, ToolContext())
-    assert r.ok and "columns" in r.data                  # executed — no gate
-    assert "optimize_sql" in r.data.get("optimization_hint", "")   # nudges toward the tool
+    assert r.ok and "columns" in r.data                       # executed — no gate
+    assert "index" in r.data.get("optimization", "").lower()  # auto safety-net advice attached
 
 
-def test_execute_sql_no_hint_for_a_light_query(tmp_path):
+def test_execute_sql_no_advice_for_a_light_query(tmp_path):
+    # a query the agent already optimized is cheap → under the threshold → never re-advised
     orch = _orch(tmp_path)
     orch.query.estimate_rows = lambda sql, database="": 100
     registry = build_tool_registry(orch)
     r = registry.invoke("execute_sql", {"sql": "SELECT * FROM orders"}, ToolContext())
-    assert "optimization_hint" not in r.data
+    assert "optimization" not in r.data
