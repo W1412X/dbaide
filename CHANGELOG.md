@@ -6,6 +6,8 @@ All notable changes to DBAide are documented here. The format is loosely based o
 
 ## [Unreleased]
 
+## [0.9.24] — 2026-06-30
+
 ### Fixed
 
 - **Stale pooled connections no longer surface a spurious error on the first query after an
