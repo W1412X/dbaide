@@ -206,6 +206,21 @@ class PostgresAdapter(DatabaseAdapter):
             ddl += f"\nCREATE {unique}INDEX {q(ix.name)} ON {tq} ({', '.join(q(c) for c in ix.columns)});"
         return ddl
 
+    def _is_connection_error(self, exc: BaseException) -> bool:
+        # Prefer psycopg's exception types over message matching (robust to localized
+        # server messages). A dropped/broken connection is OperationalError/InterfaceError;
+        # a statement_timeout is QueryCanceled (an OperationalError subclass) — exclude it so
+        # execute_readonly does not retry and burn another timeout window.
+        try:
+            import psycopg
+            if isinstance(exc, psycopg.errors.QueryCanceled):
+                return False
+            if isinstance(exc, (psycopg.OperationalError, psycopg.InterfaceError)):
+                return True
+        except Exception:
+            pass
+        return super()._is_connection_error(exc)
+
     def _execute_readonly_impl(self, sql: str, *, database: str = "", limit: int | None = None,
                                timeout_seconds: int = 10) -> QueryResult:
         bounded = append_limit(sql, limit, dialect=self.dialect)

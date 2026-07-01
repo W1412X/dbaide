@@ -297,6 +297,23 @@ class MySQLAdapter(DatabaseAdapter):
                 return str(value)
         return super().get_table_ddl(table, database=database)
 
+    def _is_connection_error(self, exc: BaseException) -> bool:
+        # Prefer pymysql error codes over message matching (robust to localized messages).
+        # 2006 "server has gone away" / 2013 "lost connection" / 2002-2003 connect failures /
+        # InterfaceError = a dropped connection → retry a read-only once. 3024 (MySQL) and
+        # 1969 (MariaDB) are statement-timeout codes → must NOT retry (it re-runs the query).
+        try:
+            import pymysql
+            if isinstance(exc, (pymysql.err.OperationalError, pymysql.err.InterfaceError)):
+                code = exc.args[0] if exc.args else None
+                if code in (3024, 1969):
+                    return False
+                if isinstance(exc, pymysql.err.InterfaceError) or code in (0, 2002, 2003, 2006, 2013):
+                    return True
+        except Exception:
+            pass
+        return super()._is_connection_error(exc)
+
     def _execute_readonly_impl(self, sql: str, *, database: str = "", limit: int | None = None,
                                timeout_seconds: int = 10) -> QueryResult:
         bounded = append_limit(sql, limit, dialect=self.dialect)

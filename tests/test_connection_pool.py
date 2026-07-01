@@ -176,3 +176,108 @@ def test_connection_pool_validator_exception_closes_once():
     # The connection should be closed exactly once (not double-closed)
     assert created[0].closed is True
     assert close_count == 1
+
+
+class _Clock:
+    """Manually advanced monotonic clock for deterministic lifetime tests."""
+
+    def __init__(self) -> None:
+        self.t = 1000.0
+
+    def __call__(self) -> float:
+        return self.t
+
+    def advance(self, dt: float) -> None:
+        self.t += dt
+
+
+def _counting_factory(created: list) -> "callable":
+    def factory():
+        conn = FakeConnection(len(created))
+        created.append(conn)
+        return conn
+    return factory
+
+
+def test_reap_closes_idle_connection_past_idle_timeout():
+    from dbaide.db.connection_pool import ConnectionPool, PoolKey as _PK
+    created: list = []
+    clock = _Clock()
+    pool = ConnectionPool(key=_PK("shop", "mysql", "reap1"), max_size=2,
+                          factory=_counting_factory(created),
+                          idle_timeout=60.0, max_lifetime=None, clock=clock)
+    with pool.acquire():          # borrow + release → one idle connection
+        pass
+    assert pool._total == 1 and len(pool._idle) == 1
+
+    clock.advance(30)             # still fresh
+    pool.reap()
+    assert pool._total == 1 and len(pool._idle) == 1 and created[0].closed is False
+
+    clock.advance(40)             # now 70s idle > 60s timeout
+    pool.reap()
+    assert pool._total == 0 and pool._idle == [] and created[0].closed is True
+
+
+def test_reap_leaves_recently_used_connections_alone():
+    from dbaide.db.connection_pool import ConnectionPool, PoolKey as _PK
+    created: list = []
+    clock = _Clock()
+    pool = ConnectionPool(key=_PK("shop", "mysql", "reap2"), max_size=2,
+                          factory=_counting_factory(created),
+                          idle_timeout=60.0, max_lifetime=None, clock=clock)
+    with pool.acquire():
+        pass
+    clock.advance(10)
+    pool.reap()
+    assert pool._total == 1 and len(pool._idle) == 1
+
+
+def test_connection_retired_on_release_when_over_max_lifetime():
+    from dbaide.db.connection_pool import ConnectionPool, PoolKey as _PK
+    created: list = []
+    clock = _Clock()
+    pool = ConnectionPool(key=_PK("shop", "mysql", "life1"), max_size=1,
+                          factory=_counting_factory(created),
+                          idle_timeout=None, max_lifetime=100.0, clock=clock)
+    handle = pool.acquire()       # born at t=1000
+    clock.advance(150)            # exceeds the 100s lifetime while checked out
+    handle.close()                # release → too old → closed, NOT pooled
+    assert created[0].closed is True
+    assert pool._idle == [] and pool._total == 0
+
+    # next acquire builds a fresh connection (accounting stayed consistent)
+    with pool.acquire() as conn:
+        assert conn.name == 1
+        assert pool._total == 1
+
+
+def test_acquire_discards_idle_connection_past_max_lifetime():
+    from dbaide.db.connection_pool import ConnectionPool, PoolKey as _PK
+    created: list = []
+    clock = _Clock()
+    pool = ConnectionPool(key=_PK("shop", "mysql", "life2"), max_size=2,
+                          factory=_counting_factory(created),
+                          idle_timeout=None, max_lifetime=100.0, clock=clock)
+    with pool.acquire():          # conn #0 born at t=1000, then idle
+        pass
+    clock.advance(150)            # conn #0 now over lifetime
+    with pool.acquire() as conn:  # must discard #0 and build #1
+        assert conn.name == 1
+    assert created[0].closed is True
+
+
+def test_born_bookkeeping_does_not_leak():
+    from dbaide.db.connection_pool import ConnectionPool, PoolKey as _PK
+    created: list = []
+    clock = _Clock()
+    pool = ConnectionPool(key=_PK("shop", "mysql", "leak1"), max_size=2,
+                          factory=_counting_factory(created),
+                          idle_timeout=1.0, max_lifetime=None, clock=clock)
+    for _ in range(5):
+        with pool.acquire():
+            pass
+        clock.advance(10)
+        pool.reap()               # each cycle retires the idle conn
+    # every retired connection's creation timestamp was forgotten
+    assert pool._born == {} and pool._idle == [] and pool._total == 0

@@ -6,6 +6,26 @@ All notable changes to DBAide are documented here. The format is loosely based o
 
 ## [Unreleased]
 
+### Fixed
+
+- **Stale pooled connections no longer surface a spurious error on the first query after an
+  idle period.** A connection the server dropped while idle (idle timeout, pgbouncer, failover,
+  firewall) stays "open" client-side and fails only when next used. `execute_readonly` now
+  retries such a failure **once** with a fresh connection — safe because these queries are
+  read-only. Statement timeouts and real query errors (syntax/permission) are *not* retried.
+  Connection-vs-timeout classification prefers driver exception types (psycopg `OperationalError`
+  / `QueryCanceled`, pymysql error codes 2006/2013/3024) and falls back to message matching, so
+  it holds up under localized server messages. Previously only MySQL caught this (via a per-query
+  `ping`); Postgres, whose pool validator only checked the client-side `closed` flag, did not.
+
+### Changed
+
+- **Pooled connections now have a max lifetime and an idle timeout.** The pool used to hold up to
+  `max_inflight_queries` connections indefinitely once grown, never closing idle ones except on a
+  config change. Connections are now retired after 30 min alive or 5 min idle — checked lazily on
+  checkout/check-in and swept by a background reaper — so DBAide does not keep physical
+  connections open against a production database while it sits idle.
+
 ## [0.9.23] — 2026-06-30
 
 ### Fixed

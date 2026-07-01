@@ -115,8 +115,19 @@ class DatabaseAdapter(ABC):
         status, error, result = "ok", "", None
         with self.budget.acquire(who):
             try:
-                result = self._execute_readonly_impl(sql, database=database, limit=limit,
-                                                      timeout_seconds=effective_timeout)
+                try:
+                    result = self._execute_readonly_impl(sql, database=database, limit=limit,
+                                                          timeout_seconds=effective_timeout)
+                except Exception as exc:  # noqa: BLE001
+                    # A pooled connection the server dropped while idle (idle timeout, pgbouncer,
+                    # failover, firewall) fails on first use — the client didn't know it was dead.
+                    # The bad connection is discarded on release; retry ONCE with a fresh one.
+                    # Safe because these queries are read-only (no side effects). NOT retried for
+                    # real query errors (syntax/permission) or statement timeouts.
+                    if not self._is_connection_error(exc):
+                        raise
+                    result = self._execute_readonly_impl(sql, database=database, limit=limit,
+                                                          timeout_seconds=effective_timeout)
                 return result
             except Exception as exc:  # noqa: BLE001 - record then re-raise
                 status, error = "error", f"{type(exc).__name__}: {exc}"
@@ -135,6 +146,29 @@ class DatabaseAdapter(ABC):
     def _execute_readonly_impl(self, sql: str, *, database: str = "", limit: int | None = None,
                                timeout_seconds: int = 10) -> QueryResult:
         raise NotImplementedError
+
+    def _is_connection_error(self, exc: BaseException) -> bool:
+        """Does this failure look like a dropped/broken connection (so a read-only query is
+        safe to retry once with a fresh connection)? Deliberately excludes statement timeouts
+        and query cancellations — those are also driver "operational" errors, but retrying one
+        re-runs the slow query and waits out another timeout. Adapters may override to add
+        driver-specific exception-type checks; the base heuristic matches on the message so it
+        works across psycopg / pymysql without importing either."""
+        msg = str(exc).lower()
+        # Never retry a timeout / cancellation — retrying just burns another timeout window.
+        if any(k in msg for k in (
+            "timeout", "canceling statement", "cancelling statement",
+            "max_execution_time", "max_statement_time", "statement execution time",
+            "query execution was interrupted",
+        )):
+            return False
+        return any(k in msg for k in (
+            "server closed the connection", "connection is closed", "connection already closed",
+            "connection not open", "the connection is closed", "server has gone away",
+            "gone away", "lost connection to", "no connection to the server",
+            "broken pipe", "eof detected", "ssl connection has been closed",
+            "terminating connection due to", "connection reset by peer",
+        ))
 
     @contextmanager
     def _record_query(self, sql: str, *, database: str = "", caller: str | None = None) -> Iterator[None]:
