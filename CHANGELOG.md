@@ -6,6 +6,8 @@ All notable changes to DBAide are documented here. The format is loosely based o
 
 ## [Unreleased]
 
+## [0.9.26] — 2026-07-13
+
 ### Fixed
 
 - **The shared backend no longer appears as a second desktop application.** macOS bundles now
