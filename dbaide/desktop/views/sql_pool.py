@@ -33,12 +33,19 @@ def _fmt_secs(seconds: float) -> str:
     return f"{s}s" if s < 60 else f"{s // 60}m{s % 60:02d}s"
 
 
+def _snapshot(service=None) -> dict:
+    if service is not None:
+        return service.dispatch("sql_pool_snapshot", {})
+    return governor.snapshot()
+
+
 class SqlPoolIndicator(QToolButton):
     """Status-bar widget: running/queued counts + budget use. Hidden when the cost
     governor is disabled; clicking opens the pool dialog."""
 
-    def __init__(self, parent=None) -> None:
+    def __init__(self, service=None, parent=None) -> None:
         super().__init__(parent)
+        self._service = service
         self.setCursor(Qt.CursorShape.PointingHandCursor)
         self.setToolTip(_t("sqlpool.title"))
         self.setStyleSheet(
@@ -54,7 +61,11 @@ class SqlPoolIndicator(QToolButton):
         self.refresh()
 
     def refresh(self) -> None:
-        snap = governor.snapshot()
+        try:
+            snap = _snapshot(self._service)
+        except Exception:
+            self.setVisible(False)
+            return
         active = snap["running_count"] or snap["queued_count"]
         # Show whenever the governor is armed (so it's discoverable + clickable) or
         # whenever something is running (monitor mode). Hidden only when off and idle.
@@ -75,7 +86,7 @@ class SqlPoolIndicator(QToolButton):
 
     def _open(self) -> None:
         if self._dialog is None:
-            self._dialog = SqlPoolDialog(self.window())
+            self._dialog = SqlPoolDialog(self._service, self.window())
             self._dialog.finished.connect(lambda *_: setattr(self, "_dialog", None))
         self._dialog.show()
         self._dialog.raise_()
@@ -85,8 +96,9 @@ class SqlPoolIndicator(QToolButton):
 class SqlPoolDialog(QDialog):
     """Lists the running and queued queries with cost, connection, and timing."""
 
-    def __init__(self, parent=None) -> None:
+    def __init__(self, service=None, parent=None) -> None:
         super().__init__(parent)
+        self._service = service
         self.setWindowTitle(_t("sqlpool.title"))
         self.resize(1040, 560)
         self.setMinimumSize(720, 380)
@@ -171,7 +183,10 @@ class SqlPoolDialog(QDialog):
         super().hideEvent(event)
 
     def refresh(self) -> None:
-        snap = governor.snapshot()
+        try:
+            snap = _snapshot(self._service)
+        except Exception:
+            return
         enabled = snap["enabled"]
         # The budget bar + queue exist only when the governor is armed; otherwise the
         # dialog is a plain monitor of what's currently running.

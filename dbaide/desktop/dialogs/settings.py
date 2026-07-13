@@ -982,6 +982,11 @@ class SettingsDialog(ChromeDialog):
                 uninstall_tool(tool)
                 info["installed_mode"] = None
             else:
+                from dbaide.mcp_http import autostart_enabled, ensure_daemon, install_daemon_autostart
+                if autostart_enabled():
+                    daemon_dir = (self._config_dir / "mcp") if self._config_dir else None
+                    install_daemon_autostart(config_dir=daemon_dir)
+                    ensure_daemon(config_dir=daemon_dir)
                 setup_tool(tool, mode=combo_mode)
                 info["installed_mode"] = combo_mode
             self._refresh_integration_row(tool)
@@ -997,6 +1002,11 @@ class SettingsDialog(ChromeDialog):
 
         mode = self._get_integration_mode()
         try:
+            from dbaide.mcp_http import autostart_enabled, ensure_daemon, install_daemon_autostart
+            if autostart_enabled():
+                daemon_dir = (self._config_dir / "mcp") if self._config_dir else None
+                install_daemon_autostart(config_dir=daemon_dir)
+                ensure_daemon(config_dir=daemon_dir)
             setup_all(mode=mode)
         except Exception as exc:
             dialog_warn(

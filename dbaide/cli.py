@@ -345,6 +345,19 @@ def build_parser() -> argparse.ArgumentParser:
     mcp.add_argument("--mode", choices=["full", "ask", "tools"], default="full",
                      help="full = ask + atomic tools (default), ask = AI pipeline only, tools = atomic tools only")
 
+    daemon = sub.add_parser(
+        "mcp-daemon",
+        help="Manage the shared local Streamable HTTP MCP backend",
+    )
+    daemon.add_argument(
+        "daemon_action",
+        nargs="?",
+        choices=["run", "start", "status", "stop"],
+        default="run",
+    )
+    daemon.add_argument("--host", default="127.0.0.1")
+    daemon.add_argument("--port", type=int, default=None)
+
     from dbaide.skill import SUPPORTED_TOOLS as _SUPPORTED_TOOLS
     setup = sub.add_parser("setup", help="Register dbaide as an MCP server in a coding tool's config")
     setup.add_argument("tool", nargs="?", default="",
@@ -539,6 +552,8 @@ def dispatch(args: argparse.Namespace, cfg: ConfigManager) -> int:
         return dispatch_backup(args, cfg)
     if args.command == "mcp":
         return dispatch_mcp(args, cfg)
+    if args.command == "mcp-daemon":
+        return dispatch_mcp_daemon(args, cfg)
     if args.command == "setup":
         return dispatch_setup(args, cfg)
     raise AssertionError(args.command)
@@ -1085,6 +1100,37 @@ def dispatch_mcp(args: argparse.Namespace, _cfg: ConfigManager) -> int:
     return 0
 
 
+def dispatch_mcp_daemon(args: argparse.Namespace, cfg: ConfigManager) -> int:
+    from dbaide.mcp_http import (
+        endpoint,
+        ensure_daemon,
+        is_daemon_running,
+        serve_http,
+        stop_daemon,
+    )
+
+    action = getattr(args, "daemon_action", "run")
+    host = getattr(args, "host", "127.0.0.1")
+    port = getattr(args, "port", None)
+    config_dir = cfg.path.parent / "mcp"
+    if action == "run":
+        serve_http(host=host, port=port, config_dir=config_dir, config_path=cfg.path)
+        return 0
+    if action == "start":
+        ensure_daemon(host=host, port=port, config_dir=config_dir)
+        print(endpoint(host=host, port=port))
+        return 0
+    if action == "status":
+        running = is_daemon_running(host=host, port=port, config_dir=config_dir)
+        print("running" if running else "stopped")
+        return 0 if running else 1
+    if action == "stop":
+        stopped = stop_daemon(config_dir=config_dir)
+        print("stopped" if stopped else "not running")
+        return 0
+    raise AssertionError(action)
+
+
 def dispatch_setup(args: argparse.Namespace, _cfg: ConfigManager) -> int:
     from dbaide.skill import setup_tool, setup_all, uninstall_tool, uninstall_all, SUPPORTED_TOOLS
 
@@ -1116,7 +1162,17 @@ def dispatch_setup(args: argparse.Namespace, _cfg: ConfigManager) -> int:
         "tools": "tools (atomic DB tools only)",
     }
 
+    def ensure_shared_daemon() -> None:
+        # Managed deployments may supervise the daemon themselves.
+        from dbaide.mcp_http import autostart_enabled
+        if not autostart_enabled():
+            return
+        from dbaide.mcp_http import ensure_daemon, install_daemon_autostart
+        install_daemon_autostart(config_dir=_cfg.path.parent / "mcp")
+        ensure_daemon(config_dir=_cfg.path.parent / "mcp")
+
     if args.setup_all:
+        ensure_shared_daemon()
         results = setup_all(mode=mode)
         for tool, path in results.items():
             print(f"  {tool:<12} → {path}")
@@ -1133,6 +1189,7 @@ def dispatch_setup(args: argparse.Namespace, _cfg: ConfigManager) -> int:
         print(f"supported: {', '.join(SUPPORTED_TOOLS)}", file=sys.stderr)
         return 1
 
+    ensure_shared_daemon()
     path = setup_tool(tool, mode=mode)
     print(f"  → {path}")
     print(f"\n{tool} integration ready — mode: {mode_desc[mode]}")

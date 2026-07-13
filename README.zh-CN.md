@@ -159,6 +159,25 @@ dbaide-gui
 
 输入框 **+** 可固定库/表作为上下文；你确认的澄清会在同一会话后续问题中继续生效。
 
+### 桌面端与 MCP 集成 —— 单一共享后端
+
+可在 **设置 → 集成** 中安装，也可使用 CLI：
+
+```bash
+dbaide setup codex          # 也支持 claude/cursor/windsurf/roo/gemini/qwen/opencode
+dbaide mcp-daemon status
+```
+
+桌面 GUI 与全部 MCP 集成都连接同一个带鉴权、仅监听 loopback 的 daemon。GUI 使用
+带进度流和取消能力的桌面 RPC；编程工具使用 MCP Streamable HTTP，不再按会话启动后端。
+唯一 daemon 统一持有 `DesktopService`、适配器缓存、SQL 并发调度、数据库连接池和任务
+取消注册表。桌面应用或集成安装会自动启动它；macOS 还会写入用户级 LaunchAgent，供
+后续登录自动拉起。旧版 stdio 配置会在桌面应用启动时自动迁移。
+
+可用 `dbaide mcp-daemon start|status|stop` 管理进程。安装前设置
+`DBAIDE_MCP_PORT` 可覆盖默认端口；若由外部服务管理器托管，可设置
+`DBAIDE_MCP_AUTOSTART=0`。
+
 ### 工作台 — 数据库客户端
 
 顶栏切换 **对话 / 工作台**。工作台为多文档只读工作区：

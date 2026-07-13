@@ -312,8 +312,8 @@ _STRINGS: dict[str, dict[str, str]] = {
     "settings.integrations.help.body": {
         "en": (
             "What it does\n"
-            "• Install writes a dbaide entry under mcpServers in the tool's config file.\n"
-            "• The AI assistant can then call DBAide tools via MCP.\n\n"
+            "• Install points the tool at DBAide's authenticated local MCP endpoint.\n"
+            "• The desktop GUI and all installed tools share one long-running backend.\n\n"
             "Three modes\n"
             "• Full (default): exposes both the ask tool and atomic DB tools. "
             "The AI can either ask a high-level question or directly call "
@@ -335,13 +335,13 @@ _STRINGS: dict[str, dict[str, str]] = {
             "Tips\n"
             "• Install always replaces the old entry — safe to switch modes anytime.\n"
             "• conn selects the connection name (default connection if omitted).\n"
-            "• The GUI app and MCP share the same ~/.dbaide config.\n"
+            "• The GUI app and shared MCP backend use the same ~/.dbaide config.\n"
             "• CLI equivalent: dbaide setup claude --mode full"
         ),
         "zh": (
             "有什么用\n"
-            "• 点击「安装」会在对应工具的配置文件中写入 mcpServers.dbaide。\n"
-            "• AI 编程助手可通过 MCP 调用 DBAide 的工具。\n\n"
+            "• 点击「安装」会让对应工具连接 DBAide 经过认证的本地 MCP 端点。\n"
+            "• 桌面 GUI 与所有已安装工具共享一个长期运行的后端，不再各自启动进程。\n\n"
             "三种模式\n"
             "• 完整模式（默认）：同时暴露 ask 工具和原子数据库工具。"
             "AI 既可以直接提问，也可以调用 list_tables、execute_sql、column_stats 等底层工具。\n"
@@ -360,7 +360,7 @@ _STRINGS: dict[str, dict[str, str]] = {
             "提示\n"
             "• 安装会自动替换旧配置——随时可以切换模式。\n"
             "• conn 为连接名称（省略则用默认连接）。\n"
-            "• 桌面应用与 MCP 共用 ~/.dbaide 配置。\n"
+            "• 桌面应用与 MCP 共享后端共用 ~/.dbaide 配置。\n"
             "• CLI 等价命令：dbaide setup claude --mode full"
         ),
     },

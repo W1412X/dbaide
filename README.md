@@ -176,6 +176,27 @@ Use the **+** button in the composer to pin databases or tables as context for t
 question. Clarifications you confirm carry forward to future questions in the same
 session, so the agent learns your intent as you go.
 
+### Desktop and MCP integrations — one shared backend
+
+Install an integration from **Settings → Integrations**, or from the CLI:
+
+```bash
+dbaide setup codex          # or claude/cursor/windsurf/roo/gemini/qwen/opencode
+dbaide mcp-daemon status
+```
+
+The desktop GUI and every MCP integration connect to one authenticated, loopback-only
+daemon. The GUI uses a streaming desktop RPC channel; coding tools use MCP Streamable
+HTTP instead of commands that start a backend per session. The daemon exclusively owns
+the `DesktopService`, adapter cache, SQL governor, database connection pools, and task
+cancellation registry. It starts with the desktop app or integration setup; on macOS a
+per-user LaunchAgent starts it on future logins. Legacy stdio registrations are migrated
+when the desktop app starts.
+
+Daemon lifecycle commands are `dbaide mcp-daemon start|status|stop`. Set
+`DBAIDE_MCP_PORT` before setup to override the default local port, or
+`DBAIDE_MCP_AUTOSTART=0` when an external service manager owns the daemon.
+
 ### Workbench — the database client
 
 Toggle **Assistant / Workbench** at the top. The Workbench is a multi-document

@@ -135,6 +135,48 @@ class DesktopService:
             "asset_root": str(self.store.base_dir),
         }
 
+    def ui_preferences(self, _payload: dict[str, Any] | None = None) -> dict[str, Any]:
+        """Return GUI settings that must be read from the backend-owned config."""
+        return {
+            "max_concurrent_runs": self.cfg.max_concurrent_runs(),
+            "stream_answers": self.cfg.stream_answers(),
+            "debug_trace": self.cfg.debug_trace(),
+            "ui_theme": self.cfg.ui_theme(),
+            "ui_language": self.cfg.ui_language(),
+            "config_dir": str(self.cfg.path.parent),
+        }
+
+    def set_ui_preference(self, payload: dict[str, Any]) -> dict[str, Any]:
+        """Persist one or more GUI preferences in the backend process."""
+        if "debug_trace" in payload:
+            enabled = bool(payload["debug_trace"])
+            self.cfg.set_debug_trace(enabled)
+            from dbaide.agent.llm_trace import set_tracing
+            set_tracing(enabled)
+        if "stream_answers" in payload:
+            self.cfg.set_stream_answers(bool(payload["stream_answers"]))
+        if "ui_theme" in payload:
+            self.cfg.set_ui_theme(str(payload["ui_theme"]))
+        if "ui_language" in payload:
+            self.cfg.set_ui_language(str(payload["ui_language"]))
+        return self.ui_preferences()
+
+    def connection_build_defaults(self, payload: dict[str, Any]) -> dict[str, Any]:
+        conn = self.cfg.get_connection(str(payload.get("connection_name") or payload.get("name") or "") or None)
+        return {"build_max_workers": self.cfg.policy_for(conn).build_max_workers}
+
+    def build_status(self, payload: dict[str, Any]) -> dict[str, Any]:
+        name = str(payload.get("connection_name") or payload.get("name") or "")
+        return {"active": bool(name and self._build_active(name))}
+
+    def sanitized_config(self, _payload: dict[str, Any] | None = None) -> dict[str, Any]:
+        from dbaide.config import sanitize_config_data
+        return sanitize_config_data(self.cfg._data)
+
+    def sql_pool_snapshot(self, _payload: dict[str, Any] | None = None) -> dict[str, Any]:
+        from dbaide.core.sql_governor import governor
+        return governor.snapshot()
+
     def test_connection(self, payload: dict[str, Any]) -> dict[str, Any]:
         conn = self._connection_from_payload(payload)
         build_adapter(conn, caller="gui").test()

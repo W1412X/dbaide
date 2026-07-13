@@ -15,6 +15,7 @@ def run_cli(tmp_path, *args, expect_fail=False):
         "HOME": str(home),
         "DBAIDE_CONFIG": str(tmp_path / "config.toml"),
         "DBAIDE_ASSETS": str(tmp_path / "assets"),
+        "DBAIDE_MCP_AUTOSTART": "0",
     }
     result = subprocess.run(
         [sys.executable, "-m", "dbaide.cli", *args],

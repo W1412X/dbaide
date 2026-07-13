@@ -1,7 +1,7 @@
 """MCP (Model Context Protocol) server exposing DBAide capabilities.
 
-Speaks JSON-RPC 2.0 over stdio — compatible with Claude Code, Cursor, Windsurf,
-Cline, Roo, and any other MCP-capable agent.
+Implements the shared JSON-RPC 2.0 protocol core used by the local Streamable
+HTTP daemon. The stdio loop remains available as a compatibility transport.
 
 Start with::
 
@@ -27,6 +27,8 @@ import os
 import signal
 import sys
 import threading
+from contextlib import contextmanager
+from contextvars import ContextVar
 from typing import Any
 
 from dbaide.agent.toolkit.result_preview import bounded_json_text, preview_rows
@@ -37,13 +39,13 @@ logger = logging.getLogger("dbaide.mcp")
 
 JSONRPC = "2.0"
 SERVER_NAME = "dbaide"
-PROTOCOL_VERSION = "2024-11-05"
+PROTOCOL_VERSION = "2025-11-25"
 # Protocol revisions whose tools wire-format is compatible with our handlers
 # (initialize / tools.list / tools.call / ping are unchanged across these).
 # When a client requests one of these we echo it back so the client stays on
 # its preferred revision; otherwise we fall back to PROTOCOL_VERSION.
 _SUPPORTED_PROTOCOL_VERSIONS = frozenset({
-    "2024-11-05", "2025-03-26", "2025-06-18",
+    "2024-11-05", "2025-03-26", "2025-06-18", "2025-11-25",
 })
 
 
@@ -831,6 +833,13 @@ _TOOL_HANDLERS: dict[str, Any] = {
 # ── Protocol handlers ──────────────────────────────────────────────────────
 
 _active_mode: str = "full"
+_request_mode: ContextVar[str | None] = ContextVar("dbaide_mcp_mode", default=None)
+_request_session: ContextVar[str] = ContextVar("dbaide_mcp_session", default="stdio")
+
+
+def _current_mode() -> str:
+    """Return the transport-scoped mode, falling back to the stdio server mode."""
+    return _request_mode.get() or _active_mode
 
 
 def handle_initialize(params: dict) -> dict:
@@ -852,9 +861,10 @@ def handle_initialize(params: dict) -> dict:
 
 def handle_tools_list(_params: dict) -> dict:
     tools: list[dict] = []
-    if _active_mode in ("full", "ask"):
+    mode = _current_mode()
+    if mode in ("full", "ask"):
         tools.append(ASK_TOOL)
-    if _active_mode in ("full", "tools"):
+    if mode in ("full", "tools"):
         tools.extend(_ATOMIC_TOOLS)
     return {"tools": tools}
 
@@ -865,11 +875,12 @@ def handle_tools_call(params: dict) -> dict:
     if handler is None:
         return _text_content(f"Unknown tool: {name}", is_error=True)
 
-    if _active_mode == "ask" and name != "ask":
+    mode = _current_mode()
+    if mode == "ask" and name != "ask":
         return _text_content(
             f"Tool '{name}' is not available in 'ask' mode", is_error=True,
         )
-    if _active_mode == "tools" and name == "ask":
+    if mode == "tools" and name == "ask":
         return _text_content(
             f"Tool 'ask' is not available in 'tools' mode", is_error=True,
         )
@@ -899,6 +910,7 @@ HANDLERS = {
 # (progress notifications + the eventual result); serialize writes so two
 # messages never interleave on the wire.
 _send_lock = threading.Lock()
+_request_sender: ContextVar[Any] = ContextVar("dbaide_mcp_sender", default=None)
 
 # In-flight async ``ask`` calls: request id → cancel Event, so a
 # notifications/cancelled for that id can signal the running agent.
@@ -906,7 +918,15 @@ _inflight: dict[Any, "threading.Event"] = {}
 _inflight_lock = threading.Lock()
 
 
+def _inflight_key(request_id: Any) -> tuple[str, Any]:
+    return (_request_session.get(), request_id)
+
+
 def _send(msg: dict | list) -> None:
+    sender = _request_sender.get()
+    if sender is not None:
+        sender(msg)
+        return
     try:
         with _send_lock:
             sys.stdout.write(json.dumps(msg) + "\n")
@@ -962,9 +982,10 @@ def _spawn_ask(msg: dict) -> None:
     progress_token = (params.get("_meta") or {}).get("progressToken") if isinstance(params.get("_meta"), dict) else None
 
     cancel_event = threading.Event()
+    inflight_key = _inflight_key(msg_id)
     if msg_id is not None:
         with _inflight_lock:
-            _inflight[msg_id] = cancel_event
+            _inflight[inflight_key] = cancel_event
 
     def run() -> None:
         try:
@@ -982,9 +1003,48 @@ def _spawn_ask(msg: dict) -> None:
         finally:
             if msg_id is not None:
                 with _inflight_lock:
-                    _inflight.pop(msg_id, None)
+                    _inflight.pop(inflight_key, None)
 
     threading.Thread(target=run, name="dbaide-mcp-ask", daemon=True).start()
+
+
+def _handle_ask_sync(msg: dict) -> dict | None:
+    """Run an ask request synchronously for request/response transports.
+
+    Streamable HTTP owns a request thread per POST, so it does not need the
+    stdio loop's background worker. Keeping the call on that request thread also
+    preserves its scoped mode and progress-message sink.
+    """
+    msg_id = msg.get("id")
+    params = msg.get("params") or {}
+    arguments = params.get("arguments")
+    if not isinstance(arguments, dict):
+        arguments = {}
+    meta = params.get("_meta")
+    progress_token = meta.get("progressToken") if isinstance(meta, dict) else None
+    cancel_event = threading.Event()
+    inflight_key = _inflight_key(msg_id)
+    if msg_id is not None:
+        with _inflight_lock:
+            _inflight[inflight_key] = cancel_event
+    try:
+        result = handle_ask(
+            arguments,
+            progress_token=progress_token,
+            cancel_event=cancel_event,
+        )
+        if msg_id is None or cancel_event.is_set():
+            return None
+        return _ok(msg_id, result)
+    except Exception as exc:  # noqa: BLE001
+        logger.exception("ask request failed")
+        if msg_id is None or cancel_event.is_set():
+            return None
+        return _error(msg_id, -32603, str(exc))
+    finally:
+        if msg_id is not None:
+            with _inflight_lock:
+                _inflight.pop(inflight_key, None)
 
 
 def _is_async_ask(msg: Any) -> bool:
@@ -995,7 +1055,50 @@ def _is_async_ask(msg: Any) -> bool:
     params = msg.get("params") or {}
     if not isinstance(params, dict) or params.get("name") != "ask":
         return False
-    return _active_mode in ("full", "ask")
+    return _current_mode() in ("full", "ask")
+
+
+def _cancel_inflight(msg: Any) -> bool:
+    """Apply an MCP cancellation notification. Return True when it matched."""
+    if not isinstance(msg, dict) or msg.get("method") != "notifications/cancelled":
+        return False
+    req_id = (msg.get("params") or {}).get("requestId")
+    with _inflight_lock:
+        ev = _inflight.get(_inflight_key(req_id))
+    if ev is not None:
+        ev.set()
+    return True
+
+
+@contextmanager
+def request_context(*, mode: str = "full", sender: Any = None, session_id: str = "stdio"):
+    """Scope mode and outbound notifications to one non-stdio request."""
+    safe_mode = mode if mode in ("full", "ask", "tools") else "full"
+    mode_token = _request_mode.set(safe_mode)
+    sender_token = _request_sender.set(sender)
+    session_token = _request_session.set(session_id or "stdio")
+    try:
+        yield
+    finally:
+        _request_session.reset(session_token)
+        _request_sender.reset(sender_token)
+        _request_mode.reset(mode_token)
+
+
+def handle_transport_message(
+    msg: Any,
+    *,
+    mode: str = "full",
+    sender: Any = None,
+    session_id: str = "stdio",
+) -> dict | None:
+    """Handle one message for Streamable HTTP or another request transport."""
+    with request_context(mode=mode, sender=sender, session_id=session_id):
+        if _cancel_inflight(msg):
+            return None
+        if _is_async_ask(msg):
+            return _handle_ask_sync(msg)
+        return _handle_one(msg)
 
 
 def serve(*, mode: str = "full") -> None:
@@ -1049,12 +1152,7 @@ def serve(*, mode: str = "full") -> None:
 
             # Cancellation: signal the matching in-flight ask so its agent loop
             # aborts at the next cancel_check.
-            if isinstance(msg, dict) and msg.get("method") == "notifications/cancelled":
-                req_id = (msg.get("params") or {}).get("requestId")
-                with _inflight_lock:
-                    ev = _inflight.get(req_id)
-                if ev is not None:
-                    ev.set()
+            if _cancel_inflight(msg):
                 continue
 
             # Long-running ask runs on a worker thread so the loop stays

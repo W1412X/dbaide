@@ -34,7 +34,10 @@ from dbaide.desktop.event_bus import (
     EventBus,
 )
 from dbaide.i18n import t as _i18n_t
-from dbaide.desktop.service import DesktopService
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from dbaide.desktop.service import DesktopService
 
 
 def _tab_label(tab_id: str) -> str:
@@ -90,12 +93,15 @@ class _SslCheckNotifier(QObject):
 
 
 class MainWindow(QMainWindow):
-    def __init__(self, service: DesktopService) -> None:
+    def __init__(self, service: "DesktopService") -> None:
         super().__init__()
         self.service = service
         self.bus = EventBus()
         self.tasks = TaskManager(service, self)
-        self.run_state = ConversationRunState(max_runs=self.service.cfg.max_concurrent_runs())
+        self._ui_preferences = self.service.dispatch("ui_preferences", {})
+        self.run_state = ConversationRunState(
+            max_runs=int(self._ui_preferences.get("max_concurrent_runs") or 1)
+        )
         self.oneoff_state = OneOffRunState()
         self.background_work = BackgroundWorkState()
         self.oneoff_controller = OneOffActionController(self)
@@ -551,7 +557,7 @@ class MainWindow(QMainWindow):
         self.statusbar.setSizeGripEnabled(False)
         self.setStatusBar(self.statusbar)
         from dbaide.desktop.views.sql_pool import SqlPoolIndicator
-        self.sql_pool_indicator = SqlPoolIndicator(self)
+        self.sql_pool_indicator = SqlPoolIndicator(self.service, self)
         self.statusbar.addPermanentWidget(self.sql_pool_indicator)
         self._ensure_ui_state().statusbar_message("Ready")
         self._on_tab_changed(self.tabbar.currentIndex())
@@ -682,9 +688,18 @@ class MainWindow(QMainWindow):
         oneoff = self._oneoff
         if self._building and str(oneoff.connection or "") == conn:
             return _i18n_t("status.building")
-        if self.service._build_active(conn):
+        if self._backend_build_active(conn):
             return _i18n_t("status.building")
         return ""
+
+    def _backend_build_active(self, conn: str) -> bool:
+        try:
+            result = self.service.dispatch("build_status", {"connection_name": conn})
+            return bool(result.get("active"))
+        except Exception:
+            # Local task bookkeeping still keeps this window safe. A transient
+            # status-poll failure should not break painting or user interaction.
+            return False
 
     def _assets_busy(self, conn: str | None = None) -> bool:
         conn = conn or self.current_connection()
@@ -695,7 +710,7 @@ class MainWindow(QMainWindow):
         oneoff = self._oneoff
         if self._building and str(oneoff.connection or "") == conn:
             return True
-        return bool(self.service._build_active(conn))
+        return self._backend_build_active(conn)
 
     def _run_background(
         self,
@@ -1327,9 +1342,10 @@ class MainWindow(QMainWindow):
             self.toast(_i18n_t("toast.select_connection"))
             return
 
-        conns = {c["name"]: c for c in self.bootstrap.get("connections") or []}
-        conn_cfg = self.service.cfg.get_connection(conn)
-        default_workers = self.service.cfg.policy_for(conn_cfg).build_max_workers
+        defaults = self.service.dispatch(
+            "connection_build_defaults", {"connection_name": conn}
+        )
+        default_workers = int(defaults.get("build_max_workers") or 1)
 
         def on_loaded(result: dict[str, Any]) -> None:
             if conn != self.current_connection():
@@ -1410,6 +1426,10 @@ class MainWindow(QMainWindow):
             resource_defaults = self.service.dispatch("resource_defaults", {})
         except Exception:
             resource_defaults = {}
+        try:
+            self._ui_preferences = self.service.dispatch("ui_preferences", {})
+        except Exception:
+            pass
         from dbaide.i18n import get_language
         dialog = SettingsDialog(
             connections=self.bootstrap.get("connections") or [],
@@ -1418,9 +1438,9 @@ class MainWindow(QMainWindow):
             default_model=str(self.bootstrap.get("default_model") or "default"),
             resource_defaults=resource_defaults,
             language=get_language(),
-            stream_answers=self.service.cfg.stream_answers(),
-            debug_trace=self.service.cfg.debug_trace(),
-            config_dir=str(self.service.cfg.path.parent),
+            stream_answers=bool(self._ui_preferences.get("stream_answers", True)),
+            debug_trace=bool(self._ui_preferences.get("debug_trace", False)),
+            config_dir=str(self._ui_preferences.get("config_dir") or ""),
             parent=self,
             initial_page=page,
         )
@@ -1466,7 +1486,9 @@ class MainWindow(QMainWindow):
         # persisted for future launches.
         from dbaide.agent.llm_trace import set_tracing
         try:
-            self.service.cfg.set_debug_trace(bool(enabled))
+            self._ui_preferences = self.service.dispatch(
+                "set_ui_preference", {"debug_trace": bool(enabled)}
+            )
             set_tracing(bool(enabled))
             self.toast(_i18n_t("toast.debug_trace_on" if enabled else "toast.debug_trace_off"))
         except Exception as exc:  # noqa: BLE001
@@ -1476,7 +1498,9 @@ class MainWindow(QMainWindow):
         # Persisted to config; the backend reads it per request (next query streams or
         # not). No UI state to push — the conversation just renders whatever arrives.
         try:
-            self.service.cfg.set_stream_answers(bool(enabled))
+            self._ui_preferences = self.service.dispatch(
+                "set_ui_preference", {"stream_answers": bool(enabled)}
+            )
         except Exception as exc:  # noqa: BLE001
             self.toast(_i18n_t("error.save_failed"))
 
@@ -1485,24 +1509,30 @@ class MainWindow(QMainWindow):
         if theme == current_theme_name():
             return
         try:
-            self.service.cfg.set_ui_theme(theme)
+            self._ui_preferences = self.service.dispatch(
+                "set_ui_preference", {"ui_theme": theme}
+            )
             self._show_restart_required()
         except Exception as exc:
             self.fail(exc)
 
     def _change_language(self, lang: str) -> None:
         from dbaide.i18n import normalize
-        if normalize(lang) == self.service.cfg.ui_language():
+        if normalize(lang) == str(self._ui_preferences.get("ui_language") or ""):
             return
         try:
-            self.service.cfg.set_ui_language(lang)
+            self._ui_preferences = self.service.dispatch(
+                "set_ui_preference", {"ui_language": lang}
+            )
             self._show_restart_required(lang)
         except Exception as exc:
             self.fail(exc)
 
     def _show_restart_required(self, lang: str | None = None) -> None:
         from dbaide.i18n import DEFAULT_LANGUAGE, _STRINGS, normalize
-        code = normalize(lang) if lang is not None else self.service.cfg.ui_language()
+        code = normalize(lang) if lang is not None else str(
+            self._ui_preferences.get("ui_language") or ""
+        )
         entry = _STRINGS.get("settings.restart_required", {})
         msg = entry.get(code) or entry.get(DEFAULT_LANGUAGE) or "Restart DBAide to apply this setting."
         dialog_alert(self, "DBAide", msg)
@@ -1511,7 +1541,8 @@ class MainWindow(QMainWindow):
         try:
             self.service.dispatch("save_resource_defaults", payload)
             # Apply the concurrency cap live; a higher cap can release queued runs.
-            self._max_runs = self.service.cfg.max_concurrent_runs()
+            self._ui_preferences = self.service.dispatch("ui_preferences", {})
+            self._max_runs = int(self._ui_preferences.get("max_concurrent_runs") or 1)
             self.conversation_controller.drain_queue()
             self.conversation_controller.sync_work_ui()
             self.toast(_i18n_t("toast.resources_saved"))
@@ -1722,7 +1753,9 @@ class MainWindow(QMainWindow):
     def _cleanup_excel_collection(self, db_path: str) -> None:
         """If the deleted connection was an Excel collection, remove its generated files."""
         from dbaide.ingest import collection_for_connection
-        collection = collection_for_connection(self.service.cfg.path.parent, db_path)
+        collection = collection_for_connection(
+            self._ui_preferences.get("config_dir") or "", db_path
+        )
         if collection is None:
             return
         import shutil
@@ -2476,7 +2509,6 @@ class MainWindow(QMainWindow):
 
     def export_debug_bundle(self) -> None:
         """Write a support ZIP (sanitized config, trace, log tail) under ~/.dbaide/debug/."""
-        from dbaide.config import sanitize_config_data
         from dbaide.history.debug_bundle import create_desktop_debug_bundle
         from dbaide.observability.app_logging import tail_log_lines
 
@@ -2486,7 +2518,7 @@ class MainWindow(QMainWindow):
         )
         try:
             path = create_desktop_debug_bundle(
-                config=sanitize_config_data(self.service.cfg._data),
+                config=self.service.dispatch("sanitized_config", {}),
                 context=context,
                 log_tail=tail_log_lines(),
             )
@@ -2520,7 +2552,7 @@ class MainWindow(QMainWindow):
 
 
 class DBAideDesktop:
-    def __init__(self, service: DesktopService) -> None:
+    def __init__(self, service: "DesktopService") -> None:
         self.service = service
 
     def run(self) -> None:

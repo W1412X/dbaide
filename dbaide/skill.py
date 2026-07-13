@@ -4,8 +4,9 @@ Each supported tool stores its MCP server config in a file under the user's
 home directory.  ``setup_tool`` / ``uninstall_tool`` write or remove the
 ``dbaide`` entry; ``is_installed`` checks whether the entry exists.
 
-The MCP server itself lives in ``dbaide.mcp_server`` and is started via
-``dbaide mcp``.
+The MCP server itself lives in one shared local Streamable HTTP daemon. Client
+configs point at that loopback endpoint instead of spawning a full backend for
+every stdio session.
 
 Three modes are available:
 
@@ -21,20 +22,22 @@ tools whose on-disk config format is documented and file-writable are
 supported here — registering a file a tool never reads would be worse than
 not registering at all.  Three formats are handled:
 
-    mcpServers  — JSON ``{"mcpServers": {name: {command, args}}}``
+    mcpServers  — JSON ``{"mcpServers": {name: {url/httpUrl, headers}}}``
                   (Claude Code, Cursor, Windsurf, Roo, Gemini CLI, Qwen Code)
-    opencode    — JSON ``{"mcp": {name: {type, command:[exe, *args]}}}``
-    codex_toml  — TOML ``[mcp_servers.name]`` with command / args
+    opencode    — JSON ``{"mcp": {name: {type:"remote", url, headers}}}``
+    codex_toml  — TOML ``[mcp_servers.name]`` with url / http_headers
 """
 
 from __future__ import annotations
 
 import json
+import os
 import shutil
 import sys
 import tomllib
 from pathlib import Path
 from typing import Any
+from urllib.parse import parse_qs, urlparse
 
 _HOME = Path.home()
 
@@ -78,6 +81,25 @@ def _mode_from_args(args: list[Any]) -> str:
             v = args[i + 1]
             return v if v in VALID_MODES else DEFAULT_MODE
     return DEFAULT_MODE
+
+
+def _mode_from_url(url: Any) -> str:
+    if not isinstance(url, str) or not url:
+        return DEFAULT_MODE
+    mode = (parse_qs(urlparse(url).query).get("mode") or [DEFAULT_MODE])[0]
+    return mode if mode in VALID_MODES else DEFAULT_MODE
+
+
+def _remote_settings(mode: str) -> tuple[str, dict[str, str]]:
+    from dbaide.mcp_http import auth_headers, endpoint
+
+    configured = os.environ.get("DBAIDE_CONFIG", "").strip()
+    config_dir = (
+        Path(configured).expanduser().parent / "mcp"
+        if configured
+        else _HOME / ".dbaide" / "mcp"
+    )
+    return endpoint(mode=mode), auth_headers(config_dir)
 
 
 # ── Per-tool config locations + formats ─────────────────────────────────────
@@ -145,18 +167,25 @@ def _write_json(path: Path, data: dict[str, Any]) -> None:
 
 # ── Format: mcpServers (JSON) ───────────────────────────────────────────────
 
-def _mcpservers_entry(mode: str) -> dict[str, Any]:
-    exe, args = _command_and_args(mode)
-    return {"command": exe, "args": args}
+def _mcpservers_entry(tool: str, mode: str) -> dict[str, Any]:
+    url, headers = _remote_settings(mode)
+    if tool in ("gemini", "qwen"):
+        return {"httpUrl": url, "headers": headers}
+    if tool == "windsurf":
+        return {"serverUrl": url, "headers": headers}
+    entry: dict[str, Any] = {"url": url, "headers": headers}
+    if tool == "claude":
+        entry["type"] = "http"
+    return entry
 
 
-def _mcpservers_setup(path: Path, mode: str) -> None:
+def _mcpservers_setup(path: Path, mode: str, tool: str) -> None:
     data = _read_json(path)
     servers = data.setdefault("mcpServers", {})
     if not isinstance(servers, dict):
         servers = data["mcpServers"] = {}
     servers.pop(SERVER_KEY, None)
-    servers[SERVER_KEY] = _mcpservers_entry(mode)
+    servers[SERVER_KEY] = _mcpservers_entry(tool, mode)
     _write_json(path, data)
 
 
@@ -174,17 +203,24 @@ def _mcpservers_mode(path: Path) -> str | None:
     entry = (_read_json(path).get("mcpServers") or {}).get(SERVER_KEY)
     if not isinstance(entry, dict):
         return None
-    return _mode_from_args(entry.get("args") or [])
+    url = entry.get("httpUrl") or entry.get("serverUrl") or entry.get("url")
+    return _mode_from_url(url) if url else _mode_from_args(entry.get("args") or [])
 
 
-# ── Format: opencode (JSON, key "mcp", command is [exe, *args]) ──────────────
+# ── Format: opencode (JSON, key "mcp", remote HTTP entry) ──────────────────────
 
 def _opencode_entry(mode: str) -> dict[str, Any]:
-    exe, args = _command_and_args(mode)
-    return {"type": "local", "command": [exe, *args], "enabled": True}
+    url, headers = _remote_settings(mode)
+    return {
+        "type": "remote",
+        "url": url,
+        "headers": headers,
+        "oauth": False,
+        "enabled": True,
+    }
 
 
-def _opencode_setup(path: Path, mode: str) -> None:
+def _opencode_setup(path: Path, mode: str, _tool: str) -> None:
     data = _read_json(path)
     servers = data.setdefault("mcp", {})
     if not isinstance(servers, dict):
@@ -208,7 +244,9 @@ def _opencode_mode(path: Path) -> str | None:
     entry = (_read_json(path).get("mcp") or {}).get(SERVER_KEY)
     if not isinstance(entry, dict):
         return None
-    # opencode folds exe + args into a single "command" list.
+    if entry.get("url"):
+        return _mode_from_url(entry.get("url"))
+    # Backward compatibility for the old local command registration.
     return _mode_from_args(entry.get("command") or [])
 
 
@@ -252,13 +290,15 @@ def _strip_codex_block(text: str) -> str:
     return "\n".join(out)
 
 
-def _codex_setup(path: Path, mode: str) -> None:
-    exe, args = _command_and_args(mode)
-    args_toml = ", ".join(_toml_str(a) for a in args)
+def _codex_setup(path: Path, mode: str, _tool: str) -> None:
+    url, headers = _remote_settings(mode)
+    headers_toml = ", ".join(
+        f"{_toml_str(k)} = {_toml_str(v)}" for k, v in headers.items()
+    )
     block = (
         f"{_CODEX_HEADER}\n"
-        f"command = {_toml_str(exe)}\n"
-        f"args = [{args_toml}]\n"
+        f"url = {_toml_str(url)}\n"
+        f"http_headers = {{ {headers_toml} }}\n"
     )
     existing = ""
     if path.exists():
@@ -289,6 +329,8 @@ def _codex_mode(path: Path) -> str | None:
     entry = (_read_toml(path).get("mcp_servers") or {}).get(SERVER_KEY)
     if not isinstance(entry, dict):
         return None
+    if entry.get("url"):
+        return _mode_from_url(entry.get("url"))
     return _mode_from_args(entry.get("args") or [])
 
 
@@ -321,13 +363,43 @@ def is_installed(tool: str) -> bool:
 def installed_mode(tool: str) -> str | None:
     """Return the mode of the currently installed entry, or None if absent.
 
-    Parses the launch args to find ``--mode <value>``; returns "full" when
-    ``--mode`` is absent (the default).
+    Parses the remote URL (or legacy launch args) to find the selected mode;
+    returns "full" when no explicit mode is present.
     """
     if tool not in _TOOLS:
         return None
     _rel, fmt = _TOOLS[tool]
     return _MODE[fmt](_config_path(tool))
+
+
+def is_remote_installed(tool: str) -> bool:
+    """Return True when the DBAide entry already uses the shared HTTP daemon."""
+    if tool not in _TOOLS:
+        return False
+    path = _config_path(tool)
+    _rel, fmt = _TOOLS[tool]
+    if fmt == _FMT_CODEX_TOML:
+        entry = (_read_toml(path).get("mcp_servers") or {}).get(SERVER_KEY)
+        return isinstance(entry, dict) and bool(entry.get("url"))
+    data = _read_json(path)
+    if fmt == _FMT_OPENCODE:
+        entry = (data.get("mcp") or {}).get(SERVER_KEY)
+        return isinstance(entry, dict) and entry.get("type") == "remote" and bool(entry.get("url"))
+    entry = (data.get("mcpServers") or {}).get(SERVER_KEY)
+    return isinstance(entry, dict) and bool(
+        entry.get("httpUrl") or entry.get("serverUrl") or entry.get("url")
+    )
+
+
+def migrate_installed_to_http() -> list[str]:
+    """Rewrite only legacy DBAide stdio entries, preserving their selected mode."""
+    migrated: list[str] = []
+    for tool in SUPPORTED_TOOLS:
+        mode = installed_mode(tool)
+        if mode is not None and not is_remote_installed(tool):
+            setup_tool(tool, mode=mode)
+            migrated.append(tool)
+    return migrated
 
 
 def setup_tool(tool: str, *, mode: str = DEFAULT_MODE) -> str:
@@ -342,7 +414,7 @@ def setup_tool(tool: str, *, mode: str = DEFAULT_MODE) -> str:
         raise ValueError(f"Invalid mode: {mode}. Valid: {', '.join(VALID_MODES)}")
     _rel, fmt = _TOOLS[tool]
     path = _config_path(tool)
-    _SETUP[fmt](path, mode)
+    _SETUP[fmt](path, mode, tool)
     return str(path)
 
 

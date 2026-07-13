@@ -502,3 +502,26 @@ def test_inspect_metadata_reports_more_tables_when_limited(monkeypatch):
     assert payload["total_tables"] == 3
     assert payload["more_tables"] is True
     assert "Raise limit" in payload["note"]
+
+
+def test_http_cancellation_is_scoped_by_session():
+    import threading
+
+    first = threading.Event()
+    second = threading.Event()
+    with mcp._inflight_lock:
+        mcp._inflight[("session-a", 1)] = first
+        mcp._inflight[("session-b", 1)] = second
+    try:
+        message = {
+            "jsonrpc": "2.0",
+            "method": "notifications/cancelled",
+            "params": {"requestId": 1},
+        }
+        mcp.handle_transport_message(message, session_id="session-a")
+        assert first.is_set()
+        assert not second.is_set()
+    finally:
+        with mcp._inflight_lock:
+            mcp._inflight.pop(("session-a", 1), None)
+            mcp._inflight.pop(("session-b", 1), None)

@@ -36,6 +36,34 @@ def test_desktop_service_action_registry_matches_service_methods(tmp_path):
     assert all(callable(handler) for handler in handlers.values())
 
 
+def test_desktop_service_exposes_remote_gui_state_without_secrets(tmp_path):
+    cfg = ConfigManager(tmp_path / "config.toml")
+    service = DesktopService(cfg, AssetStore(tmp_path / "assets"))
+    service.save_model({
+        "name": "secret-model",
+        "provider": "openai_compatible",
+        "base_url": "http://localhost:9999/v1",
+        "api_key": "top-secret",
+        "model": "demo",
+    })
+
+    try:
+        prefs = service.dispatch("set_ui_preference", {
+            "stream_answers": False,
+            "debug_trace": True,
+            "ui_theme": "dark",
+            "ui_language": "zh",
+        })
+        assert prefs["stream_answers"] is False
+        assert prefs["debug_trace"] is True
+        assert prefs["config_dir"] == str(tmp_path)
+        assert service.dispatch("build_status", {"connection_name": "x"}) == {"active": False}
+        assert service.dispatch("sanitized_config", {})["models"]["secret-model"]["api_key"] == "***"
+        assert "running_count" in service.dispatch("sql_pool_snapshot", {})
+    finally:
+        service.dispatch("set_ui_preference", {"debug_trace": False})
+
+
 def test_gui_build_assets_uses_configured_store_and_serializes_slots_dataclass(tmp_path):
     db = tmp_path / "app.db"
     make_db(db)

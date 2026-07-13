@@ -14,8 +14,23 @@ from typing import Any, Callable
 Handler = Callable[[dict[str, Any]], Any]
 
 
+# Actions whose service methods accept progress and cooperative cancellation
+# callbacks. Shared by local test workers and the daemon RPC transport so the
+# two call paths cannot drift as actions are added.
+STREAMING_ACTIONS = frozenset({
+    "build_assets", "ask", "project_instance", "refresh_instance", "enrich_table",
+    "execute_sql", "explain_sql", "browse_table", "count_table", "backup_run",
+})
+
+
 ACTION_METHODS: tuple[tuple[str, str], ...] = (
     ("bootstrap", "bootstrap"),
+    ("ui_preferences", "ui_preferences"),
+    ("set_ui_preference", "set_ui_preference"),
+    ("connection_build_defaults", "connection_build_defaults"),
+    ("build_status", "build_status"),
+    ("sanitized_config", "sanitized_config"),
+    ("sql_pool_snapshot", "sql_pool_snapshot"),
     ("build_assets", "build_assets"),
     ("project_instance", "project_instance"),
     ("refresh_instance", "refresh_instance"),

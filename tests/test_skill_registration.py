@@ -51,7 +51,11 @@ def test_claude_uses_claude_json_not_settings():
 def test_mcpservers_roundtrip(home, tool):
     path = Path(skill.setup_tool(tool, mode="full"))
     data = json.loads(path.read_text())
-    assert data["mcpServers"]["dbaide"]["command"]
+    entry = data["mcpServers"]["dbaide"]
+    assert entry.get("url") or entry.get("serverUrl") or entry.get("httpUrl")
+    assert entry["headers"]["Authorization"].startswith("Bearer ")
+    assert "command" not in entry
+    assert skill.is_remote_installed(tool)
     assert skill.is_installed(tool)
     assert skill.installed_mode(tool) == "full"
     assert skill.uninstall_tool(tool) is True
@@ -79,9 +83,10 @@ def test_opencode_format(home):
     path = Path(skill.setup_tool("opencode", mode="tools"))
     data = json.loads(path.read_text())
     entry = data["mcp"]["dbaide"]
-    assert entry["type"] == "local"
-    assert isinstance(entry["command"], list)
-    assert "tools" in entry["command"]  # mode folded into command list
+    assert entry["type"] == "remote"
+    assert "mode=tools" in entry["url"]
+    assert entry["headers"]["Authorization"].startswith("Bearer ")
+    assert entry["oauth"] is False
     assert skill.installed_mode("opencode") == "tools"
     assert skill.uninstall_tool("opencode") is True
     assert skill.installed_mode("opencode") is None
@@ -92,7 +97,9 @@ def test_opencode_format(home):
 def test_codex_toml_roundtrip(home):
     path = Path(skill.setup_tool("codex", mode="full"))
     parsed = tomllib.loads(path.read_text())
-    assert parsed["mcp_servers"]["dbaide"]["command"]
+    entry = parsed["mcp_servers"]["dbaide"]
+    assert entry["url"].startswith("http://127.0.0.1:")
+    assert entry["http_headers"]["Authorization"].startswith("Bearer ")
     assert skill.installed_mode("codex") == "full"
 
 
@@ -147,3 +154,22 @@ def test_unknown_tool_raises(home):
 def test_invalid_mode_raises(home):
     with pytest.raises(ValueError):
         skill.setup_tool("claude", mode="bogus")
+
+
+def test_migrates_legacy_stdio_entries_preserving_mode(home):
+    p = home / ".cursor" / "mcp.json"
+    p.parent.mkdir(parents=True)
+    p.write_text(json.dumps({
+        "mcpServers": {
+            "dbaide": {
+                "command": "/Applications/DBAide.app/Contents/MacOS/DBAide",
+                "args": ["mcp", "--mode", "tools"],
+            }
+        }
+    }))
+    assert skill.installed_mode("cursor") == "tools"
+    assert not skill.is_remote_installed("cursor")
+    assert skill.migrate_installed_to_http() == ["cursor"]
+    entry = json.loads(p.read_text())["mcpServers"]["dbaide"]
+    assert "mode=tools" in entry["url"]
+    assert "command" not in entry

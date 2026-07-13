@@ -1,13 +1,15 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any, Callable
+from typing import TYPE_CHECKING, Any, Callable
 from uuid import uuid4
 
 from PyQt6.QtCore import QObject, QThreadPool
 
-from dbaide.desktop.service import DesktopService
 from dbaide.desktop.workers import ServiceWorker
+
+if TYPE_CHECKING:
+    from dbaide.desktop.service import DesktopService
 
 
 DoneCallback = Callable[[Any], None]
@@ -40,7 +42,7 @@ class TaskManager(QObject):
     until a terminal signal arrives.
     """
 
-    def __init__(self, service: DesktopService, parent: QObject | None = None) -> None:
+    def __init__(self, service: "DesktopService", parent: QObject | None = None) -> None:
         super().__init__(parent)
         self.service = service
         self.pool = QThreadPool.globalInstance()

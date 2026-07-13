@@ -6,6 +6,16 @@ All notable changes to DBAide are documented here. The format is loosely based o
 
 ## [Unreleased]
 
+### Changed
+
+- **The desktop GUI and all MCP integrations now share one local backend process.** The GUI uses
+  authenticated desktop RPC with streamed progress and request-scoped cancellation; coding tools
+  use MCP Streamable HTTP instead of spawning a full DBAide stdio backend per session. The daemon
+  exclusively owns `DesktopService`, adapter caches, the SQL governor, physical connection pools,
+  and cancellation registries. Setup starts it, macOS installs a user LaunchAgent, capability
+  checks replace incompatible daemons after upgrades, and legacy stdio entries migrate to HTTP.
+  CLI/daemon routing remains headless because the desktop launcher defers Qt and UI imports.
+
 ## [0.9.24] — 2026-06-30
 
 ### Fixed
