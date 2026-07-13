@@ -6,6 +6,8 @@ All notable changes to DBAide are documented here. The format is loosely based o
 
 ## [Unreleased]
 
+## [0.9.25] — 2026-07-13
+
 ### Changed
 
 - **The desktop GUI and all MCP integrations now share one local backend process.** The GUI uses
