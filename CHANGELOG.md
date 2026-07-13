@@ -6,10 +6,15 @@ All notable changes to DBAide are documented here. The format is loosely based o
 
 ## [Unreleased]
 
+## [0.9.27] — 2026-07-13
+
 ### Fixed
 
 - The cross-platform frozen-daemon release smoke test now emits ASCII-only status text, so a
   successful Windows check is not turned into a failure by the runner's legacy console encoding.
+- This is the first distributable build containing the shared-backend desktop-classification fix
+  from 0.9.26; that tag produced no GitHub Release because its Windows packaging gate was blocked
+  by the smoke-test output encoding issue above.
 
 ## [0.9.26] — 2026-07-13
 
