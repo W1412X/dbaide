@@ -82,7 +82,9 @@ def test_health_requires_bearer_auth(http_server):
     base, token = http_server
     with urllib.request.urlopen(_request(base, token, "/health")) as response:
         assert response.status == 200
-        assert json.loads(response.read())["name"] == "dbaide-mcp"
+        health = json.loads(response.read())
+        assert health["name"] == "dbaide-mcp"
+        assert isinstance(health["uiRuntimeLoaded"], bool)
     with pytest.raises(urllib.error.HTTPError) as exc:
         urllib.request.urlopen(base + "/health")
     assert exc.value.code == 401

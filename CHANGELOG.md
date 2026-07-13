@@ -6,6 +6,14 @@ All notable changes to DBAide are documented here. The format is loosely based o
 
 ## [Unreleased]
 
+### Fixed
+
+- **The shared backend no longer appears as a second desktop application.** macOS bundles now
+  start as `LSUIElement`; only the real GUI process is promoted to a foreground app, while MCP,
+  daemon, and CLI processes remain Dock-less. Frozen-package release smoke tests now verify the
+  daemon stays free of GUI modules on macOS, Linux, and Windows, and macOS additionally asserts
+  that a Finder-style app launch produces one `Foreground` GUI plus one `UIElement` daemon.
+
 ## [0.9.25] — 2026-07-13
 
 ### Changed

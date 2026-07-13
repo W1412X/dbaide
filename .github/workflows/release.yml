@@ -70,6 +70,19 @@ jobs:
           fi
           "$bin" --verify-webengine
 
+      - name: Smoke test shared daemon (headless on every platform)
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ "${{ runner.os }}" = "macOS" ]; then
+            bin="dist/DBAide.app/Contents/MacOS/DBAide"
+          elif [ "${{ runner.os }}" = "Linux" ]; then
+            bin="dist/DBAide/DBAide"
+          else
+            bin="dist/DBAide/DBAide.exe"
+          fi
+          python scripts/smoke_test_daemon.py "$bin"
+
       - name: Bundle Qt xcb runtime libraries (Linux)
         if: runner.os == 'Linux'
         run: |

@@ -613,6 +613,18 @@ class _MCPRequestHandler(BaseHTTPRequestHandler):
                 "name": "dbaide-mcp",
                 "pid": os.getpid(),
                 "desktopRpcVersion": DESKTOP_RPC_VERSION,
+                # Release smoke tests use this to prove that the frozen daemon
+                # stayed on the headless path on macOS, Linux, and Windows.
+                # PyInstaller's runtime hook imports PyQt6.QtCore to relocate
+                # Qt's plugin paths even for CLI commands. Loading any window,
+                # rendering, or WebEngine module means the daemon actually
+                # crossed into the GUI runtime and could create desktop UI.
+                "uiRuntimeLoaded": any(name in sys.modules for name in (
+                    "PyQt6.QtGui",
+                    "PyQt6.QtWidgets",
+                    "PyQt6.QtWebEngineCore",
+                    "PyQt6.QtWebEngineWidgets",
+                )),
             })
             return
         if parsed.path == MCP_PATH:

@@ -168,5 +168,8 @@ if sys.platform == "darwin":
             "CFBundleVersion": os.environ.get("DBAIDE_VERSION", "0.0.0"),
             "NSHighResolutionCapable": True,
             "LSMinimumSystemVersion": "11.0",
+            # The same executable also runs the long-lived daemon. Start every
+            # process Dock-less; launcher.py promotes only the real GUI path.
+            "LSUIElement": True,
         },
     )

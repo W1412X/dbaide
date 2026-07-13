@@ -19,6 +19,15 @@ def _verify_webengine_import() -> int:
         return 1
 
 
+def _run_headless_cli(argv: list[str]) -> int:
+    """Route a packaged CLI command without leaving a second macOS Dock icon."""
+    from dbaide.desktop.process_type import hide_headless_process_from_dock
+
+    hide_headless_process_from_dock()
+    from dbaide.cli import main as cli_main
+    return cli_main(argv)
+
+
 def main(argv: list[str] | None = None) -> int:
     argv = list(argv or sys.argv[1:])
     if "--verify-webengine" in argv:
@@ -32,11 +41,15 @@ def main(argv: list[str] | None = None) -> int:
     # Also map the legacy `-m dbaide.mcp_server` registration (a frozen binary can't run `-m`,
     # so older configs would otherwise launch the GUI) to the `mcp` subcommand.
     if argv[:2] == ["-m", "dbaide.mcp_server"]:
-        from dbaide.cli import main as cli_main
-        return cli_main(["mcp", *argv[2:]])
+        return _run_headless_cli(["mcp", *argv[2:]])
     if argv and (not argv[0].startswith("-") or argv[0] in {"--version", "-h", "--help"}):
-        from dbaide.cli import main as cli_main
-        return cli_main(argv)
+        return _run_headless_cli(argv)
+
+    # The macOS bundle starts as LSUIElement so daemon/CLI executions never
+    # acquire a Dock icon. Only the no-subcommand desktop path becomes the one
+    # normal foreground application.
+    from dbaide.desktop.process_type import show_gui_process_in_dock
+    show_gui_process_in_dock()
 
     # The desktop UI is a client of the same backend as every MCP integration.
     # Start/verify that backend before importing Qt or any service implementation;
