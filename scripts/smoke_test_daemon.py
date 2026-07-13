@@ -93,7 +93,7 @@ def main() -> int:
             if process.poll() is not None:
                 raise RuntimeError(f"daemon exited early with {process.returncode}")
             print(
-                "✓ shared daemon healthy and headless "
+                "[ok] shared daemon healthy and headless "
                 f"(pid={health.get('pid')}, port={port})"
             )
             return 0
@@ -111,5 +111,5 @@ if __name__ == "__main__":
     try:
         raise SystemExit(main())
     except Exception as exc:  # noqa: BLE001
-        print(f"✗ {exc}", file=sys.stderr)
+        print(f"[error] {exc}", file=sys.stderr)
         raise SystemExit(1) from exc

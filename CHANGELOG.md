@@ -6,6 +6,11 @@ All notable changes to DBAide are documented here. The format is loosely based o
 
 ## [Unreleased]
 
+### Fixed
+
+- The cross-platform frozen-daemon release smoke test now emits ASCII-only status text, so a
+  successful Windows check is not turned into a failure by the runner's legacy console encoding.
+
 ## [0.9.26] — 2026-07-13
 
 ### Fixed
