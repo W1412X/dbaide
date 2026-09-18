@@ -6,6 +6,18 @@ All notable changes to DBAide are documented here. The format is loosely based o
 
 ## [Unreleased]
 
+## [0.9.28] — 2026-09-18
+
+### Fixed
+
+- **Connection config edits now take effect immediately, without a restart.** Physical connection
+  pools were keyed only by (instance, type, database, timezone), so after editing host/port/user in
+  the UI the new config was saved but the pool kept its old factory and kept dialing the previous
+  address — surfacing as a stale `2003 ... getaddrinfo failed` (or connections to the old server)
+  that survived every retry until the process restarted. A host/port/user fingerprint now joins the
+  pool key: a changed config gets a fresh pool, and orphaned old pools age out via the background
+  reaper. Applies to the MySQL/MariaDB and PostgreSQL adapters.
+
 ## [0.9.27] — 2026-07-13
 
 ### Fixed
