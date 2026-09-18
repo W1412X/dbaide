@@ -79,6 +79,29 @@ def test_connection_pool_separates_session_timezones():
     assert utc_pool is not shanghai_pool
 
 
+def test_for_key_separates_config_fingerprints():
+    """Editing host/port/user must yield a fresh pool: the old pool's factory
+    still dials the previous address, so silently reusing it would keep the
+    old connection target alive even after the user saves a new config."""
+    reset_registry()
+    created = []
+
+    def factory():
+        conn = FakeConnection(len(created))
+        created.append(conn)
+        return conn
+
+    old_pool = for_key(PoolKey("shop", "mysql", "main", "UTC", "fp_old"), max_size=2, factory=factory)
+    # Same fingerprint -> same pool (no churn on every acquire).
+    assert for_key(PoolKey("shop", "mysql", "main", "UTC", "fp_old"), max_size=2, factory=factory) is old_pool
+    # Fingerprint changed (config edited in the UI) -> new pool; the orphaned
+    # old pool is never handed out again and its idle conns age out via reaper.
+    new_pool = for_key(PoolKey("shop", "mysql", "main", "UTC", "fp_new"), max_size=2, factory=factory)
+    assert new_pool is not old_pool
+    with new_pool.acquire() as conn:
+        assert conn.name == 0  # built by the NEW pool's factory
+
+
 def test_connection_pool_caps_concurrent_physical_connections():
     reset_registry()
     created = []

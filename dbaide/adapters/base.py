@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import re
 import time
 from abc import ABC, abstractmethod
@@ -18,6 +19,23 @@ class DatabaseAdapter(ABC):
         self._policy = None
         self._budget = None
         self._query_log = None
+
+    def _pool_fingerprint(self) -> str:
+        """Fingerprint of the connection-relevant config fields (host/port/user).
+
+        The pool registry key is (instance, kind, database, timezone) - none of
+        those changes when the user edits host/port/user in the UI, so the
+        fingerprint must join the key to prevent a stale pool from silently
+        re-dialing the previous address. Password is deliberately excluded:
+        it must never feed a hash; password changes are handled by validator
+        retirement of existing pooled connections.
+        """
+        raw = "|".join([
+            str(self.config.host or ""),
+            str(self.config.port or ""),
+            str(self.config.user or ""),
+        ])
+        return hashlib.md5(raw.encode("utf-8")).hexdigest()[:16]
 
     # ── Resource wiring (lazy defaults keep direct construction working) ──────
 

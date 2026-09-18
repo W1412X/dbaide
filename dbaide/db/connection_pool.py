@@ -34,6 +34,11 @@ class PoolKey:
     kind: str
     database: str
     session_timezone: str = ""
+    # Fingerprint of the connection-relevant config (host/port/user). Pooled
+    # connections must never be reused for a config whose address changed,
+    # otherwise edits made in the UI keep dialing the previous host until the
+    # process restarts.
+    config_fingerprint: str = ""
 
 
 class PooledConnection:
@@ -259,7 +264,7 @@ def for_key(
     idle_timeout: float | None = DEFAULT_IDLE_TIMEOUT,
     max_lifetime: float | None = DEFAULT_MAX_LIFETIME,
 ) -> ConnectionPool:
-    registry_key = (key.instance or "<default>", key.kind, key.database, key.session_timezone)
+    registry_key = (key.instance or "<default>", key.kind, key.database, key.session_timezone, key.config_fingerprint)
     with _registry_lock:
         _ensure_reaper_locked()
         pool = _registry.get(registry_key)

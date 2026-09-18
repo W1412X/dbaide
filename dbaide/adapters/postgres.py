@@ -68,7 +68,7 @@ class PostgresAdapter(DatabaseAdapter):
             return not bool(getattr(conn, "closed", False))
 
         return connection_pool_for_key(
-            PoolKey(self.config.name, self.config.type or "postgres", db, self._session_timezone()),
+            PoolKey(self.config.name, self.config.type or "postgres", db, self._session_timezone(), self._pool_fingerprint()),
             max_size=self.policy.max_inflight_queries,
             factory=factory,
             validator=validator,
