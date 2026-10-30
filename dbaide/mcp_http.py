@@ -373,7 +373,11 @@ class _MCPHTTPServer(ThreadingHTTPServer):
     allow_reuse_address = True
 
     def server_bind(self) -> None:
-        _set_exclusive_bind(self.socket)
+        # Windows refuses SO_REUSEADDR on a socket already marked exclusive (WSAEINVAL,
+        # 10022), and TCPServer.server_bind applies it after this point when the class
+        # flag is set — so exclusivity has to switch reuse off, not merely add on.
+        if _set_exclusive_bind(self.socket):
+            self.allow_reuse_address = False
         super().server_bind()
 
     def __init__(

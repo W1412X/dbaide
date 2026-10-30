@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import json
 import plistlib
+import socket
+import socketserver
 import stat
 import threading
 import urllib.error
@@ -256,25 +258,66 @@ def test_direct_urlopen_ignores_the_system_proxy(monkeypatch):
         server.shutdown()
         server.server_close()
         thread.join(timeout=2)
+class _RecordingSocket:
+    """A listening socket stub that records the options requested before bind()."""
+
+    def __init__(self) -> None:
+        self.options: list[int] = []
+
+    def setsockopt(self, _level: int, option: int, _value: int) -> None:
+        self.options.append(option)
+
+    def bind(self, _address) -> None:
+        pass
+
+    def getsockname(self):
+        return ("127.0.0.1", 0)
 
 
-def test_windows_bind_asks_for_exclusive_port_ownership(monkeypatch):
-    calls = []
+def _bind_daemon_socket(monkeypatch, *, windows: bool) -> list[int]:
+    """Run the daemon's server_bind with stubbed platform views.
 
-    class _Sock:
-        def setsockopt(self, level, option, value):
-            calls.append((level, option, value))
+    ``mcp_http.os``/``mcp_http.socket`` are replaced instead of patched in place: the
+    real ``os.name`` is process-global, and flipping it to "nt" breaks pytest's own
+    pathlib while it reports the failure.
+    """
+    from types import SimpleNamespace
 
-    monkeypatch.setattr(mcp_http.os, "name", "nt")
-    monkeypatch.setattr(mcp_http.socket, "SO_EXCLUSIVEADDRUSE", -15, raising=False)
-    assert mcp_http._set_exclusive_bind(_Sock()) is True
-    assert calls == [(mcp_http.socket.SOL_SOCKET, -15, 1)]
+    exclusive = -15
+    sock = _RecordingSocket()
+    stub_socket = SimpleNamespace(
+        SOL_SOCKET=0x0FFF,
+        **({"SO_EXCLUSIVEADDRUSE": exclusive} if windows else {}),
+    )
+
+    def _tcp_server_bind(self):
+        # What socketserver does — after the subclass override has already run.
+        if self.allow_reuse_address:
+            self.socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+
+    monkeypatch.setattr(mcp_http, "os", SimpleNamespace(name="nt" if windows else "posix"))
+    monkeypatch.setattr(mcp_http, "socket", stub_socket)
+    monkeypatch.setattr(socketserver.TCPServer, "server_bind", _tcp_server_bind)
+
+    server = object.__new__(mcp_http._MCPHTTPServer)
+    server.socket = sock
+    server.server_address = ("127.0.0.1", 0)
+    mcp_http._MCPHTTPServer.server_bind(server)
+    return sock.options
 
 
-def test_posix_bind_leaves_the_port_option_alone(monkeypatch):
-    class _Sock:
-        def setsockopt(self, *_args):
-            raise AssertionError("SO_EXCLUSIVEADDRUSE is Windows-only")
+def test_windows_bind_is_exclusive_and_stops_requesting_reuse(monkeypatch):
+    """A second listener must not be able to share the port — and SO_REUSEADDR is off.
 
-    monkeypatch.setattr(mcp_http.os, "name", "posix")
-    assert mcp_http._set_exclusive_bind(_Sock()) is False
+    Windows answers WSAEINVAL (10022) for SO_REUSEADDR on a socket already marked
+    SO_EXCLUSIVEADDRUSE, and socketserver applies that flag after server_bind, so the
+    0.9.29 Windows build died at daemon startup until exclusivity switched reuse off.
+    """
+    options = _bind_daemon_socket(monkeypatch, windows=True)
+    assert options == [-15]
+    assert socket.SO_REUSEADDR not in options
+
+
+def test_posix_bind_keeps_reusing_the_loopback_port(monkeypatch):
+    options = _bind_daemon_socket(monkeypatch, windows=False)
+    assert options == [socket.SO_REUSEADDR]
