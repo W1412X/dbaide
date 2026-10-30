@@ -6,6 +6,34 @@ All notable changes to DBAide are documented here. The format is loosely based o
 
 ## [Unreleased]
 
+## [0.9.29] — 2026-10-30
+
+### Fixed
+
+- **A connection saved with one host no longer executes against another address (Windows).** The
+  desktop GUI, the CLI and the long-lived shared daemon each keep their own parsed copy of
+  `config.toml`, and nothing re-read it: a daemon that survived an app restart or an upgrade kept
+  dialing the address a connection had *before* it was edited, so the UI showed the newly entered IP
+  while queries failed against the old one. `ConfigManager` now notices an external write (mtime +
+  size) and re-reads before every read and before every mutation, so whichever process saved last is
+  the one every process executes from.
+- **The loopback GUI → daemon channel no longer goes through a system proxy.** `urllib` consults the
+  proxy configuration, which on Windows comes from the registry (corporate proxies, Clash/v2rayN-style
+  local clients), so a request to `http://127.0.0.1:19742` was handed to the proxy instead of the
+  local backend. Health probes failed, every GUI start spawned another daemon, and desktop requests
+  were split across backends holding different configurations. Health checks, desktop RPC and
+  cancellation now use a proxy-bypassing opener.
+- **A second daemon can no longer silently share the loopback port.** On Windows
+  `allow_reuse_address`/`SO_REUSEADDR` does not mean "reuse a port in TIME_WAIT" — it permits another
+  process to bind the very same port. The daemon now requests `SO_EXCLUSIVEADDRUSE`, so a competing
+  listener fails loudly instead of answering a share of the requests.
+- **Connection failures name the address that was actually dialed**, e.g.
+  `Connection failed for prod -> 112.6.118.232:3306/shop: (2003, ...)`, and `Connection OK:` carries
+  the same target. Settings no longer displays the values it *typed* after a save either: it adopts
+  the connection the backend reports as persisted.
+- Redacting a debug bundle (`sanitized_config`) no longer writes `"***"` back into the live in-memory
+  configuration, where a subsequent save would have persisted it as the real stored password.
+
 ## [0.9.28] — 2026-09-18
 
 ### Fixed
