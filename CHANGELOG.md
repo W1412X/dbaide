@@ -6,6 +6,17 @@ All notable changes to DBAide are documented here. The format is loosely based o
 
 ## [Unreleased]
 
+## [0.9.30] — 2026-10-30
+
+### Fixed
+
+- **The Windows build of 0.9.29 could not start its backend at all.** The new exclusive loopback
+  bind left `allow_reuse_address` on, and `socketserver` applies `SO_REUSEADDR` *after* the daemon's
+  own `server_bind` — Windows rejects that combination with `[WinError 10022] An invalid argument was
+  supplied`, so the daemon died on startup and the release smoke test caught it. Requesting
+  exclusivity now also switches reuse off, with a test that drives `server_bind` over a stub socket
+  and asserts exactly which socket options are asked for.
+
 ## [0.9.29] — 2026-10-30
 
 ### Fixed
