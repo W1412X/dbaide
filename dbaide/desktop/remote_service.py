@@ -21,6 +21,7 @@ from dbaide.mcp_http import (
     DESKTOP_RPC_PATH,
     auth_headers,
     daemon_port,
+    direct_urlopen,
 )
 
 
@@ -79,7 +80,7 @@ class RemoteDesktopService:
             method="POST",
         )
         try:
-            with urllib.request.urlopen(request, timeout=None) as response:
+            with direct_urlopen(request, timeout=None) as response:
                 result_seen = False
                 result: Any = None
                 for raw_line in response:
@@ -127,7 +128,7 @@ class RemoteDesktopService:
             method="POST",
         )
         try:
-            with urllib.request.urlopen(request, timeout=1.0) as response:
+            with direct_urlopen(request, timeout=1.0) as response:
                 payload = json.loads(response.read().decode("utf-8"))
                 return bool(payload.get("cancelled"))
         except (OSError, ValueError, urllib.error.URLError):

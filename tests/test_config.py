@@ -144,3 +144,54 @@ class TestTomlKey:
 
     def test_empty_quoted(self):
         assert _toml_key("") == '""'
+
+
+class TestSharedConfigRefresh:
+    """The GUI, the CLI and the long-lived daemon each cache the same config.toml."""
+
+    def test_another_writer_is_picked_up(self, tmp_path):
+        path = tmp_path / "config.toml"
+        gui = ConfigManager(path=path)
+        daemon = ConfigManager(path=path)
+        gui.upsert_connection(ConnectionConfig(
+            name="prod", type="mysql", host="10.0.0.1", port=3306, user="u", database="d",
+        ))
+        assert daemon.get_connection("prod").host == "10.0.0.1"
+        gui.upsert_connection(ConnectionConfig(
+            name="prod", type="mysql", host="112.6.118.232", port=3306, user="u", database="d",
+        ))
+        # Without re-reading, the daemon keeps dialing the address it cached at startup.
+        assert daemon.get_connection("prod").host == "112.6.118.232"
+
+    def test_external_edit_is_picked_up(self, tmp_path):
+        path = tmp_path / "config.toml"
+        cfg = ConfigManager(path=path)
+        cfg.upsert_connection(ConnectionConfig(
+            name="prod", type="postgres", host="10.0.0.1", port=5432, user="u", database="d",
+        ))
+        path.write_text(
+            path.read_text().replace('host = "10.0.0.1"', 'host = "198.51.100.7"'),
+            encoding="utf-8",
+        )
+        assert cfg.get_connection("prod").host == "198.51.100.7"
+
+    def test_unchanged_file_is_not_reparsed(self, tmp_path, monkeypatch):
+        path = tmp_path / "config.toml"
+        cfg = ConfigManager(path=path)
+        cfg.upsert_connection(ConnectionConfig(name="s", type="sqlite", path="/tmp/s.db"))
+        calls = []
+        monkeypatch.setattr(cfg, "reload", lambda: calls.append(True))
+        cfg.get_connection("s")
+        cfg.get_connection("s")
+        assert calls == []
+
+    def test_sanitize_does_not_redact_the_live_config(self, tmp_path):
+        from dbaide.config import sanitize_config_data
+        cfg = ConfigManager(path=tmp_path / "config.toml")
+        cfg.upsert_connection(ConnectionConfig(
+            name="prod", type="mysql", host="h", user="u", database="d", password="secret",
+        ))
+        assert sanitize_config_data(cfg._data)["connections"]["prod"]["password"] == "***"
+        # Redacting a debug export must not leave "***" as the stored password, which a
+        # later save() would persist for real.
+        assert cfg.get_connection("prod").password == "secret"

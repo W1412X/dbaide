@@ -49,6 +49,7 @@ from dbaide.db.identifiers import normalize_db_table_for_dialect
 from dbaide.desktop.service_actions import build_action_handlers
 from dbaide.desktop.service_payloads import (
     connection_payload,
+    connection_target,
     model_payload,
     to_payload,
     validate_model_config,
@@ -171,6 +172,7 @@ class DesktopService:
 
     def sanitized_config(self, _payload: dict[str, Any] | None = None) -> dict[str, Any]:
         from dbaide.config import sanitize_config_data
+        self.cfg.refresh_if_changed()
         return sanitize_config_data(self.cfg._data)
 
     def sql_pool_snapshot(self, _payload: dict[str, Any] | None = None) -> dict[str, Any]:
@@ -179,8 +181,12 @@ class DesktopService:
 
     def test_connection(self, payload: dict[str, Any]) -> dict[str, Any]:
         conn = self._connection_from_payload(payload)
-        build_adapter(conn, caller="gui").test()
-        return {"ok": True, "message": f"Connection OK: {conn.name}"}
+        target = connection_target(conn)
+        try:
+            build_adapter(conn, caller="gui").test()
+        except Exception as exc:
+            raise RuntimeError(f"Connection failed for {conn.name} -> {target}: {exc}") from exc
+        return {"ok": True, "message": f"Connection OK: {conn.name} ({target})"}
 
     def save_connection(self, payload: dict[str, Any]) -> dict[str, Any]:
         payload = dict(payload or {})

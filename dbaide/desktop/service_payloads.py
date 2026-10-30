@@ -25,8 +25,17 @@ def to_payload(obj: Any) -> Any:
     return str(obj)
 
 
+def connection_target(conn: ConnectionConfig) -> str:
+    """Where a server connection is actually dialed, for messages and display."""
+    if conn.type == "sqlite":
+        return conn.path
+    port = conn.port or ""
+    database = conn.database or ""
+    return f"{conn.host or 'localhost'}{':' + str(port) if port else ''}/{database}"
+
+
 def connection_payload(conn: ConnectionConfig, *, has_assets: bool) -> dict[str, Any]:
-    target = conn.path if conn.type == "sqlite" else f"{conn.host}:{conn.port or ''}/{conn.database}"
+    target = connection_target(conn)
     return {
         "name": conn.name,
         "type": conn.type,

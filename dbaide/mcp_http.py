@@ -13,6 +13,7 @@ import os
 import plistlib
 import secrets
 import signal
+import socket
 import subprocess
 import sys
 import threading
@@ -47,6 +48,25 @@ SUPPORTED_PROTOCOL_VERSIONS = frozenset({
     "2025-06-18",
     "2025-11-25",
 })
+
+
+_DIRECT_OPENER: urllib.request.OpenerDirector | None = None
+
+
+def direct_urlopen(request: Any, *, timeout: float | None = None) -> Any:
+    """Open a loopback daemon URL bypassing every system proxy.
+
+    ``urllib.request.urlopen`` consults the proxy configuration — on Windows the one
+    stored in the registry by corporate proxies and by local clients such as
+    Clash/v2rayN — and a loopback request handed to a proxy is answered by the proxy
+    instead of by the local daemon. That made health checks fail, so every GUI start
+    spawned another daemon, and desktop requests were then split across processes
+    holding different (stale) configurations.
+    """
+    global _DIRECT_OPENER
+    if _DIRECT_OPENER is None:
+        _DIRECT_OPENER = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+    return _DIRECT_OPENER.open(request, timeout=timeout)
 
 
 def _json_safe(value: Any) -> Any:
@@ -165,7 +185,7 @@ def _daemon_health(
 ) -> dict[str, Any] | None:
     request = urllib.request.Request(_health_url(host=host, port=port), headers=auth_headers(config_dir))
     try:
-        with urllib.request.urlopen(request, timeout=timeout) as response:
+        with direct_urlopen(request, timeout=timeout) as response:
             if response.status != HTTPStatus.OK:
                 return None
             payload = json.loads(response.read().decode("utf-8"))
@@ -329,9 +349,32 @@ def stop_daemon(*, config_dir: Path | None = None, timeout: float = 3.0) -> bool
     return True
 
 
+def _set_exclusive_bind(sock: Any) -> bool:
+    """Refuse a second listener on this port (Windows only). Returns whether it asked.
+
+    ``allow_reuse_address`` sets SO_REUSEADDR, which on Windows does not mean "reuse a
+    port in TIME_WAIT" — it means a second process may bind the very same loopback
+    port. A daemon left over from an earlier session then silently shares the endpoint
+    and answers desktop requests from its own in-memory state. SO_EXCLUSIVEADDRUSE
+    turns that into a loud bind failure instead.
+    """
+    exclusive = getattr(socket, "SO_EXCLUSIVEADDRUSE", None)
+    if os.name != "nt" or exclusive is None:
+        return False
+    try:
+        sock.setsockopt(socket.SOL_SOCKET, exclusive, 1)
+    except OSError:
+        return False
+    return True
+
+
 class _MCPHTTPServer(ThreadingHTTPServer):
     daemon_threads = True
     allow_reuse_address = True
+
+    def server_bind(self) -> None:
+        _set_exclusive_bind(self.socket)
+        super().server_bind()
 
     def __init__(
         self,

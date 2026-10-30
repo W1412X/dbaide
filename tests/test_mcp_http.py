@@ -207,3 +207,74 @@ def test_outbound_notifications_use_sse_response(http_server, monkeypatch):
         assert response.headers["Content-Type"].startswith("text/event-stream")
         assert "notifications/progress" in body
         assert '"id": 9' in body
+
+
+def _serve_loopback_handler():
+    """A stand-in for the daemon: a plain loopback HTTP server on an ephemeral port."""
+    from http.server import BaseHTTPRequestHandler
+
+    class _Ok(BaseHTTPRequestHandler):
+        def do_GET(self):
+            self.send_response(200)
+            self.send_header("Content-Length", "2")
+            self.end_headers()
+            self.wfile.write(b"ok")
+
+        def log_message(self, *_args):
+            pass
+
+    from http.server import ThreadingHTTPServer
+
+    server = ThreadingHTTPServer(("127.0.0.1", 0), _Ok)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    return server, thread
+
+
+def test_direct_urlopen_ignores_the_system_proxy(monkeypatch):
+    """A Windows registry / Clash-style proxy must not intercept GUI -> daemon calls.
+
+    Otherwise every health probe fails, each GUI launch spawns another daemon, and the
+    desktop ends up talking to several backends holding different configurations.
+    """
+    server, thread = _serve_loopback_handler()
+    try:
+        url = f"http://127.0.0.1:{server.server_address[1]}/health"
+        dead = f"http://127.0.0.1:{server.server_address[1] + 1}"
+        monkeypatch.setattr(urllib.request, "getproxies", lambda: {"http": dead})
+        with pytest.raises(urllib.error.URLError):
+            urllib.request.build_opener().open(url, timeout=2)
+
+        def _boom():
+            raise AssertionError("the loopback channel must not consult proxy configuration")
+
+        monkeypatch.setattr(urllib.request, "getproxies", _boom)
+        monkeypatch.setattr(mcp_http, "_DIRECT_OPENER", None)   # force a fresh opener
+        with mcp_http.direct_urlopen(urllib.request.Request(url), timeout=2) as response:
+            assert response.read() == b"ok"
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=2)
+
+
+def test_windows_bind_asks_for_exclusive_port_ownership(monkeypatch):
+    calls = []
+
+    class _Sock:
+        def setsockopt(self, level, option, value):
+            calls.append((level, option, value))
+
+    monkeypatch.setattr(mcp_http.os, "name", "nt")
+    monkeypatch.setattr(mcp_http.socket, "SO_EXCLUSIVEADDRUSE", -15, raising=False)
+    assert mcp_http._set_exclusive_bind(_Sock()) is True
+    assert calls == [(mcp_http.socket.SOL_SOCKET, -15, 1)]
+
+
+def test_posix_bind_leaves_the_port_option_alone(monkeypatch):
+    class _Sock:
+        def setsockopt(self, *_args):
+            raise AssertionError("SO_EXCLUSIVEADDRUSE is Windows-only")
+
+    monkeypatch.setattr(mcp_http.os, "name", "posix")
+    assert mcp_http._set_exclusive_bind(_Sock()) is False

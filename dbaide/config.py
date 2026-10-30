@@ -2,6 +2,7 @@ import logging
 import os
 import tempfile
 import tomllib
+from copy import deepcopy
 from pathlib import Path
 from typing import Any
 
@@ -71,7 +72,10 @@ def migrate_config(data: dict[str, Any]) -> tuple[dict[str, Any], bool]:
 
 def sanitize_config_data(data: dict[str, Any]) -> dict[str, Any]:
     """Redact secrets for debug bundles / support exports."""
-    clean = migrate_config(dict(data or {}))[0]
+    # Deep copy: a shallow copy shares the nested connection/model dicts with the live
+    # in-memory config, so redacting here would leave "***" as the stored password and
+    # the next save() would persist it.
+    clean = migrate_config(deepcopy(data or {}))[0]
 
     def _scrub(section: str, keys: frozenset[str]) -> None:
         groups = clean.get(section) or {}
@@ -128,7 +132,26 @@ class ConfigManager:
     def __init__(self, path: Path | None = None) -> None:
         self.path = path or Path(os.environ.get("DBAIDE_CONFIG", DEFAULT_CONFIG_PATH)).expanduser()
         self._data: dict[str, Any] = {}
+        # (mtime_ns, size) of the file ``_data`` was parsed from. The desktop GUI,
+        # the CLI and the long-lived shared daemon each hold a ConfigManager over the
+        # same config.toml, so a write by one of them has to be picked up by the
+        # others instead of being served from a stale in-memory copy.
+        self._signature: tuple[int, int] | None = None
         self.reload()
+
+    def _file_signature(self) -> tuple[int, int] | None:
+        try:
+            stat = self.path.stat()
+        except OSError:
+            return None
+        return (stat.st_mtime_ns, stat.st_size)
+
+    def refresh_if_changed(self) -> bool:
+        """Re-read config.toml when another process wrote it. Returns whether it did."""
+        if self._signature == self._file_signature():
+            return False
+        self.reload()
+        return True
 
     def reload(self) -> None:
         parse_failed = False
@@ -171,6 +194,7 @@ class ConfigManager:
                     self.save()
                 except OSError as exc:
                     logger.warning("failed to persist migrated config: %s", exc)
+        self._signature = self._file_signature()
 
     def config_version(self) -> int:
         return _config_version(self._data)
@@ -189,6 +213,7 @@ class ConfigManager:
             with os.fdopen(fd, "w", encoding="utf-8") as fh:
                 fh.write(content)
             os.replace(tmp, str(self.path))
+            self._signature = self._file_signature()
             logger.debug("config saved to %s", self.path)
         except Exception:
             try:
@@ -198,6 +223,7 @@ class ConfigManager:
             raise
 
     def connections(self) -> dict[str, ConnectionConfig]:
+        self.refresh_if_changed()
         raw = self._data.get("connections") or {}
         out: dict[str, ConnectionConfig] = {}
         for name, item in raw.items():
@@ -232,6 +258,7 @@ class ConfigManager:
         return conns[name]
 
     def upsert_connection(self, cfg: ConnectionConfig, *, make_default: bool = False) -> None:
+        self.refresh_if_changed()
         self._data.setdefault("connections", {})
         payload = _to_dict(cfg)
         payload.pop("name", None)
@@ -242,6 +269,7 @@ class ConfigManager:
         self._clear_policy_cache(cfg.name)
 
     def delete_connection(self, name: str) -> None:
+        self.refresh_if_changed()
         connections = self._data.setdefault("connections", {})
         connections.pop(name, None)
         if self._data.get("default_connection") == name:
@@ -266,6 +294,7 @@ class ConfigManager:
         return self.model(name or None)
 
     def models(self) -> dict[str, ModelConfig]:
+        self.refresh_if_changed()
         raw = self._data.get("models") or {}
         out: dict[str, ModelConfig] = {}
         for name, item in raw.items():
@@ -280,6 +309,7 @@ class ConfigManager:
         return out
 
     def upsert_model(self, cfg: ModelConfig, *, make_default: bool = False) -> None:
+        self.refresh_if_changed()
         self._data.setdefault("models", {})
         payload = _to_dict(cfg)
         name = payload.pop("name", None) or "default"
@@ -289,6 +319,7 @@ class ConfigManager:
         self.save()
 
     def delete_model(self, name: str) -> None:
+        self.refresh_if_changed()
         models = self._data.setdefault("models", {})
         models.pop(name, None)
         if self._data.get("default_model") == name:
@@ -305,6 +336,7 @@ class ConfigManager:
 
     def resource_defaults(self) -> dict[str, Any]:
         """Return the ``[resource_defaults]`` overrides (may be empty)."""
+        self.refresh_if_changed()
         raw = self._data.get("resource_defaults") or {}
         return dict(raw) if isinstance(raw, dict) else {}
 
@@ -335,6 +367,7 @@ class ConfigManager:
 
     def set_resource_defaults(self, values: dict[str, Any]) -> None:
         """Persist ``[resource_defaults]`` (drops None/empty values)."""
+        self.refresh_if_changed()
         clean = {k: v for k, v in (values or {}).items() if v is not None and v != ""}
         self._data["resource_defaults"] = clean
         self.save()
@@ -349,6 +382,7 @@ class ConfigManager:
 
     def set_ui_language(self, lang: str) -> None:
         from dbaide.i18n import normalize
+        self.refresh_if_changed()
         ui = self._data.setdefault("ui", {})
         if isinstance(ui, dict):
             ui["language"] = normalize(lang)
@@ -366,6 +400,7 @@ class ConfigManager:
         name = str(name or "dark").strip().lower()
         if name not in ("dark", "light"):
             name = "dark"
+        self.refresh_if_changed()
         ui = self._data.setdefault("ui", {})
         if isinstance(ui, dict):
             ui["theme"] = name
@@ -378,6 +413,7 @@ class ConfigManager:
         return bool(ui.get("debug_trace", True)) if isinstance(ui, dict) else True
 
     def set_debug_trace(self, on: bool) -> None:
+        self.refresh_if_changed()
         ui = self._data.setdefault("ui", {})
         if isinstance(ui, dict):
             ui["debug_trace"] = bool(on)
@@ -392,6 +428,7 @@ class ConfigManager:
         return True if val is None else bool(val)
 
     def set_stream_answers(self, enabled: bool) -> None:
+        self.refresh_if_changed()
         ui = self._data.setdefault("ui", {})
         if isinstance(ui, dict):
             ui["stream_answers"] = bool(enabled)

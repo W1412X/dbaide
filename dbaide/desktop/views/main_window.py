@@ -1576,6 +1576,11 @@ class MainWindow(QMainWindow):
             saved = dict(payload)
             saved["has_password"] = bool(payload.get("password") or
                                          dialog._connections.get(payload["name"], {}).get("has_password"))
+            # Trust what the backend actually persisted rather than what was typed: if
+            # the stored host/port differ, the UI shows the stored values instead of
+            # displaying a connection the daemon will never dial.
+            if isinstance(result, dict):
+                saved.update(result.get("connection") or {})
             dialog._connections[payload["name"]] = saved
             if payload.get("make_default"):
                 dialog._default_connection = payload["name"]
