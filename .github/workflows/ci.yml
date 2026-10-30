@@ -32,4 +32,19 @@ jobs:
           python -m pip install -e ".[gui,dev]"
 
       - name: Run tests
-        run: python -m pytest tests/ -q --tb=short
+        run: |
+          set -o pipefail
+          python -m pytest tests/ -q --tb=short -rf 2>&1 | tee pytest.log
+
+      # Runner logs need an authenticated session, so a failure reported only in the log
+      # text cannot be read from outside the job. Mirror the failing test ids into check
+      # annotations, which the public API exposes.
+      - name: Annotate failed tests
+        if: failure()
+        run: |
+          grep -E "^(FAILED|ERROR)" pytest.log | head -40 | while IFS= read -r line; do
+            printf '::error::%s\n' "${line:0:300}"
+          done
+          tail -3 pytest.log | while IFS= read -r line; do
+            printf '::error::%s\n' "${line:0:300}"
+          done

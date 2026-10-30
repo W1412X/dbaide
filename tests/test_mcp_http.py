@@ -242,7 +242,16 @@ def test_direct_urlopen_ignores_the_system_proxy(monkeypatch):
     server, thread = _serve_loopback_handler()
     try:
         url = f"http://127.0.0.1:{server.server_address[1]}/health"
-        dead = f"http://127.0.0.1:{server.server_address[1] + 1}"
+        # A port that was bound and released a moment ago: nothing can be listening on it.
+        probe = socket.socket()
+        probe.bind(("127.0.0.1", 0))
+        dead = f"http://127.0.0.1:{probe.getsockname()[1]}"
+        probe.close()
+        # urllib also honors no_proxy, which a CI runner or a machine with a local proxy
+        # client may set for loopback; that bypass would make the sanity check below pass
+        # through the proxy for reasons unrelated to the code under test.
+        for name in ("no_proxy", "NO_PROXY"):
+            monkeypatch.delenv(name, raising=False)
         monkeypatch.setattr(urllib.request, "getproxies", lambda: {"http": dead})
         with pytest.raises(urllib.error.URLError):
             urllib.request.build_opener().open(url, timeout=2)
@@ -258,6 +267,8 @@ def test_direct_urlopen_ignores_the_system_proxy(monkeypatch):
         server.shutdown()
         server.server_close()
         thread.join(timeout=2)
+
+
 class _RecordingSocket:
     """A listening socket stub that records the options requested before bind()."""
 
